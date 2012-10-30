@@ -9,7 +9,11 @@ module Main where
 
 import GHC hiding (flags)
 import qualified Config as GHC
+#if __GLASGOW_HASKELL__ >= 706
+import ErrUtils   ( MsgDoc )
+#else
 import ErrUtils   ( Message )
+#endif
 import Outputable ( PprStyle, showSDocForUser, qualName, qualModule )
 import FastString ( unpackFS )
 import StringBuffer ( stringToStringBuffer )
@@ -18,7 +22,11 @@ import Text.JSON as JSON
 
 import System.Environment
 import System.Process
+#if __GLASGOW_HASKELL__ >= 706
+import Data.Time
+#else
 import System.Time
+#endif
 import Data.IORef
 import Control.Applicative
 import Control.Exception
@@ -42,11 +50,11 @@ checkModule :: FilePath          -- ^ target file
             -> [String]          -- ^ any ghc options
             -> IO [ErrorMessage] -- ^ any errors and warnings
 checkModule filename mfilecontent opts = handleOtherErrors $ do
-  
+
     libdir <- getGhcLibdir
-    
+
     errsRef <- newIORef []
-    
+
     mcontent <- case mfilecontent of
                   Nothing          -> return Nothing
                   Just filecontent -> do
@@ -55,12 +63,20 @@ checkModule filename mfilecontent opts = handleOtherErrors $ do
 #else
                     strbuf <- stringToStringBuffer filecontent
 #endif
+#if __GLASGOW_HASKELL__ >= 706
+                    strtime <- getCurrentTime
+#else
                     strtime <- getClockTime
+#endif
                     return (Just (strbuf, strtime))
 
     (leftoverOpts, _) <- parseStaticFlags (map noLoc opts)
     runGhc (Just libdir) $
+#if __GLASGOW_HASKELL__ >= 706
+      handleSourceError printException $ do
+#else
       handleSourceError printExceptionAndWarnings $ do
+#endif
 
       flags0 <- getSessionDynFlags
       (flags, _, _) <- parseDynamicFlags flags0 leftoverOpts
@@ -100,6 +116,26 @@ data ErrorMessage = SrcError   ErrorKind FilePath (Int, Int) (Int, Int) String
 data ErrorKind    = Error | Warning
   deriving Show
 
+#if __GLASGOW_HASKELL__ >= 706
+collectSrcError :: IORef [ErrorMessage]
+                -> DynFlags
+                -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
+collectSrcError errsRef flags severity srcspan style msg
+  | Just errKind <- case severity of
+                      SevWarning -> Just Main.Warning
+                      SevError   -> Just Main.Error
+                      SevFatal   -> Just Main.Error
+                      _          -> Nothing
+  , Just (file, st, end) <- extractErrSpan srcspan
+  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+     in modifyIORef errsRef (SrcError errKind file st end msgstr:)
+
+collectSrcError errsRef flags SevError _srcspan style msg
+  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+     in modifyIORef errsRef (OtherError msgstr:)
+
+collectSrcError _ _ _ _ _ _ = return ()
+#else
 collectSrcError :: IORef [ErrorMessage]
                 -> Severity -> SrcSpan -> PprStyle -> Message -> IO ()
 collectSrcError errsRef severity srcspan style msg
@@ -117,6 +153,7 @@ collectSrcError errsRef SevError _srcspan style msg
      in modifyIORef errsRef (OtherError msgstr:)
 
 collectSrcError _ _ _ _ _ = return ()
+#endif
 
 extractErrSpan :: SrcSpan -> Maybe (FilePath, (Int, Int), (Int, Int))
 #if __GLASGOW_HASKELL__ >= 704
