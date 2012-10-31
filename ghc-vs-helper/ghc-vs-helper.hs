@@ -27,23 +27,73 @@ import Data.Time
 #else
 import System.Time
 #endif
+import Data.Map (Map)
+import qualified Data.Map as Map
+import qualified Data.List as List
 import Data.IORef
 import Control.Applicative
 import Control.Exception
+import System.Random (randomIO)
+import System.FilePath (combine)
+
+data SessionConfig = SessionConfig
+  { configSourcesDir :: FilePath
+  }
+
+type State = Map ModuleName (FilePath, Maybe String)
+
+type Handle = IORef State
+
+data IdeSession = IdeSession SessionConfig Handle
+
+data ModuleChange = PutModule ModuleName String
 
 main :: IO ()
 main = do
   args <- getArgs
-  (target, mcontent) <-
-    case args of
-      [target] -> return (target, Nothing)
-      [target, "--input"] -> do
-        content <- getContents
-        return (target, Just content)
-      _ -> fail "usage: file.hs [--input]"
+  let configSourcesDir = case args of
+        [dir] -> dir
+        [] -> "."
+        _ -> fail "usage: ghc-vs-helper [source-dir]"
+  let sessionConfig = SessionConfig{..}
+  -- Two sample scenarios:
+  b <- randomIO
+  if b
+    then do
+      session <- initSession sessionConfig
+                             [(mkModuleName "Main", "ghc-vs-helper.hs")]
+      updateModules session [PutModule (mkModuleName "Main") "wrong"]
+      updateModules session [PutModule (mkModuleName "Main") "correct"]
+      updateModules session [ PutModule (mkModuleName "Main") "wrong"
+                            , PutModule (mkModuleName "Main") "correct" ]
+      shutdown session
+    else do
+      session <- initSession sessionConfig
+                             [(mkModuleName "Main", "ghc-vs-helper.hs")]
+      shutdown session
 
-  errs <- checkModule target mcontent []
-  putStrLn (formatErrorMessagesJSON errs)
+initSession :: SessionConfig -> [(ModuleName, FilePath)] -> IO IdeSession
+initSession sessionConfig ms = do
+  h <- newIORef $ Map.fromList $ map (\ (m, p) -> (m, (p, Nothing))) ms
+  return $ IdeSession sessionConfig h
+
+shutdown :: IdeSession -> IO ()
+shutdown (IdeSession (SessionConfig{configSourcesDir}) h) = do
+  let checkSingle (_m, (p, mcontent)) = do
+        let target = combine configSourcesDir p
+        errs <- checkModule target mcontent []
+        return $ formatErrorMessagesJSON errs
+  state <- readIORef h
+  allErrs <- mapM checkSingle (Map.toList state)
+  putStrLn $ List.intercalate "\n\n" allErrs
+
+updateModules :: IdeSession -> [ModuleChange] -> IO ()
+updateModules _ [] =
+  return ()
+updateModules session@(IdeSession _ h) (PutModule m s : rest) = do
+  state <- readIORef h
+  writeIORef h $ Map.adjust (\ (p, _) -> (p, Just s)) m state
+  updateModules session rest
 
 checkModule :: FilePath          -- ^ target file
             -> Maybe String      -- ^ optional content of the file
