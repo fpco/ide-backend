@@ -203,16 +203,19 @@ instance Monoid IdeSessionUpdate
 updateFiles :: IdeSession -> IdeSessionUpdate -> IO IdeSession
 updateFiles = undefined
 
--- | Given the current IDE session state, and a bunch of updates, go ahead and
+-- | Given the current IDE session state, go ahead and
 -- update the session, eventually resulting in a new session state,
 -- with fully updated computed information (typing, etc.).
 --
 -- The update can be a long running operation, so it returns a 'Progress'
 -- which can be used to monitor and wait on the operation.
--- Warning: if the progress is canceled, some updates, e.g., those with
--- side-effects in the filesystem will not be rolled back.
+-- While the progress is in operation, session state tokens
+-- remain valid as usual. If the progress fails or is canceled,
+-- all it's observable internal state changes are rolled back
+-- and another progress can be initiated. The semantics of @updateFiles@
+-- and @updateSession@ is unspecified while any progress runs.
 --
-updateSession :: IdeSession -> IdeSessionUpdate -> Progress IdeSession
+updateSession :: IdeSession -> Progress IdeSession
 updateSession = undefined
 
 -- | A future, a handle on an action that will produce some result.
