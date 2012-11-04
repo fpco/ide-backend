@@ -85,7 +85,7 @@ module IdeSession (
   -- ** Source errors
   getSourceErrors,
   SourceError,
-  
+
   -- ** Symbol definition maps
   getSymbolDefinitionMap,
   SymbolDefinitionMap,
@@ -188,19 +188,29 @@ shutdownSession = undefined
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
 -- bunch of updates.
--- 
+--
 -- In particular it is an instance of 'Monoid', so multiple primitive updates
 -- can be easily combined. Updates can override each other left to right.
 --
 data IdeSessionUpdate
 instance Monoid IdeSessionUpdate
 
+-- | Immediately perform some quick updates, e.g., file updates that are best
+-- completed ASAP, for safety. The resulting session does not contain
+-- up-to-date computed information (typing, etc.), so it cannot be queried,
+-- but can be updated further, using either @updateFiles@ or @updateSession@.
+--
+updateFiles :: IdeSession -> IdeSessionUpdate -> IO IdeSession
+updateFiles = undefined
 
 -- | Given the current IDE session state, and a bunch of updates, go ahead and
--- update the session, eventually resulting in a new session state.
+-- update the session, eventually resulting in a new session state,
+-- with fully updated computed information (typing, etc.).
 --
 -- The update can be a long running operation, so it returns a 'Progress'
 -- which can be used to monitor and wait on the operation.
+-- Warning: if the progress is canceled, some updates, e.g., those with
+-- side-effects in the filesystem will not be rolled back.
 --
 updateSession :: IdeSession -> IdeSessionUpdate -> Progress IdeSession
 updateSession = undefined
@@ -289,4 +299,3 @@ data SymbolDefinitionMap
 --
 getSymbolDefinitionMap :: Query SymbolDefinitionMap
 getSymbolDefinitionMap = undefined
-
