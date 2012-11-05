@@ -20,7 +20,8 @@ executable ghc-vs-helper
                      json      ==0.5.*,
                      ghc       ==7.*,
                      containers >= 0.4.1   && < 1,
-                     random     >= 1.0.1   && < 2
+                     random     >= 1.0.1   && < 2,
+                     bytestring >= 0.9.2   && < 1
 
   if impl(ghc >= 7.6.1)
      build-depends:     time      ==1.4.*

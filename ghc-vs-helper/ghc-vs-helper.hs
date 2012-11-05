@@ -7,7 +7,7 @@
 
 module Main where
 
-import GHC hiding (flags)
+import GHC hiding (flags, ModuleName)
 import qualified Config as GHC
 #if __GLASGOW_HASKELL__ >= 706
 import ErrUtils   ( MsgDoc )
@@ -31,69 +31,196 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.List as List
 import Data.IORef
+import Data.Monoid ((<>))
+import Data.Maybe (fromMaybe)
+import Control.Monad
 import Control.Applicative
 import Control.Exception
+import Control.Concurrent
+import System.Directory
 import System.Random (randomIO)
-import System.FilePath (combine)
+import System.FilePath (combine, takeExtension)
+import System.IO.Unsafe (unsafePerformIO)  -- horrors
 
-data SessionConfig = SessionConfig
-  { configSourcesDir :: FilePath
-  }
+import Data.Monoid (Monoid(..))
+import Data.ByteString.Lazy.Char8 (ByteString)
+import qualified Data.ByteString.Lazy.Char8 as BS
 
-type State = Map ModuleName (FilePath, Maybe String)
+-- Mock-up filesystem to avoid trashing our computers when testing.
+-- Files not present in the map should be read from the real filesystem.
+type Filesystem = Map FilePath ByteString
 
-type Handle = IORef State
+filesystem :: IORef Filesystem
+{-# NOINLINE filesystem #-}
+filesystem = unsafePerformIO $ newIORef $ Map.empty
 
-data IdeSession = IdeSession SessionConfig Handle
+-- In this implementation, it's fully applicative, and so invalid sessions
+-- can be queried at will. Note that there may be some working files
+-- produced by GHC while obtaining these values. They are not captured here,
+-- so queries are not allowed to read them.
+type Computed = [SourceError]
 
-data ModuleChange = PutModule ModuleName String
+data IdeSession = IdeSession SessionConfig StateToken (Maybe Computed)
 
-main :: IO ()
-main = do
-  args <- getArgs
-  let configSourcesDir = case args of
-        [dir] -> dir
-        [] -> "."
-        _ -> fail "usage: ghc-vs-helper [source-dir]"
-  let sessionConfig = SessionConfig{..}
-  -- Two sample scenarios:
-  b <- randomIO
-  if b
-    then do
-      session <- initSession sessionConfig
-                             [(mkModuleName "Main", "ghc-vs-helper.hs")]
-      updateModules session [PutModule (mkModuleName "Main") "wrong"]
-      updateModules session [PutModule (mkModuleName "Main") "correct"]
-      updateModules session [ PutModule (mkModuleName "Main") "wrong"
-                            , PutModule (mkModuleName "Main") "correct" ]
-      shutdown session
-    else do
-      session <- initSession sessionConfig
-                             [(mkModuleName "Main", "ghc-vs-helper.hs")]
-      shutdown session
+data StateToken = StateToken Int
+  deriving (Eq, Show)
 
-initSession :: SessionConfig -> [(ModuleName, FilePath)] -> IO IdeSession
-initSession sessionConfig ms = do
-  h <- newIORef $ Map.fromList $ map (\ (m, p) -> (m, (p, Nothing))) ms
-  return $ IdeSession sessionConfig h
+initialToken :: StateToken
+initialToken = StateToken 1
 
-shutdown :: IdeSession -> IO ()
-shutdown (IdeSession (SessionConfig{configSourcesDir}) h) = do
-  let checkSingle (_m, (p, mcontent)) = do
-        let target = combine configSourcesDir p
-        errs <- checkModule target mcontent []
-        return $ formatErrorMessagesJSON errs
-  state <- readIORef h
-  allErrs <- mapM checkSingle (Map.toList state)
-  putStrLn $ List.intercalate "\n\n" allErrs
+incrementToken :: StateToken -> StateToken
+incrementToken (StateToken n) = StateToken $ n + 1
 
-updateModules :: IdeSession -> [ModuleChange] -> IO ()
-updateModules _ [] =
-  return ()
-updateModules session@(IdeSession _ h) (PutModule m s : rest) = do
-  state <- readIORef h
-  writeIORef h $ Map.adjust (\ (p, _) -> (p, Just s)) m state
-  updateModules session rest
+currentToken :: MVar StateToken
+{-# NOINLINE currentToken #-}
+currentToken = unsafePerformIO $ newMVar $ initialToken
+
+data SessionConfig = SessionConfig {
+
+       -- | The directory to use for managing source files.
+       configSourcesDir :: FilePath,
+
+       -- | The directory to use for session state, such as @.hi@ files.
+       configWorkingDir :: FilePath,
+
+       -- | The directory to use for data files that may be accessed by the
+       -- running program. The running program will have this as its CWD.
+       configDataDir :: FilePath,
+
+       -- | The directory to use for purely temporary files.
+       configTempDir :: FilePath
+     }
+
+initSession :: SessionConfig -> IO IdeSession
+initSession sessionConfig = do
+  -- We could start from token 0, but we can just as well start from
+  -- the previous value, even though the state could have been changed
+  -- in-between session and we don't have the last computed information.
+  -- In this setup, currentToken counts the sum total number
+  -- of session transitions, for all sessions in this program run.
+  token <- readMVar currentToken
+  let computed = Nothing  -- can't query before the first Progress
+  return $ IdeSession sessionConfig token computed
+
+shutdownSession :: IdeSession -> IO ()
+shutdownSession (IdeSession _ token _) = do
+  curToken <- takeMVar currentToken
+  checkToken token curToken
+  -- no resources to free
+
+checkToken :: StateToken -> StateToken -> IO ()
+checkToken token curToken =
+  when (token /= curToken) $
+    error $ "Invalid session token " ++ show token ++ " /= " ++ show curToken
+
+data IdeSessionUpdate = IdeSessionUpdate (IO ())
+
+instance Monoid IdeSessionUpdate where
+  mempty = IdeSessionUpdate $ return ()
+  mappend (IdeSessionUpdate a) (IdeSessionUpdate b) =
+    IdeSessionUpdate $ a >> b
+
+updateFiles :: IdeSession -> IdeSessionUpdate -> IO IdeSession
+updateFiles (IdeSession sessionConfig token _) (IdeSessionUpdate update) = do
+  curToken <- takeMVar currentToken
+  checkToken token curToken
+
+  update
+
+  let newToken = incrementToken token
+  putMVar currentToken $ newToken
+  let computed = Nothing  -- can't query, previous computed info invalidated
+  return $ IdeSession sessionConfig newToken computed
+
+updateSession :: IdeSession -> IO (Progress IdeSession)
+updateSession (IdeSession conf@SessionConfig{configSourcesDir} token _) =
+  progressSpawn $ do
+    -- The following implies that when the progress is in operation,
+    -- any subsequent @updateFiles@ and @updateSession@ runs have to wait
+    -- and when they complete, the progress' results are no longer valid.
+    -- This can be fixed in many ways. At least, it does not deadlock
+    -- nor produce incorrect results.
+    curToken <- takeMVar currentToken
+    checkToken token curToken
+
+    fs <- readIORef filesystem
+    let checkSingle file = do
+          let mcontent = fmap BS.unpack $ Map.lookup file fs
+          errs <- checkModule file mcontent []
+          return $ formatErrorMessagesJSON errs
+    cnts <- getDirectoryContents configSourcesDir
+    let files = filter ((`elem` [".hs"]) . takeExtension) cnts
+    allErrs <- mapM checkSingle files
+
+    let newToken = incrementToken token
+    putMVar currentToken $ newToken
+    let computed = Just allErrs  -- can query now
+    return $ IdeSession conf newToken computed
+
+data Progress a = Progress (MVar a)
+
+progressSpawn :: IO a -> IO (Progress a)
+progressSpawn action = do
+  mv <- newEmptyMVar
+  let actionMv = do
+        a <- action
+        putMVar mv a
+  void $ forkIO actionMv
+  return $ Progress mv
+
+progressWaitCompletion :: Progress a -> IO a
+progressWaitCompletion (Progress mv) = takeMVar mv
+
+-- TODO:
+-- 12:31 < dcoutts> mikolaj: steal the writeFileAtomic code from Cabal
+-- 12:31 < dcoutts> from D.S.Utils
+-- 12:32 < dcoutts> though check it's the version that uses ByteString
+-- 12:32 < dcoutts> rather than String
+updateModule :: ModuleChange -> IdeSessionUpdate
+updateModule mc = IdeSessionUpdate $ do
+  fs <- readIORef filesystem
+  let newFs = case mc of
+        ModulePut n bs -> Map.insert n bs fs
+        ModuleDelete n -> Map.delete n fs
+  writeIORef filesystem newFs
+
+data ModuleChange = ModulePut    ModuleName ByteString
+                  | ModuleDelete ModuleName
+
+type ModuleName = String  -- TODO: use GHC.Module.ModuleName ?
+
+updateDataFile :: DataFileChange -> IdeSessionUpdate
+updateDataFile mc = IdeSessionUpdate $ do
+  fs <- readIORef filesystem
+  let newFs = case mc of
+        DataFilePut n bs -> Map.insert n bs fs
+        DataFileDelete n -> Map.delete n fs
+  writeIORef filesystem newFs
+
+data DataFileChange = DataFilePut    FilePath ByteString
+                    | DataFileDelete FilePath
+
+type Query a = IdeSession -> IO a
+
+getSourceModule :: ModuleName -> Query ByteString
+getSourceModule n (IdeSession (SessionConfig{configSourcesDir}) _ _) = do
+  fs <- readIORef filesystem
+  case Map.lookup n fs of
+    Just bs -> return bs
+    Nothing -> BS.readFile (combine configSourcesDir n)
+
+getDataFile :: FilePath -> Query ByteString
+getDataFile = getSourceModule
+
+getSourceErrors :: Query [SourceError]
+getSourceErrors (IdeSession _ _ msgs) =
+  let err = error $ "This session state does not admit queries."
+  in return $ fromMaybe err msgs
+
+type SourceError = String  -- TODO
+
+
+-- Old code, still used in this mock-up.
 
 checkModule :: FilePath          -- ^ target file
             -> Maybe String      -- ^ optional content of the file
@@ -158,7 +285,6 @@ getGhcLibdir = do
   case lines out of
     [libdir] -> return libdir
     _        -> fail "cannot parse output of ghc --print-libdir"
-
 
 data ErrorMessage = SrcError   ErrorKind FilePath (Int, Int) (Int, Int) String
                   | OtherError String
@@ -238,3 +364,43 @@ errorMessageToJSON (OtherError msgstr) =
       [ ("kind",      showJSON (toJSString "message"))
       , ("message",   showJSON (toJSString msgstr))
       ]
+
+-- Test the stuff.
+
+main :: IO ()
+main = do
+  args <- getArgs
+  let configSourcesDir = case args of
+        [dir] -> dir
+        [] -> "."
+        _ -> fail "usage: ghc-vs-helper [source-dir]"
+  let sessionConfig = SessionConfig{..}
+  -- Two sample scenarios:
+  b <- randomIO
+  if b
+    then do
+      s0 <- initSession sessionConfig
+      let update1 =
+            (updateModule $ ModulePut "ghc-vs-helper.hs" (BS.pack "1"))
+            <> (updateModule $ ModulePut "ghc-vs-helper.hs" (BS.pack "x = a1"))
+          update2 =
+            (updateModule $ ModulePut "ghc-vs-helper.hs" (BS.pack "2"))
+            <> (updateModule $ ModulePut "ghc-vs-helper.hs" (BS.pack "x = a2"))
+      s1 <- updateFiles s0 update1
+      progress1 <- updateSession s1
+      s2 <- progressWaitCompletion progress1
+      s3 <- updateFiles s2 update2
+      progress3 <- updateSession s3
+      s4 <- progressWaitCompletion progress3
+      msgs2 <- getSourceErrors s2
+      putStrLn $ "Errors 2: " ++ List.intercalate "\n\n" msgs2
+      msgs4 <- getSourceErrors s4
+      putStrLn $ "Errors 4: " ++ List.intercalate "\n\n" msgs4
+      shutdownSession s4
+    else do
+      s0 <- initSession sessionConfig
+      progress <- updateSession s0
+      s1 <- progressWaitCompletion progress
+      msgs1 <- getSourceErrors s1
+      putStrLn $ "Errors 1: " ++ List.intercalate "\n\n" msgs1
+      shutdownSession s1
