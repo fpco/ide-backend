@@ -215,7 +215,7 @@ updateFiles = undefined
 -- and another progress can be initiated. The semantics of @updateFiles@
 -- and @updateSession@ is unspecified while any progress runs.
 --
-updateSession :: IdeSession -> Progress IdeSession
+updateSession :: IdeSession -> IO (Progress IdeSession)
 updateSession = undefined
 
 -- | A future, a handle on an action that will produce some result.
