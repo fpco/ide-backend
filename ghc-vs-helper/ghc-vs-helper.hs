@@ -54,13 +54,15 @@ filesystem :: IORef Filesystem
 {-# NOINLINE filesystem #-}
 filesystem = unsafePerformIO $ newIORef $ Map.empty
 
+type GhcState = [Located String]
+
 -- In this implementation, it's fully applicative, and so invalid sessions
 -- can be queried at will. Note that there may be some working files
 -- produced by GHC while obtaining these values. They are not captured here,
 -- so queries are not allowed to read them.
 type Computed = [SourceError]
 
-data IdeSession = IdeSession SessionConfig StateToken (Maybe Computed)
+data IdeSession = IdeSession SessionConfig GhcState StateToken (Maybe Computed)
 
 data StateToken = StateToken Int
   deriving (Eq, Show)
@@ -93,6 +95,8 @@ data SessionConfig = SessionConfig {
 
 initSession :: SessionConfig -> IO IdeSession
 initSession sessionConfig = do
+  let opts = []  -- GHC static flags; set them in sessionConfig?
+  (leftoverOpts, _) <- parseStaticFlags (map noLoc opts)
   -- We could start from token 0, but we can just as well start from
   -- the previous value, even though the state could have been changed
   -- in-between session and we don't have the last computed information.
@@ -100,10 +104,10 @@ initSession sessionConfig = do
   -- of session transitions, for all sessions in this program run.
   token <- readMVar currentToken
   let computed = Nothing  -- can't query before the first Progress
-  return $ IdeSession sessionConfig token computed
+  return $ IdeSession sessionConfig leftoverOpts token computed
 
 shutdownSession :: IdeSession -> IO ()
-shutdownSession (IdeSession _ token _) = do
+shutdownSession (IdeSession _ _ token _) = do
   curToken <- takeMVar currentToken
   checkToken token curToken
   -- no resources to free
@@ -121,7 +125,8 @@ instance Monoid IdeSessionUpdate where
     IdeSessionUpdate $ a >> b
 
 updateFiles :: IdeSession -> IdeSessionUpdate -> IO IdeSession
-updateFiles (IdeSession sessionConfig token _) (IdeSessionUpdate update) = do
+updateFiles (IdeSession sessionConfig ghcSt token _)
+            (IdeSessionUpdate update) = do
   curToken <- takeMVar currentToken
   checkToken token curToken
 
@@ -130,10 +135,10 @@ updateFiles (IdeSession sessionConfig token _) (IdeSessionUpdate update) = do
   let newToken = incrementToken token
   putMVar currentToken $ newToken
   let computed = Nothing  -- can't query, previous computed info invalidated
-  return $ IdeSession sessionConfig newToken computed
+  return $ IdeSession sessionConfig ghcSt newToken computed
 
 updateSession :: IdeSession -> IO (Progress IdeSession)
-updateSession (IdeSession conf@SessionConfig{configSourcesDir} token _) =
+updateSession (IdeSession conf@SessionConfig{configSourcesDir} ghcSt token _) =
   progressSpawn $ do
     -- The following implies that when the progress is in operation,
     -- any subsequent @updateFiles@ and @updateSession@ runs have to wait
@@ -146,7 +151,7 @@ updateSession (IdeSession conf@SessionConfig{configSourcesDir} token _) =
     fs <- readIORef filesystem
     let checkSingle file = do
           let mcontent = fmap BS.unpack $ Map.lookup file fs
-          errs <- checkModule file mcontent []
+          errs <- checkModule file mcontent ghcSt
           return $ formatErrorMessagesJSON errs
     cnts <- getDirectoryContents configSourcesDir
     let files = filter ((`elem` [".hs"]) . takeExtension) cnts
@@ -155,7 +160,7 @@ updateSession (IdeSession conf@SessionConfig{configSourcesDir} token _) =
     let newToken = incrementToken token
     putMVar currentToken $ newToken
     let computed = Just allErrs  -- can query now
-    return $ IdeSession conf newToken computed
+    return $ IdeSession conf ghcSt newToken computed
 
 data Progress a = Progress (MVar a)
 
@@ -203,7 +208,7 @@ data DataFileChange = DataFilePut    FilePath ByteString
 type Query a = IdeSession -> IO a
 
 getSourceModule :: ModuleName -> Query ByteString
-getSourceModule n (IdeSession (SessionConfig{configSourcesDir}) _ _) = do
+getSourceModule n (IdeSession (SessionConfig{configSourcesDir}) _ _ _) = do
   fs <- readIORef filesystem
   case Map.lookup n fs of
     Just bs -> return bs
@@ -213,7 +218,7 @@ getDataFile :: FilePath -> Query ByteString
 getDataFile = getSourceModule
 
 getSourceErrors :: Query [SourceError]
-getSourceErrors (IdeSession _ _ msgs) =
+getSourceErrors (IdeSession _ _ _ msgs) =
   let err = error $ "This session state does not admit queries."
   in return $ fromMaybe err msgs
 
@@ -224,9 +229,9 @@ type SourceError = String  -- TODO
 
 checkModule :: FilePath          -- ^ target file
             -> Maybe String      -- ^ optional content of the file
-            -> [String]          -- ^ any ghc options
+            -> [Located String]  -- ^ leftover ghc static options
             -> IO [ErrorMessage] -- ^ any errors and warnings
-checkModule filename mfilecontent opts = handleOtherErrors $ do
+checkModule filename mfilecontent leftoverOpts = handleOtherErrors $ do
 
     libdir <- getGhcLibdir
 
@@ -247,7 +252,6 @@ checkModule filename mfilecontent opts = handleOtherErrors $ do
 #endif
                     return (Just (strbuf, strtime))
 
-    (leftoverOpts, _) <- parseStaticFlags (map noLoc opts)
     runGhc (Just libdir) $
 #if __GLASGOW_HASKELL__ >= 706
       handleSourceError printException $ do
