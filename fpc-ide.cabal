@@ -1,19 +1,44 @@
-name:                ghc-vs-helper
-version:             0.2
+name:                fpc-ide
+version:             0.3
 synopsis:            A simple (demo) IDE helper program
 -- description:
 license:             BSD3
 license-file:        LICENSE
-author:              Duncan Coutts
+author:              Duncan Coutts, Mikolaj Konarski
 maintainer:          Duncan Coutts <duncan@well-typed.com>
 copyright:           (c) 2012 Well-Typed LLP
 category:            Development
 build-type:          Simple
 cabal-version:       >=1.10
 
-executable ghc-vs-helper
-  main-is:           ghc-vs-helper.hs
+library
+  exposed-modules: IdeSession
   build-depends:     base      ==4.*,
+                     directory ==1.*,
+                     process   ==1.*,
+                     filepath  ==1.*,
+                     json      ==0.5.*,
+                     ghc       ==7.*,
+                     containers >= 0.4.1   && < 1,
+                     random     >= 1.0.1   && < 2,
+                     bytestring >= 0.9.2   && < 1
+
+  if impl(ghc >= 7.6.1)
+     build-depends:     time      ==1.4.*
+  else
+     build-depends:     old-time  ==1.*
+
+  default-language: Haskell2010
+
+  default-extensions: MonoLocalBinds,
+                      BangPatterns, RecordWildCards, NamedFieldPuns
+  other-extensions:   CPP
+  ghc-options:       -Wall -fno-warn-unused-do-bind
+
+executable fpc-ide
+  main-is:           fpc-ide.hs
+  build-depends:     fpc-ide,
+                     base      ==4.*,
                      directory ==1.*,
                      process   ==1.*,
                      filepath  ==1.*,
