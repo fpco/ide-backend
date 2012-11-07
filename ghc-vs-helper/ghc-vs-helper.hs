@@ -114,15 +114,18 @@ checkToken token curToken =
   when (token /= curToken) $
     error $ "Invalid session token " ++ show token ++ " /= " ++ show curToken
 
-data IdeSessionUpdate = IdeSessionUpdate (IO ())
+data IdeSessionUpdate = IdeSessionUpdate (IdeSession -> IO ())
 
+-- We assume, if updates are combined within the monoid, they can all
+-- be applied in the context of the same session.
+-- Otherwise, call 'updateSession' sequentially with the updates.
 instance Monoid IdeSessionUpdate where
-  mempty = IdeSessionUpdate $ return ()
-  mappend (IdeSessionUpdate a) (IdeSessionUpdate b) =
-    IdeSessionUpdate $ a >> b
+  mempty = IdeSessionUpdate $ \ _ -> return ()
+  mappend (IdeSessionUpdate f) (IdeSessionUpdate g) =
+    IdeSessionUpdate $ \ sess -> f sess >> g sess
 
 updateSession :: IdeSession -> IdeSessionUpdate -> IO (Progress IdeSession)
-updateSession (IdeSession conf@SessionConfig{configSourcesDir} ghcSt currentToken token _)
+updateSession sess@(IdeSession conf@SessionConfig{configSourcesDir} ghcSt currentToken token _)
               (IdeSessionUpdate update) = do
   -- First, invalidatin the current session ASAP, because the previous
   -- computed info will shortly no longer be in sync with the files.
@@ -133,7 +136,7 @@ updateSession (IdeSession conf@SessionConfig{configSourcesDir} ghcSt currentToke
   newToken <- modifyMVar currentToken incrCheckToken
 
   -- Then, updating files ASAP.
-  update
+  update sess
 
   -- Last, spawning a future.
   progressSpawn $ do
@@ -168,7 +171,7 @@ progressWaitCompletion (Progress mv) = takeMVar mv
 -- 12:32 < dcoutts> though check it's the version that uses ByteString
 -- 12:32 < dcoutts> rather than String
 updateModule :: ModuleChange -> IdeSessionUpdate
-updateModule mc = IdeSessionUpdate $ do
+updateModule mc = IdeSessionUpdate $ \ _ -> do
   fs <- readIORef filesystem
   let newFs = case mc of
         ModulePut n bs -> Map.insert n bs fs
@@ -181,7 +184,7 @@ data ModuleChange = ModulePut    ModuleName ByteString
 type ModuleName = String  -- TODO: use GHC.Module.ModuleName ?
 
 updateDataFile :: DataFileChange -> IdeSessionUpdate
-updateDataFile mc = IdeSessionUpdate $ do
+updateDataFile mc = IdeSessionUpdate $ \ _ -> do
   fs <- readIORef filesystem
   let newFs = case mc of
         DataFilePut n bs -> Map.insert n bs fs
