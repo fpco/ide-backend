@@ -89,7 +89,7 @@ module IdeSession (
 
   -- ** Source errors
   getSourceErrors,
-  SourceError,
+  SourceError(..),
 
   -- ** Symbol definition maps
   getSymbolDefinitionMap,
@@ -156,8 +156,6 @@ import ErrUtils   ( Message )
 import Outputable ( PprStyle, showSDocForUser, qualName, qualModule )
 import FastString ( unpackFS )
 import StringBuffer ( stringToStringBuffer )
-
-import Text.JSON as JSON
 
 import System.Process
 #if __GLASGOW_HASKELL__ >= 706
@@ -319,14 +317,15 @@ updateSession sess@IdeSession{ ideConfig
   -- Last, spawning a future.
   progressSpawn $ do
     fs <- readIORef (configFilesystem ideConfig)
-    let checkSingle file = do
+    let sourcesDir = configSourcesDir ideConfig
+        checkSingle file = do
           let mcontent = fmap BS.unpack $ Map.lookup file fs
-          errs <- checkModule file mcontent ideGhcState
-          return $ formatErrorMessagesJSON errs
-    cnts <- getDirectoryContents $ configSourcesDir ideConfig
+              target = combine sourcesDir file
+          checkModule target mcontent ideGhcState
+    cnts <- getDirectoryContents sourcesDir
     let files = filter ((`elem` [".hs"]) . takeExtension) cnts
     allErrs <- mapM checkSingle files
-    let ideComputed = Just allErrs  -- can query now
+    let ideComputed = Just $ concat allErrs  -- can query now
     return $ sess {ideToken = newToken, ideComputed}
 
 -- | A future, a handle on an action that will produce some result.
@@ -430,7 +429,13 @@ getSourceErrors IdeSession{ideComputed} =
 --
 -- * This is currently a stub, but it will be a full concrete type.
 --
-type SourceError = String  -- TODO
+data SourceError =
+    SrcError ErrorKind FilePath (Int, Int) (Int, Int) String
+  | OtherError String
+  deriving Show
+
+data ErrorKind = Error | Warning
+  deriving Show
 
 -- | A mapping from symbol uses to symbol definitions
 --
@@ -452,7 +457,7 @@ getSymbolDefinitionMap = undefined
 checkModule :: FilePath          -- ^ target file
             -> Maybe String      -- ^ optional content of the file
             -> [Located String]  -- ^ leftover ghc static options
-            -> IO [ErrorMessage] -- ^ any errors and warnings
+            -> IO [SourceError]  -- ^ any errors and warnings
 checkModule filename mfilecontent leftoverOpts = handleOtherErrors $ do
 
     libdir <- getGhcLibdir
@@ -512,14 +517,8 @@ getGhcLibdir = do
     [libdir] -> return libdir
     _        -> fail "cannot parse output of ghc --print-libdir"
 
-data ErrorMessage = SrcError   ErrorKind FilePath (Int, Int) (Int, Int) String
-                  | OtherError String
-  deriving Show
-data ErrorKind    = Error | Warning
-  deriving Show
-
 #if __GLASGOW_HASKELL__ >= 706
-collectSrcError :: IORef [ErrorMessage]
+collectSrcError :: IORef [SourceError]
                 -> DynFlags
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 collectSrcError errsRef flags severity srcspan style msg
@@ -567,26 +566,3 @@ extractErrSpan srcspan | isGoodSrcSpan srcspan =
        ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
        ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
 extractErrSpan _ = Nothing
-
-formatErrorMessagesJSON :: [ErrorMessage] -> String
-formatErrorMessagesJSON = JSON.encode . map errorMessageToJSON
-
-errorMessageToJSON :: ErrorMessage -> JSValue
-errorMessageToJSON (SrcError errKind file (stline, stcol)
-                                          (endline, endcol) msgstr) =
-  JSObject $
-    toJSObject
-      [ ("kind",      showJSON (toJSString (show errKind)))
-      , ("file",      showJSON (toJSString file))
-      , ("startline", showJSON stline)
-      , ("startcol",  showJSON stcol)
-      , ("endline",   showJSON endline)
-      , ("endcol",    showJSON endcol)
-      , ("message",   showJSON (toJSString msgstr))
-      ]
-errorMessageToJSON (OtherError msgstr) =
-  JSObject $
-    toJSObject
-      [ ("kind",      showJSON (toJSString "message"))
-      , ("message",   showJSON (toJSString msgstr))
-      ]
