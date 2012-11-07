@@ -1,10 +1,3 @@
--- Copyright   : (c) JP Moresmau 2011,
---                   Well-Typed 2012
-
--- (JP Moresmau's buildwrapper package used as template for GHC API use)
-
-{-# LANGUAGE CPP #-}
-
 module Main where
 
 import Data.IORef
