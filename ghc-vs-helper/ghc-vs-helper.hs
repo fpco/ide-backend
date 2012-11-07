@@ -62,7 +62,8 @@ type GhcState = [Located String]
 -- so queries are not allowed to read them.
 type Computed = [SourceError]
 
-data IdeSession = IdeSession SessionConfig GhcState StateToken (Maybe Computed)
+data IdeSession = IdeSession SessionConfig GhcState
+                             (MVar StateToken) StateToken (Maybe Computed)
 
 data StateToken = StateToken Int
   deriving (Eq, Show)
@@ -72,10 +73,6 @@ initialToken = StateToken 1
 
 incrementToken :: StateToken -> StateToken
 incrementToken (StateToken n) = StateToken $ n + 1
-
-currentToken :: MVar StateToken
-{-# NOINLINE currentToken #-}
-currentToken = unsafePerformIO $ newMVar $ initialToken
 
 data SessionConfig = SessionConfig {
 
@@ -97,20 +94,20 @@ initSession :: SessionConfig -> IO IdeSession
 initSession sessionConfig = do
   let opts = []  -- GHC static flags; set them in sessionConfig?
   (leftoverOpts, _) <- parseStaticFlags (map noLoc opts)
-  -- We could start from token 0, but we can just as well start from
-  -- the previous value, even though the state could have been changed
-  -- in-between session and we don't have the last computed information.
-  -- In this setup, currentToken counts the sum total number
-  -- of session transitions, for all sessions in this program run.
-  token <- readMVar currentToken
   let computed = Nothing  -- can't query before the first Progress
-  return $ IdeSession sessionConfig leftoverOpts token computed
+  currentToken <- newMVar initialToken
+  return $ IdeSession sessionConfig leftoverOpts
+                      currentToken initialToken computed
 
 shutdownSession :: IdeSession -> IO ()
-shutdownSession (IdeSession _ _ token _) = do
-  curToken <- readMVar currentToken
-  checkToken token curToken
-  -- no resources to free
+shutdownSession (IdeSession _ _ currentToken token _) = do
+  -- Invalidate the session.
+  let incrCheckToken curToken = do
+        checkToken token curToken
+        let newT = incrementToken token
+        return newT
+  modifyMVar_ currentToken incrCheckToken
+  -- no other resources to free
 
 checkToken :: StateToken -> StateToken -> IO ()
 checkToken token curToken =
@@ -125,7 +122,7 @@ instance Monoid IdeSessionUpdate where
     IdeSessionUpdate $ a >> b
 
 updateSession :: IdeSession -> IdeSessionUpdate -> IO (Progress IdeSession)
-updateSession (IdeSession conf@SessionConfig{configSourcesDir} ghcSt token _)
+updateSession (IdeSession conf@SessionConfig{configSourcesDir} ghcSt currentToken token _)
               (IdeSessionUpdate update) = do
   -- First, invalidatin the current session ASAP, because the previous
   -- computed info will shortly no longer be in sync with the files.
@@ -149,7 +146,7 @@ updateSession (IdeSession conf@SessionConfig{configSourcesDir} ghcSt token _)
     let files = filter ((`elem` [".hs"]) . takeExtension) cnts
     allErrs <- mapM checkSingle files
     let computed = Just allErrs  -- can query now
-    return $ IdeSession conf ghcSt newToken computed
+    return $ IdeSession conf ghcSt currentToken newToken computed
 
 data Progress a = Progress (MVar a)
 
@@ -197,7 +194,7 @@ data DataFileChange = DataFilePut    FilePath ByteString
 type Query a = IdeSession -> IO a
 
 getSourceModule :: ModuleName -> Query ByteString
-getSourceModule n (IdeSession (SessionConfig{configSourcesDir}) _ _ _) = do
+getSourceModule n (IdeSession (SessionConfig{configSourcesDir}) _ _ _ _) = do
   fs <- readIORef filesystem
   case Map.lookup n fs of
     Just bs -> return bs
@@ -207,7 +204,7 @@ getDataFile :: FilePath -> Query ByteString
 getDataFile = getSourceModule
 
 getSourceErrors :: Query [SourceError]
-getSourceErrors (IdeSession _ _ _ msgs) =
+getSourceErrors (IdeSession _ _ _ _ msgs) =
   let err = error $ "This session state does not admit queries."
   in return $ fromMaybe err msgs
 
@@ -383,7 +380,7 @@ main = do
       s2 <- progressWaitCompletion progress1
       msgs2 <- getSourceErrors s2
       putStrLn $ "Errors 2: " ++ List.intercalate "\n\n" msgs2
-      progress3 <- updateSession s2 update2
+      progress3 <- updateSession s2 update2  -- s0 should fail
       s4 <- progressWaitCompletion progress3
       msgs4 <- getSourceErrors s4
       putStrLn $ "Errors 4: " ++ List.intercalate "\n\n" msgs4
@@ -396,4 +393,4 @@ main = do
       s1 <- progressWaitCompletion progress
       msgs1 <- getSourceErrors s1
       putStrLn $ "Errors 1: " ++ List.intercalate "\n\n" msgs1
-      shutdownSession s1
+      shutdownSession s1  -- s0 should fail
