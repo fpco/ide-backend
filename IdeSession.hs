@@ -68,6 +68,7 @@ module IdeSession (
   -- 'Progress' type to represent the action in progress.
   updateSession,
   Progress,
+  progressWaitCompletion,
 
   -- ** Modules
   updateModule,
@@ -158,7 +159,6 @@ import StringBuffer ( stringToStringBuffer )
 
 import Text.JSON as JSON
 
-import System.Environment
 import System.Process
 #if __GLASGOW_HASKELL__ >= 706
 import Data.Time
@@ -167,16 +167,13 @@ import System.Time
 #endif
 import Data.Map (Map)
 import qualified Data.Map as Map
-import qualified Data.List as List
 import Data.IORef
-import Data.Monoid ((<>))
 import Data.Maybe (fromMaybe)
 import Control.Monad
 import Control.Applicative
 import Control.Exception
 import Control.Concurrent
 import System.Directory
-import System.Random (randomIO)
 import System.FilePath (combine, takeExtension)
 import System.IO.Unsafe (unsafePerformIO)  -- horrors
 
@@ -209,7 +206,8 @@ initToken = do
 
 -- Invalidates previous sessions, returns a new token for the new session.
 incrementToken :: StateToken -> IO StateToken
-incrementToken (StateToken mv _) = do
+incrementToken token@(StateToken mv _) = do
+  checkToken token
   let incrCheckToken current = do
         let newT = current + 1
         return (newT, StateToken mv newT)
@@ -433,7 +431,7 @@ getSourceErrors IdeSession{ideComputed} =
 --
 -- * This is currently a stub, but it will be a full concrete type.
 --
-data SourceError = String  -- TODO
+type SourceError = String  -- TODO
 
 -- | A mapping from symbol uses to symbol definitions
 --
@@ -527,9 +525,9 @@ collectSrcError :: IORef [ErrorMessage]
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 collectSrcError errsRef flags severity srcspan style msg
   | Just errKind <- case severity of
-                      SevWarning -> Just Main.Warning
-                      SevError   -> Just Main.Error
-                      SevFatal   -> Just Main.Error
+                      SevWarning -> Just IdeSession.Warning
+                      SevError   -> Just IdeSession.Error
+                      SevFatal   -> Just IdeSession.Error
                       _          -> Nothing
   , Just (file, st, end) <- extractErrSpan srcspan
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
@@ -545,9 +543,9 @@ collectSrcError :: IORef [ErrorMessage]
                 -> Severity -> SrcSpan -> PprStyle -> Message -> IO ()
 collectSrcError errsRef severity srcspan style msg
   | Just errKind <- case severity of
-                      SevWarning -> Just Main.Warning
-                      SevError   -> Just Main.Error
-                      SevFatal   -> Just Main.Error
+                      SevWarning -> Just IdeSession.Warning
+                      SevError   -> Just IdeSession.Error
+                      SevFatal   -> Just IdeSession.Error
                       _          -> Nothing
   , Just (file, st, end) <- extractErrSpan srcspan
   = let msgstr = showSDocForUser (qualName style,qualModule style) msg

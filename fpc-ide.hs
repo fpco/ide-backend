@@ -7,43 +7,10 @@
 
 module Main where
 
-import GHC hiding (flags, ModuleName)
-import qualified Config as GHC
-#if __GLASGOW_HASKELL__ >= 706
-import ErrUtils   ( MsgDoc )
-#else
-import ErrUtils   ( Message )
-#endif
-import Outputable ( PprStyle, showSDocForUser, qualName, qualModule )
-import FastString ( unpackFS )
-import StringBuffer ( stringToStringBuffer )
-
-import Text.JSON as JSON
-
 import System.Environment
-import System.Process
-#if __GLASGOW_HASKELL__ >= 706
-import Data.Time
-#else
-import System.Time
-#endif
-import Data.Map (Map)
-import qualified Data.Map as Map
 import qualified Data.List as List
-import Data.IORef
-import Data.Monoid ((<>))
-import Data.Maybe (fromMaybe)
-import Control.Monad
-import Control.Applicative
-import Control.Exception
-import Control.Concurrent
-import System.Directory
+import Data.Monoid ((<>), mempty)
 import System.Random (randomIO)
-import System.FilePath (combine, takeExtension)
-import System.IO.Unsafe (unsafePerformIO)  -- horrors
-
-import Data.Monoid (Monoid(..))
-import Data.ByteString.Lazy.Char8 (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
 
 import IdeSession
