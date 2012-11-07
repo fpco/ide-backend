@@ -108,7 +108,7 @@ initSession sessionConfig = do
 
 shutdownSession :: IdeSession -> IO ()
 shutdownSession (IdeSession _ _ token _) = do
-  curToken <- takeMVar currentToken
+  curToken <- readMVar currentToken
   checkToken token curToken
   -- no resources to free
 
@@ -124,30 +124,22 @@ instance Monoid IdeSessionUpdate where
   mappend (IdeSessionUpdate a) (IdeSessionUpdate b) =
     IdeSessionUpdate $ a >> b
 
-updateFiles :: IdeSession -> IdeSessionUpdate -> IO IdeSession
-updateFiles (IdeSession sessionConfig ghcSt token _)
-            (IdeSessionUpdate update) = do
-  curToken <- takeMVar currentToken
-  checkToken token curToken
+updateSession :: IdeSession -> IdeSessionUpdate -> IO (Progress IdeSession)
+updateSession (IdeSession conf@SessionConfig{configSourcesDir} ghcSt token _)
+              (IdeSessionUpdate update) = do
+  -- First, invalidatin the current session ASAP, because the previous
+  -- computed info will shortly no longer be in sync with the files.
+  let incrCheckToken curToken = do
+        checkToken token curToken
+        let newT = incrementToken token
+        return (newT, newT)
+  newToken <- modifyMVar currentToken incrCheckToken
 
+  -- Then, updating files ASAP.
   update
 
-  let newToken = incrementToken token
-  putMVar currentToken $ newToken
-  let computed = Nothing  -- can't query, previous computed info invalidated
-  return $ IdeSession sessionConfig ghcSt newToken computed
-
-updateSession :: IdeSession -> IO (Progress IdeSession)
-updateSession (IdeSession conf@SessionConfig{configSourcesDir} ghcSt token _) =
+  -- Last, spawning a future.
   progressSpawn $ do
-    -- The following implies that when the progress is in operation,
-    -- any subsequent @updateFiles@ and @updateSession@ runs have to wait
-    -- and when they complete, the progress' results are no longer valid.
-    -- This can be fixed in many ways. At least, it does not deadlock
-    -- nor produce incorrect results.
-    curToken <- takeMVar currentToken
-    checkToken token curToken
-
     fs <- readIORef filesystem
     let checkSingle file = do
           let mcontent = fmap BS.unpack $ Map.lookup file fs
@@ -156,9 +148,6 @@ updateSession (IdeSession conf@SessionConfig{configSourcesDir} ghcSt token _) =
     cnts <- getDirectoryContents configSourcesDir
     let files = filter ((`elem` [".hs"]) . takeExtension) cnts
     allErrs <- mapM checkSingle files
-
-    let newToken = incrementToken token
-    putMVar currentToken $ newToken
     let computed = Just allErrs  -- can query now
     return $ IdeSession conf ghcSt newToken computed
 
@@ -390,20 +379,20 @@ main = do
           update2 =
             (updateModule $ ModulePut "ghc-vs-helper.hs" (BS.pack "2"))
             <> (updateModule $ ModulePut "ghc-vs-helper.hs" (BS.pack "x = a2"))
-      s1 <- updateFiles s0 update1
-      progress1 <- updateSession s1
+      progress1 <- updateSession s0 update1
       s2 <- progressWaitCompletion progress1
-      s3 <- updateFiles s2 update2
-      progress3 <- updateSession s3
-      s4 <- progressWaitCompletion progress3
       msgs2 <- getSourceErrors s2
       putStrLn $ "Errors 2: " ++ List.intercalate "\n\n" msgs2
+      progress3 <- updateSession s2 update2
+      s4 <- progressWaitCompletion progress3
       msgs4 <- getSourceErrors s4
       putStrLn $ "Errors 4: " ++ List.intercalate "\n\n" msgs4
+      msgs2' <- getSourceErrors s2
+      putStrLn $ "Errors 2 again: " ++ List.intercalate "\n\n" msgs2'
       shutdownSession s4
     else do
       s0 <- initSession sessionConfig
-      progress <- updateSession s0
+      progress <- updateSession s0 mempty
       s1 <- progressWaitCompletion progress
       msgs1 <- getSourceErrors s1
       putStrLn $ "Errors 1: " ++ List.intercalate "\n\n" msgs1
