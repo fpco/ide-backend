@@ -56,23 +56,45 @@ filesystem = unsafePerformIO $ newIORef $ Map.empty
 
 type GhcState = [Located String]
 
+-- This could be equally well implemented as a new mvar created per
+-- each new session state, but this implementation has some minor advantages.
+-- It gives more useful error messages and provides a counter of session
+-- updates, which can be used, e.g.,  to rougly estimate how badly outdated
+-- the info therein is, in order to decide whether to show it to the user,
+-- or hand up and wait for a newer version.
+data StateToken = StateToken (MVar Int) Int
+
+initToken :: IO StateToken
+initToken = do
+  mv <- newMVar 0
+  return $ StateToken mv 0
+
+-- Invalidates previous sessions, returns a new token for the new session.
+incrementToken :: StateToken -> IO StateToken
+incrementToken (StateToken mv _) = do
+  let incrCheckToken current = do
+        let newT = current + 1
+        return (newT, StateToken mv newT)
+  modifyMVar mv incrCheckToken
+
+checkToken :: StateToken -> IO ()
+checkToken (StateToken mv k) = do
+  current <- readMVar mv
+  when (k /= current) $
+    error $ "Invalid session token " ++ show k ++ " /= " ++ show current
+
 -- In this implementation, it's fully applicative, and so invalid sessions
 -- can be queried at will. Note that there may be some working files
 -- produced by GHC while obtaining these values. They are not captured here,
 -- so queries are not allowed to read them.
 type Computed = [SourceError]
 
-data IdeSession = IdeSession SessionConfig GhcState
-                             (MVar StateToken) StateToken (Maybe Computed)
-
-data StateToken = StateToken Int
-  deriving (Eq, Show)
-
-initialToken :: StateToken
-initialToken = StateToken 1
-
-incrementToken :: StateToken -> StateToken
-incrementToken (StateToken n) = StateToken $ n + 1
+data IdeSession = IdeSession
+  { ideConfig   :: SessionConfig
+  , ideGhcState :: GhcState
+  , ideToken    :: StateToken
+  , ideComputed :: (Maybe Computed)
+  }
 
 data SessionConfig = SessionConfig {
 
@@ -91,28 +113,18 @@ data SessionConfig = SessionConfig {
      }
 
 initSession :: SessionConfig -> IO IdeSession
-initSession sessionConfig = do
+initSession ideConfig = do
   let opts = []  -- GHC static flags; set them in sessionConfig?
-  (leftoverOpts, _) <- parseStaticFlags (map noLoc opts)
-  let computed = Nothing  -- can't query before the first Progress
-  currentToken <- newMVar initialToken
-  return $ IdeSession sessionConfig leftoverOpts
-                      currentToken initialToken computed
+  (ideGhcState, _) <- parseStaticFlags (map noLoc opts)
+  let ideComputed = Nothing  -- can't query before the first Progress
+  ideToken <- initToken
+  return IdeSession{..}
 
 shutdownSession :: IdeSession -> IO ()
-shutdownSession (IdeSession _ _ currentToken token _) = do
-  -- Invalidate the session.
-  let incrCheckToken curToken = do
-        checkToken token curToken
-        let newT = incrementToken token
-        return newT
-  modifyMVar_ currentToken incrCheckToken
+shutdownSession IdeSession{ideToken} = do
+  -- Invalidate the current session.
+  void $ incrementToken ideToken
   -- no other resources to free
-
-checkToken :: StateToken -> StateToken -> IO ()
-checkToken token curToken =
-  when (token /= curToken) $
-    error $ "Invalid session token " ++ show token ++ " /= " ++ show curToken
 
 data IdeSessionUpdate = IdeSessionUpdate (IdeSession -> IO ())
 
@@ -125,17 +137,15 @@ instance Monoid IdeSessionUpdate where
     IdeSessionUpdate $ \ sess -> f sess >> g sess
 
 updateSession :: IdeSession -> IdeSessionUpdate -> IO (Progress IdeSession)
-updateSession sess@(IdeSession conf@SessionConfig{configSourcesDir} ghcSt currentToken token _)
+updateSession sess@IdeSession{ ideConfig
+                             , ideGhcState
+                             , ideToken }
               (IdeSessionUpdate update) = do
-  -- First, invalidatin the current session ASAP, because the previous
+  -- First, invalidating the current session ASAP, because the previous
   -- computed info will shortly no longer be in sync with the files.
-  let incrCheckToken curToken = do
-        checkToken token curToken
-        let newT = incrementToken token
-        return (newT, newT)
-  newToken <- modifyMVar currentToken incrCheckToken
+  newToken <- incrementToken ideToken
 
-  -- Then, updating files ASAP.
+  -- Then, updating files ASAP (using the already invalidated session).
   update sess
 
   -- Last, spawning a future.
@@ -143,13 +153,13 @@ updateSession sess@(IdeSession conf@SessionConfig{configSourcesDir} ghcSt curren
     fs <- readIORef filesystem
     let checkSingle file = do
           let mcontent = fmap BS.unpack $ Map.lookup file fs
-          errs <- checkModule file mcontent ghcSt
+          errs <- checkModule file mcontent ideGhcState
           return $ formatErrorMessagesJSON errs
-    cnts <- getDirectoryContents configSourcesDir
+    cnts <- getDirectoryContents $ configSourcesDir ideConfig
     let files = filter ((`elem` [".hs"]) . takeExtension) cnts
     allErrs <- mapM checkSingle files
-    let computed = Just allErrs  -- can query now
-    return $ IdeSession conf ghcSt currentToken newToken computed
+    let ideComputed = Just allErrs  -- can query now
+    return $ sess {ideToken = newToken, ideComputed}
 
 data Progress a = Progress (MVar a)
 
@@ -197,7 +207,7 @@ data DataFileChange = DataFilePut    FilePath ByteString
 type Query a = IdeSession -> IO a
 
 getSourceModule :: ModuleName -> Query ByteString
-getSourceModule n (IdeSession (SessionConfig{configSourcesDir}) _ _ _ _) = do
+getSourceModule n IdeSession{ideConfig=SessionConfig{configSourcesDir}} = do
   fs <- readIORef filesystem
   case Map.lookup n fs of
     Just bs -> return bs
@@ -207,9 +217,9 @@ getDataFile :: FilePath -> Query ByteString
 getDataFile = getSourceModule
 
 getSourceErrors :: Query [SourceError]
-getSourceErrors (IdeSession _ _ _ _ msgs) =
+getSourceErrors IdeSession{ideComputed} =
   let err = error $ "This session state does not admit queries."
-  in return $ fromMaybe err msgs
+  in return $ fromMaybe err ideComputed
 
 type SourceError = String  -- TODO
 

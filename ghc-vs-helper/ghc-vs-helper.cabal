@@ -31,4 +31,5 @@ executable ghc-vs-helper
   default-language:  Haskell2010
   default-extensions: MonoLocalBinds,
                       BangPatterns, RecordWildCards, NamedFieldPuns
+  other-extensions:   CPP
   ghc-options:       -Wall -fno-warn-unused-do-bind
