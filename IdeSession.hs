@@ -175,19 +175,10 @@ import Control.Exception
 import Control.Concurrent
 import System.Directory
 import System.FilePath (combine, takeExtension)
-import System.IO.Unsafe (unsafePerformIO)  -- horrors
 
 import Data.Monoid (Monoid(..))
 import Data.ByteString.Lazy.Char8 (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
-
--- Mock-up filesystem to avoid trashing our computers when testing.
--- Files not present in the map should be read from the real filesystem.
-type Filesystem = Map FilePath ByteString
-
-filesystem :: IORef Filesystem
-{-# NOINLINE filesystem #-}
-filesystem = unsafePerformIO $ newIORef $ Map.empty
 
 type GhcState = [Located String]
 
@@ -240,6 +231,10 @@ data IdeSession = IdeSession
   , ideComputed :: (Maybe Computed)
   }
 
+-- Mock-up filesystem to avoid trashing our computers when testing.
+-- Files not present in the map should be read from the real filesystem.
+type Filesystem = Map FilePath ByteString
+
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.
 --
@@ -256,7 +251,10 @@ data SessionConfig = SessionConfig {
        configDataDir :: FilePath,
 
        -- | The directory to use for purely temporary files.
-       configTempDir :: FilePath
+       configTempDir :: FilePath,
+
+       -- | TMP hack for testing.
+       configFilesystem :: IORef Filesystem
      }
 
 -- | Create a fresh session, using some initial configuration.
@@ -320,7 +318,7 @@ updateSession sess@IdeSession{ ideConfig
 
   -- Last, spawning a future.
   progressSpawn $ do
-    fs <- readIORef filesystem
+    fs <- readIORef (configFilesystem ideConfig)
     let checkSingle file = do
           let mcontent = fmap BS.unpack $ Map.lookup file fs
           errs <- checkModule file mcontent ideGhcState
@@ -362,12 +360,12 @@ progressWaitCompletion (Progress mv) = takeMVar mv
 -- updated or deleted.
 --
 updateModule :: ModuleChange -> IdeSessionUpdate
-updateModule mc = IdeSessionUpdate $ \ _ -> do
-  fs <- readIORef filesystem
+updateModule mc = IdeSessionUpdate $ \ IdeSession{ideConfig} -> do
+  fs <- readIORef (configFilesystem ideConfig)
   let newFs = case mc of
         ModulePut n bs -> Map.insert n bs fs
         ModuleDelete n -> Map.delete n fs
-  writeIORef filesystem newFs
+  writeIORef (configFilesystem ideConfig) newFs
 
 data ModuleChange = ModulePut    ModuleName ByteString
                   | ModuleDelete ModuleName
@@ -378,12 +376,12 @@ type ModuleName = String  -- TODO: use GHC.Module.ModuleName ?
 -- updated or deleted.
 --
 updateDataFile :: DataFileChange -> IdeSessionUpdate
-updateDataFile mc = IdeSessionUpdate $ \ _ -> do
-  fs <- readIORef filesystem
+updateDataFile mc = IdeSessionUpdate $ \ IdeSession{ideConfig} -> do
+  fs <- readIORef (configFilesystem ideConfig)
   let newFs = case mc of
         DataFilePut n bs -> Map.insert n bs fs
         DataFileDelete n -> Map.delete n fs
-  writeIORef filesystem newFs
+  writeIORef (configFilesystem ideConfig) newFs
 
 data DataFileChange = DataFilePut    FilePath ByteString
                     | DataFileDelete FilePath
@@ -399,8 +397,9 @@ type Query a = IdeSession -> IO a
 -- | Read the current value of one of the source modules.
 --
 getSourceModule :: ModuleName -> Query ByteString
-getSourceModule n IdeSession{ideConfig=SessionConfig{configSourcesDir}} = do
-  fs <- readIORef filesystem
+getSourceModule n IdeSession{ideConfig=SessionConfig{ configSourcesDir
+                                                    , configFilesystem }} = do
+  fs <- readIORef configFilesystem
   case Map.lookup n fs of
     Just bs -> return bs
     Nothing -> BS.readFile (combine configSourcesDir n)
