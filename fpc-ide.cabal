@@ -2,7 +2,7 @@ name:                fpc-ide
 version:             0.3
 synopsis:            A simple (demo) IDE helper program
 -- description:
-license:             BSD3
+license:             AllRightsReserved
 license-file:        LICENSE
 author:              Duncan Coutts, Mikolaj Konarski
 maintainer:          Duncan Coutts <duncan@well-typed.com>
