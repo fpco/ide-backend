@@ -1,4 +1,4 @@
-name:                fpc-ide
+name:                ide-backend
 version:             0.3
 synopsis:            A simple (demo) IDE helper program
 -- description:
@@ -36,9 +36,9 @@ library
   other-extensions:   CPP
   ghc-options:       -Wall -fno-warn-unused-do-bind
 
-executable fpc-ide
-  main-is:           fpc-ide.hs
-  build-depends:     fpc-ide,
+executable ide-backend
+  main-is:           ide-backend.hs
+  build-depends:     ide-backend,
                      base      ==4.*,
                      directory ==1.*,
                      process   ==1.*,

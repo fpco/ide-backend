@@ -21,7 +21,7 @@ main = do
   let configSourcesDir = case args of
         [dir] -> dir
         [] -> "."
-        _ -> fail "usage: fpc-ide [source-dir]"
+        _ -> fail "usage: ide-backend [source-dir]"
   configFilesystem <- newIORef $ Map.empty
   let sessionConfig = SessionConfig{..}
   -- Two sample scenarios:
@@ -30,11 +30,11 @@ main = do
     then do
       s0 <- initSession sessionConfig
       let update1 =
-            (updateModule $ ModulePut "fpc-ide.hs" (BS.pack "2"))
-            <> (updateModule $ ModulePut "fpc-ide.hs" (BS.pack "x = a2"))
+            (updateModule $ ModulePut "ide-backend.hs" (BS.pack "2"))
+            <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a2"))
           update2 =
-            (updateModule $ ModulePut "fpc-ide.hs" (BS.pack "4"))
-            <> (updateModule $ ModulePut "fpc-ide.hs" (BS.pack "x = a4"))
+            (updateModule $ ModulePut "ide-backend.hs" (BS.pack "4"))
+            <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a4"))
       progress1 <- updateSession s0 update1
       s2 <- progressWaitCompletion progress1
       msgs2 <- getSourceErrors s2
