@@ -1,11 +1,12 @@
 module Main where
 
 import Data.IORef
+import Control.Monad
+import Control.Exception
 import System.Environment
 import qualified Data.List as List
 import qualified Data.Map as Map
 import Data.Monoid ((<>), mempty)
-import System.Random (randomIO)
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Text.JSON as JSON
 import Text.JSON.Pretty (pp_value)
@@ -22,39 +23,51 @@ main = do
         _ -> fail "usage: ide-backend [source-dir]"
   configFilesystem <- newIORef $ Map.empty
   let sessionConfig = SessionConfig{..}
-  -- Two sample scenarios:
-  b <- randomIO
-  if b
-    then do
-      s0 <- initSession sessionConfig
-      let update1 =
-            (updateModule $ ModulePut "ide-backend.hs" (BS.pack "2"))
-            <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a2"))
-          update2 =
-            (updateModule $ ModulePut "ide-backend.hs" (BS.pack "4"))
-            <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a4"))
-      progress1 <- updateSession s0 update1
-      s2 <- progressWaitCompletion progress1
-      msgs2 <- getSourceErrors s2
-      putStrLn $ "Error 2:\n" ++ List.intercalate "\n\n"
-        (map formatErrorMessagesJSON msgs2) ++ "\n"
-      progress3 <- updateSession s2 update2  -- s0 should fail
-      s4 <- progressWaitCompletion progress3
-      msgs4 <- getSourceErrors s4
-      putStrLn $ "Error 4:\n" ++ List.intercalate "\n\n"
-        (map formatErrorMessagesJSON msgs4) ++ "\n"
-      msgs2' <- getSourceErrors s2
-      putStrLn $ "Error 2 again:\n" ++ List.intercalate "\n\n"
-        (map formatErrorMessagesJSON msgs2') ++ "\n"
-      shutdownSession s4
-    else do
-      s0 <- initSession sessionConfig
-      progress <- updateSession s0 mempty
-      s1 <- progressWaitCompletion progress
-      msgs1 <- getSourceErrors s1
-      putStrLn $ "Error 1:\n" ++ List.intercalate "\n\n"
-        (map formatErrorMessagesJSON msgs1) ++ "\n"
-      shutdownSession s1  -- s0 should fail
+  s0 <- initSession sessionConfig
+  let update1 =
+        (updateModule $ ModulePut "ide-backend.hs" (BS.pack "2"))
+        <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a2"))
+      update2 =
+        (updateModule $ ModulePut "ide-backend.hs" (BS.pack "4"))
+        <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a4"))
+  progress1 <- updateSession s0 update1
+  s2 <- progressWaitCompletion progress1
+  msgs2 <- getSourceErrors s2
+  putStrLn $ "Error 2:\n" ++ List.intercalate "\n\n"
+    (map formatErrorMessagesJSON msgs2) ++ "\n"
+  shouldFail "updateSession s0 update2"
+            $ updateSession s0 update2
+  progress3 <- updateSession s2 update2
+  s4 <- progressWaitCompletion progress3
+  msgs4 <- getSourceErrors s4
+  putStrLn $ "Error 4:\n" ++ List.intercalate "\n\n"
+    (map formatErrorMessagesJSON msgs4) ++ "\n"
+  msgs2' <- getSourceErrors s2
+  putStrLn $ "Error 2 again:\n" ++ List.intercalate "\n\n"
+    (map formatErrorMessagesJSON msgs2') ++ "\n"
+-- Can't do the following until we have each runGHC session spawned in
+-- a differen process.
+--
+--  shutdownSession s4
+--  s10 <- initSession sessionConfig
+  let s10 = s4
+  progress <- updateSession s10 mempty
+  s11 <- progressWaitCompletion progress
+  msgs11 <- getSourceErrors s11
+  putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
+    (map formatErrorMessagesJSON msgs11) ++ "\n"
+  shouldFail "shutdownSession s10"
+            $ shutdownSession s10
+  shutdownSession s11
+
+shouldFail :: String -> IO a -> IO ()
+shouldFail descr x = do
+  let logException e = do
+        putStrLn $ "Correctly rejected: " ++ descr ++
+                   "\nwith exception: " ++ show (e :: ErrorCall) ++ "\n"
+        return True
+  failed <- catch (x >> return False) logException
+  unless failed $ error $ "should fail: " ++ descr
 
 -- Hacks retained just to pretty-print error messages.
 formatErrorMessagesJSON :: SourceError -> String
