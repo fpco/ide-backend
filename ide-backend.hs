@@ -4,16 +4,16 @@ import Data.IORef
 import System.Environment
 import qualified Data.List as List
 import qualified Data.Map as Map
-import Data.Monoid ((<>), mempty)
-import System.Random (randomIO)
-import qualified Data.ByteString.Lazy.Char8 as BS
+import Data.Monoid (mempty)
 import Text.JSON as JSON
 import Text.JSON.Pretty (pp_value)
 import Text.PrettyPrint (render)
 
 import IdeSession
 
--- Test the stuff.
+-- A sample program using the library. Naively, separately, type-checks
+-- all programs in the given directory and prints out the list of errors
+-- in JSON format.
 
 main :: IO ()
 main = do
@@ -24,39 +24,13 @@ main = do
         _ -> fail "usage: ide-backend [source-dir]"
   configFilesystem <- newIORef $ Map.empty
   let sessionConfig = SessionConfig{..}
-  -- Two sample scenarios:
-  b <- randomIO
-  if b
-    then do
-      s0 <- initSession sessionConfig
-      let update1 =
-            (updateModule $ ModulePut "ide-backend.hs" (BS.pack "2"))
-            <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a2"))
-          update2 =
-            (updateModule $ ModulePut "ide-backend.hs" (BS.pack "4"))
-            <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a4"))
-      progress1 <- updateSession s0 update1
-      s2 <- progressWaitCompletion progress1
-      msgs2 <- getSourceErrors s2
-      putStrLn $ "Error 2:\n" ++ List.intercalate "\n\n"
-        (map formatErrorMessagesJSON msgs2) ++ "\n"
-      progress3 <- updateSession s2 update2  -- s0 should fail
-      s4 <- progressWaitCompletion progress3
-      msgs4 <- getSourceErrors s4
-      putStrLn $ "Error 4:\n" ++ List.intercalate "\n\n"
-        (map formatErrorMessagesJSON msgs4) ++ "\n"
-      msgs2' <- getSourceErrors s2
-      putStrLn $ "Error 2 again:\n" ++ List.intercalate "\n\n"
-        (map formatErrorMessagesJSON msgs2') ++ "\n"
-      shutdownSession s4
-    else do
-      s0 <- initSession sessionConfig
-      progress <- updateSession s0 mempty
-      s1 <- progressWaitCompletion progress
-      msgs1 <- getSourceErrors s1
-      putStrLn $ "Error 1:\n" ++ List.intercalate "\n\n"
-        (map formatErrorMessagesJSON msgs1) ++ "\n"
-      shutdownSession s1  -- s0 should fail
+  s0 <- initSession sessionConfig
+  progress1 <- updateSession s0 mempty
+  s2 <- progressWaitCompletion progress1
+  msgs2 <- getSourceErrors s2
+  putStrLn $ "Errors:\n" ++ List.intercalate "\n\n"
+    (map formatErrorMessagesJSON msgs2) ++ "\n"
+  shutdownSession s2
 
 -- Hacks retained just to pretty-print error messages.
 formatErrorMessagesJSON :: SourceError -> String
