@@ -286,14 +286,11 @@ updateSession sess@IdeSession{ ideConfig
   -- Last, spawning a future.
   progressSpawn $ do
     let sourcesDir = configSourcesDir ideConfig
-        checkSingle file = do
-          let mcontent = Nothing
-              target = combine sourcesDir file
-          checkModule target mcontent ideGhcState
     cnts <- getDirectoryContents sourcesDir
-    let files = filter ((`elem` [".hs"]) . takeExtension) cnts
-    allErrs <- mapM checkSingle files
-    let ideComputed = Just $ concat allErrs  -- can query now
+    let files = map (combine sourcesDir)
+                $ filter ((`elem` [".hs"]) . takeExtension) cnts
+    allErrs <- checkModule files Nothing ideGhcState
+    let ideComputed = Just allErrs  -- can query now
     return $ sess {ideToken = newToken, ideComputed}
 
 -- | A future, a handle on an action that will produce some result.

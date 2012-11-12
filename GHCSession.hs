@@ -60,17 +60,17 @@ data ErrorKind = Error | Warning
 --
 data SymbolDefinitionMap
 
-checkModule :: FilePath          -- ^ target file
+checkModule :: [FilePath]        -- ^ target files
             -> Maybe String      -- ^ optional content of the file
             -> [Located String]  -- ^ leftover ghc static options
             -> IO [SourceError]  -- ^ any errors and warnings
-checkModule filename mfilecontent leftoverOpts = handleOtherErrors $ do
+checkModule targets mfilecontent leftoverOpts = handleOtherErrors $ do
 
     libdir <- getGhcLibdir
 
     errsRef <- newIORef []
 
-    mcontent <- case mfilecontent of
+    _mcontent <- case mfilecontent of
                   Nothing          -> return Nothing
                   Just filecontent -> do
 #if __GLASGOW_HASKELL__ >= 704
@@ -99,14 +99,16 @@ checkModule filename mfilecontent leftoverOpts = handleOtherErrors $ do
         setSessionDynFlags flags {
                              hscTarget  = HscNothing,
                              ghcLink    = NoLink,
-                             ghcMode    = OneShot, --CompManager,
+                             ghcMode    = CompManager,
                              log_action = collectSrcError errsRef
                            }
-        addTarget Target {
-                    targetId           = TargetFile filename Nothing,
-                    targetAllowObjCode = True,
-                    targetContents     = mcontent
-                  }
+        let addSingle filename = do
+              addTarget Target
+                { targetId           = TargetFile filename Nothing
+                , targetAllowObjCode = True
+                , targetContents     = Nothing
+                }
+        mapM_ addSingle targets
         load LoadAllTargets
         return ()
 
