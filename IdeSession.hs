@@ -145,9 +145,10 @@ module IdeSession (
 import Data.Maybe (fromMaybe)
 import Control.Monad
 import Control.Concurrent
-import System.IO (withFile, IOMode(..))
+import System.IO (openBinaryTempFile, hClose)
 import System.Directory
-import System.FilePath (combine, takeExtension)
+import System.FilePath (combine, takeExtension, (<.>), splitFileName)
+import qualified Control.Exception as Exception
 
 import Data.Monoid (Monoid(..))
 import Data.ByteString.Lazy.Char8 (ByteString)
@@ -316,12 +317,25 @@ progressSpawn action = do
 progressWaitCompletion :: Progress a -> IO a
 progressWaitCompletion (Progress mv) = takeMVar mv
 
--- TODO:
--- 12:31 < dcoutts> mikolaj: steal the writeFileAtomic code from Cabal
--- 12:31 < dcoutts> from D.S.Utils
--- 12:32 < dcoutts> though check it's the version that uses ByteString
--- 12:32 < dcoutts> rather than String
+-- | Writes a file atomically.
 --
+-- The file is either written sucessfully or an IO exception is raised and
+-- the original file is left unchanged.
+--
+-- On windows it is not possible to delete a file that is open by a process.
+-- This case will give an IO exception but the atomic property is not affected.
+--
+writeFileAtomic :: FilePath -> BS.ByteString -> IO ()
+writeFileAtomic targetPath content = do
+  let (targetDir, targetFile) = splitFileName targetPath
+  Exception.bracketOnError
+    (openBinaryTempFile targetDir $ targetFile <.> "tmp")
+    (\(tmpPath, handle) -> hClose handle >> removeFile tmpPath)
+    (\(tmpPath, handle) -> do
+        BS.hPut handle content
+        hClose handle
+        renameFile tmpPath targetPath)
+
 -- | A session update that changes a source module. Modules can be added,
 -- updated or deleted.
 --
@@ -329,9 +343,7 @@ updateModule :: ModuleChange -> IdeSessionUpdate
 updateModule mc =
   IdeSessionUpdate $ \ IdeSession{ideConfig=SessionConfig{configSourcesDir}} ->
   case mc of
-     ModulePut n bs ->
-       withFile (combine configSourcesDir n) WriteMode $ \ handle ->
-         BS.hPut handle bs
+     ModulePut n bs -> writeFileAtomic (combine configSourcesDir n) bs
      ModuleDelete n -> removeFile (combine configSourcesDir n)
 
 data ModuleChange = ModulePut    ModuleName ByteString
@@ -346,9 +358,7 @@ updateDataFile :: DataFileChange -> IdeSessionUpdate
 updateDataFile mc =
   IdeSessionUpdate $ \ IdeSession{ideConfig=SessionConfig{configDataDir}} ->
   case mc of
-     DataFilePut n bs ->
-       withFile (combine configDataDir n) WriteMode $ \ handle ->
-         BS.hPut handle bs
+     DataFilePut n bs -> writeFileAtomic (combine configDataDir n) bs
      DataFileDelete n -> removeFile (combine configDataDir n)
 
 data DataFileChange = DataFilePut    FilePath ByteString
