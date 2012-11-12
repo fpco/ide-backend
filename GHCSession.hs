@@ -99,7 +99,7 @@ checkModule filename mfilecontent leftoverOpts = handleOtherErrors $ do
         setSessionDynFlags flags {
                              hscTarget  = HscNothing,
                              ghcLink    = NoLink,
-                             ghcMode    = CompManager,
+                             ghcMode    = OneShot, --CompManager,
                              log_action = collectSrcError errsRef
                            }
         addTarget Target {
