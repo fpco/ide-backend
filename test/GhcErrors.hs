@@ -23,13 +23,14 @@ main = do
        [] -> "."
        _ -> fail "usage: GhcErrors [source-dir]"
  withTemporaryDirectory "ide-backend-test" $ \ configSourcesDir -> do
-  putStrLn $ "Temporary test directory: " ++ configSourcesDir ++ "\n\n"
+  putStrLn $ "Copying files from: " ++ originalSourcesDir ++ "\n\n"
+          ++ "Temporary test directory: " ++ configSourcesDir ++ "\n\n"
 
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
   cnts <- getDirectoryContents originalSourcesDir
   let files = filter ((`elem` [".hs"]) . takeExtension) cnts
       copy file = copyFile (combine originalSourcesDir file)
-                         (combine configSourcesDir file)
+                           (combine configSourcesDir file)
   mapM_ copy files
   -- Init session.
   let sessionConfig = SessionConfig{ configSourcesDir
@@ -39,10 +40,10 @@ main = do
                                    }
   s0 <- initSession sessionConfig
   -- Overwrite something.
-  let update1 =
+  let update1 = if originalSourcesDir /= "." then mempty else
         (updateModule $ ModulePut "ide-backend.hs" (BS.pack "2"))
         <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a2"))
-      update2 =
+      update2 = if originalSourcesDir /= "." then mempty else
         (updateModule $ ModulePut "ide-backend.hs" (BS.pack "4"))
         <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a4"))
   -- Test the computations.
