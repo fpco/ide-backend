@@ -143,7 +143,7 @@ collectSrcError errsRef flags SevError _srcspan style msg
 
 collectSrcError _ _ _ _ _ _ = return ()
 #else
-collectSrcError :: IORef [ErrorMessage]
+collectSrcError :: IORef [SourceError]
                 -> Severity -> SrcSpan -> PprStyle -> Message -> IO ()
 collectSrcError errsRef severity srcspan style msg
   | Just errKind <- case severity of
