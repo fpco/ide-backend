@@ -60,9 +60,9 @@ executable ide-backend
   other-extensions:   CPP
   ghc-options:       -Wall -fno-warn-unused-do-bind
 
-test-suite ghcErrors
+test-suite ghc-errors
   type:              exitcode-stdio-1.0
-  main-is:           GhcErrors.hs
+  main-is:           ghc-errors.hs
   hs-source-dirs:    test
   build-depends:     ide-backend,
                      base      ==4.*,
