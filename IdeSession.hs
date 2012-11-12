@@ -142,12 +142,10 @@ module IdeSession (
 
 ) where
 
-import Data.Map (Map)
-import qualified Data.Map as Map
-import Data.IORef
 import Data.Maybe (fromMaybe)
 import Control.Monad
 import Control.Concurrent
+import System.IO (withFile, IOMode(..))
 import System.Directory
 import System.FilePath (combine, takeExtension)
 
@@ -206,10 +204,6 @@ data IdeSession = IdeSession
   , ideComputed :: (Maybe Computed)
   }
 
--- Mock-up filesystem to avoid trashing our computers when testing.
--- Files not present in the map should be read from the real filesystem.
-type Filesystem = Map FilePath ByteString
-
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.
 --
@@ -226,10 +220,7 @@ data SessionConfig = SessionConfig {
        configDataDir :: FilePath,
 
        -- | The directory to use for purely temporary files.
-       configTempDir :: FilePath,
-
-       -- | TMP hack for testing.
-       configFilesystem :: IORef Filesystem
+       configTempDir :: FilePath
      }
 
 -- | Create a fresh session, using some initial configuration.
@@ -293,10 +284,9 @@ updateSession sess@IdeSession{ ideConfig
 
   -- Last, spawning a future.
   progressSpawn $ do
-    fs <- readIORef (configFilesystem ideConfig)
     let sourcesDir = configSourcesDir ideConfig
         checkSingle file = do
-          let mcontent = fmap BS.unpack $ Map.lookup file fs
+          let mcontent = Nothing
               target = combine sourcesDir file
           checkModule target mcontent ideGhcState
     cnts <- getDirectoryContents sourcesDir
@@ -336,12 +326,13 @@ progressWaitCompletion (Progress mv) = takeMVar mv
 -- updated or deleted.
 --
 updateModule :: ModuleChange -> IdeSessionUpdate
-updateModule mc = IdeSessionUpdate $ \ IdeSession{ideConfig} -> do
-  fs <- readIORef (configFilesystem ideConfig)
-  let newFs = case mc of
-        ModulePut n bs -> Map.insert n bs fs
-        ModuleDelete n -> Map.delete n fs
-  writeIORef (configFilesystem ideConfig) newFs
+updateModule mc =
+  IdeSessionUpdate $ \ IdeSession{ideConfig=SessionConfig{configSourcesDir}} ->
+  case mc of
+     ModulePut n bs ->
+       withFile (combine configSourcesDir n) WriteMode $ \ handle ->
+         BS.hPut handle bs
+     ModuleDelete n -> removeFile (combine configSourcesDir n)
 
 data ModuleChange = ModulePut    ModuleName ByteString
                   | ModuleDelete ModuleName
@@ -352,12 +343,13 @@ type ModuleName = String  -- TODO: use GHC.Module.ModuleName ?
 -- updated or deleted.
 --
 updateDataFile :: DataFileChange -> IdeSessionUpdate
-updateDataFile mc = IdeSessionUpdate $ \ IdeSession{ideConfig} -> do
-  fs <- readIORef (configFilesystem ideConfig)
-  let newFs = case mc of
-        DataFilePut n bs -> Map.insert n bs fs
-        DataFileDelete n -> Map.delete n fs
-  writeIORef (configFilesystem ideConfig) newFs
+updateDataFile mc =
+  IdeSessionUpdate $ \ IdeSession{ideConfig=SessionConfig{configDataDir}} ->
+  case mc of
+     DataFilePut n bs ->
+       withFile (combine configDataDir n) WriteMode $ \ handle ->
+         BS.hPut handle bs
+     DataFileDelete n -> removeFile (combine configDataDir n)
 
 data DataFileChange = DataFilePut    FilePath ByteString
                     | DataFileDelete FilePath
@@ -373,17 +365,14 @@ type Query a = IdeSession -> IO a
 -- | Read the current value of one of the source modules.
 --
 getSourceModule :: ModuleName -> Query ByteString
-getSourceModule n IdeSession{ideConfig=SessionConfig{ configSourcesDir
-                                                    , configFilesystem }} = do
-  fs <- readIORef configFilesystem
-  case Map.lookup n fs of
-    Just bs -> return bs
-    Nothing -> BS.readFile (combine configSourcesDir n)
+getSourceModule n IdeSession{ideConfig=SessionConfig{configSourcesDir}} =
+  BS.readFile (combine configSourcesDir n)
 
 -- | Read the current value of one of the data files.
 --
 getDataFile :: FilePath -> Query ByteString
-getDataFile = getSourceModule  -- TODO
+getDataFile n IdeSession{ideConfig=SessionConfig{configDataDir}} =
+  BS.readFile (combine configDataDir n)
 
 -- | Get any compilation errors or warnings in the current state of the
 -- session, meaning errors that GHC reports for the current state of all the

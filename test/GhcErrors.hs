@@ -1,11 +1,12 @@
 module Main where
 
-import Data.IORef
 import Control.Monad
 import Control.Exception
 import System.Environment
+import System.FilePath (combine, takeExtension)
+import System.Directory
+import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
-import qualified Data.Map as Map
 import Data.Monoid ((<>), mempty)
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Text.JSON as JSON
@@ -16,20 +17,35 @@ import IdeSession
 
 main :: IO ()
 main = do
-  args <- getArgs
-  let configSourcesDir = case args of
-        [dir] -> dir
-        [] -> "."
-        _ -> fail "usage: ide-backend [source-dir]"
-  configFilesystem <- newIORef $ Map.empty
-  let sessionConfig = SessionConfig{..}
+ args <- getArgs
+ let originalSourcesDir = case args of
+       [dir] -> dir
+       [] -> "."
+       _ -> fail "usage: GhcErrors [source-dir]"
+ withTemporaryDirectory "ide-backend-test" $ \ configSourcesDir -> do
+  putStrLn $ "Temporary test directory: " ++ configSourcesDir ++ "\n\n"
+
+  -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
+  cnts <- getDirectoryContents originalSourcesDir
+  let files = filter ((`elem` [".hs"]) . takeExtension) cnts
+      copy file = copyFile (combine originalSourcesDir file)
+                         (combine configSourcesDir file)
+  mapM_ copy files
+  -- Init session.
+  let sessionConfig = SessionConfig{ configSourcesDir
+                                   , configWorkingDir = configSourcesDir
+                                   , configDataDir    = configSourcesDir
+                                   , configTempDir    = configSourcesDir
+                                   }
   s0 <- initSession sessionConfig
+  -- Overwrite something.
   let update1 =
         (updateModule $ ModulePut "ide-backend.hs" (BS.pack "2"))
         <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a2"))
       update2 =
         (updateModule $ ModulePut "ide-backend.hs" (BS.pack "4"))
         <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a4"))
+  -- Test the computations.
   progress1 <- updateSession s0 update1
   s2 <- progressWaitCompletion progress1
   msgs2 <- getSourceErrors s2
@@ -64,7 +80,7 @@ shouldFail :: String -> IO a -> IO ()
 shouldFail descr x = do
   let logException e = do
         putStrLn $ "Correctly rejected: " ++ descr ++
-                   "\nwith exception: " ++ show (e :: ErrorCall) ++ "\n"
+                   "\nwith exception msg: " ++ show (e :: ErrorCall) ++ "\n"
         return True
   failed <- catch (x >> return False) logException
   unless failed $ error $ "should fail: " ++ descr

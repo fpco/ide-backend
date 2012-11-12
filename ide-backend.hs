@@ -1,9 +1,7 @@
 module Main where
 
-import Data.IORef
 import System.Environment
 import qualified Data.List as List
-import qualified Data.Map as Map
 import Data.Monoid (mempty)
 import Text.JSON as JSON
 import Text.JSON.Pretty (pp_value)
@@ -22,8 +20,11 @@ main = do
         [dir] -> dir
         [] -> "."
         _ -> fail "usage: ide-backend [source-dir]"
-  configFilesystem <- newIORef $ Map.empty
-  let sessionConfig = SessionConfig{..}
+  let sessionConfig = SessionConfig{ configSourcesDir
+                                   , configWorkingDir = configSourcesDir
+                                   , configDataDir    = configSourcesDir
+                                   , configTempDir    = configSourcesDir
+                                   }
   s0 <- initSession sessionConfig
   progress1 <- updateSession s0 mempty
   s2 <- progressWaitCompletion progress1
