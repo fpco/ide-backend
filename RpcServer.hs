@@ -7,6 +7,7 @@ module RpcServer
   , RpcServer
   , forkRpcServer
   , rpc 
+  , shutdown
     -- * Testing
   , main
   ) where
@@ -27,6 +28,7 @@ import System.Process
   , proc
   , StdStream(CreatePipe)
   , ProcessHandle
+  , terminateProcess
   )
 import Data.Aeson 
   ( FromJSON
@@ -38,7 +40,7 @@ import Data.Aeson
   )
 import Data.Aeson.TH (deriveJSON)
 import Control.Monad (forever)
-import qualified Control.Exception as Ex (SomeException, throwIO, catch)
+import qualified Control.Exception as Ex
 import Control.Concurrent (ThreadId, forkIO, killThread)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar 
@@ -48,6 +50,7 @@ import Control.Concurrent.MVar
   , putMVar
   , readMVar
   , modifyMVar 
+  , takeMVar
   )
 import Data.ByteString.Lazy (ByteString, hPut, hGetContents, hPutStr)
 import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
@@ -100,20 +103,21 @@ rpcServer inp outp handler = do
 --------------------------------------------------------------------------------
 
 -- | Abstract data type representing RPC servers
-data RpcServer req resp = RpcServer {
-    -- | The server's 'stdin'
-    rpcIn :: Handle               
-    -- | The server's 'stdout' 
-    --
-    -- This represents the parser state, hence we represent it as an MVar
-    -- around a lazy bytestring (the MVar doubles as the lock for the server,
-    -- sequentializing concurrent requests)
-  , rpcOut :: MVar ByteString  
-    -- | Thread that forwards the server's stderr to our stderr
-  , rpcErr :: ThreadId
-    -- | Handle on the server process itself
-  , rpcProc :: ProcessHandle
-  }
+newtype RpcServer req resp = RpcServer (MVar (RpcState req resp))
+
+-- | RPC server state
+data RpcState req resp = 
+    RpcRunning {
+        -- | The server's 'stdin'
+        rpcIn :: Handle               
+        -- | The server's 'stdout' (this essentially represents the parser state)
+      , rpcOut :: ByteString  
+        -- | Thread that forwards the server's stderr to our stderr
+      , rpcErr :: ThreadId
+        -- | Handle on the server process itself
+      , rpcProc :: ProcessHandle
+      }
+  | RpcStopped Ex.SomeException
 
 -- | Fork an RPC server as a separate process
 forkRpcServer :: FilePath  -- ^ Filename of the executable
@@ -141,31 +145,72 @@ forkRpcServer path args = do
   tid <- forkIO $ hGetContents herr >>= hPutStr stderr  
 
   -- Get server's output as a lazy bytestring
-  contents     <- hGetContents hout
-  contentsMVar <- newMVar contents
+  contents <- hGetContents hout
 
   -- Done
-  return RpcServer {
+  st <- newMVar RpcRunning {
       rpcIn   = hin
-    , rpcOut  = contentsMVar
+    , rpcOut  = contents
     , rpcErr  = tid
     , rpcProc = ph
     }
+  return (RpcServer st)
 
 -- | Do an RPC call
 --
--- Throws an exception if the server returns a mallformed result
---
--- TODO: timeout?
+-- Throws an exception if the server returns a mallformed result or the server
+-- has shut down.
 rpc :: (ToJSON req, FromJSON resp)
     => RpcServer req resp  -- ^ RPC server
     -> req                 -- ^ Request
     -> IO resp             -- ^ Response
-rpc server req = modifyMVar (rpcOut server) $ \out -> do
-  hPut (rpcIn server) $ encode Request { request = req }
-  case parseJSON out of
-    Right (out', Response resp) -> return (out', resp)
-    Left err                    -> Ex.throwIO (userError err)
+rpc server req = withRpcServer server $ \st ->
+  case st of
+    RpcRunning {} -> do
+      hPut (rpcIn st) $ encode Request { request = req }
+      case parseJSON (rpcOut st) of
+        Right (out', Response resp) -> 
+          return (st { rpcOut = out' }, resp)
+        Left err -> 
+          Ex.throwIO (userError err)
+    RpcStopped ex -> 
+      Ex.throwIO (userError $ "rpc: server shutdown (" ++ show ex ++ ")")
+
+-- | Shut down the RPC server
+--
+-- This simply kills the remote process. If you want to shut down the remote
+-- process cleanly you must implement your own termination protocol before
+-- calling 'shutdown'.
+shutdown :: RpcServer req resp -> IO ()
+shutdown server = withRpcServer server $ \st -> do
+  ex <- terminate st (Ex.toException (userError "Manual shutdown"))
+  return (RpcStopped ex, ())
+
+-- | Force-terminate the external process 
+terminate :: RpcState req resp -> Ex.SomeException -> IO Ex.SomeException
+terminate st@(RpcRunning {}) ex = do
+  terminateProcess (rpcProc st)
+  killThread (rpcErr st)
+  return ex
+terminate (RpcStopped ex') _ = 
+  return ex' -- Already stopped
+
+-- | Like modifyMVar, but terminate the server on exceptions 
+withRpcServer :: RpcServer req resp 
+              -> (RpcState req resp -> IO (RpcState req resp, a))
+              -> IO a
+withRpcServer (RpcServer server) io = 
+  Ex.mask $ \restore -> do
+    st <- takeMVar server
+    mResult <- Ex.try $ restore (io st)
+    case mResult of
+      Right (st', a) -> do
+        putMVar server st'
+        return a
+      Left ex -> do
+        ex' <- terminate st ex
+        putMVar server (RpcStopped ex')
+        Ex.throwIO ex
 
 --------------------------------------------------------------------------------
 -- Internal                                                                   --
@@ -247,4 +292,9 @@ main = do
       rpc server Reset >>= print 
       rpc server Get >>= print 
       Ex.catch (rpc server Crash >>= print) (\ex -> print (ex :: Ex.SomeException))
-      rpc server Get >>= print 
+      Ex.catch (rpc server Get >>= print) (\ex -> print (ex :: Ex.SomeException))
+
+      server2 <- forkRpcServer ("./" ++ prog) ["--server"] :: IO CountServer 
+      rpc server2 Get >>= print 
+      shutdown server2
+      rpc server2 Get >>= print 
