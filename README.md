@@ -7,9 +7,10 @@ Compile and test with
 
 For some more testing, go to test/ and run
 
-../dist/build/ghc-errors/ghc-errors
+    ../dist/build/ghc-errors/ghc-errors
 
-with each of the subdirectories in turn (sorry, no automation here yet).
+with the name of each of the subdirectories in turn
+(sorry, no automation here yet).
 
 
 The API is in IdeSession.hs. Format it nicely with

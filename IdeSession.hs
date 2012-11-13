@@ -224,10 +224,20 @@ data SessionConfig = SessionConfig {
        configTempDir :: FilePath
      }
 
+ensureDirEmpty :: FilePath -> IO ()
+ensureDirEmpty dir = do
+  cnts <- getDirectoryContents dir
+  when (any (`notElem` [".", ".."]) cnts) $
+    error $ "Directory " ++ dir ++ " is not empty"
+
 -- | Create a fresh session, using some initial configuration.
 --
 initSession :: SessionConfig -> IO IdeSession
-initSession ideConfig = do
+initSession ideConfig@SessionConfig{..} = do
+  ensureDirEmpty configSourcesDir
+  ensureDirEmpty configWorkingDir
+  ensureDirEmpty configDataDir
+  ensureDirEmpty configTempDir
   let opts = []  -- GHC static flags; set them in sessionConfig?
   ideGhcState <- optsToGhcState opts
   let ideComputed = Nothing  -- can't query before the first Progress
@@ -272,7 +282,7 @@ instance Monoid IdeSessionUpdate where
 --
 
 updateSession :: IdeSession -> IdeSessionUpdate -> IO (Progress IdeSession)
-updateSession sess@IdeSession{ ideConfig
+updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
                              , ideGhcState
                              , ideToken }
               (IdeSessionUpdate update) = do
@@ -285,9 +295,8 @@ updateSession sess@IdeSession{ ideConfig
 
   -- Last, spawning a future.
   progressSpawn $ do
-    let sourcesDir = configSourcesDir ideConfig
-    cnts <- getDirectoryContents sourcesDir
-    let files = map (combine sourcesDir)
+    cnts <- getDirectoryContents configSourcesDir
+    let files = map (combine configSourcesDir)
                 $ filter ((`elem` [".hs"]) . takeExtension) cnts
     allErrs <- checkModule files Nothing ideGhcState
     let ideComputed = Just allErrs  -- can query now
