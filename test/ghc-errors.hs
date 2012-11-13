@@ -3,11 +3,11 @@ module Main where
 import Control.Monad
 import Control.Exception
 import System.Environment
-import System.FilePath (combine, takeExtension)
+import System.FilePath ((</>), takeExtension, dropExtension)
 import System.Directory
 import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
-import Data.Monoid ((<>), mempty)
+import Data.Monoid ((<>), mempty, mconcat)
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Text.JSON as JSON
 import Text.JSON.Pretty (pp_value)
@@ -25,27 +25,36 @@ main = do
  withTemporaryDirectory "ide-backend-test" $ \ configSourcesDir -> do
   putStrLn $ "Copying files from: " ++ originalSourcesDir ++ "\n\n"
           ++ "Temporary test directory: " ++ configSourcesDir ++ "\n\n"
-
-  -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
-  cnts <- getDirectoryContents originalSourcesDir
-  let files = filter ((`elem` [".hs"]) . takeExtension) cnts
-      copy file = copyFile (combine originalSourcesDir file)
-                           (combine configSourcesDir file)
-  mapM_ copy files
   -- Init session.
   let sessionConfig = SessionConfig{ configSourcesDir
                                    , configWorkingDir = configSourcesDir
                                    , configDataDir    = configSourcesDir
                                    , configTempDir    = configSourcesDir
                                    }
-  s0 <- initSession sessionConfig
-  -- Overwrite something.
-  let update1 = if originalSourcesDir /= "." then mempty else
-        (updateModule $ ModulePut "ide-backend.hs" (BS.pack "2"))
-        <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a2"))
-      update2 = if originalSourcesDir /= "." then mempty else
-        (updateModule $ ModulePut "ide-backend.hs" (BS.pack "4"))
-        <> (updateModule $ ModulePut "ide-backend.hs" (BS.pack "x = a4"))
+  sP <- initSession sessionConfig
+  -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
+  -- HACK: here we fake module names, guessing them from file names.
+  cnts <- getDirectoryContents originalSourcesDir
+  let originalFiles = filter ((`elem` [".hs"]) . takeExtension) cnts
+      originalModules =
+        map (\ f -> (ModuleName $ dropExtension f, f)) originalFiles
+      upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
+      originalUpdate = mconcat $ map upd originalModules
+  progressP <- updateSession sP originalUpdate
+  s0 <- progressWaitCompletion progressP
+  msgs0 <- getSourceErrors s0
+  putStrLn $ "Error 0:\n" ++ List.intercalate "\n\n"
+    (map formatErrorMessagesJSON msgs0) ++ "\n"
+  -- Overwrite some copied files.
+  let overName = case originalModules of
+        [] -> ModuleName "testEmptyDirModule"
+        (m, _) : _ -> m
+      update1 =
+        (updateModule $ ModulePut overName (BS.pack "module M where\n2"))
+        <> (updateModule $ ModulePut overName (BS.pack "module M where\nx = a2"))
+      update2 =
+        (updateModule $ ModulePut overName (BS.pack "module M where\n4"))
+        <> (updateModule $ ModulePut overName (BS.pack "module M where\nx = a4"))
   -- Test the computations.
   progress1 <- updateSession s0 update1
   s2 <- progressWaitCompletion progress1

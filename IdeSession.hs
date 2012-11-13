@@ -69,6 +69,7 @@ module IdeSession (
   -- ** Modules
   updateModule,
   ModuleChange(..),
+  ModuleName(..),
 
   -- ** Data files
   updateDataFile,
@@ -147,7 +148,7 @@ import Control.Monad
 import Control.Concurrent
 import System.IO (openBinaryTempFile, hClose)
 import System.Directory
-import System.FilePath (combine, takeExtension, (<.>), splitFileName)
+import System.FilePath ((</>), takeExtension, (<.>), splitFileName)
 import qualified Control.Exception as Exception
 
 import Data.Monoid (Monoid(..))
@@ -296,7 +297,7 @@ updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
   -- Last, spawning a future.
   progressSpawn $ do
     cnts <- getDirectoryContents configSourcesDir
-    let files = map (combine configSourcesDir)
+    let files = map (configSourcesDir </>)
                 $ filter ((`elem` [".hs"]) . takeExtension) cnts
     allErrs <- checkModule files Nothing ideGhcState
     let ideComputed = Just allErrs  -- can query now
@@ -346,16 +347,21 @@ writeFileAtomic targetPath content = do
 -- updated or deleted.
 --
 updateModule :: ModuleChange -> IdeSessionUpdate
-updateModule mc =
-  IdeSessionUpdate $ \ IdeSession{ideConfig=SessionConfig{configSourcesDir}} ->
+updateModule mc = IdeSessionUpdate $ \ IdeSession{ideConfig} ->
   case mc of
-     ModulePut n bs -> writeFileAtomic (combine configSourcesDir n) bs
-     ModuleDelete n -> removeFile (combine configSourcesDir n)
+    ModulePut m bs -> writeFileAtomic (internalFile ideConfig m) bs
+    ModuleSource m p -> copyFile p (internalFile ideConfig m)
+    ModuleDelete m -> removeFile (internalFile ideConfig m)
 
 data ModuleChange = ModulePut    ModuleName ByteString
+                  | ModuleSource ModuleName FilePath
                   | ModuleDelete ModuleName
 
-type ModuleName = String  -- TODO: use GHC.Module.ModuleName ?
+newtype ModuleName = ModuleName String
+
+internalFile :: SessionConfig -> ModuleName -> FilePath
+internalFile SessionConfig{configSourcesDir} (ModuleName n) =
+  configSourcesDir </> n <.> ".hs"
 
 -- | A session update that changes a data file. Data files can be added,
 -- updated or deleted.
@@ -364,10 +370,13 @@ updateDataFile :: DataFileChange -> IdeSessionUpdate
 updateDataFile mc =
   IdeSessionUpdate $ \ IdeSession{ideConfig=SessionConfig{configDataDir}} ->
   case mc of
-     DataFilePut n bs -> writeFileAtomic (combine configDataDir n) bs
-     DataFileDelete n -> removeFile (combine configDataDir n)
+     DataFilePut n bs -> writeFileAtomic (configDataDir </> n) bs
+     DataFileSource n p -> copyFile (configDataDir </> n)
+                                    (configDataDir </> p)
+     DataFileDelete n -> removeFile (configDataDir </> n)
 
 data DataFileChange = DataFilePut    FilePath ByteString
+                    | DataFileSource FilePath FilePath
                     | DataFileDelete FilePath
 
 -- | The type of queries in a given session state.
@@ -381,14 +390,14 @@ type Query a = IdeSession -> IO a
 -- | Read the current value of one of the source modules.
 --
 getSourceModule :: ModuleName -> Query ByteString
-getSourceModule n IdeSession{ideConfig=SessionConfig{configSourcesDir}} =
-  BS.readFile (combine configSourcesDir n)
+getSourceModule m IdeSession{ideConfig} =
+  BS.readFile $ internalFile ideConfig m
 
 -- | Read the current value of one of the data files.
 --
 getDataFile :: FilePath -> Query ByteString
 getDataFile n IdeSession{ideConfig=SessionConfig{configDataDir}} =
-  BS.readFile (combine configDataDir n)
+  BS.readFile $  configDataDir </> n
 
 -- | Get any compilation errors or warnings in the current state of the
 -- session, meaning errors that GHC reports for the current state of all the
