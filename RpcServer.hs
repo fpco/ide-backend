@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 {-# OPTIONS_GHC -Wall #-}
 module RpcServer 
   ( -- * Server-side
@@ -11,7 +11,16 @@ module RpcServer
   , main
   ) where
 
-import System.IO (Handle, hSetBinaryMode, stdin, stdout, stderr, hPrint)
+import System.IO 
+  ( Handle
+  , hSetBinaryMode
+  , stdin
+  , stdout
+  , stderr
+  , hPrint
+  , hSetBuffering
+  , BufferMode(LineBuffering, NoBuffering)
+  )
 import System.Process 
   ( CreateProcess(std_in, std_out, std_err)
   , createProcess
@@ -27,9 +36,10 @@ import Data.Aeson
   , fromJSON
   , Result(Success, Error)
   )
+import Data.Aeson.TH (deriveJSON)
 import Control.Monad (forever)
 import qualified Control.Exception as Ex (SomeException, throwIO, catch)
-import Control.Concurrent (forkIO)
+import Control.Concurrent (ThreadId, forkIO, killThread)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar 
   ( MVar
@@ -39,11 +49,27 @@ import Control.Concurrent.MVar
   , readMVar
   , modifyMVar 
   )
-import qualified Data.ByteString.Lazy as BSL (ByteString, hPut, hGetContents)
+import Data.ByteString.Lazy (ByteString, hPut, hGetContents, hPutStr)
 import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
 
 -- For testing
 import System.Environment (getArgs, getProgName)
+
+--------------------------------------------------------------------------------
+-- Internal data types                                                        --
+--                                                                            --
+-- We wrap the requests and responses to and from the RPC server in a custom  --
+-- data type for two reasons. First, top-level JSON values must be objects or --
+-- arrays; by wrapping them the user does not have to worry about this.       --
+-- Second, it allows us to send control messages back and worth when we need  --
+-- to.                                                                        -- 
+--------------------------------------------------------------------------------
+
+data Request  a = Request  { request  :: a }
+data Response a = Response { response :: a }
+
+$(deriveJSON id ''Request) 
+$(deriveJSON id ''Response)
 
 --------------------------------------------------------------------------------
 -- Server-side API                                                            --
@@ -62,11 +88,12 @@ rpcServer inp outp handler = do
   
   let forkCatch p = forkIO $ Ex.catch p (putMVar exception) 
 
-  _ <- forkCatch $ readRequests inp requests
-  _ <- forkCatch $ writeResponses responses outp
-  _ <- forkCatch $ channelHandler requests responses handler 
+  tid1 <- forkCatch $ readRequests inp requests
+  tid2 <- forkCatch $ writeResponses responses outp
+  tid3 <- forkCatch $ channelHandler requests responses handler 
 
   readMVar exception >>= hPrint stderr
+  mapM_ killThread [tid1, tid2, tid3]
 
 --------------------------------------------------------------------------------
 -- Client-side API                                                            --
@@ -81,9 +108,9 @@ data RpcServer req resp = RpcServer {
     -- This represents the parser state, hence we represent it as an MVar
     -- around a lazy bytestring (the MVar doubles as the lock for the server,
     -- sequentializing concurrent requests)
-  , rpcOut :: MVar BSL.ByteString  
-    -- | The server's 'stderr'
-  , rpcErr :: Handle              
+  , rpcOut :: MVar ByteString  
+    -- | Thread that forwards the server's stderr to our stderr
+  , rpcErr :: ThreadId
     -- | Handle on the server process itself
   , rpcProc :: ProcessHandle
   }
@@ -93,27 +120,52 @@ forkRpcServer :: FilePath  -- ^ Filename of the executable
               -> [String]  -- ^ Arguments
               -> IO (RpcServer req resp)
 forkRpcServer path args = do
+  -- Start the server
   (Just hin, Just hout, Just herr, ph) <- createProcess $ (proc path args) { 
       std_in  = CreatePipe
     , std_out = CreatePipe
     , std_err = CreatePipe
     }
-  contents     <- BSL.hGetContents hout
+
+  -- Set to binary mode so that 'hGetContents' works
+  hSetBinaryMode hin  True
+  hSetBinaryMode hout True
+  hSetBinaryMode herr True
+
+  -- Make sure requests get sent to the server immediately
+  hSetBuffering hin  NoBuffering
+  hSetBuffering hout NoBuffering
+  hSetBuffering herr LineBuffering
+
+  -- Forward server's stderr to our stderr
+  tid <- forkIO $ hGetContents herr >>= hPutStr stderr  
+
+  -- Get server's output as a lazy bytestring
+  contents     <- hGetContents hout
   contentsMVar <- newMVar contents
-  return (RpcServer hin contentsMVar herr ph)
+
+  -- Done
+  return RpcServer {
+      rpcIn   = hin
+    , rpcOut  = contentsMVar
+    , rpcErr  = tid
+    , rpcProc = ph
+    }
 
 -- | Do an RPC call
 --
 -- Throws an exception if the server returns a mallformed result
+--
+-- TODO: timeout?
 rpc :: (ToJSON req, FromJSON resp)
     => RpcServer req resp  -- ^ RPC server
     -> req                 -- ^ Request
     -> IO resp             -- ^ Response
 rpc server req = modifyMVar (rpcOut server) $ \out -> do
-  BSL.hPut (rpcIn server) (encode req)
+  hPut (rpcIn server) $ encode Request { request = req }
   case parseJSON out of
-    Right (out', resp) -> return (out', resp)
-    Left err           -> Ex.throwIO (userError err)
+    Right (out', Response resp) -> return (out', resp)
+    Left err                    -> Ex.throwIO (userError err)
 
 --------------------------------------------------------------------------------
 -- Internal                                                                   --
@@ -123,20 +175,18 @@ rpc server req = modifyMVar (rpcOut server) $ \out -> do
 readRequests :: forall req. FromJSON req => Handle -> Chan req -> IO ()
 readRequests h ch = do 
     hSetBinaryMode h True
-    contents <- BSL.hGetContents h
-    go contents
+    hSetBuffering h NoBuffering
+    hGetContents h >>= go
   where
-    go :: BSL.ByteString -> IO ()
+    go :: ByteString -> IO ()
     go contents = 
       case parseJSON contents of
-        Right (contents', req) -> do
-          writeChan ch req
-          go contents'
-        Left err ->
-          -- Exception will be caught by 'rpcServer'
-          Ex.throwIO (userError err)
-    
-parseJSON :: FromJSON a => BSL.ByteString -> Either String (BSL.ByteString, a) 
+        Right (contents', Request req) -> writeChan ch req >> go contents'
+        Left err                       -> Ex.throwIO (userError err)
+   
+-- | Parse a JSON value, and return the remainder of the input along with
+-- the result (or an error message)
+parseJSON :: FromJSON a => ByteString -> Either String (ByteString, a) 
 parseJSON bs =
   case parse json' bs of
     Fail _ _ err -> Left err
@@ -147,7 +197,12 @@ parseJSON bs =
     
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: ToJSON resp => Chan resp -> Handle -> IO ()
-writeResponses ch h = forever $ readChan ch >>= BSL.hPut h .  encode 
+writeResponses ch h = do
+  hSetBinaryMode h True
+  hSetBuffering h NoBuffering
+  forever $ do
+    resp <- readChan ch 
+    hPut h $ encode Response { response = resp }
 
 -- | Run a handler repeatedly, given input and output channels
 channelHandler :: Chan req -> Chan resp -> (req -> IO resp) -> IO ()
@@ -160,16 +215,36 @@ channelHandler inp outp handler = forever $ do
 -- For testing                                                                --
 --------------------------------------------------------------------------------
 
-echoServer :: String -> IO String
-echoServer = return
+data CountRequest  = Increment | Reset | Get | Crash deriving Show
+data CountResponse = Ok | Count Int deriving Show
+
+type CountServer = RpcServer CountRequest CountResponse
+
+$(deriveJSON id ''CountRequest)
+$(deriveJSON id ''CountResponse)
+
+countServer :: MVar Int -> CountRequest -> IO CountResponse
+countServer st Increment = modifyMVar st $ \i -> return (i + 1, Ok)
+countServer st Reset     = modifyMVar st $ \_ -> return (0, Ok)
+countServer st Get       = readMVar st >>= return . Count
+countServer _  Crash     = Ex.throwIO (userError "Server crashed!")
 
 main :: IO ()
 main = do
+  hSetBuffering stderr LineBuffering
   args <- getArgs
   case args of
-    ["--server"] -> rpcServer stdin stdout echoServer   
+    ["--server"] -> do
+      st <- newMVar 0
+      rpcServer stdin stdout (countServer st) 
     _ -> do
-      prog <- getProgName 
-      server <- forkRpcServer prog []
-      resp   <- rpc server "Hello server"
-      putStrLn resp
+      prog   <- getProgName 
+      server <- forkRpcServer ("./" ++ prog) ["--server"] :: IO CountServer 
+      rpc server Get >>= print 
+      rpc server Increment >>= print 
+      rpc server Increment >>= print 
+      rpc server Get >>= print 
+      rpc server Reset >>= print 
+      rpc server Get >>= print 
+      Ex.catch (rpc server Crash >>= print) (\ex -> print (ex :: Ex.SomeException))
+      rpc server Get >>= print 
