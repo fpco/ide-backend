@@ -93,10 +93,10 @@ $(deriveJSON id ''Response)
 
 -- | Start the RPC server
 rpcServer :: (FromJSON req, ToJSON resp) 
-          => Handle                      -- ^ Input
-          -> Handle                      -- ^ Output
-          -> Handle                      -- ^ Errors 
-          -> (req -> Progress resp resp) -- ^ The request handler 
+          => Handle                           -- ^ Input
+          -> Handle                           -- ^ Output
+          -> Handle                           -- ^ Errors 
+          -> (req -> IO (Progress resp resp)) -- ^ The request handler 
           -> IO ()
 rpcServer hin hout herr handler = do
   requests  <- newChan
@@ -322,11 +322,11 @@ writeResponses ch h = do
 -- | Run a handler repeatedly, given input and output channels
 channelHandler :: Chan (Request req)
                -> Chan (Response resp)
-               -> (req -> Progress resp resp)
+               -> (req -> IO (Progress resp resp))
                -> IO ()
 channelHandler inp outp handler = forever $ do
     Request req <- readChan inp 
-    go (handler req)
+    handler req >>= go
   where
     go p = do 
       resp <- progressWait p 
@@ -341,7 +341,7 @@ channelHandler inp outp handler = forever $ do
 -- For testing                                                                --
 --------------------------------------------------------------------------------
 
-data CountRequest  = Increment | Reset | Get | Crash | CountDown deriving Show
+data CountRequest  = Increment | Reset | Get | Crash | CountFor Int deriving Show
 data CountResponse = Ok | Count Int deriving Show
 
 type CountServer = RpcServer CountRequest CountResponse
@@ -349,21 +349,25 @@ type CountServer = RpcServer CountRequest CountResponse
 $(deriveJSON id ''CountRequest)
 $(deriveJSON id ''CountResponse)
 
-countServer :: MVar Int -> CountRequest -> Progress CountResponse CountResponse
-countServer st Increment = Progress $ 
+countServer :: MVar Int -> CountRequest -> IO (Progress CountResponse CountResponse)
+countServer st Increment = return $ Progress $ 
   modifyMVar st $ \i -> return (i + 1, Left Ok)
-countServer st Reset = Progress $ 
+countServer st Reset = return $ Progress $ 
   modifyMVar st $ \_ -> return (0, Left Ok)
-countServer st Get = Progress $ do
+countServer st Get = return $ Progress $ do
   i <- readMVar st
   return (Left (Count i))
-countServer _  Crash = Progress $ 
+countServer _  Crash = return $ Progress $ 
   Ex.throwIO (userError "Server crashed!")
-countServer st CountDown = Progress $ do
-  modifyMVar st $ \i -> 
-    if i == 0 
-      then return (0, Left Ok)
-      else return (i - 1, Right (Count i, countServer st CountDown))
+countServer st (CountFor n) = do
+    leftToCount <- newMVar n
+    return (p leftToCount)
+  where
+    p leftToCount = Progress $ do 
+      shouldCount <- modifyMVar leftToCount $ \m -> return (m - 1, m > 0)
+      if shouldCount 
+        then modifyMVar st $ \i -> return (i + 1, Right (Count (i + 1), p leftToCount))
+        else return (Left Ok)
 
 main :: IO ()
 main = do
@@ -391,8 +395,4 @@ main = do
       Ex.catch (rpc server2 Get >>= print) (\ex -> print (ex :: Ex.SomeException))
 
       server3 <- forkRpcServer ("./" ++ prog) ["--server"] :: IO CountServer 
-      rpc server3 Increment >>= print 
-      rpc server3 Increment >>= print 
-      rpc server3 Increment >>= print 
-      rpc server3 Increment >>= print 
-      rpcWithProgressCallback server3 CountDown print >>= print
+      rpcWithProgressCallback server3 (CountFor 5) print >>= print
