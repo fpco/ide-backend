@@ -98,7 +98,7 @@ rpcServer hin hout herr handler = do
   responses <- newChan
   exception <- newEmptyMVar :: IO (MVar Ex.SomeException)
 
-  configureHandles [hin, hout, herr]
+  setBinaryBlockBuffered [hin, hout, herr]
 
   let forkCatch p = forkIO $ Ex.catch p (putMVar exception)
 
@@ -145,7 +145,7 @@ forkRpcServer path args = do
     }
 
   -- Set handles to binary mode/block buffering
-  configureHandles [hin, hout, herr]
+  setBinaryBlockBuffered [hin, hout, herr]
 
   -- Forward server's stderr to our stderr
   tid <- forkIO $ hGetContents herr >>= hPutStr stderr
@@ -171,26 +171,17 @@ rpc :: (ToJSON req, FromJSON resp)
     => RpcServer req resp  -- ^ RPC server
     -> req                 -- ^ Request
     -> IO resp             -- ^ Response
-rpc server req = withRpcServer server $ \st ->
-  case st of
-    RpcRunning {} -> do
-      hPut (rpcIn st) $ encode (Request req)
-      hFlush (rpcIn st)
-      case parseJSON (rpcOut st) of
-        Right (out', FinalResponse resp) ->
-          return (st { rpcOut = out' }, resp)
-        Right (_, IntermediateResponse _) ->
-          Ex.throwIO (userError "rpc: Unexpected intermediate response")
-        Left err ->
-          Ex.throwIO (userError err)
-    RpcStopped ex ->
-      Ex.throwIO (userError $ "rpc: server shutdown (" ++ show ex ++ ")")
+rpc server req = rpcWithProgress server req $ \p -> do
+  resp <- progressWait p
+  case resp of
+    Left  r -> return r
+    Right _ -> Ex.throwIO (userError "rpc: Unexpected intermediate response")
 
 -- | Like 'rpc', but with support for receiving multiple replies for the
 -- same request
 rpcWithProgress :: (ToJSON req, FromJSON resp)
-                => RpcServer req resp  -- ^ RPC server
-                -> req                 -- ^ Request
+                => RpcServer req resp           -- ^ RPC server
+                -> req                          -- ^ Request
                 -> (Progress resp resp -> IO b) -- ^ Handler
                 -> IO b
 rpcWithProgress server req handler = withRpcServer server $ \st ->
@@ -229,7 +220,7 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
 rpcWithProgressCallback :: (ToJSON req, FromJSON resp)
                         => RpcServer req resp  -- ^ RPC server
                         -> req                 -- ^ Request
-                        -> (resp -> IO ())     -- ^ Callback for intermediate messages
+                        -> (resp -> IO ())     -- ^ Callback
                         -> IO resp
 rpcWithProgressCallback server req callback = rpcWithProgress server req handler
   where
@@ -329,6 +320,7 @@ channelHandler inp outp handler = forever $ do
           go p'
 
 -- Set all the specified handles to binary mode and block buffering
-configureHandles :: [Handle] -> IO ()
-configureHandles = mapM_ $ \h -> do hSetBinaryMode h True
-                                    hSetBuffering  h (BlockBuffering Nothing)
+setBinaryBlockBuffered :: [Handle] -> IO ()
+setBinaryBlockBuffered =
+  mapM_ $ \h -> do hSetBinaryMode h True
+                   hSetBuffering  h (BlockBuffering Nothing)
