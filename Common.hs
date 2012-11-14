@@ -1,6 +1,8 @@
 {-# LANGUAGE TemplateHaskell #-}
+-- | GHC-independent types that the GHC-specific modules nevertheless
+-- need to know.
 module Common
-  ( SourceError(..), ErrorKind(..)
+  ( SourceError(..), SourceErrorKind(..)
   , SymbolDefinitionMap
   ) where
 
@@ -12,14 +14,14 @@ import Data.Aeson.TH (deriveJSON)
 -- location point.
 --
 data SourceError =
-    SrcError ErrorKind FilePath (Int, Int) (Int, Int) String
+    SrcError SourceErrorKind FilePath (Int, Int) (Int, Int) String
   | OtherError String
   deriving Show
 
-data ErrorKind = Error | Warning
+data SourceErrorKind = KindError | KindWarning
   deriving Show
 
-$(deriveJSON id ''ErrorKind)
+$(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)
 
 -- | A mapping from symbol uses to symbol definitions

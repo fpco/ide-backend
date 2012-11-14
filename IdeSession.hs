@@ -285,7 +285,6 @@ instance Monoid IdeSessionUpdate where
 -- and another progress can be initiated. The semantics of @updateFiles@
 -- and @updateSession@ is unspecified while any progress runs.
 --
-
 updateSession :: IdeSession -> IdeSessionUpdate
               -> IO (Progress IdeSession IdeSession)
 updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
