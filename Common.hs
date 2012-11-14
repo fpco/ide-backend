@@ -1,7 +1,10 @@
+{-# LANGUAGE TemplateHaskell #-}
 module Common
   ( SourceError(..), ErrorKind(..)
   , SymbolDefinitionMap
   ) where
+
+import Data.Aeson.TH (deriveJSON)
 
 -- | An error or warning in a source module.
 --
@@ -15,6 +18,9 @@ data SourceError =
 
 data ErrorKind = Error | Warning
   deriving Show
+
+$(deriveJSON id ''ErrorKind)
+$(deriveJSON id ''SourceError)
 
 -- | A mapping from symbol uses to symbol definitions
 --

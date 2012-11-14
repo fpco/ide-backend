@@ -12,7 +12,7 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 library
-  exposed-modules: IdeSession, RpcServer, Common
+  exposed-modules: IdeSession, RpcServer, Common, GhcServer
   other-modules:   GhcRun
   build-depends:     base      ==4.*,
                      directory ==1.*,
