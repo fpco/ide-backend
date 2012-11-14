@@ -19,7 +19,7 @@ import System.IO
   ( Handle
   , hSetBinaryMode
   , hSetBuffering
-  , BufferMode(BlockBuffering, NoBuffering)
+  , BufferMode(BlockBuffering, BlockBuffering)
   , hFlush
   , hIsClosed
   , hClose
@@ -387,7 +387,7 @@ forwardExceptions h mvar = do
 setBinaryBlockBuffered :: [Handle] -> IO ()
 setBinaryBlockBuffered =
   mapM_ $ \h -> do hSetBinaryMode h True
-                   hSetBuffering  h NoBuffering -- (BlockBuffering Nothing)
+                   hSetBuffering  h (BlockBuffering Nothing)
 
 -- | Wait for a handle to close
 --
