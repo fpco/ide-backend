@@ -1,10 +1,10 @@
 name:                ide-backend
-version:             0.3
+version:             0.4
 synopsis:            A simple (demo) IDE helper program
 -- description:
 license:             AllRightsReserved
 license-file:        LICENSE
-author:              Duncan Coutts, Mikolaj Konarski
+author:              Duncan Coutts, Mikolaj Konarski, Edsko de Vries
 maintainer:          Duncan Coutts <duncan@well-typed.com>
 copyright:           (c) 2012 Well-Typed LLP
 category:            Development
@@ -13,7 +13,7 @@ cabal-version:       >=1.10
 
 library
   exposed-modules: IdeSession
-  other-modules:   GHCSession
+  other-modules:   GHCSession, RpcServer
   build-depends:     base      ==4.*,
                      directory ==1.*,
                      process   ==1.*,
@@ -22,7 +22,9 @@ library
                      ghc       ==7.*,
                      containers >= 0.4.1   && < 1,
                      random     >= 1.0.1   && < 2,
-                     bytestring >= 0.9.2   && < 1
+                     bytestring >= 0.9.2   && < 1,
+                     attoparsec,
+                     aeson
 
   if impl(ghc >= 7.6.1)
      build-depends:     time      ==1.4.*
