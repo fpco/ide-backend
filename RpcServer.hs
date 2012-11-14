@@ -10,7 +10,7 @@ module RpcServer
   , rpcWithProgress
   , rpcWithProgressCallback
   , shutdown
-  , ExternalException
+  , ExternalException(..)
     -- * Progress
   , Progress(..)
   ) where
@@ -85,7 +85,7 @@ newtype Progress p a = Progress {
 -- The record accessor ensures deriveJSON wraps the whole thing in an object
 -- so that we can send it as a top-level JSON object
 data ExternalException = ExternalException { externalException :: String }
-  deriving (Typeable)
+  deriving (Typeable, Eq)
 
 instance Show ExternalException where
   show ex = "External exception: " ++ externalException ex
@@ -249,7 +249,7 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
       out' <- takeMVar outSt
       return (st { rpcOut = out' }, b)
     RpcStopped ex ->
-      Ex.throwIO (userError $ "rpc: server shutdown (" ++ show ex ++ ")")
+      Ex.throwIO ex
 
 -- | Variation on 'rpcWithProgress' with a callback for intermediate messages
 rpcWithProgressCallback :: (ToJSON req, FromJSON resp)
