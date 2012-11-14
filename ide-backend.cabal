@@ -24,8 +24,8 @@ library
                      random     >= 1.0.1   && < 2,
                      bytestring >= 0.9.2   && < 1,
                      attoparsec,
-                     aeson
-
+                     aeson,
+                     executable-path
   if impl(ghc >= 7.6.1)
      build-depends:     time      ==1.4.*
   else
@@ -38,7 +38,8 @@ library
   ghc-options:       -Wall -fno-warn-unused-do-bind
 
 
-executable ide-backend
+test-suite ide-backend-sample-use
+  type:              exitcode-stdio-1.0
   main-is:           ide-backend.hs
   build-depends:     ide-backend,
                      base      ==4.*,
@@ -52,8 +53,10 @@ executable ide-backend
                      bytestring >= 0.9.2   && < 1,
                      attoparsec,
                      aeson,
-                     pretty
-
+                     executable-path,
+                     pretty,
+-- pretty beastly deps:
+                     Unixutils >= 1.50
   if impl(ghc >= 7.6.1)
      build-depends:     time      ==1.4.*
   else
@@ -82,6 +85,7 @@ test-suite ghc-errors
                      bytestring >= 0.9.2   && < 1,
                      attoparsec,
                      aeson,
+                     executable-path,
                      pretty,
 -- pretty beastly deps:
                      Unixutils >= 1.50

@@ -18,16 +18,40 @@ import Text.JSON as JSON
 import Text.JSON.Pretty (pp_value)
 import Text.PrettyPrint (render)
 
+import System.IO
+  ( stdin
+  , stdout
+  , stderr
+  , hSetBuffering
+  , BufferMode(LineBuffering)
+  )
+
+
 import IdeSession
+import RpcServer
+import GhcServer
 
 main :: IO ()
 main = do
- args <- getArgs
- let originalSourcesDir = case args of
-       [dir] -> dir
-       [] -> "."
-       _ -> fail "usage: GhcErrors [source-dir]"
- withTemporaryDirectory "ide-backend-test" $ \ configSourcesDir -> do
+  hSetBuffering stderr LineBuffering
+  args <- getArgs
+  case args of
+    ["--server"] -> do
+      let opts = []  -- GHC static flags; set them in sessionConfig?
+      ideGhcState <- optsToGhcState opts
+      rpcServer stdin stdout stderr (ghcServer ideGhcState)
+    _ -> do
+      test "test/ABnoError"
+      test "test/ABerror"
+      test "test/AerrorB"
+      test "."
+
+test :: FilePath -> IO ()
+test originalSourcesDir =
+  withTemporaryDirectory "ide-backend-test" $ check originalSourcesDir
+
+check :: FilePath -> FilePath -> IO ()
+check originalSourcesDir configSourcesDir = do
   putStrLn $ "Copying files from: " ++ originalSourcesDir ++ "\n\n"
           ++ "Temporary test directory: " ++ configSourcesDir ++ "\n\n"
   -- Init session.

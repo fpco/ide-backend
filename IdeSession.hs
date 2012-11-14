@@ -140,30 +140,31 @@ module IdeSession (
   -- This property is a useful correctness property for internal testing: the
   -- results of all the queries should be the same before and after blowing
   -- away all the transitory state and recovering.
-
 ) where
 
+-- getExecutablePath is in base only for >= 4.6
+import System.Environment.Executable (getExecutablePath)
 import Data.Maybe (fromMaybe)
 import Control.Monad
 import Control.Concurrent
 import System.IO (openBinaryTempFile, hClose)
 import System.Directory
-import System.FilePath ((</>), takeExtension, (<.>), splitFileName)
+import System.FilePath ((</>), (<.>), splitFileName)
 import qualified Control.Exception as Exception
-
 import Data.Monoid (Monoid(..))
-import Data.ByteString.Lazy.Char8 (ByteString)
+import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
 
-import GhcRun
+import RpcServer
 import Common
+import GhcServer
 
 -- This could be equally well implemented as a new mvar created per
 -- each new session state, but this implementation has some minor advantages.
 -- It gives more useful error messages and provides a counter of session
--- updates, which can be used, e.g.,  to rougly estimate how badly outdated
--- the info therein is, in order to decide whether to show it to the user,
--- or hand up and wait for a newer version.
+-- updates, which can be used, e.g.,  to roughly estimate how badly outdated
+-- the info therein is, in order to decide whether to show it to the user
+-- while waiting for a newer version.
 data StateToken = StateToken (MVar Int) Int
 
 initToken :: IO StateToken
@@ -201,10 +202,10 @@ type Computed = [SourceError]
 -- accidentally use an old invalid one, then it's a dynamically checked error.)
 --
 data IdeSession = IdeSession
-  { ideConfig   :: SessionConfig
-  , ideGhcState :: GhcState
-  , ideToken    :: StateToken
-  , ideComputed :: (Maybe Computed)
+  { ideConfig    :: SessionConfig
+  , ideGhcServer :: GhcServer
+  , ideToken     :: StateToken
+  , ideComputed  :: (Maybe Computed)
   }
 
 -- | Configuration parameters for a session. These remain the same throughout
@@ -240,19 +241,21 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configWorkingDir
   ensureDirEmpty configDataDir
   ensureDirEmpty configTempDir
-  let opts = []  -- GHC static flags; set them in sessionConfig?
-  ideGhcState <- optsToGhcState opts
   let ideComputed = Nothing  -- can't query before the first Progress
   ideToken <- initToken
+  -- Fork the GHC server.
+  prog <- getExecutablePath
+  ideGhcServer <- forkRpcServer prog ["--server"] :: IO GhcServer
   return IdeSession{..}
 
 -- | Close a session down, releasing the resources.
 --
 shutdownSession :: IdeSession -> IO ()
-shutdownSession IdeSession{ideToken} = do
+shutdownSession IdeSession{ideToken, ideGhcServer} = do
   -- Invalidate the current session.
   void $ incrementToken ideToken
-  -- no other resources to free
+  -- Shutdown GHC server.
+  shutdown ideGhcServer
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
 -- bunch of updates.
@@ -283,9 +286,10 @@ instance Monoid IdeSessionUpdate where
 -- and @updateSession@ is unspecified while any progress runs.
 --
 
-updateSession :: IdeSession -> IdeSessionUpdate -> IO (Progress IdeSession)
+updateSession :: IdeSession -> IdeSessionUpdate
+              -> IO (Progress IdeSession IdeSession)
 updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
-                             , ideGhcState
+                             , ideGhcServer
                              , ideToken }
               (IdeSessionUpdate update) = do
   -- First, invalidating the current session ASAP, because the previous
@@ -295,35 +299,28 @@ updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
   -- Then, updating files ASAP (using the already invalidated session).
   update sess
 
-  -- Last, spawning a future.
-  progressSpawn $ do
-    cnts <- getDirectoryContents configSourcesDir
-    let files = map (configSourcesDir </>)
-                $ filter ((`elem` [".hs"]) . takeExtension) cnts
-    allErrs <- checkModule files Nothing ideGhcState
+  -- Last, communicating with the GHC server.
+  return $ Progress $ do
+    RespDone allErrs <- rpc ideGhcServer $ ReqCompute configSourcesDir
     let ideComputed = Just allErrs  -- can query now
-    return $ sess {ideToken = newToken, ideComputed}
+    return $ Left $ sess {ideToken = newToken, ideComputed}
 
+-- TODO: update description and move it to where Progress is defined:
 -- | A future, a handle on an action that will produce some result.
 --
 -- Currently this is just a simple future, but there is the option to extend
 -- it with actual progress info, and\/or with cancellation.
 --
-data Progress a = Progress (MVar a)
 
-progressSpawn :: IO a -> IO (Progress a)
-progressSpawn action = do
-  mv <- newEmptyMVar
-  let actionMv = do
-        a <- action
-        putMVar mv a
-  void $ forkIO actionMv
-  return $ Progress mv
 
 -- | Block until the operation completes.
 --
-progressWaitCompletion :: Progress a -> IO a
-progressWaitCompletion (Progress mv) = takeMVar mv
+progressWaitCompletion :: Progress a a -> IO a
+progressWaitCompletion p = do
+  w <- progressWait p
+  case w of
+    Left a -> return a
+    Right (_, p2) -> progressWaitCompletion p2
 
 -- | Writes a file atomically.
 --
