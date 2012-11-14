@@ -20,7 +20,8 @@ import System.IO
   , stderr
   , hPrint
   , hSetBuffering
-  , BufferMode(LineBuffering, NoBuffering)
+  , BufferMode(BlockBuffering)
+  , hFlush
   )
 import System.Process
   ( CreateProcess(std_in, std_out, std_err)
@@ -97,13 +98,17 @@ rpcServer hin hout herr handler = do
   responses <- newChan
   exception <- newEmptyMVar :: IO (MVar Ex.SomeException)
 
+  configureHandles [hin, hout, herr]
+
   let forkCatch p = forkIO $ Ex.catch p (putMVar exception)
 
   tid1 <- forkCatch $ readRequests hin requests
   tid2 <- forkCatch $ writeResponses responses hout
   tid3 <- forkCatch $ channelHandler requests responses handler
 
-  readMVar exception >>= hPrint herr
+  ex <- readMVar exception
+  hPrint herr ex
+  hFlush herr
   mapM_ killThread [tid1, tid2, tid3]
 
 --------------------------------------------------------------------------------
@@ -139,15 +144,8 @@ forkRpcServer path args = do
     , std_err = CreatePipe
     }
 
-  -- Set to binary mode so that 'hGetContents' works
-  hSetBinaryMode hin  True
-  hSetBinaryMode hout True
-  hSetBinaryMode herr True
-
-  -- Make sure requests get sent to the server immediately
-  hSetBuffering hin  NoBuffering
-  hSetBuffering hout NoBuffering
-  hSetBuffering herr LineBuffering
+  -- Set handles to binary mode/block buffering
+  configureHandles [hin, hout, herr]
 
   -- Forward server's stderr to our stderr
   tid <- forkIO $ hGetContents herr >>= hPutStr stderr
@@ -177,6 +175,7 @@ rpc server req = withRpcServer server $ \st ->
   case st of
     RpcRunning {} -> do
       hPut (rpcIn st) $ encode (Request req)
+      hFlush (rpcIn st)
       case parseJSON (rpcOut st) of
         Right (out', FinalResponse resp) ->
           return (st { rpcOut = out' }, resp)
@@ -198,6 +197,7 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
   case st of
     RpcRunning {} -> do
       hPut (rpcIn st) $ encode (Request req)
+      hFlush (rpcIn st)
 
       -- We create a local MVar that holds the parser state (unparsed part
       -- of the server input). This MVar is updated every time the handler
@@ -209,7 +209,7 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
       outSt <- newMVar (rpcOut st)
 
       -- Construct the Progress object
-      let go = Progress $ modifyMVar outSt $ \out -> do
+      let go = Progress $ modifyMVar outSt $ \out ->
                  case parseJSON out of
                    Right (out', FinalResponse resp) ->
                      return (out', Left resp)
@@ -284,10 +284,7 @@ withRpcServer (RpcServer server) io =
 
 -- | Decode messages from a handle and forward them to a channel
 readRequests :: forall req. FromJSON req => Handle -> Chan (Request req) -> IO ()
-readRequests h ch = do
-    hSetBinaryMode h True
-    hSetBuffering h NoBuffering
-    hGetContents h >>= go
+readRequests h ch = hGetContents h >>= go
   where
     go :: ByteString -> IO ()
     go contents =
@@ -308,10 +305,10 @@ parseJSON bs =
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: ToJSON resp => Chan (Response resp) -> Handle -> IO ()
-writeResponses ch h = do
-  hSetBinaryMode h True
-  hSetBuffering h NoBuffering
-  forever $ readChan ch >>= hPut h . encode
+writeResponses ch h = forever $ do
+  resp <- readChan ch
+  hPut h (encode resp)
+  hFlush h
 
 -- | Run a handler repeatedly, given input and output channels
 channelHandler :: Chan (Request req)
@@ -330,3 +327,8 @@ channelHandler inp outp handler = forever $ do
         Right (intermediateResponse, p') -> do
           writeChan outp (IntermediateResponse intermediateResponse)
           go p'
+
+-- Set all the specified handles to binary mode and block buffering
+configureHandles :: [Handle] -> IO ()
+configureHandles = mapM_ $ \h -> do hSetBinaryMode h True
+                                    hSetBuffering  h (BlockBuffering Nothing)
