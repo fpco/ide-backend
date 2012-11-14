@@ -10,14 +10,14 @@ module GhcServer
   ( -- * Types involved in the communication
     GhcRequest(..), GhcResponse(..)
   , Progress(..)  -- probably move somewhere outside
+  , fmap2Progress
     -- * A handle to the server
   , GhcServer
     -- * Server-side operations
   , createGhcServer
     -- * Client-side operations
   , forkGhcServer
-  , reqCompute
-  , reqErrors
+  , rpcGhcServer
   , shutdownGhcServer
   ) where
 
@@ -103,21 +103,23 @@ forkGhcServer = do
   prog <- getExecutablePath
   forkRpcServer prog ["--server"]
 
--- TODO: the following two can be rewritten to one, returning Progress; do this
--- as soon as Progress is a monad or a functor
-reqCompute :: GhcServer -> FilePath -> IO ()
-reqCompute gs configSourcesDir = do
-  working <- rpc gs $ ReqCompute configSourcesDir
-  case working of
-    RespWorking -> return ()
-    RespDone _  -> error "reqCompute: RespDone"
-
-reqErrors :: GhcServer -> IO (Maybe [SourceError])
-reqErrors gs = do
-  merrs <- rpc gs ReqErrors
-  case merrs of
-    RespWorking -> return Nothing
-    RespDone errs  -> return $ Just errs
+-- This could already produce values of a stronger type
+-- @Progress () [SourceError]@ here, but in the future
+-- we may use some RpcServer operations stronger than @rpc@
+-- and they tend to use @Progress a a@.
+rpcGhcServer :: GhcServer -> FilePath -> IO (Progress GhcResponse GhcResponse)
+rpcGhcServer gs configSourcesDir = do
+  resp <- rpc gs $ ReqCompute configSourcesDir
+  p resp
+ where
+  p :: GhcResponse -> IO (Progress GhcResponse GhcResponse)
+  p resp1 = do
+    case resp1 of
+      RespWorking -> return $ Progress $ do
+        resp2 <- rpc gs ReqErrors
+        progress <- p resp2
+        return $ Right (resp1, progress)
+      RespDone _ -> return $ Progress $ return $ Left resp1
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs

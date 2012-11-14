@@ -296,19 +296,11 @@ updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
   update sess
 
   -- Last, communicating with the GHC server.
-  reqCompute ideGhcServer configSourcesDir
-  let p :: IO (Progress () IdeSession)
-      p = do
-        merrs <- reqErrors ideGhcServer
-        case merrs of
-          Nothing ->
-            return $ Progress $ do
-              progress <- p
-              return $ Right ((), progress)
-          Just _ ->
-            let sess2 = sess {ideToken = newToken, ideComputed = merrs}
-            in return $ Progress $ return $ Left sess2
-  p
+  let f RespWorking     = ()
+      f (RespDone _)    = error "updateSession: unexpected RespDone"
+      g RespWorking     = error "updateSession: unexpected RespWorking"
+      g (RespDone errs) = sess {ideToken = newToken, ideComputed = Just errs}
+  liftM (fmap2Progress f g) $ rpcGhcServer ideGhcServer configSourcesDir
 
 -- TODO: move elsewhere? Close to Progress? Or only to test utilities?
 -- | Block until the operation completes.

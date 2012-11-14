@@ -13,6 +13,7 @@ module RpcServer
   , ExternalException(..)
     -- * Progress
   , Progress(..)
+  , fmap2Progress
   ) where
 
 import System.IO
@@ -83,6 +84,13 @@ import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
 newtype Progress p a = Progress {
     progressWait :: IO (Either a (p, Progress p a))
   }
+
+fmap2Progress :: (p -> q) -> (a -> b) -> Progress p a -> Progress q b
+fmap2Progress f g (Progress pr) = Progress $ do
+  lr <- pr
+  case lr of
+    Left a -> return $ Left $ g a
+    Right (p, progress2) -> return $ Right (f p, fmap2Progress f g progress2)
 
 --------------------------------------------------------------------------------
 -- Exceptions thrown by the RPC server are retrown locally as                 --
