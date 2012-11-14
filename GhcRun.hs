@@ -5,8 +5,6 @@
 module GhcRun
   ( GhcState
   , optsToGhcState
-  , SourceError(..)
-  , SymbolDefinitionMap
   , checkModule
   ) where
 
@@ -31,6 +29,8 @@ import Data.IORef
 import Control.Applicative
 import Control.Exception
 
+import qualified Common as Common
+
 type GhcState = [Located String]
 
 optsToGhcState :: [String] -> IO GhcState
@@ -38,32 +38,10 @@ optsToGhcState opts = do
   (ghcState, _) <- parseStaticFlags (map noLoc opts)
   return ghcState
 
--- | An error or warning in a source module.
---
--- Most errors are associated with a span of text, but some have only a
--- location point.
---
--- * This is currently a stub, but it will be a full concrete type.
---
-data SourceError =
-    SrcError ErrorKind FilePath (Int, Int) (Int, Int) String
-  | OtherError String
-  deriving Show
-
-data ErrorKind = Error | Warning
-  deriving Show
-
--- | A mapping from symbol uses to symbol definitions
---
--- * This is currently a stub, but it will be a full concrete type so that
--- it can be serialised etc.
---
-data SymbolDefinitionMap
-
 checkModule :: [FilePath]        -- ^ target files
             -> Maybe String      -- ^ optional content of the file
             -> [Located String]  -- ^ leftover ghc static options
-            -> IO [SourceError]  -- ^ any errors and warnings
+            -> IO [Common.SourceError]  -- ^ any errors and warnings
 checkModule targets mfilecontent leftoverOpts = handleOtherErrors $ do
 
     libdir <- getGhcLibdir
@@ -115,7 +93,7 @@ checkModule targets mfilecontent leftoverOpts = handleOtherErrors $ do
     reverse <$> readIORef errsRef
   where
     handleOtherErrors =
-      handle $ \e -> return [OtherError (show (e :: SomeException))]
+      handle $ \e -> return [Common.OtherError (show (e :: SomeException))]
 
 getGhcLibdir :: IO FilePath
 getGhcLibdir = do
@@ -126,40 +104,40 @@ getGhcLibdir = do
     _        -> fail "cannot parse output of ghc --print-libdir"
 
 #if __GLASGOW_HASKELL__ >= 706
-collectSrcError :: IORef [SourceError]
+collectSrcError :: IORef [Common.SourceError]
                 -> DynFlags
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 collectSrcError errsRef flags severity srcspan style msg
   | Just errKind <- case severity of
-                      SevWarning -> Just GhcRun.Warning
-                      SevError   -> Just GhcRun.Error
-                      SevFatal   -> Just GhcRun.Error
+                      SevWarning -> Just Common.Warning
+                      SevError   -> Just Common.Error
+                      SevFatal   -> Just Common.Error
                       _          -> Nothing
   , Just (file, st, end) <- extractErrSpan srcspan
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
-     in modifyIORef errsRef (SrcError errKind file st end msgstr:)
+     in modifyIORef errsRef (Common.SrcError errKind file st end msgstr:)
 
 collectSrcError errsRef flags SevError _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
-     in modifyIORef errsRef (OtherError msgstr:)
+     in modifyIORef errsRef (Common.OtherError msgstr:)
 
 collectSrcError _ _ _ _ _ _ = return ()
 #else
-collectSrcError :: IORef [SourceError]
+collectSrcError :: IORef [Common.SourceError]
                 -> Severity -> SrcSpan -> PprStyle -> Message -> IO ()
 collectSrcError errsRef severity srcspan style msg
   | Just errKind <- case severity of
-                      SevWarning -> Just GhcRun.Warning
-                      SevError   -> Just GhcRun.Error
-                      SevFatal   -> Just GhcRun.Error
+                      SevWarning -> Just Common.Warning
+                      SevError   -> Just Common.Error
+                      SevFatal   -> Just Common.Error
                       _          -> Nothing
   , Just (file, st, end) <- extractErrSpan srcspan
   = let msgstr = showSDocForUser (qualName style,qualModule style) msg
-     in modifyIORef errsRef (SrcError errKind file st end msgstr:)
+     in modifyIORef errsRef (Common.SrcError errKind file st end msgstr:)
 
 collectSrcError errsRef SevError _srcspan style msg
   = let msgstr = showSDocForUser (qualName style,qualModule style) msg
-     in modifyIORef errsRef (OtherError msgstr:)
+     in modifyIORef errsRef (Common.OtherError msgstr:)
 
 collectSrcError _ _ _ _ _ = return ()
 #endif

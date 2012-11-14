@@ -156,6 +156,7 @@ import Data.ByteString.Lazy.Char8 (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
 
 import GhcRun
+import Common
 
 -- This could be equally well implemented as a new mvar created per
 -- each new session state, but this implementation has some minor advantages.
