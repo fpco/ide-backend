@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DeriveDataTypeable #-}
 {-# OPTIONS_GHC -Wall #-}
 module RpcServer
   ( -- * Server-side
@@ -10,6 +10,7 @@ module RpcServer
   , rpcWithProgress
   , rpcWithProgressCallback
   , shutdown
+  , ExternalException
     -- * Progress
   , Progress(..)
   ) where
@@ -17,11 +18,11 @@ module RpcServer
 import System.IO
   ( Handle
   , hSetBinaryMode
-  , stderr
-  , hPrint
   , hSetBuffering
-  , BufferMode(BlockBuffering)
+  , BufferMode(BlockBuffering, NoBuffering)
   , hFlush
+  , hIsClosed
+  , hClose
   )
 import System.Process
   ( CreateProcess(std_in, std_out, std_err)
@@ -29,8 +30,9 @@ import System.Process
   , proc
   , StdStream(CreatePipe)
   , ProcessHandle
-  , terminateProcess
+  , waitForProcess
   )
+import Data.Typeable (Typeable)
 import Data.Aeson
   ( FromJSON
   , ToJSON
@@ -42,7 +44,14 @@ import Data.Aeson
 import Data.Aeson.TH (deriveJSON)
 import Control.Monad (forever)
 import qualified Control.Exception as Ex
-import Control.Concurrent (ThreadId, forkIO, killThread)
+import Control.Concurrent
+  ( ThreadId
+  , forkIO
+  , killThread
+  , threadDelay
+  , myThreadId
+  , throwTo
+  )
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar
   ( MVar
@@ -53,7 +62,7 @@ import Control.Concurrent.MVar
   , modifyMVar
   , takeMVar
   )
-import Data.ByteString.Lazy (ByteString, hPut, hGetContents, hPutStr)
+import Data.ByteString.Lazy (ByteString, hPut, hGetContents)
 import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
 
 --------------------------------------------------------------------------------
@@ -67,6 +76,25 @@ newtype Progress p a = Progress {
   }
 
 --------------------------------------------------------------------------------
+-- Exceptions thrown by the RPC server are retrown locally as                 --
+-- 'ExternalException's                                                       --
+--------------------------------------------------------------------------------
+
+-- | Exceptions thrown by the remote server
+--
+-- The record accessor ensures deriveJSON wraps the whole thing in an object
+-- so that we can send it as a top-level JSON object
+data ExternalException = ExternalException { externalException :: String }
+  deriving (Typeable)
+
+instance Show ExternalException where
+  show ex = "External exception: " ++ externalException ex
+
+instance Ex.Exception ExternalException
+
+$(deriveJSON id ''ExternalException)
+
+--------------------------------------------------------------------------------
 -- Internal data types                                                        --
 --                                                                            --
 -- We wrap the requests and responses to and from the RPC server in a custom  --
@@ -76,11 +104,12 @@ newtype Progress p a = Progress {
 -- to.                                                                        --
 --------------------------------------------------------------------------------
 
-data Request  a = Request a
-data Response a = FinalResponse a | IntermediateResponse a
+data Request  a = Request { _request :: a }
+data Response a = FinalResponse        { _response :: a }
+                | IntermediateResponse { _response :: a }
 
-$(deriveJSON id ''Request)
-$(deriveJSON id ''Response)
+$(deriveJSON tail ''Request)
+$(deriveJSON tail ''Response)
 
 --------------------------------------------------------------------------------
 -- Server-side API                                                            --
@@ -107,8 +136,9 @@ rpcServer hin hout herr handler = do
   tid3 <- forkCatch $ channelHandler requests responses handler
 
   ex <- readMVar exception
-  hPrint herr ex
+  hPut herr (encode . ExternalException . show $ ex)
   hFlush herr
+  -- TODO: do we need to wait for the client to read the exception?
   mapM_ killThread [tid1, tid2, tid3]
 
 --------------------------------------------------------------------------------
@@ -116,7 +146,17 @@ rpcServer hin hout herr handler = do
 --------------------------------------------------------------------------------
 
 -- | Abstract data type representing RPC servers
-newtype RpcServer req resp = RpcServer (MVar (RpcState req resp))
+data RpcServer req resp = RpcServer {
+    -- | State of the RPC server
+    rpcState :: MVar (RpcState req resp)
+    -- | When the server throws an exception, we output it on stderr, read the
+    -- exception in the client, and then store it here. We don't throw it
+    -- asynchronously because this would mean client code would have to worry
+    -- about asynchronous exceptions everywhere as long as the RPC server is
+    -- running. Instead, we will throw the exception on the next (or current)
+    -- call to 'rpc' (and friends)
+  , rpcPendingException :: MVar ExternalException
+  }
 
 -- | RPC server state
 data RpcState req resp =
@@ -137,34 +177,29 @@ forkRpcServer :: FilePath  -- ^ Filename of the executable
               -> [String]  -- ^ Arguments
               -> IO (RpcServer req resp)
 forkRpcServer path args = do
-  -- Start the server
   (Just hin, Just hout, Just herr, ph) <- createProcess $ (proc path args) {
       std_in  = CreatePipe
     , std_out = CreatePipe
     , std_err = CreatePipe
     }
-
-  -- Set handles to binary mode/block buffering
   setBinaryBlockBuffered [hin, hout, herr]
-
-  -- Forward server's stderr to our stderr
-  tid <- forkIO $ hGetContents herr >>= hPutStr stderr
-
-  -- Get server's output as a lazy bytestring
+  pendingException <- newEmptyMVar
+  tid <- forkIO $ forwardExceptions herr pendingException
   contents <- hGetContents hout
-
-  -- Done
   st <- newMVar RpcRunning {
       rpcIn   = hin
     , rpcOut  = contents
     , rpcErr  = tid
     , rpcProc = ph
     }
-  return (RpcServer st)
+  return RpcServer {
+      rpcState            = st
+    , rpcPendingException = pendingException
+    }
 
 -- | Do an RPC call
 --
--- Throws an exception if the server returns a mallformed result or the server
+-- Throws an exception if the server returns a malformed result or the server
 -- has shut down, or if the server returns more than one message (see
 -- 'rpcWithProgress' instead)
 rpc :: (ToJSON req, FromJSON resp)
@@ -246,8 +281,17 @@ shutdown server = withRpcServer server $ \st -> do
 -- | Force-terminate the external process
 terminate :: RpcState req resp -> Ex.SomeException -> IO Ex.SomeException
 terminate st@(RpcRunning {}) ex = do
-  terminateProcess (rpcProc st)
+  -- We terminate the thread that listens for exceptions from the server first,
+  -- because we don't want the closing of stdin to be reported as an
+  -- ExternalException (rather, we want the exception to be "closed manually")
   killThread (rpcErr st)
+
+  -- Close the server's stdin. This will cause the server to exit
+  hClose (rpcIn st)
+
+  -- Wait for the server to terminate
+  _ <- waitForProcess (rpcProc st)
+
   return ex
 terminate (RpcStopped ex') _ =
   return ex' -- Already stopped
@@ -256,17 +300,26 @@ terminate (RpcStopped ex') _ =
 withRpcServer :: RpcServer req resp
               -> (RpcState req resp -> IO (RpcState req resp, a))
               -> IO a
-withRpcServer (RpcServer server) io =
+withRpcServer server io =
   Ex.mask $ \restore -> do
-    st <- takeMVar server
+    st <- takeMVar (rpcState server)
+
+    mainThread <- myThreadId
+    auxThread <- forkIO $ do
+      ex <- readMVar (rpcPendingException server)
+      throwTo mainThread ex
+
     mResult <- Ex.try $ restore (io st)
+
+    killThread auxThread
+
     case mResult of
       Right (st', a) -> do
-        putMVar server st'
+        putMVar (rpcState server) st'
         return a
       Left ex -> do
         ex' <- terminate st ex
-        putMVar server (RpcStopped ex')
+        putMVar (rpcState server) (RpcStopped ex')
         Ex.throwIO ex
 
 --------------------------------------------------------------------------------
@@ -319,8 +372,30 @@ channelHandler inp outp handler = forever $ do
           writeChan outp (IntermediateResponse intermediateResponse)
           go p'
 
--- Set all the specified handles to binary mode and block buffering
+-- | Read an exception from the remote server and store it locally
+-- (see description of 'RpcServer')
+forwardExceptions :: Handle -> MVar ExternalException -> IO ()
+forwardExceptions h mvar = do
+  contents <- hGetContents h
+  case parseJSON contents of
+    Right (_, ex) ->
+      putMVar mvar ex
+    Left err ->
+      putMVar mvar (ExternalException $ "Malformed exception: " ++ err)
+
+-- | Set all the specified handles to binary mode and block buffering
 setBinaryBlockBuffered :: [Handle] -> IO ()
 setBinaryBlockBuffered =
   mapM_ $ \h -> do hSetBinaryMode h True
-                   hSetBuffering  h (BlockBuffering Nothing)
+                   hSetBuffering  h NoBuffering -- (BlockBuffering Nothing)
+
+-- | Wait for a handle to close
+--
+-- TODO: Is there a better way to do this?
+waitUntilClosed :: Handle -> IO ()
+waitUntilClosed h = go
+  where
+    go = do
+      closed <- hIsClosed h
+      if closed then return ()
+                else threadDelay 10000 >> go
