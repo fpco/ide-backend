@@ -2,6 +2,10 @@
 -- Copyright   : (c) JP Moresmau 2011,
 --                   Well-Typed 2012
 -- (JP Moresmau's buildwrapper package used as template for GHC API use)
+--
+-- | Implementation details of the calls to GHC that compute information
+-- based on source files. Only this file should import the GHC internals
+-- modules.
 module GhcRun
   ( GhcState
   , optsToGhcState
@@ -31,18 +35,19 @@ import Control.Exception
 
 import Common
 
-type GhcState = [Located String]
+newtype GhcState = GhcState [Located String]
 
 optsToGhcState :: [String] -> IO GhcState
 optsToGhcState opts = do
   (ghcState, _) <- parseStaticFlags (map noLoc opts)
-  return ghcState
+  return $ GhcState ghcState
 
 checkModule :: [FilePath]        -- ^ target files
             -> Maybe String      -- ^ optional content of the file
-            -> [Located String]  -- ^ leftover ghc static options
+            -> GhcState          -- ^ leftover ghc static options
             -> IO [SourceError]  -- ^ any errors and warnings
-checkModule targets mfilecontent leftoverOpts = handleOtherErrors $ do
+checkModule targets mfilecontent (GhcState leftoverOpts) =
+  handleOtherErrors $ do
 
     libdir <- getGhcLibdir
 
