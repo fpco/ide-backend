@@ -142,8 +142,6 @@ module IdeSession (
   -- away all the transitory state and recovering.
 ) where
 
--- getExecutablePath is in base only for >= 4.6
-import System.Environment.Executable (getExecutablePath)
 import Data.Maybe (fromMaybe)
 import Control.Monad
 import Control.Concurrent
@@ -155,7 +153,6 @@ import Data.Monoid (Monoid(..))
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
 
-import RpcServer
 import Common
 import GhcServer
 
@@ -243,9 +240,7 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configTempDir
   let ideComputed = Nothing  -- can't query before the first Progress
   ideToken <- initToken
-  -- Fork the GHC server.
-  prog <- getExecutablePath
-  ideGhcServer <- forkRpcServer prog ["--server"] :: IO GhcServer
+  ideGhcServer <- forkGhcServer
   return IdeSession{..}
 
 -- | Close a session down, releasing the resources.
@@ -255,7 +250,7 @@ shutdownSession IdeSession{ideToken, ideGhcServer} = do
   -- Invalidate the current session.
   void $ incrementToken ideToken
   -- Shutdown GHC server.
-  shutdown ideGhcServer
+  shutdownGhcServer ideGhcServer
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
 -- bunch of updates.
@@ -300,7 +295,7 @@ updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
 
   -- Last, communicating with the GHC server.
   return $ Progress $ do
-    RespDone allErrs <- rpc ideGhcServer $ ReqCompute configSourcesDir
+    allErrs <- rpcGhcServer ideGhcServer configSourcesDir
     let ideComputed = Just allErrs  -- can query now
     return $ Left $ sess {ideToken = newToken, ideComputed}
 

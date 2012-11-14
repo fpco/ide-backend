@@ -17,18 +17,13 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 import Text.JSON as JSON
 import Text.JSON.Pretty (pp_value)
 import Text.PrettyPrint (render)
-
 import System.IO
-  ( stdin
-  , stdout
-  , stderr
+  ( stderr
   , hSetBuffering
   , BufferMode(LineBuffering)
   )
 
-
 import IdeSession
-import RpcServer
 import GhcServer
 
 main :: IO ()
@@ -38,8 +33,7 @@ main = do
   case args of
     ["--server"] -> do
       let opts = []  -- GHC static flags; set them in sessionConfig?
-      ideGhcState <- optsToGhcState opts
-      rpcServer stdin stdout stderr (ghcServer ideGhcState)
+      createGhcServer opts
     _ -> do
       test "test/ABnoError"
       test "test/ABerror"
