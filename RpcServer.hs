@@ -1,21 +1,21 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 {-# OPTIONS_GHC -Wall #-}
-module RpcServer 
+module RpcServer
   ( -- * Server-side
     rpcServer
     -- * Client-side
   , RpcServer
   , forkRpcServer
-  , rpc 
+  , rpc
   , rpcWithProgress
   , shutdown
-    -- * Progress 
+    -- * Progress
   , Progress(..)
     -- * Testing
   , main
   ) where
 
-import System.IO 
+import System.IO
   ( Handle
   , hSetBinaryMode
   , stdin
@@ -25,7 +25,7 @@ import System.IO
   , hSetBuffering
   , BufferMode(LineBuffering, NoBuffering)
   )
-import System.Process 
+import System.Process
   ( CreateProcess(std_in, std_out, std_err)
   , createProcess
   , proc
@@ -33,7 +33,7 @@ import System.Process
   , ProcessHandle
   , terminateProcess
   )
-import Data.Aeson 
+import Data.Aeson
   ( FromJSON
   , ToJSON
   , encode
@@ -46,13 +46,13 @@ import Control.Monad (forever)
 import qualified Control.Exception as Ex
 import Control.Concurrent (ThreadId, forkIO, killThread)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import Control.Concurrent.MVar 
+import Control.Concurrent.MVar
   ( MVar
   , newMVar
   , newEmptyMVar
   , putMVar
   , readMVar
-  , modifyMVar 
+  , modifyMVar
   , takeMVar
   )
 import Data.ByteString.Lazy (ByteString, hPut, hGetContents, hPutStr)
@@ -67,8 +67,8 @@ import System.Environment (getArgs, getProgName)
 -- (we should probably move this elsewhere eventually)                        --
 --------------------------------------------------------------------------------
 
-newtype Progress p a = Progress { 
-    progressWait :: IO (Either a (p, Progress p a)) 
+newtype Progress p a = Progress {
+    progressWait :: IO (Either a (p, Progress p a))
   }
 
 --------------------------------------------------------------------------------
@@ -78,13 +78,13 @@ newtype Progress p a = Progress {
 -- data type for two reasons. First, top-level JSON values must be objects or --
 -- arrays; by wrapping them the user does not have to worry about this.       --
 -- Second, it allows us to send control messages back and worth when we need  --
--- to.                                                                        -- 
+-- to.                                                                        --
 --------------------------------------------------------------------------------
 
-data Request  a = Request a 
-data Response a = FinalResponse a | IntermediateResponse a 
+data Request  a = Request a
+data Response a = FinalResponse a | IntermediateResponse a
 
-$(deriveJSON id ''Request) 
+$(deriveJSON id ''Request)
 $(deriveJSON id ''Response)
 
 --------------------------------------------------------------------------------
@@ -92,24 +92,24 @@ $(deriveJSON id ''Response)
 --------------------------------------------------------------------------------
 
 -- | Start the RPC server
-rpcServer :: (FromJSON req, ToJSON resp) 
+rpcServer :: (FromJSON req, ToJSON resp)
           => Handle                           -- ^ Input
           -> Handle                           -- ^ Output
-          -> Handle                           -- ^ Errors 
-          -> (req -> IO (Progress resp resp)) -- ^ The request handler 
+          -> Handle                           -- ^ Errors
+          -> (req -> IO (Progress resp resp)) -- ^ The request handler
           -> IO ()
 rpcServer hin hout herr handler = do
   requests  <- newChan
   responses <- newChan
   exception <- newEmptyMVar :: IO (MVar Ex.SomeException)
-  
-  let forkCatch p = forkIO $ Ex.catch p (putMVar exception) 
+
+  let forkCatch p = forkIO $ Ex.catch p (putMVar exception)
 
   tid1 <- forkCatch $ readRequests hin requests
-  tid2 <- forkCatch $ writeResponses responses hout 
-  tid3 <- forkCatch $ channelHandler requests responses handler 
+  tid2 <- forkCatch $ writeResponses responses hout
+  tid3 <- forkCatch $ channelHandler requests responses handler
 
-  readMVar exception >>= hPrint herr 
+  readMVar exception >>= hPrint herr
   mapM_ killThread [tid1, tid2, tid3]
 
 --------------------------------------------------------------------------------
@@ -120,12 +120,12 @@ rpcServer hin hout herr handler = do
 newtype RpcServer req resp = RpcServer (MVar (RpcState req resp))
 
 -- | RPC server state
-data RpcState req resp = 
+data RpcState req resp =
     RpcRunning {
         -- | The server's 'stdin'
-        rpcIn :: Handle               
+        rpcIn :: Handle
         -- | The server's 'stdout' (this essentially represents the parser state)
-      , rpcOut :: ByteString  
+      , rpcOut :: ByteString
         -- | Thread that forwards the server's stderr to our stderr
       , rpcErr :: ThreadId
         -- | Handle on the server process itself
@@ -139,7 +139,7 @@ forkRpcServer :: FilePath  -- ^ Filename of the executable
               -> IO (RpcServer req resp)
 forkRpcServer path args = do
   -- Start the server
-  (Just hin, Just hout, Just herr, ph) <- createProcess $ (proc path args) { 
+  (Just hin, Just hout, Just herr, ph) <- createProcess $ (proc path args) {
       std_in  = CreatePipe
     , std_out = CreatePipe
     , std_err = CreatePipe
@@ -156,7 +156,7 @@ forkRpcServer path args = do
   hSetBuffering herr LineBuffering
 
   -- Forward server's stderr to our stderr
-  tid <- forkIO $ hGetContents herr >>= hPutStr stderr  
+  tid <- forkIO $ hGetContents herr >>= hPutStr stderr
 
   -- Get server's output as a lazy bytestring
   contents <- hGetContents hout
@@ -173,7 +173,7 @@ forkRpcServer path args = do
 -- | Do an RPC call
 --
 -- Throws an exception if the server returns a mallformed result or the server
--- has shut down, or if the server returns more than one message (see 
+-- has shut down, or if the server returns more than one message (see
 -- 'rpcWithProgress' instead)
 rpc :: (ToJSON req, FromJSON resp)
     => RpcServer req resp  -- ^ RPC server
@@ -182,18 +182,18 @@ rpc :: (ToJSON req, FromJSON resp)
 rpc server req = withRpcServer server $ \st ->
   case st of
     RpcRunning {} -> do
-      hPut (rpcIn st) $ encode (Request req) 
+      hPut (rpcIn st) $ encode (Request req)
       case parseJSON (rpcOut st) of
-        Right (out', FinalResponse resp) -> 
+        Right (out', FinalResponse resp) ->
           return (st { rpcOut = out' }, resp)
         Right (_, IntermediateResponse _) ->
           Ex.throwIO (userError "rpc: Unexpected intermediate response")
-        Left err -> 
+        Left err ->
           Ex.throwIO (userError err)
-    RpcStopped ex -> 
+    RpcStopped ex ->
       Ex.throwIO (userError $ "rpc: server shutdown (" ++ show ex ++ ")")
 
--- | Like 'rpc', but with support for receiving multiple replies for the 
+-- | Like 'rpc', but with support for receiving multiple replies for the
 -- same request
 rpcWithProgress :: (ToJSON req, FromJSON resp)
                 => RpcServer req resp  -- ^ RPC server
@@ -217,9 +217,9 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
       -- Construct the Progress object
       let go = Progress $ modifyMVar outSt $ \out -> do
                  case parseJSON out of
-                   Right (out', FinalResponse resp) -> 
+                   Right (out', FinalResponse resp) ->
                      return (out', Left resp)
-                   Right (out', IntermediateResponse resp) -> 
+                   Right (out', IntermediateResponse resp) ->
                      return (out', Right (resp, go))
                    Left err ->
                      Ex.throwIO (userError err)
@@ -228,7 +228,7 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
       b <- handler go
       out' <- takeMVar outSt
       return (st { rpcOut = out' }, b)
-    RpcStopped ex -> 
+    RpcStopped ex ->
       Ex.throwIO (userError $ "rpc: server shutdown (" ++ show ex ++ ")")
 
 -- | Variation on 'rpcWithProgress' with a callback for intermediate messages
@@ -236,8 +236,8 @@ rpcWithProgressCallback :: (ToJSON req, FromJSON resp)
                         => RpcServer req resp  -- ^ RPC server
                         -> req                 -- ^ Request
                         -> (resp -> IO ())     -- ^ Callback for intermediate messages
-                        -> IO resp 
-rpcWithProgressCallback server req callback = rpcWithProgress server req handler 
+                        -> IO resp
+rpcWithProgressCallback server req callback = rpcWithProgress server req handler
   where
     handler p = do
       resp <- progressWait p
@@ -258,20 +258,20 @@ shutdown server = withRpcServer server $ \st -> do
   ex <- terminate st (Ex.toException (userError "Manual shutdown"))
   return (RpcStopped ex, ())
 
--- | Force-terminate the external process 
+-- | Force-terminate the external process
 terminate :: RpcState req resp -> Ex.SomeException -> IO Ex.SomeException
 terminate st@(RpcRunning {}) ex = do
   terminateProcess (rpcProc st)
   killThread (rpcErr st)
   return ex
-terminate (RpcStopped ex') _ = 
+terminate (RpcStopped ex') _ =
   return ex' -- Already stopped
 
--- | Like modifyMVar, but terminate the server on exceptions 
-withRpcServer :: RpcServer req resp 
+-- | Like modifyMVar, but terminate the server on exceptions
+withRpcServer :: RpcServer req resp
               -> (RpcState req resp -> IO (RpcState req resp, a))
               -> IO a
-withRpcServer (RpcServer server) io = 
+withRpcServer (RpcServer server) io =
   Ex.mask $ \restore -> do
     st <- takeMVar server
     mResult <- Ex.try $ restore (io st)
@@ -288,36 +288,36 @@ withRpcServer (RpcServer server) io =
 -- Internal                                                                   --
 --------------------------------------------------------------------------------
 
--- | Decode messages from a handle and forward them to a channel 
+-- | Decode messages from a handle and forward them to a channel
 readRequests :: forall req. FromJSON req => Handle -> Chan (Request req) -> IO ()
-readRequests h ch = do 
+readRequests h ch = do
     hSetBinaryMode h True
     hSetBuffering h NoBuffering
     hGetContents h >>= go
   where
     go :: ByteString -> IO ()
-    go contents = 
+    go contents =
       case parseJSON contents of
         Right (contents', req) -> writeChan ch req >> go contents'
         Left err               -> Ex.throwIO (userError err)
-   
+
 -- | Parse a JSON value, and return the remainder of the input along with
 -- the result (or an error message)
-parseJSON :: FromJSON a => ByteString -> Either String (ByteString, a) 
+parseJSON :: FromJSON a => ByteString -> Either String (ByteString, a)
 parseJSON bs =
   case parse json' bs of
     Fail _ _ err -> Left err
-    Done bs' value -> 
+    Done bs' value ->
       case fromJSON value of
         Success req -> Right (bs', req)
         Error err   -> Left err
-    
+
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: ToJSON resp => Chan (Response resp) -> Handle -> IO ()
 writeResponses ch h = do
   hSetBinaryMode h True
   hSetBuffering h NoBuffering
-  forever $ readChan ch >>= hPut h . encode 
+  forever $ readChan ch >>= hPut h . encode
 
 -- | Run a handler repeatedly, given input and output channels
 channelHandler :: Chan (Request req)
@@ -325,15 +325,15 @@ channelHandler :: Chan (Request req)
                -> (req -> IO (Progress resp resp))
                -> IO ()
 channelHandler inp outp handler = forever $ do
-    Request req <- readChan inp 
+    Request req <- readChan inp
     handler req >>= go
   where
-    go p = do 
-      resp <- progressWait p 
+    go p = do
+      resp <- progressWait p
       case resp of
         Left lastResponse ->
           writeChan outp (FinalResponse lastResponse)
-        Right (intermediateResponse, p') -> do 
+        Right (intermediateResponse, p') -> do
           writeChan outp (IntermediateResponse intermediateResponse)
           go p'
 
@@ -350,22 +350,22 @@ $(deriveJSON id ''CountRequest)
 $(deriveJSON id ''CountResponse)
 
 countServer :: MVar Int -> CountRequest -> IO (Progress CountResponse CountResponse)
-countServer st Increment = return $ Progress $ 
+countServer st Increment = return $ Progress $
   modifyMVar st $ \i -> return (i + 1, Left Ok)
-countServer st Reset = return $ Progress $ 
+countServer st Reset = return $ Progress $
   modifyMVar st $ \_ -> return (0, Left Ok)
 countServer st Get = return $ Progress $ do
   i <- readMVar st
   return (Left (Count i))
-countServer _  Crash = return $ Progress $ 
+countServer _  Crash = return $ Progress $
   Ex.throwIO (userError "Server crashed!")
 countServer st (CountFor n) = do
     leftToCount <- newMVar n
     return (p leftToCount)
   where
-    p leftToCount = Progress $ do 
+    p leftToCount = Progress $ do
       shouldCount <- modifyMVar leftToCount $ \m -> return (m - 1, m > 0)
-      if shouldCount 
+      if shouldCount
         then modifyMVar st $ \i -> return (i + 1, Right (Count (i + 1), p leftToCount))
         else return (Left Ok)
 
@@ -376,23 +376,23 @@ main = do
   case args of
     ["--server"] -> do
       st <- newMVar 0
-      rpcServer stdin stdout stderr (countServer st) 
+      rpcServer stdin stdout stderr (countServer st)
     _ -> do
-      prog   <- getProgName 
-      server <- forkRpcServer ("./" ++ prog) ["--server"] :: IO CountServer 
-      rpc server Get >>= print 
-      rpc server Increment >>= print 
-      rpc server Increment >>= print 
-      rpc server Get >>= print 
-      rpc server Reset >>= print 
-      rpc server Get >>= print 
+      prog   <- getProgName
+      server <- forkRpcServer ("./" ++ prog) ["--server"] :: IO CountServer
+      rpc server Get >>= print
+      rpc server Increment >>= print
+      rpc server Increment >>= print
+      rpc server Get >>= print
+      rpc server Reset >>= print
+      rpc server Get >>= print
       Ex.catch (rpc server Crash >>= print) (\ex -> print (ex :: Ex.SomeException))
       Ex.catch (rpc server Get >>= print) (\ex -> print (ex :: Ex.SomeException))
 
-      server2 <- forkRpcServer ("./" ++ prog) ["--server"] :: IO CountServer 
-      rpc server2 Get >>= print 
+      server2 <- forkRpcServer ("./" ++ prog) ["--server"] :: IO CountServer
+      rpc server2 Get >>= print
       shutdown server2
       Ex.catch (rpc server2 Get >>= print) (\ex -> print (ex :: Ex.SomeException))
 
-      server3 <- forkRpcServer ("./" ++ prog) ["--server"] :: IO CountServer 
+      server3 <- forkRpcServer ("./" ++ prog) ["--server"] :: IO CountServer
       rpcWithProgressCallback server3 (CountFor 5) print >>= print
