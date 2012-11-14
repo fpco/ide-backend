@@ -2,53 +2,26 @@
 module Main where
 
 import System.IO
-  ( Handle
-  , hSetBinaryMode
-  , stdin
+  ( stdin
   , stdout
   , stderr
-  , hPrint
   , hSetBuffering
-  , BufferMode(LineBuffering, NoBuffering)
-  )
-import System.Process
-  ( CreateProcess(std_in, std_out, std_err)
-  , createProcess
-  , proc
-  , StdStream(CreatePipe)
-  , ProcessHandle
-  , terminateProcess
-  )
-import Data.Aeson
-  ( FromJSON
-  , ToJSON
-  , encode
-  , json'
-  , fromJSON
-  , Result(Success, Error)
+  , BufferMode(LineBuffering)
   )
 import Data.Aeson.TH (deriveJSON)
-import Control.Monad (forever)
 import qualified Control.Exception as Ex
-import Control.Concurrent (ThreadId, forkIO, killThread)
-import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar
   ( MVar
   , newMVar
-  , newEmptyMVar
-  , putMVar
   , readMVar
   , modifyMVar
-  , takeMVar
   )
-import Data.ByteString.Lazy (ByteString, hPut, hGetContents, hPutStr)
-import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
 
--- For testing
-import System.Environment (getArgs, getExecutablePath)
+import RpcServer
+import System.Environment (getArgs)
 
-import RpcServer hiding (main)
-
+-- getExecutablePath is in base only for >= 4.6
+import System.Environment.Executable (getExecutablePath)
 
 data CountRequest  = Increment | Reset | Get | Crash | CountFor Int deriving Show
 data CountResponse = Ok | Count Int deriving Show
