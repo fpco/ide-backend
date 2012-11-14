@@ -2,7 +2,7 @@
 -- Copyright   : (c) JP Moresmau 2011,
 --                   Well-Typed 2012
 -- (JP Moresmau's buildwrapper package used as template for GHC API use)
-module GHCSession
+module GhcRun
   ( GhcState
   , optsToGhcState
   , SourceError(..)
@@ -131,9 +131,9 @@ collectSrcError :: IORef [SourceError]
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 collectSrcError errsRef flags severity srcspan style msg
   | Just errKind <- case severity of
-                      SevWarning -> Just GHCSession.Warning
-                      SevError   -> Just GHCSession.Error
-                      SevFatal   -> Just GHCSession.Error
+                      SevWarning -> Just GhcRun.Warning
+                      SevError   -> Just GhcRun.Error
+                      SevFatal   -> Just GhcRun.Error
                       _          -> Nothing
   , Just (file, st, end) <- extractErrSpan srcspan
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
@@ -149,9 +149,9 @@ collectSrcError :: IORef [SourceError]
                 -> Severity -> SrcSpan -> PprStyle -> Message -> IO ()
 collectSrcError errsRef severity srcspan style msg
   | Just errKind <- case severity of
-                      SevWarning -> Just GHCSession.Warning
-                      SevError   -> Just GHCSession.Error
-                      SevFatal   -> Just GHCSession.Error
+                      SevWarning -> Just GhcRun.Warning
+                      SevError   -> Just GhcRun.Error
+                      SevFatal   -> Just GhcRun.Error
                       _          -> Nothing
   , Just (file, st, end) <- extractErrSpan srcspan
   = let msgstr = showSDocForUser (qualName style,qualModule style) msg

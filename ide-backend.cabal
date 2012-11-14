@@ -13,7 +13,7 @@ cabal-version:       >=1.10
 
 library
   exposed-modules: IdeSession, RpcServer
-  other-modules:   GHCSession
+  other-modules:   GhcRun
   build-depends:     base      ==4.*,
                      directory ==1.*,
                      process   ==1.*,
