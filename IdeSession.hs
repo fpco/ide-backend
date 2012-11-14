@@ -268,6 +268,8 @@ instance Monoid IdeSessionUpdate where
   mappend (IdeSessionUpdate f) (IdeSessionUpdate g) =
     IdeSessionUpdate $ \ sess -> f sess >> g sess
 
+-- TODO: is IO in the result type still needed now that
+-- the Progress type has lots of IOs?
 -- | Given the current IDE session state, go ahead and
 -- update the session, eventually resulting in a new session state,
 -- with fully updated computed information (typing, etc.).
@@ -281,7 +283,7 @@ instance Monoid IdeSessionUpdate where
 -- and @updateSession@ is unspecified while any progress runs.
 --
 updateSession :: IdeSession -> IdeSessionUpdate
-              -> IO (Progress IdeSession IdeSession)
+              -> IO (Progress () IdeSession)
 updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
                              , ideGhcServer
                              , ideToken }
@@ -294,22 +296,24 @@ updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
   update sess
 
   -- Last, communicating with the GHC server.
-  return $ Progress $ do
-    allErrs <- rpcGhcServer ideGhcServer configSourcesDir
-    let ideComputed = Just allErrs  -- can query now
-    return $ Left $ sess {ideToken = newToken, ideComputed}
+  reqCompute ideGhcServer configSourcesDir
+  let p :: IO (Progress () IdeSession)
+      p = do
+        merrs <- reqErrors ideGhcServer
+        case merrs of
+          Nothing ->
+            return $ Progress $ do
+              progress <- p
+              return $ Right ((), progress)
+          Just _ ->
+            let sess2 = sess {ideToken = newToken, ideComputed = merrs}
+            in return $ Progress $ return $ Left sess2
+  p
 
--- TODO: update description and move it to where Progress is defined:
--- | A future, a handle on an action that will produce some result.
---
--- Currently this is just a simple future, but there is the option to extend
--- it with actual progress info, and\/or with cancellation.
---
-
-
+-- TODO: move elsewhere? Close to Progress? Or only to test utilities?
 -- | Block until the operation completes.
 --
-progressWaitCompletion :: Progress a a -> IO a
+progressWaitCompletion :: Progress a b -> IO b
 progressWaitCompletion p = do
   w <- progressWait p
   case w of

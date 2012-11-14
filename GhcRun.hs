@@ -7,8 +7,8 @@
 -- based on source files. Only this file should import the GHC internals
 -- modules.
 module GhcRun
-  ( GhcState
-  , optsToGhcState
+  ( LeftoverOpts
+  , submitOpts
   , checkModule
   ) where
 
@@ -35,18 +35,18 @@ import Control.Exception
 
 import Common
 
-newtype GhcState = GhcState [Located String]
+newtype LeftoverOpts = LeftoverOpts [Located String]
 
-optsToGhcState :: [String] -> IO GhcState
-optsToGhcState opts = do
+submitOpts :: [String] -> IO LeftoverOpts
+submitOpts opts = do
   (ghcState, _) <- parseStaticFlags (map noLoc opts)
-  return $ GhcState ghcState
+  return $ LeftoverOpts ghcState
 
 checkModule :: [FilePath]        -- ^ target files
             -> Maybe String      -- ^ optional content of the file
-            -> GhcState          -- ^ leftover ghc static options
+            -> LeftoverOpts          -- ^ leftover ghc static options
             -> IO [SourceError]  -- ^ any errors and warnings
-checkModule targets mfilecontent (GhcState leftoverOpts) =
+checkModule targets mfilecontent (LeftoverOpts leftoverOpts) =
   handleOtherErrors $ do
 
     libdir <- getGhcLibdir

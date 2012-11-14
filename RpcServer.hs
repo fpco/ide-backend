@@ -71,6 +71,15 @@ import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
 -- (we should probably move this elsewhere eventually)                        --
 --------------------------------------------------------------------------------
 
+-- TODO: update description and perhaps move it somewhere else? perhaps
+-- move progressWaitCompletion as well?
+-- TODO2: make Progress a Monad or at least a Functor separately (or jointly)
+-- in the first and in the second argument?
+-- | A future, a handle on an action that will produce some result.
+--
+-- Currently this is just a simple future, but there is the option to extend
+-- it with actual progress info, and\/or with cancellation.
+--
 newtype Progress p a = Progress {
     progressWait :: IO (Either a (p, Progress p a))
   }
