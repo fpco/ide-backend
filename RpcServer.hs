@@ -13,6 +13,7 @@ module RpcServer
   , Progress(..)
     -- * Testing
   , main
+  ,  rpcWithProgressCallback
   ) where
 
 import System.IO
