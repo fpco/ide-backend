@@ -160,8 +160,7 @@ rpcServer hin hout herr handler = do
   tid3 <- forkCatch $ channelHandler requests responses handler
 
   ex <- readMVar exception
-  hPut herr (encode . ExternalException . show $ ex)
-  hFlush herr
+  hPutFlush herr (encode . ExternalException . show $ ex)
   -- TODO: do we need to wait for the client to read the exception?
   mapM_ killThread [tid1, tid2, tid3]
 
@@ -179,7 +178,7 @@ data RpcServer req resp = RpcServer {
     -- about asynchronous exceptions everywhere as long as the RPC server is
     -- running. Instead, we will throw the exception on the next (or current)
     -- call to 'rpc' (and friends)
-  , rpcPendingException :: MVar ExternalException
+  , rpcPendingException :: MVar Ex.SomeException
   }
 
 -- | RPC server state
@@ -246,8 +245,7 @@ rpcWithProgress :: (ToJSON req, FromJSON resp)
 rpcWithProgress server req handler = withRpcServer server $ \st ->
   case st of
     RpcRunning {} -> do
-      hPut (rpcIn st) $ encode (Request req)
-      hFlush (rpcIn st)
+      checkKilled (rpcProc st) $ hPutFlush (rpcIn st) (encode $ Request req)
 
       -- We create a local MVar that holds the parser state (unparsed part
       -- of the server input). This MVar is updated every time the handler
@@ -259,17 +257,14 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
       outSt <- newMVar (rpcOut st)
 
       -- Construct the Progress object
-      let go = Progress $ modifyMVar outSt $ \out ->
+      let go = Progress $ modifyMVar outSt $ \out -> checkKilled (rpcProc st) $
                  case parseJSON out of
                    Right (out', FinalResponse resp) ->
                      return (out', Left resp)
                    Right (out', IntermediateResponse resp) ->
                      return (out', Right (resp, go))
-                   Left err -> do
-                     exitCode <- getProcessExitCode (rpcProc st)
-                     case exitCode of
-                       Just _  -> Ex.throwIO serverKilledException
-                       Nothing -> Ex.throwIO (userError err)
+                   Left err ->
+                     Ex.throwIO (userError err)
 
       -- Call the handler, update the state, and return the result
       b <- handler go
@@ -376,10 +371,7 @@ parseJSON bs =
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: ToJSON resp => Chan (Response resp) -> Handle -> IO ()
-writeResponses ch h = forever $ do
-  resp <- readChan ch
-  hPut h (encode resp)
-  hFlush h
+writeResponses ch h = forever $ readChan ch >>= hPutFlush h . encode
 
 -- | Run a handler repeatedly, given input and output channels
 channelHandler :: Chan (Request req)
@@ -402,21 +394,20 @@ channelHandler inp outp handler = forever $ do
 -- | Read an exception from the remote server and store it locally
 -- (see description of 'RpcServer')
 forwardExceptions :: Handle
-                  -> MVar ExternalException
+                  -> MVar Ex.SomeException
                   -> ProcessHandle
                   -> IO ()
 forwardExceptions h mvar ph = do
     contents <- hGetContents h
-    case parseJSON contents of
-      Right (_, ex) ->
-        putMVar mvar ex
-      Left err -> do
-        exitCode <- getProcessExitCode ph
-        case exitCode of
-          Just _  -> putMVar mvar serverKilledException
-          Nothing -> putMVar mvar (ExternalException $ "Malformed exception: "
-                                                    ++ prefixOf 80 contents
-                                                    ++ " (" ++ err ++ ")")
+
+    Ex.handle (putMVar mvar) . checkKilled ph $
+      case parseJSON contents of
+        Right (_, ex) ->
+          Ex.throwIO (ex :: ExternalException)
+        Left err ->
+          Ex.throwIO . userError $ "Malformed exception: "
+                                ++ prefixOf 80 contents
+                                ++ " (" ++ err ++ ")"
   where
     prefixOf :: Int -> ByteString -> String
     prefixOf len bs =
@@ -431,6 +422,20 @@ setBinaryBlockBuffered =
   mapM_ $ \h -> do hSetBinaryMode h True
                    hSetBuffering  h (BlockBuffering Nothing)
 
+-- | Run the specified IO action. If it throws an exception, check if
+-- given process has been killed. If so, throw a serverKilledException.
+-- If not, rethrow the original exception.
+checkKilled :: ProcessHandle -> IO a -> IO a
+checkKilled ph p = Ex.catch p $ \ex -> do
+  exitCode <- getProcessExitCode ph
+  case exitCode of
+    Just _  -> Ex.throwIO serverKilledException
+    Nothing -> Ex.throwIO (ex :: Ex.SomeException)
+
+-- | Write a bytestring to a buffer and flush
+hPutFlush :: Handle -> ByteString -> IO ()
+hPutFlush h bs = hPut h bs >> hFlush h
+
 -- | Wait for a handle to close
 --
 -- TODO: Is there a better way to do this?
@@ -441,3 +446,4 @@ waitUntilClosed h = go
       closed <- hIsClosed h
       if closed then return ()
                 else threadDelay 10000 >> go
+

@@ -5,8 +5,8 @@ import System.IO (stdin, stdout, stderr)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
 import System.Posix.Signals (raiseSignal, sigKILL)
-import Data.Aeson (FromJSON, ToJSON)
-import Data.Aeson.TH (deriveJSON)
+import Data.Aeson (FromJSON(parseJSON), ToJSON(toJSON))
+import Data.Aeson.TH (deriveJSON, deriveToJSON, deriveFromJSON)
 import Data.Maybe (fromJust)
 import Control.Monad (forM_)
 import qualified Control.Exception as Ex
@@ -165,7 +165,7 @@ testShutdown = do
   server <- forkTestServer "echo"
   assertRpcEqual server "ping" "ping"
   shutdown server
-  assertRpcRaises server "ping" (userError "Manual shutdown")
+  assertRpcRaises server "ping" serverKilledException
 
 --------------------------------------------------------------------------------
 -- Error handling tests                                                       --
@@ -211,6 +211,39 @@ testKillAsyncServer req = return . Progress $ do
   forkIO $ threadDelay 1000000 >> raiseSignal sigKILL
   return (Left req)
 
+-- | Test crash during decoding
+data TypeWithFaultyDecoder = TypeWithFaultyDecoder deriving Show
+
+instance FromJSON TypeWithFaultyDecoder where
+  parseJSON _ = fail "Faulty decoder"
+
+$(deriveToJSON id ''TypeWithFaultyDecoder)
+
+testFaultyDecoder :: Assertion
+testFaultyDecoder = do
+  server <- forkTestServer "faultyDecoder" :: IO (RpcServer TypeWithFaultyDecoder ())
+  assertRpcRaises server TypeWithFaultyDecoder (ExternalException . show . userError $ "Faulty decoder")
+
+testFaultyDecoderServer :: TypeWithFaultyDecoder -> IO (Progress () ())
+testFaultyDecoderServer _ = return . Progress $ return (Left ())
+
+-- | Test crash during encoding
+data TypeWithFaultyEncoder = TypeWithFaultyEncoder deriving (Show, Eq)
+
+$(deriveFromJSON id ''TypeWithFaultyEncoder)
+
+instance ToJSON TypeWithFaultyEncoder where
+  toJSON _ = error "Faulty encoder"
+
+testFaultyEncoder :: Assertion
+testFaultyEncoder = do
+  server <- forkTestServer "faultyEncoder" :: IO (RpcServer () TypeWithFaultyEncoder)
+  assertRpcRaises server () (ExternalException "Faulty encoder")
+
+testFaultyEncoderServer :: () -> IO (Progress TypeWithFaultyEncoder TypeWithFaultyEncoder)
+testFaultyEncoderServer () = return . Progress $
+  return (Left TypeWithFaultyEncoder)
+
 --------------------------------------------------------------------------------
 -- Driver                                                                     --
 --------------------------------------------------------------------------------
@@ -225,9 +258,11 @@ tests = [
       , testCase "shutdown"        testShutdown
       ]
   , testGroup "Error handling" [
-        testCase "crash"     testCrash
-      , testCase "kill"      testKill
-      , testCase "killAsync" testKillAsync
+        testCase "crash"         testCrash
+      , testCase "kill"          testKill
+      , testCase "killAsync"     testKillAsync
+      , testCase "faultyDecoder" testFaultyDecoder
+      , testCase "faultyEncoder" testFaultyEncoder
       ]
   ]
 
@@ -252,4 +287,8 @@ main = do
       startTestServer (testKillServer firstRequest)
     ["--server", "killAsync"] ->
       startTestServer testKillAsyncServer
+    ["--server", "faultyDecoder"] ->
+      startTestServer testFaultyDecoderServer
+    ["--server", "faultyEncoder"] ->
+      startTestServer testFaultyEncoderServer
     _ -> defaultMain tests
