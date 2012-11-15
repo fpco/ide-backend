@@ -11,11 +11,13 @@ module RpcServer
   , rpcWithProgressCallback
   , shutdown
   , ExternalException(..)
+  , serverKilledException
     -- * Progress
   , Progress(..)
   , fmap2Progress
   ) where
 
+import Prelude hiding (take)
 import System.IO
   ( Handle
   , hSetBinaryMode
@@ -32,6 +34,7 @@ import System.Process
   , StdStream(CreatePipe)
   , ProcessHandle
   , waitForProcess
+  , getProcessExitCode
   )
 import Data.Typeable (Typeable)
 import Data.Aeson
@@ -63,7 +66,8 @@ import Control.Concurrent.MVar
   , modifyMVar
   , takeMVar
   )
-import Data.ByteString.Lazy (ByteString, hPut, hGetContents)
+import Data.ByteString.Lazy (ByteString, hPut, hGetContents, take)
+import Data.ByteString.Lazy.Char8 (unpack)
 import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
 
 --------------------------------------------------------------------------------
@@ -110,6 +114,9 @@ instance Show ExternalException where
 instance Ex.Exception ExternalException
 
 $(deriveJSON id ''ExternalException)
+
+serverKilledException :: ExternalException
+serverKilledException = ExternalException "Server killed"
 
 --------------------------------------------------------------------------------
 -- Internal data types                                                        --
@@ -201,7 +208,7 @@ forkRpcServer path args = do
     }
   setBinaryBlockBuffered [hin, hout, herr]
   pendingException <- newEmptyMVar
-  tid <- forkIO $ forwardExceptions herr pendingException
+  tid <- forkIO $ forwardExceptions herr pendingException ph
   contents <- hGetContents hout
   st <- newMVar RpcRunning {
       rpcIn   = hin
@@ -258,8 +265,11 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
                      return (out', Left resp)
                    Right (out', IntermediateResponse resp) ->
                      return (out', Right (resp, go))
-                   Left err ->
-                     Ex.throwIO (userError err)
+                   Left err -> do
+                     exitCode <- getProcessExitCode (rpcProc st)
+                     case exitCode of
+                       Just _  -> Ex.throwIO serverKilledException
+                       Nothing -> Ex.throwIO (userError err)
 
       -- Call the handler, update the state, and return the result
       b <- handler go
@@ -391,14 +401,29 @@ channelHandler inp outp handler = forever $ do
 
 -- | Read an exception from the remote server and store it locally
 -- (see description of 'RpcServer')
-forwardExceptions :: Handle -> MVar ExternalException -> IO ()
-forwardExceptions h mvar = do
-  contents <- hGetContents h
-  case parseJSON contents of
-    Right (_, ex) ->
-      putMVar mvar ex
-    Left err ->
-      putMVar mvar (ExternalException $ "Malformed exception: " ++ err)
+forwardExceptions :: Handle
+                  -> MVar ExternalException
+                  -> ProcessHandle
+                  -> IO ()
+forwardExceptions h mvar ph = do
+    contents <- hGetContents h
+    case parseJSON contents of
+      Right (_, ex) ->
+        putMVar mvar ex
+      Left err -> do
+        exitCode <- getProcessExitCode ph
+        case exitCode of
+          Just _  -> putMVar mvar serverKilledException
+          Nothing -> putMVar mvar (ExternalException $ "Malformed exception: "
+                                                    ++ prefixOf 80 contents
+                                                    ++ " (" ++ err ++ ")")
+  where
+    prefixOf :: Int -> ByteString -> String
+    prefixOf len bs =
+      let prefix = unpack (take (fromIntegral (len + 1)) bs) in
+      if length prefix > len then '"' : init prefix ++ "\"..."
+                             else '"' : prefix ++ "\""
+
 
 -- | Set all the specified handles to binary mode and block buffering
 setBinaryBlockBuffered :: [Handle] -> IO ()

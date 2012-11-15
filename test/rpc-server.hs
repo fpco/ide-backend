@@ -4,15 +4,17 @@ module Main where
 import System.IO (stdin, stdout, stderr)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
+import System.Posix.Signals (raiseSignal, sigKILL)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Aeson.TH (deriveJSON)
 import Data.Maybe (fromJust)
 import Control.Monad (forM_)
 import qualified Control.Exception as Ex
 import Control.Applicative ((<$>), (<|>))
+import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.MVar (MVar, newMVar, modifyMVar)
 
-import Test.Framework (Test, TestName, defaultMain, testGroup)
+import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertEqual, assertFailure)
 
@@ -173,13 +175,41 @@ testShutdown = do
 testCrash :: Assertion
 testCrash = do
   server <- forkTestServer "crash" :: IO (RpcServer () ())
-  assertRpcRaises server () (ExternalException . show $ crash)
+  assertRpcRaises server () $ ExternalException (show crash)
 
 testCrashServer :: () -> IO (Progress () ())
 testCrashServer () = return . Progress $ Ex.throwIO crash
 
 crash :: Ex.IOException
 crash = userError "Intentional crash"
+
+-- | Test server which gets killed during a request
+testKill :: Assertion
+testKill = do
+  server <- forkTestServer "kill" :: IO (RpcServer String String)
+  assertRpcEqual server "ping" "ping" -- First request goes through
+  assertRpcRaises server "ping" serverKilledException
+
+testKillServer :: MVar Bool -> String -> IO (Progress String String)
+testKillServer firstRequest req = return . Progress $ do
+  isFirst <- modifyMVar firstRequest $ \b -> return (False, b)
+  if isFirst
+    then return (Left req)
+    else raiseSignal sigKILL >> undefined
+
+-- | Test server which gets killed between requests
+testKillAsync :: Assertion
+testKillAsync = do
+  server <- forkTestServer "killAsync" :: IO (RpcServer String String)
+  assertRpcEqual server "ping" "ping"
+  threadDelay 2000000 -- Wait for server to exit
+  assertRpcRaises server "ping" serverKilledException
+
+testKillAsyncServer :: String -> IO (Progress String String)
+testKillAsyncServer req = return . Progress $ do
+  -- Fork a thread which causes the server to crash 0.5 seconds after the request
+  forkIO $ threadDelay 1000000 >> raiseSignal sigKILL
+  return (Left req)
 
 --------------------------------------------------------------------------------
 -- Driver                                                                     --
@@ -195,7 +225,9 @@ tests = [
       , testCase "shutdown"        testShutdown
       ]
   , testGroup "Error handling" [
-        testCase "crash" testCrash
+        testCase "crash"     testCrash
+      , testCase "kill"      testKill
+      , testCase "killAsync" testKillAsync
       ]
   ]
 
@@ -215,4 +247,9 @@ main = do
       startTestServer testProgressServer
     ["--server", "crash"] ->
       startTestServer testCrashServer
+    ["--server", "kill"] -> do
+      firstRequest <- newMVar True
+      startTestServer (testKillServer firstRequest)
+    ["--server", "killAsync"] ->
+      startTestServer testKillAsyncServer
     _ -> defaultMain tests
