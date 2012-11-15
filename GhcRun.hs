@@ -44,9 +44,10 @@ submitOpts opts = do
 
 checkModule :: [FilePath]        -- ^ target files
             -> Maybe String      -- ^ optional content of the file
-            -> LeftoverOpts          -- ^ leftover ghc static options
+            -> LeftoverOpts      -- ^ leftover ghc static options
+            -> IO ()             -- ^ handler for each "compiling M" message
             -> IO [SourceError]  -- ^ any errors and warnings
-checkModule targets mfilecontent (LeftoverOpts leftoverOpts) =
+checkModule targets mfilecontent (LeftoverOpts leftoverOpts) handler =
   handleOtherErrors $ do
 
     libdir <- getGhcLibdir
@@ -83,7 +84,9 @@ checkModule targets mfilecontent (LeftoverOpts leftoverOpts) =
                              hscTarget  = HscNothing,
                              ghcLink    = NoLink,
                              ghcMode    = CompManager,
-                             log_action = collectSrcError errsRef
+                             log_action = collectSrcError errsRef handler,
+                             -- print "compiling M ... done." for each module
+                             verbosity  = 1
                            }
         let addSingle filename = do
               addTarget Target
@@ -109,10 +112,10 @@ getGhcLibdir = do
     _        -> fail "cannot parse output of ghc --print-libdir"
 
 #if __GLASGOW_HASKELL__ >= 706
-collectSrcError :: IORef [SourceError]
+collectSrcError :: IORef [SourceError] -> IO ()
                 -> DynFlags
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
-collectSrcError errsRef flags severity srcspan style msg
+collectSrcError errsRef _handler flags severity srcspan style msg
   | Just errKind <- case severity of
                       SevWarning -> Just KindWarning
                       SevError   -> Just KindError
@@ -122,29 +125,37 @@ collectSrcError errsRef flags severity srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in modifyIORef errsRef (SrcError errKind file st end msgstr:)
 
-collectSrcError errsRef flags SevError _srcspan style msg
+collectSrcError errsRef _handler flags SevError _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in modifyIORef errsRef (OtherError msgstr:)
+
+collectSrcError _errsRef handler _flags SevOutput _srcspan _style _msg =
+  -- TODO: verify that it's the "compiling M" message
+  handler
+
+collectSrcError _ _ _ _ _ _ _ = return ()
+#else
+collectSrcError :: IORef [SourceError] -> IO ()
+                -> Severity -> SrcSpan -> PprStyle -> Message -> IO ()
+collectSrcError errsRef _handler severity srcspan style msg
+  | Just errKind <- case severity of
+                      SevWarning -> Just KindWarning
+                      SevError   -> Just KindError
+                      SevFatal   -> Just KindError
+                      _          -> Nothing
+  , Just (file, st, end) <- extractErrSpan srcspan
+  = let msgstr = showSDocForUser (qualName style,qualModule style) msg
+     in modifyIORef errsRef (SrcError errKind file st end msgstr:)
+
+collectSrcError errsRef _handler SevError _srcspan style msg
+  = let msgstr = showSDocForUser (qualName style,qualModule style) msg
+     in modifyIORef errsRef (OtherError msgstr:)
+
+collectSrcError _errsRef handler SevOutput _srcspan _style _msg =
+  -- TODO: verify that it's the "compiling M" message
+  handler
 
 collectSrcError _ _ _ _ _ _ = return ()
-#else
-collectSrcError :: IORef [SourceError]
-                -> Severity -> SrcSpan -> PprStyle -> Message -> IO ()
-collectSrcError errsRef severity srcspan style msg
-  | Just errKind <- case severity of
-                      SevWarning -> Just KindWarning
-                      SevError   -> Just KindError
-                      SevFatal   -> Just KindError
-                      _          -> Nothing
-  , Just (file, st, end) <- extractErrSpan srcspan
-  = let msgstr = showSDocForUser (qualName style,qualModule style) msg
-     in modifyIORef errsRef (SrcError errKind file st end msgstr:)
-
-collectSrcError errsRef SevError _srcspan style msg
-  = let msgstr = showSDocForUser (qualName style,qualModule style) msg
-     in modifyIORef errsRef (OtherError msgstr:)
-
-collectSrcError _ _ _ _ _ = return ()
 #endif
 
 extractErrSpan :: SrcSpan -> Maybe (FilePath, (Int, Int), (Int, Int))
