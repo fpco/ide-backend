@@ -165,7 +165,7 @@ testShutdown = do
   server <- forkTestServer "echo"
   assertRpcEqual server "ping" "ping"
   shutdown server
-  assertRpcRaises server "ping" serverKilledException
+  assertRpcRaises server "ping" (userError "Manual shutdown")
 
 --------------------------------------------------------------------------------
 -- Error handling tests                                                       --

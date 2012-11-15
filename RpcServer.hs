@@ -24,7 +24,6 @@ import System.IO
   , hSetBuffering
   , BufferMode(BlockBuffering, BlockBuffering)
   , hFlush
-  , hIsClosed
   , hClose
   )
 import System.Process
@@ -52,7 +51,6 @@ import Control.Concurrent
   ( ThreadId
   , forkIO
   , killThread
-  , threadDelay
   , myThreadId
   , throwTo
   )
@@ -303,9 +301,8 @@ shutdown server = withRpcServer server $ \st -> do
 -- | Force-terminate the external process
 terminate :: RpcState req resp -> Ex.SomeException -> IO Ex.SomeException
 terminate st@(RpcRunning {}) ex = do
-  -- We terminate the thread that listens for exceptions from the server first,
-  -- because we don't want the closing of stdin to be reported as an
-  -- ExternalException (rather, we want the exception to be "closed manually")
+  -- If we kill the server the thread that lists for exceptions from the server
+  -- may report an exception, which is not the one we want
   killThread (rpcErr st)
 
   -- Close the server's stdin. This will cause the server to exit
@@ -400,7 +397,7 @@ forwardExceptions :: Handle
 forwardExceptions h mvar ph = do
     contents <- hGetContents h
 
-    Ex.handle (putMVar mvar) . checkKilled ph $
+    Ex.handle (putMVar mvar) . checkKilled ph . terminateIfKilled $
       case parseJSON contents of
         Right (_, ex) ->
           Ex.throwIO (ex :: ExternalException)
@@ -415,6 +412,11 @@ forwardExceptions h mvar ph = do
       if length prefix > len then '"' : init prefix ++ "\"..."
                              else '"' : prefix ++ "\""
 
+    terminateIfKilled :: IO () -> IO ()
+    terminateIfKilled =
+      let isThreadKilled Ex.ThreadKilled = Just ()
+          isThreadKilled _               = Nothing
+      in Ex.handleJust isThreadKilled (const $ return ())
 
 -- | Set all the specified handles to binary mode and block buffering
 setBinaryBlockBuffered :: [Handle] -> IO ()
@@ -435,15 +437,3 @@ checkKilled ph p = Ex.catch p $ \ex -> do
 -- | Write a bytestring to a buffer and flush
 hPutFlush :: Handle -> ByteString -> IO ()
 hPutFlush h bs = hPut h bs >> hFlush h
-
--- | Wait for a handle to close
---
--- TODO: Is there a better way to do this?
-waitUntilClosed :: Handle -> IO ()
-waitUntilClosed h = go
-  where
-    go = do
-      closed <- hIsClosed h
-      if closed then return ()
-                else threadDelay 10000 >> go
-
