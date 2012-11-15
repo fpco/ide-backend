@@ -306,7 +306,9 @@ terminate st@(RpcRunning {}) ex = do
   killThread (rpcErr st)
 
   -- Close the server's stdin. This will cause the server to exit
-  hClose (rpcIn st)
+  -- This may fail if the server is already killed, so we just ignore any
+  -- exceptions thrown by hClose
+  ignoreIOExceptions $ hClose (rpcIn st)
 
   -- Wait for the server to terminate
   _ <- waitForProcess (rpcProc st)
@@ -437,3 +439,10 @@ checkKilled ph p = Ex.catch p $ \ex -> do
 -- | Write a bytestring to a buffer and flush
 hPutFlush :: Handle -> ByteString -> IO ()
 hPutFlush h bs = hPut h bs >> hFlush h
+
+-- | Ignore IO exceptions
+ignoreIOExceptions :: IO () -> IO ()
+ignoreIOExceptions = Ex.handle ignore
+  where
+    ignore :: Ex.IOException -> IO ()
+    ignore _ = return ()

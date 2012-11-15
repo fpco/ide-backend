@@ -202,13 +202,13 @@ testKillAsync :: Assertion
 testKillAsync = do
   server <- forkTestServer "killAsync" :: IO (RpcServer String String)
   assertRpcEqual server "ping" "ping"
-  threadDelay 2000000 -- Wait for server to exit
+  threadDelay 500000 -- Wait for server to exit
   assertRpcRaises server "ping" serverKilledException
 
 testKillAsyncServer :: String -> IO (Progress String String)
 testKillAsyncServer req = return . Progress $ do
   -- Fork a thread which causes the server to crash 0.5 seconds after the request
-  forkIO $ threadDelay 1000000 >> raiseSignal sigKILL
+  forkIO $ threadDelay 250000 >> raiseSignal sigKILL
   return (Left req)
 
 -- | Test crash during decoding
