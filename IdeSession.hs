@@ -63,6 +63,7 @@ module IdeSession (
   -- involve compiling modules and can take some time, the update uses the
   -- 'Progress' type to represent the action in progress.
   updateSession,
+  PCounter,
   Progress,
   progressWaitCompletion,
 
@@ -268,8 +269,6 @@ instance Monoid IdeSessionUpdate where
   mappend (IdeSessionUpdate f) (IdeSessionUpdate g) =
     IdeSessionUpdate $ \ sess -> f sess >> g sess
 
--- TODO: is IO in the result type still needed now that
--- the Progress type has lots of IOs?
 -- | Given the current IDE session state, go ahead and
 -- update the session, eventually resulting in a new session state,
 -- with fully updated computed information (typing, etc.).
@@ -283,11 +282,11 @@ instance Monoid IdeSessionUpdate where
 -- and @updateSession@ is unspecified while any progress runs.
 --
 updateSession :: IdeSession -> IdeSessionUpdate
-              -> IO (Progress () IdeSession)
+              -> (Progress PCounter IdeSession -> IO a) -> IO a
 updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
                              , ideGhcServer
                              , ideToken }
-              (IdeSessionUpdate update) = do
+              (IdeSessionUpdate update) handler = do
   -- First, invalidating the current session ASAP, because the previous
   -- computed info will shortly no longer be in sync with the files.
   newToken <- incrementToken ideToken
@@ -296,11 +295,11 @@ updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
   update sess
 
   -- Last, communicating with the GHC server.
-  let f RespWorking     = ()
+  let f (RespWorking c) = c
       f (RespDone _)    = error "updateSession: unexpected RespDone"
-      g RespWorking     = error "updateSession: unexpected RespWorking"
+      g (RespWorking _) = error "updateSession: unexpected RespWorking"
       g (RespDone errs) = sess {ideToken = newToken, ideComputed = Just errs}
-  liftM (fmap2Progress f g) $ rpcGhcServer ideGhcServer configSourcesDir
+  rpcGhcServer ideGhcServer configSourcesDir (handler . fmap2Progress f g)
 
 -- TODO: move elsewhere? Close to Progress? Or only to test utilities?
 -- | Block until the operation completes.
