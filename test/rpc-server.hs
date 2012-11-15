@@ -30,12 +30,17 @@ assertRaises :: (Ex.Exception e, Eq e, Show e)
              -> e          -- ^ Expected exception
              -> IO a       -- ^ Action to run
              -> Assertion
-assertRaises msg ex p = Ex.catch runAction $ \ex' ->
-    case Ex.fromException ex' of
-      Just ex'' -> assertEqual msg ex ex''
-      Nothing   -> assertFailure (msg ++ ": Raised exception of the wrong type " ++ exceptionType ex' ++ ": " ++ show ex')
-  where
-    runAction = p >> assertFailure (msg ++ ": No exception was raised")
+assertRaises msg ex p = do
+  mex <- Ex.try p
+  case mex of
+    Right _  -> assertFailure (msg ++ ": No exception was raised")
+    Left ex' ->
+      case Ex.fromException ex' of
+        Just ex'' -> assertEqual msg ex ex''
+        Nothing   -> assertFailure $ msg ++ ": "
+                                  ++ "Raised exception of the wrong type "
+                                  ++ exceptionType ex' ++ ": "
+                                  ++ show ex'
 
 exceptionType :: Ex.SomeException -> String
 exceptionType ex = fromJust $
@@ -104,7 +109,7 @@ assertRpcRaises server req ex =
 -- | Simple echo server
 testEcho :: Assertion
 testEcho = do
-  server <- forkTestServer "echo"
+  server <- forkTestServer "echo" :: IO (RpcServer String String)
   assertRpcEqual server "ping" "ping"
 
 testEchoServer :: String -> IO (Progress String String)
