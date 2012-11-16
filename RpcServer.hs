@@ -11,12 +11,11 @@ module RpcServer
   , rpcWithProgressCallback
   , shutdown
   , ExternalException(..)
-  , serverKilledException
   , underconsumptionException
   , overconsumptionException
+  , serverKilledException
   ) where
 
-import Prelude hiding (take)
 import System.IO
   ( Handle
   , hSetBinaryMode
@@ -24,16 +23,17 @@ import System.IO
   , BufferMode(BlockBuffering, BlockBuffering)
   , hFlush
   , hClose
+  , openTempFile
   )
 import System.Process
   ( CreateProcess(std_in, std_out, std_err)
   , createProcess
   , proc
-  , StdStream(CreatePipe)
+  , StdStream(CreatePipe, UseHandle)
   , ProcessHandle
   , waitForProcess
-  , getProcessExitCode
   )
+import System.Directory (removeFile)
 import Data.Typeable (Typeable)
 import Data.Aeson
   ( FromJSON
@@ -46,13 +46,7 @@ import Data.Aeson
 import Data.Aeson.TH (deriveJSON)
 import Control.Monad (forever)
 import qualified Control.Exception as Ex
-import Control.Concurrent
-  ( ThreadId
-  , forkIO
-  , killThread
-  , myThreadId
-  , throwTo
-  )
+import Control.Concurrent (forkIO, killThread)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar
   ( MVar
@@ -63,8 +57,8 @@ import Control.Concurrent.MVar
   , modifyMVar
   , takeMVar
   )
-import Data.ByteString.Lazy (ByteString, hPut, hGetContents, take)
-import Data.ByteString.Lazy.Char8 (unpack)
+import Data.ByteString.Lazy (ByteString, hPut, hGetContents)
+import Data.ByteString.Lazy.Char8 (pack)
 import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
 
 import Progress
@@ -86,8 +80,7 @@ instance Show ExternalException where
 
 instance Ex.Exception ExternalException
 
-$(deriveJSON id ''ExternalException)
-
+-- | Generic exception thrown if the server gets killed for unknown reason
 serverKilledException :: ExternalException
 serverKilledException = ExternalException "Server killed"
 
@@ -133,8 +126,7 @@ rpcServer hin hout herr handler = do
   tid3 <- forkCatch $ channelHandler requests responses handler
 
   ex <- readMVar exception
-  hPutFlush herr (encode . ExternalException . show $ ex)
-  -- TODO: do we need to wait for the client to read the exception?
+  hPutFlush herr (pack (show ex))
   mapM_ killThread [tid1, tid2, tid3]
 
 --------------------------------------------------------------------------------
@@ -143,54 +135,44 @@ rpcServer hin hout herr handler = do
 
 -- | Abstract data type representing RPC servers
 data RpcServer req resp = RpcServer {
-    -- | State of the RPC server
-    rpcState :: MVar (RpcState req resp)
-    -- | When the server throws an exception, we output it on stderr, read the
-    -- exception in the client, and then store it here. We don't throw it
-    -- asynchronously because this would mean client code would have to worry
-    -- about asynchronous exceptions everywhere as long as the RPC server is
-    -- running. Instead, we will throw the exception on the next (or current)
-    -- call to 'rpc' (and friends)
-  , rpcPendingException :: MVar Ex.SomeException
+    -- | The server's 'stdin'
+    rpcIn :: Handle
+    -- | Filename of the file where the errors of the server are stored
+  , rpcErr :: FilePath
+    -- | Handle on the server process itself
+  , rpcProc :: ProcessHandle
+    -- | Server state
+  , rpcState :: MVar (RpcState req resp)
   }
 
 -- | RPC server state
 data RpcState req resp =
-    RpcRunning {
-        -- | The server's 'stdin'
-        rpcIn :: Handle
-        -- | The server's 'stdout' (this essentially represents the parser state)
-      , rpcOut :: ByteString
-        -- | Thread that forwards the server's stderr to our stderr
-      , rpcErr :: ThreadId
-        -- | Handle on the server process itself
-      , rpcProc :: ProcessHandle
-      }
+    -- | The server is running. We record the server's unconsumed output.
+    RpcRunning ByteString
+    -- | The server was stopped, either manually or because of an exception
   | RpcStopped Ex.SomeException
 
 -- | Fork an RPC server as a separate process
 forkRpcServer :: FilePath  -- ^ Filename of the executable
               -> [String]  -- ^ Arguments
+              -> String    -- ^ Directory to store temporary files
               -> IO (RpcServer req resp)
-forkRpcServer path args = do
-  (Just hin, Just hout, Just herr, ph) <- createProcess $ (proc path args) {
+forkRpcServer path args tmpdir = do
+  -- We create a file for the server to store exceptions in
+  (errFilePath, errFileHandle) <- openTempFile tmpdir "rpcserver-stderr-"
+  (Just hin, Just hout, Nothing, ph) <- createProcess $ (proc path args) {
       std_in  = CreatePipe
     , std_out = CreatePipe
-    , std_err = CreatePipe
+    , std_err = UseHandle errFileHandle
     }
-  setBinaryBlockBuffered [hin, hout, herr]
-  pendingException <- newEmptyMVar
-  tid <- forkIO $ forwardExceptions herr pendingException ph
+  setBinaryBlockBuffered [hin, hout]
   contents <- hGetContents hout
-  st <- newMVar RpcRunning {
-      rpcIn   = hin
-    , rpcOut  = contents
-    , rpcErr  = tid
-    , rpcProc = ph
-    }
+  st <- newMVar $ RpcRunning contents
   return RpcServer {
-      rpcState            = st
-    , rpcPendingException = pendingException
+      rpcIn   = hin
+    , rpcErr  = errFilePath
+    , rpcProc = ph
+    , rpcState = st
     }
 
 -- | Do an RPC call
@@ -217,8 +199,8 @@ rpcWithProgress :: forall req resp b. (ToJSON req, FromJSON resp)
                 -> IO b
 rpcWithProgress server req handler = withRpcServer server $ \st ->
   case st of
-    RpcRunning {} -> do
-      checkKilled (rpcProc st) $ hPutFlush (rpcIn st) (encode $ Request req)
+    RpcRunning out -> do
+      mapIOToExternal server $ hPutFlush (rpcIn server) (encode $ Request req)
 
       -- We maintain the state of the progress in an MVar holding an
       -- 'Either ByteString ByteString'. This ByteString is the parser state
@@ -230,10 +212,10 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
       -- 3. We can throw an exception if the user consumes too much input
       -- 4. We can detect if the Progress object escapes the scope of
       --    rpcWithServer (by changing the state after the handler returns).
-      progressState <- newMVar (Right (rpcOut st))
+      progressState <- newMVar (Right out)
 
       -- Call the handler, update the state, and return the result
-      b <- handler $ progress (rpcProc st) progressState
+      b <- handler $ progress progressState
 
       -- At this point the handler has returned, but we have not yet changed
       -- the 'progressState' to make sure it's Right. So potentially the
@@ -249,22 +231,21 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
           Left out' -> return (Left out', out')
           Right _   -> Ex.throwIO underconsumptionException
 
-      return (st { rpcOut = out' }, b)
+      return (RpcRunning out', b)
     RpcStopped ex ->
       Ex.throwIO ex
   where
-    progress :: ProcessHandle
-             -> MVar (Either ByteString ByteString)
+    progress :: MVar (Either ByteString ByteString)
              -> Progress resp resp
-    progress ph progressState = Progress $
-      modifyMVar progressState $ \mOut -> checkKilled ph $
+    progress progressState = Progress $
+      modifyMVar progressState $ \mOut ->
         case mOut of
-          Right out ->
+          Right out -> mapIOToExternal server $
             case parseJSON out of
               Right (out', FinalResponse resp) ->
                 return (Left out', Left resp)
               Right (out', IntermediateResponse resp) ->
-                return (Right out', Right (resp, progress ph progressState))
+                return (Right out', Right (resp, progress progressState))
               Left err ->
                 Ex.throwIO (userError err)
           Left _ ->
@@ -301,28 +282,17 @@ rpcWithProgressCallback server req callback = rpcWithProgress server req handler
 -- process cleanly you must implement your own termination protocol before
 -- calling 'shutdown'.
 shutdown :: RpcServer req resp -> IO ()
-shutdown server = withRpcServer server $ \st -> do
-  ex <- terminate st (Ex.toException (userError "Manual shutdown"))
+shutdown server = withRpcServer server $ \_ -> do
+  terminate server
+  let ex = Ex.toException (userError "Manual shutdown")
   return (RpcStopped ex, ())
 
 -- | Force-terminate the external process
-terminate :: RpcState req resp -> Ex.SomeException -> IO Ex.SomeException
-terminate st@(RpcRunning {}) ex = do
-  -- If we kill the server the thread that lists for exceptions from the server
-  -- may report an exception, which is not the one we want
-  killThread (rpcErr st)
-
-  -- Close the server's stdin. This will cause the server to exit
-  -- This may fail if the server is already killed, so we just ignore any
-  -- exceptions thrown by hClose
-  ignoreIOExceptions $ hClose (rpcIn st)
-
-  -- Wait for the server to terminate
-  _ <- waitForProcess (rpcProc st)
-
-  return ex
-terminate (RpcStopped ex') _ =
-  return ex' -- Already stopped
+terminate :: RpcServer req resp -> IO ()
+terminate server = do
+  ignoreIOExceptions $ hClose (rpcIn server)
+  _ <- waitForProcess (rpcProc server)
+  ignoreIOExceptions $ removeFile (rpcErr server)
 
 -- | Like modifyMVar, but terminate the server on exceptions
 withRpcServer :: RpcServer req resp
@@ -332,22 +302,15 @@ withRpcServer server io =
   Ex.mask $ \restore -> do
     st <- takeMVar (rpcState server)
 
-    mainThread <- myThreadId
-    auxThread <- forkIO $ do
-      ex <- readMVar (rpcPendingException server)
-      throwTo mainThread ex
-
     mResult <- Ex.try $ restore (io st)
-
-    killThread auxThread
 
     case mResult of
       Right (st', a) -> do
         putMVar (rpcState server) st'
         return a
       Left ex -> do
-        ex' <- terminate st ex
-        putMVar (rpcState server) (RpcStopped ex')
+        terminate server
+        putMVar (rpcState server) (RpcStopped ex)
         Ex.throwIO ex
 
 --------------------------------------------------------------------------------
@@ -397,55 +360,32 @@ channelHandler inp outp handler = forever $ do
           writeChan outp (IntermediateResponse intermediateResponse)
           go p'
 
--- | Read an exception from the remote server and store it locally
--- (see description of 'RpcServer')
-forwardExceptions :: Handle
-                  -> MVar Ex.SomeException
-                  -> ProcessHandle
-                  -> IO ()
-forwardExceptions h mvar ph = do
-    contents <- hGetContents h
-
-    Ex.handle (putMVar mvar) . checkKilled ph . terminateIfKilled $
-      case parseJSON contents of
-        Right (_, ex) ->
-          Ex.throwIO (ex :: ExternalException)
-        Left err ->
-          Ex.throwIO . userError $ "Malformed exception: "
-                                ++ prefixOf 80 contents
-                                ++ " (" ++ err ++ ")"
-  where
-    prefixOf :: Int -> ByteString -> String
-    prefixOf len bs =
-      let prefix = unpack (take (fromIntegral (len + 1)) bs) in
-      if length prefix > len then '"' : init prefix ++ "\"..."
-                             else '"' : prefix ++ "\""
-
-    terminateIfKilled :: IO () -> IO ()
-    terminateIfKilled =
-      let isThreadKilled Ex.ThreadKilled = Just ()
-          isThreadKilled _               = Nothing
-      in Ex.handleJust isThreadKilled (const $ return ())
-
 -- | Set all the specified handles to binary mode and block buffering
 setBinaryBlockBuffered :: [Handle] -> IO ()
 setBinaryBlockBuffered =
   mapM_ $ \h -> do hSetBinaryMode h True
                    hSetBuffering  h (BlockBuffering Nothing)
 
--- | Run the specified IO action. If it throws an exception, check if
--- given process has been killed. If so, throw a serverKilledException.
--- If not, rethrow the original exception.
-checkKilled :: ProcessHandle -> IO a -> IO a
-checkKilled ph p = Ex.catch p $ \ex -> do
-  exitCode <- getProcessExitCode ph
-  case exitCode of
-    Just _  -> Ex.throwIO serverKilledException
-    Nothing -> Ex.throwIO (ex :: Ex.SomeException)
+-- | Map IO exceptions to external exceptions, using the error written
+-- by the server (if any)
+mapIOToExternal :: RpcServer req resp -> IO a -> IO a
+mapIOToExternal server p = Ex.catch p $ \ex -> do
+  let _ = ex :: Ex.IOException
+  merr <- tryReadFile (rpcErr server)
+  ignoreIOExceptions $ removeFile (rpcErr server)
+  if null merr
+    then Ex.throwIO serverKilledException
+    else Ex.throwIO (ExternalException merr)
 
 -- | Write a bytestring to a buffer and flush
 hPutFlush :: Handle -> ByteString -> IO ()
 hPutFlush h bs = hPut h bs >> hFlush h
+
+-- | Try to read the given file. If it doesn't exist, return the empty stirng
+tryReadFile :: FilePath -> IO String
+tryReadFile file = Ex.catch (readFile file) $ \ex ->
+  let _ = ex :: Ex.IOException in
+  return ""
 
 -- | Ignore IO exceptions
 ignoreIOExceptions :: IO () -> IO ()

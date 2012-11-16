@@ -64,7 +64,7 @@ startTestServer = rpcServer stdin stdout stderr
 forkTestServer :: String -> IO (RpcServer req resp)
 forkTestServer test = do
   prog <- getExecutablePath
-  forkRpcServer prog ["--server", test]
+  forkRpcServer prog ["--server", test] "."
 
 -- | Do an RPC call and verify the result
 assertRpcEqual :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp)
@@ -296,7 +296,9 @@ tests = [
   ]
   where
     testRPC :: String -> (RpcServer req resp -> Assertion) -> Test
-    testRPC test = testCase test . withServer test
+    testRPC name assertion = testCase name $ withServer name $ \server -> do
+      assertion server
+      shutdown server
 
 main :: IO ()
 main = do
