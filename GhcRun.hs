@@ -4,8 +4,8 @@
 -- (JP Moresmau's buildwrapper package used as template for GHC API use)
 --
 -- | Implementation details of the calls to GHC that compute information
--- based on source files. Only this file should import the GHC internals
--- modules.
+-- based on source files and provides progress information.
+-- Only this file should import the GHC-internals modules.
 module GhcRun
   ( LeftoverOpts
   , submitOpts

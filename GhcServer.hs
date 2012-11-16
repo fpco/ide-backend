@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 -- | Implementation of the server that controls the long-running GHC instance.
--- | This is the place where the GHC-specific part joins the part
+-- This is the place where the GHC-specific part joins the part
 -- implementing the general RPC infrastructure.
 --
 -- The modules importing any GHC internals, as well as the modules

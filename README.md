@@ -5,15 +5,8 @@ Compile and test with
 
     cabal install --enable-tests
 
-For some more testing, go to test/ and run
 
-    ../dist/build/ghc-errors/ghc-errors
-
-with the name of each of the subdirectories in turn
-(sorry, no automation here yet).
-
-
-The API is in IdeSession.hs. Format it nicely with
+The API is in IdeSession.hs. It can be formatted nicely for viewing with
 
     cabal haddock
 

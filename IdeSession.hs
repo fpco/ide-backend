@@ -157,40 +157,6 @@ import Common
 import GhcServer
 import Progress
 
--- This could be equally well implemented as a new mvar created per
--- each new session state, but this implementation has some minor advantages.
--- It gives more useful error messages and provides a counter of session
--- updates, which can be used, e.g.,  to roughly estimate how badly outdated
--- the info therein is, in order to decide whether to show it to the user
--- while waiting for a newer version.
-data StateToken = StateToken (MVar Int) Int
-
-initToken :: IO StateToken
-initToken = do
-  mv <- newMVar 0
-  return $ StateToken mv 0
-
--- Invalidates previous sessions, returns a new token for the new session.
-incrementToken :: StateToken -> IO StateToken
-incrementToken token@(StateToken mv _) = do
-  checkToken token
-  let incrCheckToken current = do
-        let newT = current + 1
-        return (newT, StateToken mv newT)
-  modifyMVar mv incrCheckToken
-
-checkToken :: StateToken -> IO ()
-checkToken (StateToken mv k) = do
-  current <- readMVar mv
-  when (k /= current) $
-    error $ "Invalid session token " ++ show k ++ " /= " ++ show current
-
--- In this implementation, it's fully applicative, and so invalid sessions
--- can be queried at will. Note that there may be some working files
--- produced by GHC while obtaining these values. They are not captured here,
--- so queries are not allowed to read them.
-type Computed = [SourceError]
-
 -- | This is a state token for the current state of an IDE session. We can run
 -- queries in the current state, and from this state we can perform a batch
 -- of updates, ultimately leading to a new 'IdeSession'.
@@ -225,6 +191,40 @@ data SessionConfig = SessionConfig {
        configTempDir :: FilePath
      }
 
+-- This could be equally well implemented as a new mvar created per
+-- each new session state, but this implementation has some minor advantages.
+-- It gives more useful error messages and provides a counter of session
+-- updates, which can be used, e.g.,  to roughly estimate how badly outdated
+-- the info therein is, in order to decide whether to show it to the user
+-- while waiting for a newer version.
+data StateToken = StateToken (MVar Int) Int
+
+initToken :: IO StateToken
+initToken = do
+  mv <- newMVar 0
+  return $ StateToken mv 0
+
+-- Invalidates previous sessions, returns a new token for the new session.
+incrementToken :: StateToken -> IO StateToken
+incrementToken token@(StateToken mv _) = do
+  checkToken token
+  let incrCheckToken current = do
+        let newT = current + 1
+        return (newT, StateToken mv newT)
+  modifyMVar mv incrCheckToken
+
+checkToken :: StateToken -> IO ()
+checkToken (StateToken mv k) = do
+  current <- readMVar mv
+  when (k /= current) $
+    error $ "Invalid session token " ++ show k ++ " /= " ++ show current
+
+-- In this implementation, it's fully applicative, and so invalid sessions
+-- can be queried at will. Note that there may be some working files
+-- produced by GHC while obtaining these values. They are not captured here,
+-- so queries are not allowed to read them.
+type Computed = [SourceError]
+
 ensureDirEmpty :: FilePath -> IO ()
 ensureDirEmpty dir = do
   cnts <- getDirectoryContents dir
@@ -239,7 +239,7 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configWorkingDir
   ensureDirEmpty configDataDir
   ensureDirEmpty configTempDir
-  let ideComputed = Nothing  -- can't query before the first Progress
+  let ideComputed = Nothing  -- can't query before the first call to GHC
   ideToken <- initToken
   ideGhcServer <- forkGhcServer
   return IdeSession{..}
@@ -295,11 +295,11 @@ updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
   update sess
 
   -- Last, communicating with the GHC server.
-  let f (RespWorking c) = c
+  let f (RespWorking c) = c  -- advancement counter
       f (RespDone _)    = error "updateSession: unexpected RespDone"
       g (RespWorking _) = error "updateSession: unexpected RespWorking"
       g (RespDone errs) = sess {ideToken = newToken, ideComputed = Just errs}
-  rpcGhcServer ideGhcServer configSourcesDir (handler . fmap2Progress f g)
+  rpcGhcServer ideGhcServer configSourcesDir (handler . bimapProgress f g)
 
 -- | Writes a file atomically.
 --
