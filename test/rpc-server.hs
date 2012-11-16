@@ -342,6 +342,29 @@ testOverconsumption server = do
       progressWait p
       progressWait p
 
+-- | Test what happens if the client specifies the wrong request type
+--
+-- (The actual type is the type of the echo server: RpcServer String String)
+testInvalidReqType :: RpcServer () String -> Assertion
+testInvalidReqType server =
+    assertRpcRaises server () (ExternalException . show . userError $ parseEx)
+  where
+    -- TODO: do we want to insist on this particular parse error?
+    parseEx = "when expecting a String, encountered Array instead"
+
+-- | Test what happens if the client specifies the wrong response type
+--
+-- Note that since the decoding error now happens *locally*, the exception
+-- is a regular userError, rather than an ExternalException
+--
+-- (The actual type is the type of the echo server: RpcServer String String)
+testInvalidRespType :: RpcServer String () -> Assertion
+testInvalidRespType server =
+    assertRpcRaises server "hi" (userError parseEx)
+  where
+    -- TODO: do we want to insist on this particular parse error?
+    parseEx = "when expecting a (), encountered String instead"
+
 --------------------------------------------------------------------------------
 -- Driver                                                                     --
 --------------------------------------------------------------------------------
@@ -371,6 +394,8 @@ tests = [
         testRPC "illscoped"        testIllscoped
       , testRPC "underconsumption" testUnderconsumption
       , testRPC "overconsumption"  testOverconsumption
+      , testRPC "invalidReqType"   testInvalidReqType
+      , testRPC "invalidRespType"  testInvalidRespType
       ]
   ]
   where
@@ -419,6 +444,10 @@ main = do
       startTestServer testKillMultiServer
     ["--server", "killAsyncMulti"] ->
       startTestServer testKillAsyncMultiServer
+    ["--server", "invalidReqType"] ->
+      startTestServer testEchoServer
+    ["--server", "invalidRespType"] ->
+      startTestServer testEchoServer
     ["--server", serverName] ->
       error $ "Invalid server " ++ show serverName
     _ -> defaultMain tests

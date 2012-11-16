@@ -240,13 +240,16 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
     progress progressState = Progress $
       modifyMVar progressState $ \mOut ->
         case mOut of
-          Right out -> mapIOToExternal server $
-            case parseJSON out of
-              Right (out', FinalResponse resp) ->
+          Right out -> do
+            (out', value) <- mapIOToExternal server $ case parse json' out of
+                               Fail _ _ err  -> Ex.throwIO (userError err)
+                               Done out' val -> return (out', val)
+            case fromJSON value of
+              Success (FinalResponse resp) ->
                 return (Left out', Left resp)
-              Right (out', IntermediateResponse resp) ->
+              Success (IntermediateResponse resp) ->
                 return (Right out', Right (resp, progress progressState))
-              Left err ->
+              Error err ->
                 Ex.throwIO (userError err)
           Left _ ->
             Ex.throwIO overconsumptionException
@@ -327,16 +330,14 @@ readRequests h ch = hGetContents h >>= go
         Right (contents', req) -> writeChan ch req >> go contents'
         Left err               -> Ex.throwIO (userError err)
 
--- | Parse a JSON value, and return the remainder of the input along with
--- the result (or an error message)
-parseJSON :: FromJSON a => ByteString -> Either String (ByteString, a)
-parseJSON bs =
-  case parse json' bs of
-    Fail _ _ err -> Left err
-    Done bs' value ->
-      case fromJSON value of
-        Success req -> Right (bs', req)
-        Error err   -> Left err
+    parseJSON :: FromJSON a => ByteString -> Either String (ByteString, a)
+    parseJSON bs =
+      case parse json' bs of
+        Fail _ _ err -> Left err
+        Done bs' value ->
+          case fromJSON value of
+            Success req -> Right (bs', req)
+            Error err   -> Left err
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: ToJSON resp => Chan (Response resp) -> Handle -> IO ()
