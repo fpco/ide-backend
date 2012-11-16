@@ -17,6 +17,7 @@ import Test.HUnit (Assertion, assertEqual, assertFailure)
 import IdeSession
 import GhcServer
 import Progress
+import TestTools
 
 testAll :: [String] -> FilePath -> IO ()
 testAll opts originalSourcesDir =
@@ -63,8 +64,9 @@ check opts originalSourcesDir configSourcesDir = do
   msgs2 <- getSourceErrors s2
   putStrLn $ "Error 2:\n" ++ List.intercalate "\n\n"
     (map formatErrorMessage msgs2) ++ "\n"
-  shouldFail "updateSession s0 update2 (progressWaitConsume displayCounter)"
-            $ updateSession s0 update2 (progressWaitConsume displayCounter)
+  assertRaises "updateSession s0 update2 (progressWaitConsume displayCounter)"
+               (userError "Invalid session token 1 /= 2")
+               (updateSession s0 update2 (progressWaitConsume displayCounter))
   s4 <- updateSession s2 update2 (progressWaitConsume displayCounter)
   msgs4 <- getSourceErrors s4
   putStrLn $ "Error 4:\n" ++ List.intercalate "\n\n"
@@ -82,18 +84,10 @@ check opts originalSourcesDir configSourcesDir = do
   msgs11 <- getSourceErrors s11
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
     (map formatErrorMessage msgs11) ++ "\n"
-  shouldFail "shutdownSession s10"
-            $ shutdownSession s10
+  assertRaises "shutdownSession s10"
+               (userError "Invalid session token 1 /= 2")
+               (shutdownSession s10)
   shutdownSession s11
-
-shouldFail :: String -> IO a -> IO ()
-shouldFail descr x = do
-  let logException e = do
-        putStrLn $ "Correctly rejected: " ++ descr ++
-                   "\nwith exception msg: " ++ show (e :: Ex.ErrorCall) ++ "\n"
-        return True
-  failed <- Ex.catch (x >> return False) logException
-  unless failed $ error $ "should fail: " ++ descr
 
 formatErrorMessage :: SourceError -> String
 formatErrorMessage = show
