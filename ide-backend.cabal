@@ -18,7 +18,6 @@ library
                       directory ==1.*,
                       process   ==1.*,
                       filepath  ==1.*,
-                      json      ==0.5.*,
                       ghc       ==7.*,
                       containers >= 0.4.1   && < 1,
                       random     >= 1.0.1   && < 2,
@@ -47,7 +46,6 @@ test-suite ide-backend-sample-use
                       directory ==1.*,
                       process   ==1.*,
                       filepath  ==1.*,
-                      json      ==0.5.*,
                       ghc       ==7.*,
                       containers >= 0.4.1   && < 1,
                       random     >= 1.0.1   && < 2,
@@ -55,7 +53,6 @@ test-suite ide-backend-sample-use
                       attoparsec,
                       aeson,
                       executable-path,
-                      pretty,
 -- pretty beastly deps:
                       Unixutils >= 1.50
   if impl(ghc >= 7.6.1)
@@ -79,7 +76,6 @@ test-suite ghc-errors
                       directory ==1.*,
                       process   ==1.*,
                       filepath  ==1.*,
-                      json      ==0.5.*,
                       ghc       ==7.*,
                       containers >= 0.4.1   && < 1,
                       random     >= 1.0.1   && < 2,
@@ -90,7 +86,6 @@ test-suite ghc-errors
                       test-framework-hunit >= 0.2 && < 0.3,
                       HUnit                >= 1.2 && < 1.3,
                       executable-path,
-                      pretty,
 -- pretty beastly deps:
                       Unixutils >= 1.50
   if impl(ghc >= 7.6.1)
@@ -114,7 +109,6 @@ test-suite rpc-server
                      directory ==1.*,
                      process   ==1.*,
                      filepath  ==1.*,
-                     json      ==0.5.*,
                      ghc       ==7.*,
                      containers >= 0.4.1   && < 1,
                      random     >= 1.0.1   && < 2,

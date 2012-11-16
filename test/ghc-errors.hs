@@ -9,9 +9,6 @@ import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
 import Data.Monoid ((<>), mempty, mconcat)
 import qualified Data.ByteString.Lazy.Char8 as BS
-import Text.JSON as JSON
-import Text.JSON.Pretty (pp_value)
-import Text.PrettyPrint (render)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -50,7 +47,7 @@ check opts originalSourcesDir configSourcesDir = do
   s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
   msgs0 <- getSourceErrors s0
   putStrLn $ "Error 0:\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessagesJSON msgs0) ++ "\n"
+    (map formatErrorMessage msgs0) ++ "\n"
   -- Overwrite some copied files.
   let overName = case originalModules of
         [] -> ModuleName "testEmptyDirModule"
@@ -65,16 +62,16 @@ check opts originalSourcesDir configSourcesDir = do
   s2 <- updateSession s0 update1 (progressWaitConsume displayCounter)
   msgs2 <- getSourceErrors s2
   putStrLn $ "Error 2:\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessagesJSON msgs2) ++ "\n"
+    (map formatErrorMessage msgs2) ++ "\n"
   shouldFail "updateSession s0 update2 (progressWaitConsume displayCounter)"
             $ updateSession s0 update2 (progressWaitConsume displayCounter)
   s4 <- updateSession s2 update2 (progressWaitConsume displayCounter)
   msgs4 <- getSourceErrors s4
   putStrLn $ "Error 4:\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessagesJSON msgs4) ++ "\n"
+    (map formatErrorMessage msgs4) ++ "\n"
   msgs2' <- getSourceErrors s2
   putStrLn $ "Error 2 again:\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessagesJSON msgs2') ++ "\n"
+    (map formatErrorMessage msgs2') ++ "\n"
 -- Can't do the following until we have each runGHC session spawned in
 -- a differen process.
 --
@@ -84,7 +81,7 @@ check opts originalSourcesDir configSourcesDir = do
   s11 <- updateSession s10 mempty (progressWaitConsume displayCounter)
   msgs11 <- getSourceErrors s11
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessagesJSON msgs11) ++ "\n"
+    (map formatErrorMessage msgs11) ++ "\n"
   shouldFail "shutdownSession s10"
             $ shutdownSession s10
   shutdownSession s11
@@ -98,30 +95,8 @@ shouldFail descr x = do
   failed <- Ex.catch (x >> return False) logException
   unless failed $ error $ "should fail: " ++ descr
 
--- Hacks retained just to pretty-print error messages.
-formatErrorMessagesJSON :: SourceError -> String
-formatErrorMessagesJSON err =
-  render $ pp_value $ errorMessageToJSON err
-
-errorMessageToJSON :: SourceError -> JSValue
-errorMessageToJSON (SrcError errKind file (stline, stcol)
-                                          (endline, endcol) msgstr) =
-  JSObject $
-    toJSObject
-      [ ("kind",      showJSON (toJSString (show errKind)))
-      , ("file",      showJSON (toJSString file))
-      , ("startline", showJSON stline)
-      , ("startcol",  showJSON stcol)
-      , ("endline",   showJSON endline)
-      , ("endcol",    showJSON endcol)
-      , ("message",   showJSON (toJSString msgstr))
-      ]
-errorMessageToJSON (OtherError msgstr) =
-  JSObject $
-    toJSObject
-      [ ("kind",      showJSON (toJSString "message"))
-      , ("message",   showJSON (toJSString msgstr))
-      ]
+formatErrorMessage :: SourceError -> String
+formatErrorMessage = show
 
 -- Driver
 
