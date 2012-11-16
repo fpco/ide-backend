@@ -48,7 +48,7 @@ check originalSourcesDir configSourcesDir = do
   let sessionConfig = SessionConfig{ configSourcesDir
                                    , configWorkingDir = configSourcesDir
                                    , configDataDir    = configSourcesDir
-                                   , configTempDir    = configSourcesDir
+                                   , configTempDir    = "."
                                    }
   sP <- initSession sessionConfig
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.

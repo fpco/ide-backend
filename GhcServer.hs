@@ -119,10 +119,10 @@ createGhcServer opts = do
 
 -- * Client-side operations
 
-forkGhcServer :: IO GhcServer
-forkGhcServer = do
+forkGhcServer :: FilePath -> IO GhcServer
+forkGhcServer configTempDir = do
   prog <- getExecutablePath
-  forkRpcServer prog ["--server"] "." -- TODO: use temp directory assigned to library API
+  forkRpcServer prog ["--server"] configTempDir
 
 rpcGhcServer :: GhcServer -> FilePath
              -> (Progress GhcResponse GhcResponse -> IO a) -> IO a

@@ -238,10 +238,9 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configSourcesDir
   ensureDirEmpty configWorkingDir
   ensureDirEmpty configDataDir
-  ensureDirEmpty configTempDir
   let ideComputed = Nothing  -- can't query before the first call to GHC
   ideToken <- initToken
-  ideGhcServer <- forkGhcServer
+  ideGhcServer <- forkGhcServer configTempDir
   return IdeSession{..}
 
 -- | Close a session down, releasing the resources.
