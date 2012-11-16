@@ -4,11 +4,11 @@ module Main where
 import System.IO (stdin, stdout, stderr)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
-import System.Posix.Signals (raiseSignal, sigKILL)
+import System.Posix.Signals (raiseSignal, sigKILL, Signal)
 import Data.Aeson (FromJSON(parseJSON), ToJSON(toJSON))
 import Data.Aeson.TH (deriveJSON, deriveToJSON, deriveFromJSON)
 import Data.Maybe (fromJust)
-import Control.Monad (forM_)
+import Control.Monad (forM_, void)
 import qualified Control.Exception as Ex
 import Control.Applicative ((<$>), (<|>))
 import Control.Concurrent (threadDelay, forkIO)
@@ -42,13 +42,21 @@ assertRaises msg ex p = do
                                   ++ "Raised exception of the wrong type "
                                   ++ exceptionType ex' ++ ": "
                                   ++ show ex'
+                                  ++ ". Expected exception of type "
+                                  ++ exceptionType (Ex.toException ex) ++ ": "
+                                  ++ show ex
 
+-- | Find the type of an exception (only a few kinds of exceptions are supported)
 exceptionType :: Ex.SomeException -> String
 exceptionType ex = fromJust $
       ((\(_ :: Ex.IOException)    -> "IOException")       <$> Ex.fromException ex)
   <|> ((\(_ :: Ex.AsyncException) -> "AsyncException")    <$> Ex.fromException ex)
   <|> ((\(_ :: ExternalException) -> "ExternalException") <$> Ex.fromException ex)
   <|> Just "Unknown type"
+
+-- | Like 'raiseSignal', but with a more general type
+throwSignal :: Signal -> IO a
+throwSignal signal = raiseSignal signal >> undefined
 
 --------------------------------------------------------------------------------
 -- RPC-specific auxiliary                                                     --
@@ -72,20 +80,48 @@ assertRpcEqual :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp)
                -> req                 -- ^ Request
                -> resp                -- ^ Expected response
                -> Assertion
-assertRpcEqual server req resp = do
-  resp' <- rpc server req
-  assertEqual ("Request " ++ show req) resp resp'
+assertRpcEqual server req resp =
+  assertRpcEquals server req [resp]
 
--- | Like 'assertRpcEqual' but verify a number of responses
+-- | Like 'assertRpcEqual' but verify a number of responses, before throwing
+-- the specified exception (if any)
 assertRpcEquals :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp)
                 => RpcServer req resp  -- ^ RPC server
                 -> req                 -- ^ Request
                 -> [resp]              -- ^ Expected responses
                 -> Assertion
-assertRpcEquals server req = rpcWithProgress server req . handler
+assertRpcEquals server req resps =
+  assertRpc server req resps (Nothing :: Maybe Ex.IOException) -- Random choice
+
+-- | Verify that the RPC call raises the given exception immediately
+assertRpcRaises :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp, Eq e, Ex.Exception e)
+                => RpcServer req resp  -- ^ RPC server
+                -> req                 -- ^ Request
+                -> e                   -- ^ Expected exception
+                -> Assertion
+assertRpcRaises server req ex =
+  assertRpc server req [] (Just ex)
+
+-- | The most general form for checking an RPC response: send a request,
+-- and verify the returned responses, possibly followed by an exception.
+assertRpc :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp, Eq e, Ex.Exception e)
+          => RpcServer req resp  -- ^ RPC server
+          -> req                 -- ^ Request
+          -> [resp]              -- ^ Expected responses
+          -> Maybe e             -- ^ Exception after the responses
+          -> Assertion
+assertRpc server req resps mEx =
+    case mEx of
+      Just ex -> -- assertRaises on the outside, because it the exception might
+                 -- be raised before the first call to progressWait
+                 assertRaises ("Request " ++ show req) ex $ rpcWithProgress server req (handler resps)
+      Nothing -> rpcWithProgress server req (handler resps)
   where
-    handler [] _ =
-      assertFailure $ "Received unexpected messages for request " ++ show req
+    handler [] p =
+      case mEx of
+        Just _  -> -- Do another call so that we can get the exception
+                   void $ progressWait p
+        Nothing -> assertFailure ("Request " ++ show req ++ ": Unexpected message")
     handler (r:rs) p = do
       resp <- progressWait p
       case resp of
@@ -94,17 +130,6 @@ assertRpcEquals server req = rpcWithProgress server req . handler
         Right (intermediateResponse, p') -> do
           assertEqual ("Request " ++ show req) r intermediateResponse
           handler rs p'
-
-assertRpcRaises :: (ToJSON req, FromJSON resp, Show req, Eq e, Ex.Exception e)
-                => RpcServer req resp  -- ^ RPC server
-                -> req                 -- ^ Request
-                -> e                   -- ^ Expected exception
-                -> Assertion
-assertRpcRaises server req ex =
-  assertRaises ("Request " ++ show req) ex (rpc server req)
-
-withServer :: String -> (RpcServer req resp -> Assertion) -> Assertion
-withServer server = (forkTestServer server >>=)
 
 --------------------------------------------------------------------------------
 -- Feature tests                                                              --
@@ -195,7 +220,7 @@ testKillServer firstRequest req = return . Progress $ do
   isFirst <- modifyMVar firstRequest $ \b -> return (False, b)
   if isFirst
     then return (Left req)
-    else raiseSignal sigKILL >> undefined
+    else throwSignal sigKILL
 
 -- | Test server which gets killed between requests
 testKillAsync :: RpcServer String String -> Assertion
@@ -207,7 +232,7 @@ testKillAsync server = do
 testKillAsyncServer :: String -> IO (Progress String String)
 testKillAsyncServer req = return . Progress $ do
   -- Fork a thread which causes the server to crash 0.5 seconds after the request
-  forkIO $ threadDelay 250000 >> raiseSignal sigKILL
+  forkIO $ threadDelay 250000 >> throwSignal sigKILL
   return (Left req)
 
 -- | Test crash during decoding
@@ -240,6 +265,55 @@ testFaultyEncoder server =
 testFaultyEncoderServer :: () -> IO (Progress TypeWithFaultyEncoder TypeWithFaultyEncoder)
 testFaultyEncoderServer () = return . Progress $
   return (Left TypeWithFaultyEncoder)
+
+--------------------------------------------------------------------------------
+-- Test errors during RPC calls with multiple responses                       --
+--------------------------------------------------------------------------------
+
+-- | Test server which crashes after sending some intermediate responses
+testCrashMulti :: RpcServer Int Int -> Assertion
+testCrashMulti server =
+  assertRpc server 5 [5, 4 .. 1] (Just . ExternalException . show $ crash)
+
+testCrashMultiServer :: Int -> IO (Progress Int Int)
+testCrashMultiServer crashAfter = do
+  mvar <- newMVar crashAfter
+  let go = Progress $ modifyMVar mvar $ \n ->
+             if n == 0
+               then Ex.throwIO crash
+               else return (n - 1, Right (n, go))
+  return go
+
+-- | Like 'CrashMulti', but killed rather than an exception
+testKillMulti :: RpcServer Int Int -> Assertion
+testKillMulti server =
+  assertRpc server 5 [5, 4 .. 1] (Just serverKilledException)
+
+testKillMultiServer :: Int -> IO (Progress Int Int)
+testKillMultiServer crashAfter = do
+  mvar <- newMVar crashAfter
+  let go = Progress $ modifyMVar mvar $ \n ->
+             if n == 0
+               then throwSignal sigKILL
+               else return (n - 1, Right (n, go))
+  return go
+
+-- | Like 'KillMulti', but now the server gets killed *between* messages
+testKillAsyncMulti :: RpcServer Int Int -> Assertion
+testKillAsyncMulti server =
+  assertRpc server 5 [5, 4 .. 1] (Just serverKilledException)
+
+testKillAsyncMultiServer :: Int -> IO (Progress Int Int)
+testKillAsyncMultiServer crashAfter = do
+  mvar <- newMVar crashAfter
+  let go = Progress $ do
+             threadDelay 500000
+             modifyMVar mvar $ \n -> case n of
+               0 -> return (0, Left 0)
+               1 -> do forkIO $ threadDelay 250000 >> throwSignal sigKILL
+                       return (n - 1, Right (n, go))
+               _ -> return (n - 1, Right (n, go))
+  return go
 
 --------------------------------------------------------------------------------
 -- Tests for errors in client code                                            --
@@ -288,6 +362,11 @@ tests = [
       , testRPC "faultyDecoder"    testFaultyDecoder
       , testRPC "faultyEncoder"    testFaultyEncoder
       ]
+  , testGroup "Error handling during RPC calls with multiple responses" [
+        testRPC "crashMulti"       testCrashMulti
+      , testRPC "killMulti"        testKillMulti
+      , testRPC "killAsyncMulti"   testKillAsyncMulti
+      ]
   , testGroup "Client code errors" [
         testRPC "illscoped"        testIllscoped
       , testRPC "underconsumption" testUnderconsumption
@@ -296,8 +375,9 @@ tests = [
   ]
   where
     testRPC :: String -> (RpcServer req resp -> Assertion) -> Test
-    testRPC name assertion = testCase name $ withServer name $ \server -> do
-      assertion server
+    testRPC name testWith = testCase name $ do
+      server <- forkTestServer name
+      testWith server
       shutdown server
 
 main :: IO ()
@@ -333,6 +413,12 @@ main = do
       startTestServer testEchoServer
     ["--server", "overconsumption"] ->
       startTestServer testEchoServer
+    ["--server", "crashMulti"] ->
+      startTestServer testCrashMultiServer
+    ["--server", "killMulti"] ->
+      startTestServer testKillMultiServer
+    ["--server", "killAsyncMulti"] ->
+      startTestServer testKillAsyncMultiServer
     ["--server", serverName] ->
       error $ "Invalid server " ++ show serverName
     _ -> defaultMain tests
