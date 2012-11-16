@@ -63,7 +63,9 @@ check originalSourcesDir configSourcesDir = do
         map (\ f -> (ModuleName $ dropExtension f, f)) originalFiles
       upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
       originalUpdate = mconcat $ map upd originalModules
-  s0 <- updateSession sP originalUpdate progressWaitCompletion
+      displayCounter :: PCounter -> IO ()
+      displayCounter n = putStr (show n)
+  s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
   msgs0 <- getSourceErrors s0
   putStrLn $ "Error 0:\n" ++ List.intercalate "\n\n"
     (map formatErrorMessagesJSON msgs0) ++ "\n"
@@ -78,13 +80,13 @@ check originalSourcesDir configSourcesDir = do
         (updateModule $ ModulePut overName (BS.pack "module M where\n4"))
         <> (updateModule $ ModulePut overName (BS.pack "module M where\nx = a4"))
   -- Test the computations.
-  s2 <- updateSession s0 update1 progressWaitCompletion
+  s2 <- updateSession s0 update1 (progressWaitConsume displayCounter)
   msgs2 <- getSourceErrors s2
   putStrLn $ "Error 2:\n" ++ List.intercalate "\n\n"
     (map formatErrorMessagesJSON msgs2) ++ "\n"
-  shouldFail "updateSession s0 update2 progressWaitCompletion"
-            $ updateSession s0 update2 progressWaitCompletion
-  s4 <- updateSession s2 update2 progressWaitCompletion
+  shouldFail "updateSession s0 update2 (progressWaitConsume displayCounter)"
+            $ updateSession s0 update2 (progressWaitConsume displayCounter)
+  s4 <- updateSession s2 update2 (progressWaitConsume displayCounter)
   msgs4 <- getSourceErrors s4
   putStrLn $ "Error 4:\n" ++ List.intercalate "\n\n"
     (map formatErrorMessagesJSON msgs4) ++ "\n"
@@ -97,7 +99,7 @@ check originalSourcesDir configSourcesDir = do
 --  shutdownSession s4
 --  s10 <- initSession sessionConfig
   let s10 = s4
-  s11 <- updateSession s10 mempty progressWaitCompletion
+  s11 <- updateSession s10 mempty (progressWaitConsume displayCounter)
   msgs11 <- getSourceErrors s11
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
     (map formatErrorMessagesJSON msgs11) ++ "\n"

@@ -63,7 +63,9 @@ check originalSourcesDir configSourcesDir = do
         map (\ f -> (ModuleName $ dropExtension f, f)) originalFiles
       upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
       originalUpdate = mconcat $ map upd originalModules
-  s0 <- updateSession sP originalUpdate progressWaitCompletion
+      displayCounter :: PCounter -> IO ()
+      displayCounter n = putStr (show n)  -- or just putStr "#"
+  s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
   msgs0 <- getSourceErrors s0
   putStrLn $ "Errors :\n" ++ List.intercalate "\n\n"
     (map formatErrorMessagesJSON msgs0) ++ "\n"

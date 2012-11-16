@@ -66,6 +66,7 @@ module IdeSession (
   PCounter,
   Progress,
   progressWaitCompletion,
+  progressWaitConsume,
 
   -- ** Modules
   updateModule,
@@ -310,6 +311,18 @@ progressWaitCompletion p = do
   case w of
     Left a -> return a
     Right (_, p2) -> progressWaitCompletion p2
+
+-- | Wait until the operation completes, consuming intermediate advancement
+-- information whenever it arrives.
+--
+progressWaitConsume :: (a -> IO ()) -> Progress a b -> IO b
+progressWaitConsume consume p = do
+  w <- progressWait p
+  case w of
+    Left a -> return a
+    Right (adv, p2) -> do
+      consume adv
+      progressWaitConsume consume p2
 
 -- | Writes a file atomically.
 --
