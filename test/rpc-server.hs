@@ -103,24 +103,23 @@ assertRpcRaises :: (ToJSON req, FromJSON resp, Show req, Eq e, Ex.Exception e)
 assertRpcRaises server req ex =
   assertRaises ("Request " ++ show req) ex (rpc server req)
 
+withServer :: String -> (RpcServer req resp -> Assertion) -> Assertion
+withServer server = (forkTestServer server >>=)
+
 --------------------------------------------------------------------------------
 -- Feature tests                                                              --
 --------------------------------------------------------------------------------
 
 -- | Simple echo server
-testEcho :: Assertion
-testEcho = do
-  server <- forkTestServer "echo" :: IO (RpcServer String String)
-  assertRpcEqual server "ping" "ping"
+testEcho :: RpcServer String String -> Assertion
+testEcho server = assertRpcEqual server "ping" "ping"
 
 testEchoServer :: String -> IO (Progress String String)
 testEchoServer = return . Progress . return . Left
 
 -- | Test stateful server
-testState :: Assertion
-testState = do
-  server <- forkTestServer "state"
-  forM_ ([0 .. 9] :: [Int]) $ assertRpcEqual server ()
+testState :: RpcServer () Int -> Assertion
+testState server = forM_ ([0 .. 9] :: [Int]) $ assertRpcEqual server ()
 
 testStateServer :: MVar Int -> () -> IO (Progress Int Int)
 testStateServer st () = return . Progress . modifyMVar st $ \i ->
@@ -133,25 +132,23 @@ data CountResponse = Done | Count Int deriving (Eq, Show)
 $(deriveJSON id ''CountRequest)
 $(deriveJSON id ''CountResponse)
 
-testCustomDataTypes :: Assertion
-testCustomDataTypes = do
-  server <- forkTestServer "customDataTypes"
+testCustom :: RpcServer CountRequest CountResponse -> Assertion
+testCustom server = do
   assertRpcEqual server GetCount (Count 0)
   assertRpcEqual server Increment Done
   assertRpcEqual server GetCount (Count 1)
 
-testCustomDataTypesServer :: MVar Int
+testCustomServer :: MVar Int
                           -> CountRequest
                           -> IO (Progress CountResponse CountResponse)
-testCustomDataTypesServer st Increment = return . Progress $
+testCustomServer st Increment = return . Progress $
   modifyMVar st $ \i -> return (i + 1, Left Done)
-testCustomDataTypesServer st GetCount = return . Progress $
+testCustomServer st GetCount = return . Progress $
   modifyMVar st $ \i -> return (i, Left (Count i))
 
 -- | Test progress messages
-testProgress :: Assertion
-testProgress = do
-  server <- forkTestServer "progress" :: IO (RpcServer Int Int)
+testProgress :: RpcServer Int Int -> Assertion
+testProgress server =
   forM_ [0 .. 9] $ \i -> assertRpcEquals server i [i, i - 1 .. 0]
 
 testProgressServer :: Int -> IO (Progress Int Int)
@@ -166,9 +163,8 @@ testProgressServer n = do
           else return (m - 1, Right (m, go left))
 
 -- | Test shutdown
-testShutdown :: Assertion
-testShutdown = do
-  server <- forkTestServer "echo"
+testShutdown :: RpcServer String String -> Assertion
+testShutdown server = do
   assertRpcEqual server "ping" "ping"
   shutdown server
   assertRpcRaises server "ping" (userError "Manual shutdown")
@@ -178,9 +174,8 @@ testShutdown = do
 --------------------------------------------------------------------------------
 
 -- | Test crashing server
-testCrash :: Assertion
-testCrash = do
-  server <- forkTestServer "crash" :: IO (RpcServer () ())
+testCrash :: RpcServer () () -> Assertion
+testCrash server =
   assertRpcRaises server () $ ExternalException (show crash)
 
 testCrashServer :: () -> IO (Progress () ())
@@ -190,9 +185,8 @@ crash :: Ex.IOException
 crash = userError "Intentional crash"
 
 -- | Test server which gets killed during a request
-testKill :: Assertion
-testKill = do
-  server <- forkTestServer "kill" :: IO (RpcServer String String)
+testKill :: RpcServer String String -> Assertion
+testKill server = do
   assertRpcEqual server "ping" "ping" -- First request goes through
   assertRpcRaises server "ping" serverKilledException
 
@@ -204,9 +198,8 @@ testKillServer firstRequest req = return . Progress $ do
     else raiseSignal sigKILL >> undefined
 
 -- | Test server which gets killed between requests
-testKillAsync :: Assertion
-testKillAsync = do
-  server <- forkTestServer "killAsync" :: IO (RpcServer String String)
+testKillAsync :: RpcServer String String -> Assertion
+testKillAsync server = do
   assertRpcEqual server "ping" "ping"
   threadDelay 500000 -- Wait for server to exit
   assertRpcRaises server "ping" serverKilledException
@@ -225,9 +218,8 @@ instance FromJSON TypeWithFaultyDecoder where
 
 $(deriveToJSON id ''TypeWithFaultyDecoder)
 
-testFaultyDecoder :: Assertion
-testFaultyDecoder = do
-  server <- forkTestServer "faultyDecoder" :: IO (RpcServer TypeWithFaultyDecoder ())
+testFaultyDecoder :: RpcServer TypeWithFaultyDecoder () -> Assertion
+testFaultyDecoder server =
   assertRpcRaises server TypeWithFaultyDecoder (ExternalException . show . userError $ "Faulty decoder")
 
 testFaultyDecoderServer :: TypeWithFaultyDecoder -> IO (Progress () ())
@@ -241,9 +233,8 @@ $(deriveFromJSON id ''TypeWithFaultyEncoder)
 instance ToJSON TypeWithFaultyEncoder where
   toJSON _ = error "Faulty encoder"
 
-testFaultyEncoder :: Assertion
-testFaultyEncoder = do
-  server <- forkTestServer "faultyEncoder" :: IO (RpcServer () TypeWithFaultyEncoder)
+testFaultyEncoder :: RpcServer () TypeWithFaultyEncoder -> Assertion
+testFaultyEncoder server =
   assertRpcRaises server () (ExternalException "Faulty encoder")
 
 testFaultyEncoderServer :: () -> IO (Progress TypeWithFaultyEncoder TypeWithFaultyEncoder)
@@ -257,20 +248,24 @@ testFaultyEncoderServer () = return . Progress $
 tests :: [Test]
 tests = [
     testGroup "Features" [
-        testCase "echo"            testEcho
-      , testCase "state"           testState
-      , testCase "customDataTypes" testCustomDataTypes
-      , testCase "progress"        testProgress
-      , testCase "shutdown"        testShutdown
+        testRPC "echo"     testEcho
+      , testRPC "state"    testState
+      , testRPC "custom"   testCustom
+      , testRPC "progress" testProgress
+      , testRPC "shutdown" testShutdown
       ]
   , testGroup "Error handling" [
-        testCase "crash"         testCrash
-      , testCase "kill"          testKill
-      , testCase "killAsync"     testKillAsync
-      , testCase "faultyDecoder" testFaultyDecoder
-      , testCase "faultyEncoder" testFaultyEncoder
+        testRPC "crash"         testCrash
+      , testRPC "kill"          testKill
+      , testRPC "killAsync"     testKillAsync
+      , testRPC "faultyDecoder" testFaultyDecoder
+      , testRPC "faultyEncoder" testFaultyEncoder
       ]
   ]
+  where
+    testRPC :: String -> (RpcServer req resp -> Assertion) -> Test
+    testRPC test = testCase test . withServer test
+
 
 main :: IO ()
 main = do
@@ -281,11 +276,13 @@ main = do
     ["--server", "state"] -> do
       st <- newMVar 0
       startTestServer (testStateServer st)
-    ["--server", "customDataTypes"] -> do
+    ["--server", "custom"] -> do
       st <- newMVar 0
-      startTestServer (testCustomDataTypesServer st)
+      startTestServer (testCustomServer st)
     ["--server", "progress"] ->
       startTestServer testProgressServer
+    ["--server", "shutdown"] ->
+      startTestServer testEchoServer
     ["--server", "crash"] ->
       startTestServer testCrashServer
     ["--server", "kill"] -> do
@@ -297,4 +294,7 @@ main = do
       startTestServer testFaultyDecoderServer
     ["--server", "faultyEncoder"] ->
       startTestServer testFaultyEncoderServer
+    ["--server", serverName] ->
+      error $ "Invalid server " ++ show serverName
     _ -> defaultMain tests
+
