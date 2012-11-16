@@ -30,8 +30,7 @@ main = do
   hSetBuffering stderr LineBuffering
   args <- getArgs
   case args of
-    "--server" : opts -> do
-      createGhcServer opts  -- @opts@ are GHC static flags
+    "--server" : opts -> createGhcServer opts  -- @opts@ are GHC static flags
     _ -> do
       let originalSourcesDir = case args of
             [dir] -> dir

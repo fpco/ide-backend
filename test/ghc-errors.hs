@@ -12,35 +12,21 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 import Text.JSON as JSON
 import Text.JSON.Pretty (pp_value)
 import Text.PrettyPrint (render)
-import System.IO
-  ( stderr
-  , hSetBuffering
-  , BufferMode(LineBuffering)
-  )
+
+import Test.Framework (Test, defaultMain, testGroup)
+import Test.Framework.Providers.HUnit (testCase)
+import Test.HUnit (Assertion, assertEqual, assertFailure)
 
 import IdeSession
 import GhcServer
 import Progress
 
-main :: IO ()
-main = do
-  hSetBuffering stderr LineBuffering
-  args <- getArgs
-  case args of
-    "--server" : opts -> do
-      createGhcServer opts  -- @opts@ are GHC static flags
-    _ -> do
-      test "test/ABnoError"
-      test "test/ABerror"
-      test "test/AerrorB"
-      test "."
+testAll :: [String] -> FilePath -> IO ()
+testAll opts originalSourcesDir =
+  withTemporaryDirectory "ide-backend-test" $ check opts originalSourcesDir
 
-test :: FilePath -> IO ()
-test originalSourcesDir =
-  withTemporaryDirectory "ide-backend-test" $ check originalSourcesDir
-
-check :: FilePath -> FilePath -> IO ()
-check originalSourcesDir configSourcesDir = do
+check :: [String] -> FilePath -> FilePath -> IO ()
+check opts originalSourcesDir configSourcesDir = do
   putStrLn $ "Copying files from: " ++ originalSourcesDir ++ "\n\n"
           ++ "Temporary test directory: " ++ configSourcesDir ++ "\n\n"
   -- Init session.
@@ -48,7 +34,7 @@ check originalSourcesDir configSourcesDir = do
                                    , configWorkingDir = configSourcesDir
                                    , configDataDir    = configSourcesDir
                                    , configTempDir    = "."
-                                   , configStaticOpts = []
+                                   , configStaticOpts = opts
                                    }
   sP <- initSession sessionConfig
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
@@ -136,3 +122,22 @@ errorMessageToJSON (OtherError msgstr) =
       [ ("kind",      showJSON (toJSString "message"))
       , ("message",   showJSON (toJSString msgstr))
       ]
+
+-- Driver
+
+tests :: [Test]
+tests =
+  [ testGroup "Full integration tests"
+    [ testCase "A depends on B, no errors"  $ testAll [] "test/ABnoError"
+    , testCase "A depends on B, error in A" $ testAll [] "test/AerrorB"
+    , testCase "A depends on B, error in B" $ testAll [] "test/ABerror"
+    , testCase "Our own code, package 'ghc' missing" $ testAll [] "."
+    ]
+  ]
+
+main :: IO ()
+main = do
+  args <- getArgs
+  case args of
+    "--server" : opts -> createGhcServer opts  -- @opts@ are GHC static flags
+    _ -> defaultMain tests
