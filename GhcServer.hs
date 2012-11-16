@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 -- | Implementation of the server that controls the long-running GHC instance.
 -- | This is the place where the GHC-specific part joins the part
 -- implementing the general RPC infrastructure.
@@ -20,6 +20,7 @@ module GhcServer
   ) where
 
 -- getExecutablePath is in base only for >= 4.6
+import qualified Control.Exception as Ex
 import System.Environment.Executable (getExecutablePath)
 import System.FilePath ((</>), takeExtension)
 import System.Directory
@@ -30,7 +31,10 @@ import System.IO
   , stderr
   )
 import Control.Monad (void)
-import Control.Concurrent (forkIO)
+import Control.Concurrent
+  ( forkIO
+  , myThreadId
+  )
 import Control.Concurrent.MVar
   ( newEmptyMVar
   , putMVar
@@ -68,12 +72,16 @@ hsExtentions = [".hs", ".lhs"]
 -- doing \ m -> load (LoadUpTo m)) or rewrite collectSrcError to place
 -- warnings in an mvar instead of IORef and read from it into Progress,
 -- as soon as they appear.
--- TODO2: 15:06 < edsko> forkCatch p = do tid <- myThreadId ; fork $ catch p (\(ex :: SomeException) -> throwTo tid ex)
 ghcServerEngine :: GhcState -> GhcRequest
                 -> IO (Progress GhcResponse GhcResponse)
 ghcServerEngine GhcState{lOpts} (ReqCompute configSourcesDir) = do
   mvCounter <- newEmptyMVar
-  void $ forkIO $ do
+  let forkCatch :: IO () -> IO ()
+      forkCatch p = do
+        tid <- myThreadId
+        void $ forkIO $ Ex.catch p (\ (ex :: Ex.SomeException) ->
+                                     Ex.throwTo tid ex)
+  forkCatch $ do
     cnts <- getDirectoryContents configSourcesDir
     let files = map (configSourcesDir </>)
                 $ filter ((`elem` hsExtentions) . takeExtension) cnts

@@ -31,7 +31,7 @@ import System.Time
 #endif
 import Data.IORef
 import Control.Applicative
-import Control.Exception
+import qualified Control.Exception as Ex
 
 import Common
 
@@ -101,7 +101,7 @@ checkModule targets mfilecontent (LeftoverOpts leftoverOpts) handler =
     reverse <$> readIORef errsRef
   where
     handleOtherErrors =
-      handle $ \e -> return [OtherError (show (e :: SomeException))]
+      Ex.handle $ \e -> return [OtherError (show (e :: Ex.SomeException))]
 
 getGhcLibdir :: IO FilePath
 getGhcLibdir = do

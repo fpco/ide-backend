@@ -1,12 +1,7 @@
-{-# LANGUAGE CPP #-}
 module Main where
 
-#if ! MIN_VERSION_base(4,6,0)
-import Prelude hiding (catch)
-#endif
-
 import Control.Monad
-import Control.Exception
+import qualified Control.Exception as Ex
 import System.Environment
 import System.FilePath ((</>), takeExtension, dropExtension)
 import System.Directory
@@ -76,9 +71,9 @@ shouldFail :: String -> IO a -> IO ()
 shouldFail descr x = do
   let logException e = do
         putStrLn $ "Correctly rejected: " ++ descr ++
-                   "\nwith exception msg: " ++ show (e :: ErrorCall) ++ "\n"
+                   "\nwith exception msg: " ++ show (e :: Ex.ErrorCall) ++ "\n"
         return True
-  failed <- catch (x >> return False) logException
+  failed <- Ex.catch (x >> return False) logException
   unless failed $ error $ "should fail: " ++ descr
 
 -- Hacks retained just to pretty-print error messages.

@@ -148,7 +148,7 @@ import Control.Concurrent
 import System.IO (openBinaryTempFile, hClose)
 import System.Directory
 import System.FilePath ((</>), (<.>), splitFileName)
-import qualified Control.Exception as Exception
+import qualified Control.Exception as Ex
 import Data.Monoid (Monoid(..))
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
@@ -312,7 +312,7 @@ updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
 writeFileAtomic :: FilePath -> BS.ByteString -> IO ()
 writeFileAtomic targetPath content = do
   let (targetDir, targetFile) = splitFileName targetPath
-  Exception.bracketOnError
+  Ex.bracketOnError
     (openBinaryTempFile targetDir $ targetFile <.> "tmp")
     (\(tmpPath, handle) -> hClose handle >> removeFile tmpPath)
     (\(tmpPath, handle) -> do
