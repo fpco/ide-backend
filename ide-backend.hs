@@ -24,6 +24,7 @@ import System.IO
 
 import IdeSession
 import GhcServer
+import Progress
 
 --- A sample program using the library. It type-checks all files
 --- in the given directory and prints out the list of errors

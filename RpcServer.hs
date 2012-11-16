@@ -12,9 +12,6 @@ module RpcServer
   , shutdown
   , ExternalException(..)
   , serverKilledException
-    -- * Progress
-  , Progress(..)
-  , fmap2Progress
   ) where
 
 import Prelude hiding (take)
@@ -68,31 +65,7 @@ import Data.ByteString.Lazy (ByteString, hPut, hGetContents, take)
 import Data.ByteString.Lazy.Char8 (unpack)
 import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
 
---------------------------------------------------------------------------------
--- Simple "Future" data type                                                  --
---                                                                            --
--- (we should probably move this elsewhere eventually)                        --
---------------------------------------------------------------------------------
-
--- TODO: update description and perhaps move it somewhere else? perhaps
--- move progressWaitCompletion as well?
--- TODO2: make Progress a Monad or at least a Functor separately (or jointly)
--- in the first and in the second argument?
--- | A future, a handle on an action that will produce some result.
---
--- Currently this is just a simple future, but there is the option to extend
--- it with actual progress info, and\/or with cancellation.
---
-newtype Progress p a = Progress {
-    progressWait :: IO (Either a (p, Progress p a))
-  }
-
-fmap2Progress :: (p -> q) -> (a -> b) -> Progress p a -> Progress q b
-fmap2Progress f g (Progress pr) = Progress $ do
-  lr <- pr
-  case lr of
-    Left a -> return $ Left $ g a
-    Right (p, progress2) -> return $ Right (f p, fmap2Progress f g progress2)
+import Progress
 
 --------------------------------------------------------------------------------
 -- Exceptions thrown by the RPC server are retrown locally as                 --

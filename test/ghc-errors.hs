@@ -25,6 +25,7 @@ import System.IO
 
 import IdeSession
 import GhcServer
+import Progress
 
 main :: IO ()
 main = do

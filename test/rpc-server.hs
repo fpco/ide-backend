@@ -19,6 +19,7 @@ import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertEqual, assertFailure)
 
 import RpcServer
+import Progress
 
 --------------------------------------------------------------------------------
 -- Generic auxiliary                                                          --

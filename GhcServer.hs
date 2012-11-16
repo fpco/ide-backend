@@ -9,8 +9,6 @@
 module GhcServer
   ( -- * Types involved in the communication
     PCounter, GhcRequest(..), GhcResponse(..)
-  , Progress(..)  -- probably move somewhere outside
-  , fmap2Progress
     -- * A handle to the server
   , GhcServer
     -- * Server-side operations
@@ -44,6 +42,7 @@ import Control.Concurrent.MVar
 import RpcServer
 import Common
 import GhcRun
+import Progress
 
 type PCounter = Int
 data GhcRequest  = ReqCompute FilePath

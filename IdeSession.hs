@@ -65,8 +65,6 @@ module IdeSession (
   updateSession,
   PCounter,
   Progress,
-  progressWaitCompletion,
-  progressWaitConsume,
 
   -- ** Modules
   updateModule,
@@ -157,6 +155,7 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 
 import Common
 import GhcServer
+import Progress
 
 -- This could be equally well implemented as a new mvar created per
 -- each new session state, but this implementation has some minor advantages.
@@ -301,28 +300,6 @@ updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
       g (RespWorking _) = error "updateSession: unexpected RespWorking"
       g (RespDone errs) = sess {ideToken = newToken, ideComputed = Just errs}
   rpcGhcServer ideGhcServer configSourcesDir (handler . fmap2Progress f g)
-
--- TODO: move elsewhere? Close to Progress? Or only to test utilities?
--- | Block until the operation completes.
---
-progressWaitCompletion :: Progress a b -> IO b
-progressWaitCompletion p = do
-  w <- progressWait p
-  case w of
-    Left a -> return a
-    Right (_, p2) -> progressWaitCompletion p2
-
--- | Wait until the operation completes, consuming intermediate advancement
--- information whenever it arrives.
---
-progressWaitConsume :: (a -> IO ()) -> Progress a b -> IO b
-progressWaitConsume consume p = do
-  w <- progressWait p
-  case w of
-    Left a -> return a
-    Right (adv, p2) -> do
-      consume adv
-      progressWaitConsume consume p2
 
 -- | Writes a file atomically.
 --
