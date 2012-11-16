@@ -142,7 +142,6 @@ module IdeSession (
   -- away all the transitory state and recovering.
 ) where
 
-import Data.Maybe (fromMaybe)
 import Control.Monad
 import Control.Concurrent
 import System.IO (openBinaryTempFile, hClose)
@@ -219,8 +218,8 @@ incrementToken token@(StateToken mv _) = do
 checkToken :: StateToken -> IO ()
 checkToken (StateToken mv k) = do
   current <- readMVar mv
-  when (k /= current) $
-    error $ "Invalid session token " ++ show k ++ " /= " ++ show current
+  when (k /= current)
+    $ fail $ "Invalid session token " ++ show k ++ " /= " ++ show current
 
 -- In this implementation, it's fully applicative, and so invalid sessions
 -- can be queried at will. Note that there may be some working files
@@ -231,8 +230,8 @@ type Computed = [SourceError]
 ensureDirEmpty :: FilePath -> IO ()
 ensureDirEmpty dir = do
   cnts <- getDirectoryContents dir
-  when (any (`notElem` [".", ".."]) cnts) $
-    error $ "Directory " ++ dir ++ " is not empty"
+  when (any (`notElem` [".", ".."]) cnts)
+    $ fail $ "Directory " ++ dir ++ " is not empty"
 
 -- | Create a fresh session, using some initial configuration.
 --
@@ -388,9 +387,10 @@ getDataFile n IdeSession{ideConfig=SessionConfig{configDataDir}} =
 -- would return all warnings (as if you did clean and rebuild each time).
 --
 getSourceErrors :: Query [SourceError]
-getSourceErrors IdeSession{ideComputed} =
-  let err = error $ "This session state does not admit queries."
-  in return $ fromMaybe err ideComputed
+getSourceErrors IdeSession{ideComputed} = do
+  case ideComputed of
+    Nothing -> fail "This session state does not admit queries."
+    Just c  -> return c
 
 -- | Get a mapping from where symbols are used to where they are defined.
 -- That is, given a symbol used at a particular location in a source module

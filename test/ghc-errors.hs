@@ -85,7 +85,7 @@ check opts originalSourcesDir configSourcesDir = do
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
     (map formatErrorMessage msgs11) ++ "\n"
   assertRaises "shutdownSession s10"
-               (userError "Invalid session token 1 /= 2")
+               (userError "Invalid session token 3 /= 4")
                (shutdownSession s10)
   shutdownSession s11
 
