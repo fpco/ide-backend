@@ -30,9 +30,8 @@ main = do
   hSetBuffering stderr LineBuffering
   args <- getArgs
   case args of
-    ["--server"] -> do
-      let opts = []  -- GHC static flags; set them in sessionConfig?
-      createGhcServer opts
+    "--server" : opts -> do
+      createGhcServer opts  -- @opts@ are GHC static flags
     _ -> do
       let originalSourcesDir = case args of
             [dir] -> dir
@@ -49,6 +48,7 @@ check originalSourcesDir configSourcesDir = do
                                    , configWorkingDir = configSourcesDir
                                    , configDataDir    = configSourcesDir
                                    , configTempDir    = "."
+                                   , configStaticOpts = []
                                    }
   sP <- initSession sessionConfig
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.

@@ -188,7 +188,10 @@ data SessionConfig = SessionConfig {
        configDataDir :: FilePath,
 
        -- | The directory to use for purely temporary files.
-       configTempDir :: FilePath
+       configTempDir :: FilePath,
+
+       -- | GHC static options.
+       configStaticOpts :: [String]
      }
 
 -- This could be equally well implemented as a new mvar created per
@@ -240,7 +243,7 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configDataDir
   let ideComputed = Nothing  -- can't query before the first call to GHC
   ideToken <- initToken
-  ideGhcServer <- forkGhcServer configTempDir
+  ideGhcServer <- forkGhcServer configStaticOpts configTempDir
   return IdeSession{..}
 
 -- | Close a session down, releasing the resources.
