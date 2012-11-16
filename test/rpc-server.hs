@@ -242,30 +242,61 @@ testFaultyEncoderServer () = return . Progress $
   return (Left TypeWithFaultyEncoder)
 
 --------------------------------------------------------------------------------
+-- Tests for errors in client code                                            --
+--------------------------------------------------------------------------------
+
+-- | Test letting the Progress object escape from the scope
+testIllscoped :: RpcServer String String -> Assertion
+testIllscoped server = do
+  progress <- rpcWithProgress server "ping" $ \p -> do
+    -- Consume the reply, then let the Progress object escape from the scope
+    progressWait p
+    return p
+  assertRaises "" overconsumptionException $ progressWait progress
+
+-- | Test consuming too few messages
+testUnderconsumption :: RpcServer String String -> Assertion
+testUnderconsumption server =
+  assertRaises "" underconsumptionException $
+    rpcWithProgress server "ping" return
+
+-- | Test consuming too many messages
+testOverconsumption :: RpcServer String String -> Assertion
+testOverconsumption server = do
+  assertRaises "" overconsumptionException $
+    rpcWithProgress server "ping" $ \p -> do
+      progressWait p
+      progressWait p
+
+--------------------------------------------------------------------------------
 -- Driver                                                                     --
 --------------------------------------------------------------------------------
 
 tests :: [Test]
 tests = [
     testGroup "Features" [
-        testRPC "echo"     testEcho
-      , testRPC "state"    testState
-      , testRPC "custom"   testCustom
-      , testRPC "progress" testProgress
-      , testRPC "shutdown" testShutdown
+        testRPC "echo"             testEcho
+      , testRPC "state"            testState
+      , testRPC "custom"           testCustom
+      , testRPC "progress"         testProgress
+      , testRPC "shutdown"         testShutdown
       ]
   , testGroup "Error handling" [
-        testRPC "crash"         testCrash
-      , testRPC "kill"          testKill
-      , testRPC "killAsync"     testKillAsync
-      , testRPC "faultyDecoder" testFaultyDecoder
-      , testRPC "faultyEncoder" testFaultyEncoder
+        testRPC "crash"            testCrash
+      , testRPC "kill"             testKill
+      , testRPC "killAsync"        testKillAsync
+      , testRPC "faultyDecoder"    testFaultyDecoder
+      , testRPC "faultyEncoder"    testFaultyEncoder
+      ]
+  , testGroup "Client code errors" [
+        testRPC "illscoped"        testIllscoped
+      , testRPC "underconsumption" testUnderconsumption
+      , testRPC "overconsumption"  testOverconsumption
       ]
   ]
   where
     testRPC :: String -> (RpcServer req resp -> Assertion) -> Test
     testRPC test = testCase test . withServer test
-
 
 main :: IO ()
 main = do
@@ -294,6 +325,12 @@ main = do
       startTestServer testFaultyDecoderServer
     ["--server", "faultyEncoder"] ->
       startTestServer testFaultyEncoderServer
+    ["--server", "illscoped"] ->
+      startTestServer testEchoServer
+    ["--server", "underconsumption"] ->
+      startTestServer testEchoServer
+    ["--server", "overconsumption"] ->
+      startTestServer testEchoServer
     ["--server", serverName] ->
       error $ "Invalid server " ++ show serverName
     _ -> defaultMain tests

@@ -12,6 +12,8 @@ module RpcServer
   , shutdown
   , ExternalException(..)
   , serverKilledException
+  , underconsumptionException
+  , overconsumptionException
   ) where
 
 import Prelude hiding (take)
@@ -208,7 +210,7 @@ rpc server req = rpcWithProgress server req $ \p -> do
 
 -- | Like 'rpc', but with support for receiving multiple replies for the
 -- same request
-rpcWithProgress :: (ToJSON req, FromJSON resp)
+rpcWithProgress :: forall req resp b. (ToJSON req, FromJSON resp)
                 => RpcServer req resp           -- ^ RPC server
                 -> req                          -- ^ Request
                 -> (Progress resp resp -> IO b) -- ^ Handler
@@ -218,31 +220,63 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
     RpcRunning {} -> do
       checkKilled (rpcProc st) $ hPutFlush (rpcIn st) (encode $ Request req)
 
-      -- We create a local MVar that holds the parser state (unparsed part
-      -- of the server input). This MVar is updated every time the handler
-      -- waits on the Progress object, so that once the handler returns
-      -- we can retrieve the final state. This has the additional advantage
-      -- that once we take the MVar at the end the user will no longer be
-      -- able to call the handler (that is, we can't stop the user from
-      -- calling wait, but it will deadlock and not affect other RPC calls)
-      outSt <- newMVar (rpcOut st)
-
-      -- Construct the Progress object
-      let go = Progress $ modifyMVar outSt $ \out -> checkKilled (rpcProc st) $
-                 case parseJSON out of
-                   Right (out', FinalResponse resp) ->
-                     return (out', Left resp)
-                   Right (out', IntermediateResponse resp) ->
-                     return (out', Right (resp, go))
-                   Left err ->
-                     Ex.throwIO (userError err)
+      -- We maintain the state of the progress in an MVar holding an
+      -- 'Either ByteString ByteString'. This ByteString is the parser state
+      -- (unconsumed input). As long as it's Right, more messages are available;
+      -- after the last message the state becomes Left. This means that
+      --
+      -- 1. We can get the final state of the input after the handler returns
+      -- 2. We can throw an exception if the user does not consume all input
+      -- 3. We can throw an exception if the user consumes too much input
+      -- 4. We can detect if the Progress object escapes the scope of
+      --    rpcWithServer (by changing the state after the handler returns).
+      progressState <- newMVar (Right (rpcOut st))
 
       -- Call the handler, update the state, and return the result
-      b <- handler go
-      out' <- takeMVar outSt
+      b <- handler $ progress (rpcProc st) progressState
+
+      -- At this point the handler has returned, but we have not yet changed
+      -- the 'progressState' to make sure it's Right. So potentially the
+      -- Progress object *might* escape from the handler, and then be invoked
+      -- until we change the state below. Although strange (and unlikely), it
+      -- won't cause any problems: we don't release the lock on the RPC server
+      -- state until we modify the 'progressState', below, and as soon as we do
+      -- change the 'progressState' the escaped 'Progress' object becomes
+      -- useless.
+
+      out' <- modifyMVar progressState $ \mOut ->
+        case mOut of
+          Left out' -> return (Left out', out')
+          Right _   -> Ex.throwIO underconsumptionException
+
       return (st { rpcOut = out' }, b)
     RpcStopped ex ->
       Ex.throwIO ex
+  where
+    progress :: ProcessHandle
+             -> MVar (Either ByteString ByteString)
+             -> Progress resp resp
+    progress ph progressState = Progress $
+      modifyMVar progressState $ \mOut -> checkKilled ph $
+        case mOut of
+          Right out ->
+            case parseJSON out of
+              Right (out', FinalResponse resp) ->
+                return (Left out', Left resp)
+              Right (out', IntermediateResponse resp) ->
+                return (Right out', Right (resp, progress ph progressState))
+              Left err ->
+                Ex.throwIO (userError err)
+          Left _ ->
+            Ex.throwIO overconsumptionException
+
+underconsumptionException :: Ex.IOException
+underconsumptionException =
+  userError "rpcWithProgress: Not all messages consumed"
+
+overconsumptionException :: Ex.IOException
+overconsumptionException =
+  userError "rpcWithProgress: No more messages"
 
 -- | Variation on 'rpcWithProgress' with a callback for intermediate messages
 rpcWithProgressCallback :: (ToJSON req, FromJSON resp)
