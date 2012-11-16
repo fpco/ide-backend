@@ -25,13 +25,13 @@ main = do
       let (originalSourcesDir, opts) = case args of
             ["--help"] -> error "usage: typecheck-dir [source-dir]"
             dir : optsArg -> (dir, optsArg)
-            [] -> (".", [])
+            [] -> ("test/Cabal.Distribution.PackageDescription", [])
       withTemporaryDirectory "typecheck-dir" $ check opts originalSourcesDir
 
 check :: [String] -> FilePath -> FilePath -> IO ()
 check opts originalSourcesDir configSourcesDir = do
-  putStrLn $ "Copying files from: " ++ originalSourcesDir ++ "\n\n"
-          ++ "Temporary directory: " ++ configSourcesDir ++ "\n"
+  putStrLn $ "Copying files from: " ++ originalSourcesDir ++ "\n"
+          ++ "to a temporary directory at: " ++ configSourcesDir ++ "\n"
   -- Init session.
   let sessionConfig = SessionConfig{ configSourcesDir
                                    , configWorkingDir = configSourcesDir
