@@ -1,7 +1,5 @@
 module Main where
 
-import Control.Monad
-import qualified Control.Exception as Ex
 import System.Environment
 import System.FilePath ((</>), takeExtension, dropExtension)
 import System.Directory
@@ -12,11 +10,11 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
-import Test.HUnit (Assertion, assertEqual, assertFailure)
 
 import IdeSession
 import GhcServer
 import Progress
+import Common
 import TestTools
 
 testAll :: [String] -> FilePath -> IO ()
@@ -48,7 +46,7 @@ check opts originalSourcesDir configSourcesDir = do
   s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
   msgs0 <- getSourceErrors s0
   putStrLn $ "Error 0:\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessage msgs0) ++ "\n"
+    (map formatSourceError msgs0) ++ "\n"
   -- Overwrite some copied files.
   let overName = case originalModules of
         [] -> ModuleName "testEmptyDirModule"
@@ -63,17 +61,17 @@ check opts originalSourcesDir configSourcesDir = do
   s2 <- updateSession s0 update1 (progressWaitConsume displayCounter)
   msgs2 <- getSourceErrors s2
   putStrLn $ "Error 2:\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessage msgs2) ++ "\n"
+    (map formatSourceError msgs2) ++ "\n"
   assertRaises "updateSession s0 update2 (progressWaitConsume displayCounter)"
                (userError "Invalid session token 1 /= 2")
                (updateSession s0 update2 (progressWaitConsume displayCounter))
   s4 <- updateSession s2 update2 (progressWaitConsume displayCounter)
   msgs4 <- getSourceErrors s4
   putStrLn $ "Error 4:\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessage msgs4) ++ "\n"
+    (map formatSourceError msgs4) ++ "\n"
   msgs2' <- getSourceErrors s2
   putStrLn $ "Error 2 again:\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessage msgs2') ++ "\n"
+    (map formatSourceError msgs2') ++ "\n"
 -- Can't do the following until we have each runGHC session spawned in
 -- a differen process.
 --
@@ -83,14 +81,11 @@ check opts originalSourcesDir configSourcesDir = do
   s11 <- updateSession s10 mempty (progressWaitConsume displayCounter)
   msgs11 <- getSourceErrors s11
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessage msgs11) ++ "\n"
+    (map formatSourceError msgs11) ++ "\n"
   assertRaises "shutdownSession s10"
                (userError "Invalid session token 3 /= 4")
                (shutdownSession s10)
   shutdownSession s11
-
-formatErrorMessage :: SourceError -> String
-formatErrorMessage = show
 
 -- Driver
 

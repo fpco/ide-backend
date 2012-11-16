@@ -38,9 +38,9 @@ library
   ghc-options:        -Wall -fno-warn-unused-do-bind
 
 
-test-suite ide-backend-sample-use
+test-suite typecheck-dir
   type:               exitcode-stdio-1.0
-  main-is:            ide-backend.hs
+  main-is:            typecheck-dir.hs
   build-depends:      ide-backend,
                       base      ==4.*,
                       directory ==1.*,

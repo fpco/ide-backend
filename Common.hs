@@ -4,6 +4,7 @@
 module Common
   ( SourceError(..), SourceErrorKind(..)
   , SymbolDefinitionMap
+  , formatSourceError
   ) where
 
 import Data.Aeson.TH (deriveJSON)
@@ -23,6 +24,9 @@ data SourceErrorKind = KindError | KindWarning
 
 $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)
+
+formatSourceError :: SourceError -> String
+formatSourceError = show
 
 -- | A mapping from symbol uses to symbol definitions
 --

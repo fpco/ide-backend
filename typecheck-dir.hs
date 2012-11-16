@@ -1,22 +1,16 @@
 module Main where
 
-import Control.Monad
-import qualified Control.Exception as Ex
 import System.Environment
 import System.FilePath ((</>), takeExtension, dropExtension)
 import System.Directory
 import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
 import Data.Monoid (mconcat)
-import System.IO
-  ( stderr
-  , hSetBuffering
-  , BufferMode(LineBuffering)
-  )
 
 import IdeSession
 import GhcServer
 import Progress
+import Common
 
 --- A sample program using the library. It type-checks all files
 --- in the given directory and prints out the list of errors
@@ -24,27 +18,26 @@ import Progress
 
 main :: IO ()
 main = do
-  hSetBuffering stderr LineBuffering
   args <- getArgs
   case args of
     "--server" : opts -> createGhcServer opts  -- @opts@ are GHC static flags
     _ -> do
-      let originalSourcesDir = case args of
-            [dir] -> dir
-            [] -> "."
-            _ -> fail "usage: programName [source-dir]"
-      withTemporaryDirectory "ide-backend-test" $ check originalSourcesDir
+      let (originalSourcesDir, opts) = case args of
+            ["--help"] -> error "usage: typecheck-dir [source-dir]"
+            dir : optsArg -> (dir, optsArg)
+            [] -> (".", [])
+      withTemporaryDirectory "typecheck-dir" $ check opts originalSourcesDir
 
-check :: FilePath -> FilePath -> IO ()
-check originalSourcesDir configSourcesDir = do
+check :: [String] -> FilePath -> FilePath -> IO ()
+check opts originalSourcesDir configSourcesDir = do
   putStrLn $ "Copying files from: " ++ originalSourcesDir ++ "\n\n"
-          ++ "Temporary directory: " ++ configSourcesDir ++ "\n\n"
+          ++ "Temporary directory: " ++ configSourcesDir ++ "\n"
   -- Init session.
   let sessionConfig = SessionConfig{ configSourcesDir
                                    , configWorkingDir = configSourcesDir
                                    , configDataDir    = configSourcesDir
                                    , configTempDir    = "."
-                                   , configStaticOpts = []
+                                   , configStaticOpts = opts
                                    }
   sP <- initSession sessionConfig
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
@@ -55,13 +48,11 @@ check originalSourcesDir configSourcesDir = do
         map (\ f -> (ModuleName $ dropExtension f, f)) originalFiles
       upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
       originalUpdate = mconcat $ map upd originalModules
+      len = show $ length originalFiles
       displayCounter :: PCounter -> IO ()
-      displayCounter n = putStr (show n)  -- or just putStr "#"
+      displayCounter n = putStrLn ("[" ++ show n ++ "/" ++ len ++ "]")
   s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
   msgs0 <- getSourceErrors s0
-  putStrLn $ "Errors :\n" ++ List.intercalate "\n\n"
-    (map formatErrorMessage msgs0) ++ "\n"
+  putStrLn $ "\nErrors and warnings:\n" ++ List.intercalate "\n"
+    (map formatSourceError msgs0) ++ "\n"
   shutdownSession s0
-
-formatErrorMessage :: SourceError -> String
-formatErrorMessage = show
