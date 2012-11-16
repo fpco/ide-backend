@@ -23,8 +23,8 @@ testAll opts originalSourcesDir =
 
 check :: [String] -> FilePath -> FilePath -> IO ()
 check opts originalSourcesDir configSourcesDir = do
-  putStrLn $ "Copying files from: " ++ originalSourcesDir ++ "\n\n"
-          ++ "Temporary test directory: " ++ configSourcesDir ++ "\n\n"
+  putStrLn $ "\nCopying files from: " ++ originalSourcesDir ++ "\n"
+          ++ "to a temporary test directory at: " ++ configSourcesDir ++ "\n"
   -- Init session.
   let sessionConfig = SessionConfig{ configSourcesDir
                                    , configWorkingDir = configSourcesDir
@@ -72,18 +72,26 @@ check opts originalSourcesDir configSourcesDir = do
   msgs2' <- getSourceErrors s2
   putStrLn $ "Error 2 again:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs2') ++ "\n"
--- Can't do the following until we have each runGHC session spawned in
--- a differen process.
---
---  shutdownSession s4
---  s10 <- initSession sessionConfig
-  let s10 = s4
+  shutdownSession s4
+  assertRaises "initSession sessionConfig"
+               (userError
+                $ "Directory " ++ configSourcesDir ++ " is not empty")
+               (initSession sessionConfig)
+  -- Remove file from the source directory to satisfy the precondition
+  -- of initSession.
+  mapM_ removeFile $ map (configSourcesDir </>) originalFiles
+  -- Init another session. It strarts a new process with GHC,
+  -- so the old state does not interfere.
+  s10 <- initSession sessionConfig
+  assertRaises "getSourceErrors s10"
+               (userError "This session state does not admit queries.")
+               (getSourceErrors s10)
   s11 <- updateSession s10 mempty (progressWaitConsume displayCounter)
   msgs11 <- getSourceErrors s11
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs11) ++ "\n"
   assertRaises "shutdownSession s10"
-               (userError "Invalid session token 3 /= 4")
+               (userError "Invalid session token 0 /= 1")
                (shutdownSession s10)
   shutdownSession s11
 
@@ -96,6 +104,8 @@ tests =
     , testCase "A depends on B, error in A" $ testAll [] "test/AerrorB"
     , testCase "A depends on B, error in B" $ testAll [] "test/ABerror"
     , testCase "Our own code, package 'ghc' missing" $ testAll [] "."
+    , testCase "A subdirectory of Cabal code"
+      $ testAll [] "test/Cabal.Distribution.PackageDescription"
     ]
   ]
 
