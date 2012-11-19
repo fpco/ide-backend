@@ -111,6 +111,15 @@ getGhcLibdir = do
     [libdir] -> return libdir
     _        -> fail "cannot parse output of ghc --print-libdir"
 
+-- Put into the log_action field for extra debugging. Also, set verbosity to 3.
+_collectSrcError_debug :: IORef [SourceError] -> IO ()
+                       -> DynFlags
+                       -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
+_collectSrcError_debug errsRef handler flags severity srcspan style msg = do
+  appendFile "log_debug"
+    $ showSDocForUser flags (qualName style,qualModule style) msg ++ "\n"
+  collectSrcError errsRef handler flags severity srcspan style msg
+
 #if __GLASGOW_HASKELL__ >= 706
 collectSrcError :: IORef [SourceError] -> IO ()
                 -> DynFlags
