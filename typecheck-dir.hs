@@ -16,6 +16,20 @@ import Common
 --- in the given directory and prints out the list of errors
 --- in JSON format.
 
+-- | Some common extensions (please fill in).
+defaultExtensions :: [String]
+defaultExtensions = [ "-XCPP"
+                    , "-XTemplateHaskell"
+                    , "-XBangPatterns"
+                    , "-XRecordWildCards"
+                    , "-XNamedFieldPuns"
+                    , "-XPatternGuards"
+                    , "-XScopedTypeVariables"
+                    , "-XMultiParamTypeClasses"
+                    , "-XRankNTypes"
+                    , "-XTypeFamilies"
+                    ]
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -23,9 +37,12 @@ main = do
     "--server" : opts -> createGhcServer opts  -- @opts@ are GHC static flags
     _ -> do
       let (originalSourcesDir, opts) = case args of
-            ["--help"] -> error "usage: typecheck-dir [source-dir]"
+            ["--help"] ->
+              error "usage: typecheck-dir [source-dir] [ghc-options]"
+            [dir] -> (dir, defaultExtensions)
             dir : optsArg -> (dir, optsArg)
-            [] -> ("test/Cabal.Distribution.PackageDescription", [])
+            [] -> ("test/Cabal.Distribution.PackageDescription",
+                   defaultExtensions)
       withTemporaryDirectory "typecheck-dir" $ check opts originalSourcesDir
 
 check :: [String] -> FilePath -> FilePath -> IO ()
