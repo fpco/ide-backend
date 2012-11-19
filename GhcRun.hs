@@ -116,8 +116,18 @@ _collectSrcError_debug :: IORef [SourceError] -> IO ()
                        -> DynFlags
                        -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 _collectSrcError_debug errsRef handler flags severity srcspan style msg = do
+  let showSeverity SevOutput  = "SevOutput"
+      showSeverity SevDump    = "SevDump"
+      showSeverity SevInfo    = "SevInfo"
+      showSeverity SevWarning = "SevWarning"
+      showSeverity SevError   = "SevError"
+      showSeverity SevFatal   = "SevFatal"
   appendFile "log_debug"
-    $ showSDocForUser flags (qualName style,qualModule style) msg ++ "\n"
+    $  "Severity: "   ++ showSeverity severity
+    ++ "  SrcSpan: "  ++ show srcspan
+--    ++ "  PprStyle: " ++ show style
+    ++ "  MsgDoc: "   ++ showSDocForUser flags (qualName style,qualModule style) msg
+    ++ "\n"
   collectSrcError errsRef handler flags severity srcspan style msg
 
 #if __GLASGOW_HASKELL__ >= 706
