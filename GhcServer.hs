@@ -36,7 +36,7 @@ import Control.Concurrent
   , myThreadId
   )
 import Control.Concurrent.MVar
-  ( newEmptyMVar
+  ( newMVar
   , putMVar
   , modifyMVar_
   , takeMVar
@@ -75,7 +75,7 @@ hsExtentions = [".hs", ".lhs"]
 ghcServerEngine :: GhcState -> GhcRequest
                 -> IO (Progress GhcResponse GhcResponse)
 ghcServerEngine GhcState{lOpts} (ReqCompute configSourcesDir) = do
-  mvCounter <- newEmptyMVar
+  mvCounter <- newMVar (Right 0)  -- Report progress step [0/n], too.
   let forkCatch :: IO () -> IO ()
       forkCatch p = do
         tid <- myThreadId
@@ -91,6 +91,7 @@ ghcServerEngine GhcState{lOpts} (ReqCompute configSourcesDir) = do
           -- Don't block, GHC should not be slowed down.
           b <- isEmptyMVar mvCounter
           if b
+            -- Indicate that another one file was type-checked.
             then putMVar mvCounter (Right 1)
             -- If not consumed, increment count and keep working.
             else modifyMVar_ mvCounter (return . incrementCounter)
@@ -106,6 +107,8 @@ ghcServerEngine GhcState{lOpts} (ReqCompute configSourcesDir) = do
         merrs <- takeMVar mvCounter
         case merrs of
           Right new -> do
+            -- Add the count of files type-checked since last time reported.
+            -- The count is 1, unless the machine is busy and @p@ runs rarely.
             let newCounter = new + counter
             return $ Right (RespWorking newCounter, p newCounter)
           Left errs ->
