@@ -47,14 +47,18 @@ checkModule :: [FilePath]        -- ^ target files
             -> LeftoverOpts      -- ^ leftover ghc static options
             -> IO ()             -- ^ handler for each "compiling M" message
             -> IO [SourceError]  -- ^ any errors and warnings
-checkModule targets mfilecontent (LeftoverOpts leftoverOpts) handler =
+checkModule targets mfilecontent (LeftoverOpts leftoverOpts) handler = do
+  errsRef <- newIORef []
+  let collectedErrors = reverse <$> readIORef errsRef
+  let handleOtherErrors =
+        Ex.handle $ \e -> do
+          let exError = OtherError (show (e :: Ex.SomeException))
+          (++ [exError]) <$> collectedErrors
   handleOtherErrors $ do
 
     libdir <- getGhcLibdir
 
-    errsRef <- newIORef []
-
-    _mcontent <- case mfilecontent of
+    mcontent <- case mfilecontent of
                   Nothing          -> return Nothing
                   Just filecontent -> do
 #if __GLASGOW_HASKELL__ >= 704
@@ -92,16 +96,13 @@ checkModule targets mfilecontent (LeftoverOpts leftoverOpts) handler =
               addTarget Target
                 { targetId           = TargetFile filename Nothing
                 , targetAllowObjCode = True
-                , targetContents     = Nothing
+                , targetContents     = mcontent
                 }
         mapM_ addSingle targets
         load LoadAllTargets
         return ()
 
-    reverse <$> readIORef errsRef
-  where
-    handleOtherErrors =
-      Ex.handle $ \e -> return [OtherError (show (e :: Ex.SomeException))]
+    collectedErrors
 
 getGhcLibdir :: IO FilePath
 getGhcLibdir = do
