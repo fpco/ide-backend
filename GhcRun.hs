@@ -19,16 +19,11 @@ import ErrUtils   ( MsgDoc )
 #else
 import ErrUtils   ( Message )
 #endif
-import Outputable ( PprStyle, showSDocForUser, qualName, qualModule )
+import Outputable ( PprStyle, qualName, qualModule )
+import qualified Outputable as GHC 
 import FastString ( unpackFS )
-import StringBuffer ( stringToStringBuffer )
 
 import System.Process
-#if __GLASGOW_HASKELL__ >= 706
-import Data.Time
-#else
-import System.Time
-#endif
 import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
@@ -43,11 +38,10 @@ submitOpts opts = do
   return $ LeftoverOpts ghcState
 
 checkModule :: [FilePath]        -- ^ target files
-            -> Maybe String      -- ^ optional content of the file
             -> LeftoverOpts      -- ^ leftover ghc static options
             -> IO ()             -- ^ handler for each "compiling M" message
             -> IO [SourceError]  -- ^ any errors and warnings
-checkModule targets mfilecontent (LeftoverOpts leftoverOpts) handler = do
+checkModule targets (LeftoverOpts leftoverOpts) handler = do
   errsRef <- newIORef []
   let collectedErrors = reverse <$> readIORef errsRef
   let handleOtherErrors =
@@ -58,27 +52,8 @@ checkModule targets mfilecontent (LeftoverOpts leftoverOpts) handler = do
 
     libdir <- getGhcLibdir
 
-    mcontent <- case mfilecontent of
-                  Nothing          -> return Nothing
-                  Just filecontent -> do
-#if __GLASGOW_HASKELL__ >= 704
-                    let strbuf = stringToStringBuffer filecontent
-#else
-                    strbuf <- stringToStringBuffer filecontent
-#endif
-#if __GLASGOW_HASKELL__ >= 706
-                    strtime <- getCurrentTime
-#else
-                    strtime <- getClockTime
-#endif
-                    return (Just (strbuf, strtime))
-
     runGhc (Just libdir) $
-#if __GLASGOW_HASKELL__ >= 706
       handleSourceError printException $ do
-#else
-      handleSourceError printExceptionAndWarnings $ do
-#endif
 
       flags0 <- getSessionDynFlags
       (flags, _, _) <- parseDynamicFlags flags0 leftoverOpts
@@ -88,7 +63,11 @@ checkModule targets mfilecontent (LeftoverOpts leftoverOpts) handler = do
                              hscTarget  = HscNothing,
                              ghcLink    = NoLink,
                              ghcMode    = CompManager,
+#if __GLASGOW_HASKELL__ >= 706
                              log_action = collectSrcError errsRef handler,
+#else
+                             log_action = collectSrcError errsRef handler flags,
+#endif
                              -- print "compiling M ... done." for each module
                              verbosity  = 1
                            }
@@ -96,7 +75,7 @@ checkModule targets mfilecontent (LeftoverOpts leftoverOpts) handler = do
               addTarget Target
                 { targetId           = TargetFile filename Nothing
                 , targetAllowObjCode = True
-                , targetContents     = mcontent
+                , targetContents     = Nothing
                 }
         mapM_ addSingle targets
         load LoadAllTargets
@@ -118,7 +97,9 @@ _collectSrcError_debug :: IORef [SourceError] -> IO ()
                        -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 _collectSrcError_debug errsRef handler flags severity srcspan style msg = do
   let showSeverity SevOutput  = "SevOutput"
+#if __GLASGOW_HASKELL__ >= 706
       showSeverity SevDump    = "SevDump"
+#endif
       showSeverity SevInfo    = "SevInfo"
       showSeverity SevWarning = "SevWarning"
       showSeverity SevError   = "SevError"
@@ -131,7 +112,6 @@ _collectSrcError_debug errsRef handler flags severity srcspan style msg = do
     ++ "\n"
   collectSrcError errsRef handler flags severity srcspan style msg
 
-#if __GLASGOW_HASKELL__ >= 706
 collectSrcError :: IORef [SourceError] -> IO ()
                 -> DynFlags
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
@@ -154,36 +134,25 @@ collectSrcError _errsRef handler _flags SevOutput _srcspan _style _msg =
   handler
 
 collectSrcError _ _ _ _ _ _ _ = return ()
+
+
+-----------------------
+-- GHC version compat
+--
+
+#if __GLASGOW_HASKELL__ < 706
+type MsgDoc = Message
+#endif
+
+showSDocForUser :: DynFlags -> PrintUnqualified -> MsgDoc -> String
+#if __GLASGOW_HASKELL__ >= 706
+showSDocForUser  flags uqual msg = GHC.showSDocForUser flags uqual msg
 #else
-collectSrcError :: IORef [SourceError] -> IO ()
-                -> Severity -> SrcSpan -> PprStyle -> Message -> IO ()
-collectSrcError errsRef _handler severity srcspan style msg
-  | Just errKind <- case severity of
-                      SevWarning -> Just KindWarning
-                      SevError   -> Just KindError
-                      SevFatal   -> Just KindError
-                      _          -> Nothing
-  , Just (file, st, end) <- extractErrSpan srcspan
-  = let msgstr = showSDocForUser (qualName style,qualModule style) msg
-     in modifyIORef errsRef (SrcError errKind file st end msgstr:)
-
-collectSrcError errsRef _handler SevError _srcspan style msg
-  = let msgstr = showSDocForUser (qualName style,qualModule style) msg
-     in modifyIORef errsRef (OtherError msgstr:)
-
-collectSrcError _errsRef handler SevOutput _srcspan _style _msg =
-  -- TODO: verify that it's the "compiling M" message
-  handler
-
-collectSrcError _ _ _ _ _ _ = return ()
+showSDocForUser _flags uqual msg = GHC.showSDocForUser       uqual msg
 #endif
 
 extractErrSpan :: SrcSpan -> Maybe (FilePath, (Int, Int), (Int, Int))
-#if __GLASGOW_HASKELL__ >= 704
 extractErrSpan (RealSrcSpan srcspan) =
-#else
-extractErrSpan srcspan | isGoodSrcSpan srcspan =
-#endif
   Just (unpackFS (srcSpanFile srcspan)
        ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
        ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))

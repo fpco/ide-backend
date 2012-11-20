@@ -95,7 +95,7 @@ ghcServerEngine GhcState{lOpts} (ReqCompute configSourcesDir) = do
             then putMVar mvCounter (Right 1)
             -- If not consumed, increment count and keep working.
             else modifyMVar_ mvCounter (return . incrementCounter)
-    errs <- checkModule files Nothing lOpts updateCounter
+    errs <- checkModule files lOpts updateCounter
     -- Don't block, GHC should not be slowed down.
     b <- isEmptyMVar mvCounter
     if b
