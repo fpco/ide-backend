@@ -1,6 +1,6 @@
 name:                 ide-backend
 version:              0.4
-synopsis:             A simple (demo) IDE helper program
+synopsis:             An IDE backend library
 -- description:
 license:              AllRightsReserved
 license-file:         LICENSE
