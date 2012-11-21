@@ -169,6 +169,7 @@ data IdeSession = IdeSession
   , ideGhcServer :: GhcServer
   , ideToken     :: StateToken
   , ideComputed  :: (Maybe Computed)
+  , ideNewOpts   :: [String]
   }
 
 -- | Configuration parameters for a session. These remain the same throughout
@@ -241,6 +242,8 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configWorkingDir
   ensureDirEmpty configDataDir
   let ideComputed = Nothing  -- can't query before the first call to GHC
+      -- These are extra new options to add to the server at the next call.
+      ideNewOpts  = []
   ideToken <- initToken
   ideGhcServer <- forkGhcServer configStaticOpts configTempDir
   return IdeSession{..}
@@ -260,15 +263,15 @@ shutdownSession IdeSession{ideToken, ideGhcServer} = do
 -- In particular it is an instance of 'Monoid', so multiple primitive updates
 -- can be easily combined. Updates can override each other left to right.
 --
-data IdeSessionUpdate = IdeSessionUpdate (IdeSession -> IO ())
+data IdeSessionUpdate = IdeSessionUpdate (IdeSession -> IO IdeSession)
 
 -- We assume, if updates are combined within the monoid, they can all
 -- be applied in the context of the same session.
 -- Otherwise, call 'updateSession' sequentially with the updates.
 instance Monoid IdeSessionUpdate where
-  mempty = IdeSessionUpdate $ \ _ -> return ()
+  mempty = IdeSessionUpdate $ \ sess -> return sess
   mappend (IdeSessionUpdate f) (IdeSessionUpdate g) =
-    IdeSessionUpdate $ \ sess -> f sess >> g sess
+    IdeSessionUpdate $ f >=> g
 
 -- | Given the current IDE session state, go ahead and
 -- update the session, eventually resulting in a new session state,
@@ -284,23 +287,26 @@ instance Monoid IdeSessionUpdate where
 --
 updateSession :: IdeSession -> IdeSessionUpdate
               -> (Progress PCounter IdeSession -> IO a) -> IO a
-updateSession sess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
-                             , ideGhcServer
-                             , ideToken }
-              (IdeSessionUpdate update) handler = do
+updateSession sess (IdeSessionUpdate update) handler = do
   -- First, invalidating the current session ASAP, because the previous
   -- computed info will shortly no longer be in sync with the files.
-  newToken <- incrementToken ideToken
+  newToken <- incrementToken $ ideToken sess
 
   -- Then, updating files ASAP (using the already invalidated session).
-  update sess
+  newSess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
+                    , ideGhcServer
+                    , ideNewOpts } <- update sess
 
   -- Last, communicating with the GHC server.
   let f (RespWorking c) = c  -- advancement counter
       f (RespDone _)    = error "updateSession: unexpected RespDone"
       g (RespWorking _) = error "updateSession: unexpected RespWorking"
-      g (RespDone errs) = sess {ideToken = newToken, ideComputed = Just errs}
-  rpcGhcServer ideGhcServer configSourcesDir (handler . bimapProgress f g)
+      g (RespDone r) = newSess { ideToken    = newToken
+                               , ideComputed = Just r
+                               , ideNewOpts  = []  -- set and forgotten
+                               }
+  rpcGhcServer ideGhcServer ideNewOpts configSourcesDir
+               (handler . bimapProgress f g)
 
 -- | Writes a file atomically.
 --
@@ -325,15 +331,25 @@ writeFileAtomic targetPath content = do
 -- updated or deleted.
 --
 updateModule :: ModuleChange -> IdeSessionUpdate
-updateModule mc = IdeSessionUpdate $ \ IdeSession{ideConfig} ->
+updateModule mc = IdeSessionUpdate $ \ sess@IdeSession{ideConfig} ->
   case mc of
-    ModulePut m bs -> writeFileAtomic (internalFile ideConfig m) bs
-    ModuleSource m p -> copyFile p (internalFile ideConfig m)
-    ModuleDelete m -> removeFile (internalFile ideConfig m)
+    ModulePut m bs -> do
+      writeFileAtomic (internalFile ideConfig m) bs
+      return sess
+    ModuleSource m p -> do
+      copyFile p (internalFile ideConfig m)
+      return sess
+    ModuleDelete m -> do
+      removeFile (internalFile ideConfig m)
+      return sess
+    OptionsSet opts -> return $ sess {ideNewOpts = opts}
 
 data ModuleChange = ModulePut    ModuleName ByteString
                   | ModuleSource ModuleName FilePath
                   | ModuleDelete ModuleName
+                    -- | Warning: only dynamic flags can be set here.
+                    -- Static flags need to be set at server startup.
+                  | OptionsSet   [String]
 
 newtype ModuleName = ModuleName String
 
@@ -346,12 +362,14 @@ internalFile SessionConfig{configSourcesDir} (ModuleName n) =
 --
 updateDataFile :: DataFileChange -> IdeSessionUpdate
 updateDataFile mc =
-  IdeSessionUpdate $ \ IdeSession{ideConfig=SessionConfig{configDataDir}} ->
-  case mc of
-     DataFilePut n bs -> writeFileAtomic (configDataDir </> n) bs
-     DataFileSource n p -> copyFile (configDataDir </> n)
-                                    (configDataDir </> p)
-     DataFileDelete n -> removeFile (configDataDir </> n)
+  IdeSessionUpdate
+  $ \ sess@IdeSession{ideConfig=SessionConfig{configDataDir}} -> do
+    case mc of
+      DataFilePut n bs -> writeFileAtomic (configDataDir </> n) bs
+      DataFileSource n p -> copyFile (configDataDir </> n)
+                                     (configDataDir </> p)
+      DataFileDelete n -> removeFile (configDataDir </> n)
+    return sess
 
 data DataFileChange = DataFilePut    FilePath ByteString
                     | DataFileSource FilePath FilePath

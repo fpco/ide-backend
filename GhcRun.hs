@@ -7,7 +7,7 @@
 -- based on source files and provides progress information.
 -- Only this file should import the GHC-internals modules.
 module GhcRun
-  ( LeftoverOpts
+  ( DynamicOpts
   , submitOpts
   , checkModule
   ) where
@@ -20,7 +20,7 @@ import ErrUtils   ( MsgDoc )
 import ErrUtils   ( Message )
 #endif
 import Outputable ( PprStyle, qualName, qualModule )
-import qualified Outputable as GHC 
+import qualified Outputable as GHC
 import FastString ( unpackFS )
 
 import System.Process
@@ -30,18 +30,20 @@ import qualified Control.Exception as Ex
 
 import Common
 
-newtype LeftoverOpts = LeftoverOpts [Located String]
+newtype DynamicOpts = DynamicOpts [Located String]
 
-submitOpts :: [String] -> IO LeftoverOpts
+-- | Set static flags at server startup and return dynamic flags.
+submitOpts :: [String] -> IO DynamicOpts
 submitOpts opts = do
-  (ghcState, _) <- parseStaticFlags (map noLoc opts)
-  return $ LeftoverOpts ghcState
+  (dynFlags, _) <- parseStaticFlags (map noLoc opts)
+  return $ DynamicOpts dynFlags
 
 checkModule :: [FilePath]        -- ^ target files
-            -> LeftoverOpts      -- ^ leftover ghc static options
+            -> DynamicOpts       -- ^ dynamic flags from server start
+            -> [String]          -- ^ dynamic flags just set during the session
             -> IO ()             -- ^ handler for each "compiling M" message
             -> IO [SourceError]  -- ^ any errors and warnings
-checkModule targets (LeftoverOpts leftoverOpts) handler = do
+checkModule targets (DynamicOpts dynOpts) ideNewOpts handler = do
   errsRef <- newIORef []
   let collectedErrors = reverse <$> readIORef errsRef
   let handleOtherErrors =
@@ -56,7 +58,8 @@ checkModule targets (LeftoverOpts leftoverOpts) handler = do
       handleSourceError printException $ do
 
       flags0 <- getSessionDynFlags
-      (flags, _, _) <- parseDynamicFlags flags0 leftoverOpts
+      (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
+      (flags, _, _)  <- parseDynamicFlags flags1 (map noLoc ideNewOpts)
 
       defaultCleanupHandler flags $ do
         setSessionDynFlags flags {

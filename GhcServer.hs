@@ -49,7 +49,7 @@ import GhcRun
 import Progress
 
 type PCounter = Int
-data GhcRequest  = ReqCompute FilePath
+data GhcRequest  = ReqCompute [String] FilePath
   deriving Show
 data GhcResponse = RespWorking PCounter | RespDone [SourceError]
   deriving Show
@@ -57,7 +57,14 @@ data GhcResponse = RespWorking PCounter | RespDone [SourceError]
 $(deriveJSON id ''GhcRequest)
 $(deriveJSON id ''GhcResponse)
 
-newtype GhcState = GhcState { lOpts :: LeftoverOpts }
+-- Keeps the dynamic portion of the options specified at server startup
+-- (they are among the options listed in SessionConfig).
+-- TODO: check if we need to keep this state or if we can drop it
+-- after the dynamic flags are fed to GHC. If we ever want to restart
+-- the server keeping the flags or to display all the active flags to the user,
+-- this is useful and we'd also need to keep adding the ideNewOpts flag,
+-- but YAGNI.
+newtype GhcState = GhcState { dOpts :: DynamicOpts }
 
 type GhcServer = RpcServer GhcRequest GhcResponse
 
@@ -74,7 +81,7 @@ hsExtentions = [".hs", ".lhs"]
 -- as soon as they appear.
 ghcServerEngine :: GhcState -> GhcRequest
                 -> IO (Progress GhcResponse GhcResponse)
-ghcServerEngine GhcState{lOpts} (ReqCompute configSourcesDir) = do
+ghcServerEngine GhcState{dOpts} (ReqCompute ideNewOpts configSourcesDir) = do
   mvCounter <- newMVar (Right 0)  -- Report progress step [0/n], too.
   let forkCatch :: IO () -> IO ()
       forkCatch p = do
@@ -95,7 +102,7 @@ ghcServerEngine GhcState{lOpts} (ReqCompute configSourcesDir) = do
             then putMVar mvCounter (Right 1)
             -- If not consumed, increment count and keep working.
             else modifyMVar_ mvCounter (return . incrementCounter)
-    errs <- checkModule files lOpts updateCounter
+    errs <- checkModule files dOpts ideNewOpts updateCounter
     -- Don't block, GHC should not be slowed down.
     b <- isEmptyMVar mvCounter
     if b
@@ -117,7 +124,7 @@ ghcServerEngine GhcState{lOpts} (ReqCompute configSourcesDir) = do
 
 createGhcServer :: [String] -> IO ()
 createGhcServer opts = do
-  lOpts <- submitOpts opts
+  dOpts <- submitOpts opts
   rpcServer stdin stdout stderr (ghcServerEngine GhcState{..})
 
 -- * Client-side operations
@@ -127,10 +134,10 @@ forkGhcServer opts configTempDir = do
   prog <- getExecutablePath
   forkRpcServer prog ("--server" : opts) configTempDir
 
-rpcGhcServer :: GhcServer -> FilePath
+rpcGhcServer :: GhcServer -> [String] -> FilePath
              -> (Progress GhcResponse GhcResponse -> IO a) -> IO a
-rpcGhcServer gs configSourcesDir handler =
-  rpcWithProgress gs (ReqCompute configSourcesDir) handler
+rpcGhcServer gs ideNewOpts configSourcesDir handler =
+  rpcWithProgress gs (ReqCompute ideNewOpts configSourcesDir) handler
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs
