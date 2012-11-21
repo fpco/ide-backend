@@ -169,7 +169,9 @@ data IdeSession = IdeSession
   , ideGhcServer :: GhcServer
   , ideToken     :: StateToken
   , ideComputed  :: (Maybe Computed)
-  , ideNewOpts   :: [String]
+    -- | Compiler dynamic options. If they are not set, the options from
+    -- SessionConfig are used.
+  , ideNewOpts   :: Maybe [String]
   }
 
 -- | Configuration parameters for a session. These remain the same throughout
@@ -190,7 +192,8 @@ data SessionConfig = SessionConfig {
        -- | The directory to use for purely temporary files.
        configTempDir :: FilePath,
 
-       -- | GHC static options.
+       -- | GHC static options. Can also contain default dynamic options,
+       -- that are overriden via session update.
        configStaticOpts :: [String]
      }
 
@@ -242,8 +245,7 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configWorkingDir
   ensureDirEmpty configDataDir
   let ideComputed = Nothing  -- can't query before the first call to GHC
-      -- These are extra new options to add to the server at the next call.
-      ideNewOpts  = []
+      ideNewOpts  = Nothing  -- options from SessionConfig used initially
   ideToken <- initToken
   ideGhcServer <- forkGhcServer configStaticOpts configTempDir
   return IdeSession{..}
@@ -303,7 +305,6 @@ updateSession sess (IdeSessionUpdate update) handler = do
       g (RespWorking _) = error "updateSession: unexpected RespWorking"
       g (RespDone r) = newSess { ideToken    = newToken
                                , ideComputed = Just r
-                               , ideNewOpts  = []  -- set and forgotten
                                }
   rpcGhcServer ideGhcServer ideNewOpts configSourcesDir
                (handler . bimapProgress f g)
@@ -349,7 +350,7 @@ data ModuleChange = ModulePut    ModuleName ByteString
                   | ModuleDelete ModuleName
                     -- | Warning: only dynamic flags can be set here.
                     -- Static flags need to be set at server startup.
-                  | OptionsSet   [String]
+                  | OptionsSet   (Maybe [String])
 
 newtype ModuleName = ModuleName String
 

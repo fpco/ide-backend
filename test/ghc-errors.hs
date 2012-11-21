@@ -87,7 +87,7 @@ check opts originalSourcesDir configSourcesDir = do
                (userError "This session state does not admit queries.")
                (getSourceErrors s10)
   let optionsUpdate = originalUpdate
-                      <> updateModule (OptionsSet ["-XNamedFieldPuns"])
+                      <> updateModule (OptionsSet $ Just ["-XNamedFieldPuns"])
   s11 <- updateSession s10 optionsUpdate (progressWaitConsume displayCounter)
   msgs11 <- getSourceErrors s11
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"

@@ -8,7 +8,8 @@
 -- Only this file should import the GHC-internals modules.
 module GhcRun
   ( DynamicOpts
-  , submitOpts
+  , submitStaticOpts
+  , optsToDynFlags
   , checkModule
   ) where
 
@@ -33,17 +34,19 @@ import Common
 newtype DynamicOpts = DynamicOpts [Located String]
 
 -- | Set static flags at server startup and return dynamic flags.
-submitOpts :: [String] -> IO DynamicOpts
-submitOpts opts = do
+submitStaticOpts :: [String] -> IO DynamicOpts
+submitStaticOpts opts = do
   (dynFlags, _) <- parseStaticFlags (map noLoc opts)
   return $ DynamicOpts dynFlags
 
+optsToDynFlags :: [String] -> DynamicOpts
+optsToDynFlags = DynamicOpts . map noLoc
+
 checkModule :: [FilePath]        -- ^ target files
-            -> DynamicOpts       -- ^ dynamic flags from server start
-            -> [String]          -- ^ dynamic flags just set during the session
+            -> DynamicOpts       -- ^ dynamic flags for this run of runGhc
             -> IO ()             -- ^ handler for each "compiling M" message
             -> IO [SourceError]  -- ^ any errors and warnings
-checkModule targets (DynamicOpts dynOpts) ideNewOpts handler = do
+checkModule targets (DynamicOpts dynOpts) handler = do
   errsRef <- newIORef []
   let collectedErrors = reverse <$> readIORef errsRef
   let handleOtherErrors =
@@ -58,8 +61,7 @@ checkModule targets (DynamicOpts dynOpts) ideNewOpts handler = do
       handleSourceError printException $ do
 
       flags0 <- getSessionDynFlags
-      (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
-      (flags, _, _)  <- parseDynamicFlags flags1 (map noLoc ideNewOpts)
+      (flags, _, _) <- parseDynamicFlags flags0 dynOpts
 
       defaultCleanupHandler flags $ do
         setSessionDynFlags flags {

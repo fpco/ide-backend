@@ -49,7 +49,7 @@ import GhcRun
 import Progress
 
 type PCounter = Int
-data GhcRequest  = ReqCompute [String] FilePath
+data GhcRequest  = ReqCompute (Maybe [String]) FilePath
   deriving Show
 data GhcResponse = RespWorking PCounter | RespDone [SourceError]
   deriving Show
@@ -59,12 +59,8 @@ $(deriveJSON id ''GhcResponse)
 
 -- Keeps the dynamic portion of the options specified at server startup
 -- (they are among the options listed in SessionConfig).
--- TODO: check if we need to keep this state or if we can drop it
--- after the dynamic flags are fed to GHC. If we ever want to restart
--- the server keeping the flags or to display all the active flags to the user,
--- this is useful and we'd also need to keep adding the ideNewOpts flag,
--- but YAGNI.
-newtype GhcState = GhcState { dOpts :: DynamicOpts }
+-- They are only fed to GHC if no options are set via a session update command.
+newtype GhcInitData = GhcInitData { dOpts :: DynamicOpts }
 
 type GhcServer = RpcServer GhcRequest GhcResponse
 
@@ -79,9 +75,10 @@ hsExtentions = [".hs", ".lhs"]
 -- doing \ m -> load (LoadUpTo m)) or rewrite collectSrcError to place
 -- warnings in an mvar instead of IORef and read from it into Progress,
 -- as soon as they appear.
-ghcServerEngine :: GhcState -> GhcRequest
+ghcServerEngine :: GhcInitData -> GhcRequest
                 -> IO (Progress GhcResponse GhcResponse)
-ghcServerEngine GhcState{dOpts} (ReqCompute ideNewOpts configSourcesDir) = do
+ghcServerEngine GhcInitData{dOpts}
+                (ReqCompute ideNewOpts configSourcesDir) = do
   mvCounter <- newMVar (Right 0)  -- Report progress step [0/n], too.
   let forkCatch :: IO () -> IO ()
       forkCatch p = do
@@ -102,7 +99,8 @@ ghcServerEngine GhcState{dOpts} (ReqCompute ideNewOpts configSourcesDir) = do
             then putMVar mvCounter (Right 1)
             -- If not consumed, increment count and keep working.
             else modifyMVar_ mvCounter (return . incrementCounter)
-    errs <- checkModule files dOpts ideNewOpts updateCounter
+        dynOpts = maybe dOpts optsToDynFlags ideNewOpts
+    errs <- checkModule files dynOpts updateCounter
     -- Don't block, GHC should not be slowed down.
     b <- isEmptyMVar mvCounter
     if b
@@ -124,8 +122,8 @@ ghcServerEngine GhcState{dOpts} (ReqCompute ideNewOpts configSourcesDir) = do
 
 createGhcServer :: [String] -> IO ()
 createGhcServer opts = do
-  dOpts <- submitOpts opts
-  rpcServer stdin stdout stderr (ghcServerEngine GhcState{..})
+  dOpts <- submitStaticOpts opts
+  rpcServer stdin stdout stderr (ghcServerEngine GhcInitData{..})
 
 -- * Client-side operations
 
@@ -134,7 +132,7 @@ forkGhcServer opts configTempDir = do
   prog <- getExecutablePath
   forkRpcServer prog ("--server" : opts) configTempDir
 
-rpcGhcServer :: GhcServer -> [String] -> FilePath
+rpcGhcServer :: GhcServer -> (Maybe [String]) -> FilePath
              -> (Progress GhcResponse GhcResponse -> IO a) -> IO a
 rpcGhcServer gs ideNewOpts configSourcesDir handler =
   rpcWithProgress gs (ReqCompute ideNewOpts configSourcesDir) handler
