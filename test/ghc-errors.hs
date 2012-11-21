@@ -24,7 +24,6 @@ testAll opts originalSourcesDir =
 check :: [String] -> FilePath -> FilePath -> IO ()
 check opts originalSourcesDir configSourcesDir = do
   putStrLn $ "\n\nCopying files from: " ++ originalSourcesDir ++ "\n"
-          ++ "to a temporary test directory at: " ++ configSourcesDir ++ "\n"
   -- Init session.
   let sessionConfig = SessionConfig{ configSourcesDir
                                    , configWorkingDir = configSourcesDir

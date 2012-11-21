@@ -59,7 +59,7 @@ test-suite typecheck-dir
                       DeriveDataTypeable
   ghc-options:        -Wall -fno-warn-unused-do-bind
 
--- Has to be run after ghc-errorsm so has to be defined before.
+-- Has to be run after ghc-errors, so has to be defined before.
 test-suite golden
   type:               exitcode-stdio-1.0
   main-is:            golden-errors.hs

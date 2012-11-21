@@ -8,6 +8,7 @@ module Common
   ) where
 
 import Data.Aeson.TH (deriveJSON)
+import System.FilePath (takeFileName)
 
 -- | An error or warning in a source module.
 --
@@ -26,7 +27,9 @@ $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)
 
 formatSourceError :: SourceError -> String
-formatSourceError = show
+formatSourceError (SrcError kind path ii jj s) =
+  show (SrcError kind (takeFileName path) ii jj s)
+formatSourceError err@(OtherError _ ) = show err
 
 -- | A mapping from symbol uses to symbol definitions
 --
