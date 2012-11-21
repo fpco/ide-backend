@@ -23,7 +23,7 @@ testAll opts originalSourcesDir =
 
 check :: [String] -> FilePath -> FilePath -> IO ()
 check opts originalSourcesDir configSourcesDir = do
-  putStrLn $ "\nCopying files from: " ++ originalSourcesDir ++ "\n"
+  putStrLn $ "\n\nCopying files from: " ++ originalSourcesDir ++ "\n"
           ++ "to a temporary test directory at: " ++ configSourcesDir ++ "\n"
   -- Init session.
   let sessionConfig = SessionConfig{ configSourcesDir
@@ -86,14 +86,20 @@ check opts originalSourcesDir configSourcesDir = do
   assertRaises "getSourceErrors s10"
                (userError "This session state does not admit queries.")
                (getSourceErrors s10)
-  s11 <- updateSession s10 mempty (progressWaitConsume displayCounter)
+  let optionsUpdate = originalUpdate
+                      <> updateModule (OptionsSet ["-XNamedFieldPuns"])
+  s11 <- updateSession s10 optionsUpdate (progressWaitConsume displayCounter)
   msgs11 <- getSourceErrors s11
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs11) ++ "\n"
   assertRaises "shutdownSession s10"
                (userError "Invalid session token 0 /= 1")
                (shutdownSession s10)
-  shutdownSession s11
+  s12 <- updateSession s11 mempty (progressWaitConsume displayCounter)
+  msgs12 <- getSourceErrors s12
+  putStrLn $ "Error 12:\n" ++ List.intercalate "\n\n"
+    (map formatSourceError msgs12) ++ "\n"
+  shutdownSession s12
 
 -- Driver
 
@@ -106,6 +112,7 @@ tests =
     , testCase "Our own code, package 'ghc' missing" $ testAll [] "."
     , testCase "A subdirectory of Cabal code"
       $ testAll [] "test/Cabal.Distribution.PackageDescription"
+    , testCase "A file requiring -XNamedFieldPuns" $ testAll [] "test/Puns"
     ]
   ]
 
