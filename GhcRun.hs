@@ -127,30 +127,6 @@ getGhcLibdir = do
     [libdir] -> return libdir
     _        -> fail "cannot parse output of ghc --print-libdir"
 
--- Put into the log_action field for extra debugging. Also, set verbosity to 3.
-_collectSrcError_debug :: IORef [SourceError]
-                       -> (String -> IO ())
-                       -> (String -> IO ())
-                       -> DynFlags
-                       -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
-_collectSrcError_debug errsRef handlerOutput handlerRemaining flags severity srcspan style msg = do
-  let showSeverity SevOutput  = "SevOutput"
-#if __GLASGOW_HASKELL__ >= 706
-      showSeverity SevDump    = "SevDump"
-#endif
-      showSeverity SevInfo    = "SevInfo"
-      showSeverity SevWarning = "SevWarning"
-      showSeverity SevError   = "SevError"
-      showSeverity SevFatal   = "SevFatal"
-  appendFile "log_debug"
-    $  "Severity: "   ++ showSeverity severity
-    ++ "  SrcSpan: "  ++ show srcspan
---    ++ "  PprStyle: " ++ show style
-    ++ "  MsgDoc: "   ++ showSDocForUser flags (qualName style,qualModule style) msg
-    ++ "\n"
-  collectSrcError
-    errsRef handlerOutput handlerRemaining flags severity srcspan style msg
-
 collectSrcError :: IORef [SourceError]
                 -> (String -> IO ())
                 -> (String -> IO ())
@@ -206,3 +182,31 @@ extractErrSpan (RealSrcSpan srcspan) =
        ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
        ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
 extractErrSpan _ = Nothing
+
+-- Debugging code in case of obscure RPC errors. Try to debug GHC API
+-- problems using the in-process test tool first and debug RPC problems
+-- in isolation using variations on the existing synthetic tests.
+
+-- Put into the log_action field for extra debugging. Also, set verbosity to 3.
+_collectSrcError_debug :: IORef [SourceError]
+                       -> (String -> IO ())
+                       -> (String -> IO ())
+                       -> DynFlags
+                       -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
+_collectSrcError_debug errsRef handlerOutput handlerRemaining flags severity srcspan style msg = do
+  let showSeverity SevOutput  = "SevOutput"
+#if __GLASGOW_HASKELL__ >= 706
+      showSeverity SevDump    = "SevDump"
+#endif
+      showSeverity SevInfo    = "SevInfo"
+      showSeverity SevWarning = "SevWarning"
+      showSeverity SevError   = "SevError"
+      showSeverity SevFatal   = "SevFatal"
+  appendFile "log_debug"
+    $  "Severity: "   ++ showSeverity severity
+    ++ "  SrcSpan: "  ++ show srcspan
+--    ++ "  PprStyle: " ++ show style
+    ++ "  MsgDoc: "   ++ showSDocForUser flags (qualName style,qualModule style) msg
+    ++ "\n"
+  collectSrcError
+    errsRef handlerOutput handlerRemaining flags severity srcspan style msg
