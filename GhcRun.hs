@@ -15,6 +15,7 @@ module GhcRun
 
 import GHC hiding (flags, ModuleName)
 import qualified Config as GHC
+import GhcMonad (liftIO)
 #if __GLASGOW_HASKELL__ >= 706
 import ErrUtils   ( MsgDoc )
 #else
@@ -28,7 +29,6 @@ import System.Process
 import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
-import Control.Monad (void)
 
 import Common
 
@@ -58,11 +58,10 @@ checkModule targets (DynamicOpts dynOpts) funToRun verbosity
         Ex.handle $ \e -> do
           let exError = OtherError (show (e :: Ex.SomeException))
           (++ [exError]) <$> collectedErrors
-      (hscTarget, ghcLink, runOrNot) = case funToRun of
-        Nothing  -> (HscNothing,     NoLink,
-                     return ())
-        Just fun -> (HscInterpreted, LinkInMemory,
-                     void $ runStmt fun RunToCompletion)
+      (hscTarget, ghcLink) = case funToRun of
+        Nothing -> (HscNothing,     NoLink)
+        -- TODO: typecheck only what's needed for the function in funToRun?
+        Just _  -> (HscInterpreted, LinkInMemory)
   handleOtherErrors $ do
 
     libdir <- getGhcLibdir
@@ -92,8 +91,31 @@ checkModule targets (DynamicOpts dynOpts) funToRun verbosity
                 , targetContents     = Nothing
                 }
         mapM_ addSingle targets
-        load LoadAllTargets
-        runOrNot
+        loadRes <- load LoadAllTargets
+{- debug; context is []
+        context <- getContext
+        liftIO $ putStrLn $ "getContext: "
+                            ++ showSDocDebug flags (GHC.ppr context)
+
+-}      case funToRun of
+          Just fun | succeeded loadRes -> do
+            setContext $ [IIDecl $ simpleImportDecl $ mkModuleName "Main"]
+{- debug: contest is ["Main"]
+            context <- getContext
+            liftIO $ putStrLn $ "getContext: "
+                                ++ showSDocDebug flags (GHC.ppr context)
+-}
+            runRes <- runStmt fun RunToCompletion
+            case runRes of
+              RunOk names ->
+                liftIO $ putStrLn $ "\nRunOk: "
+                                    ++ showSDocDebug flags (GHC.ppr names)
+              RunException ex ->
+                liftIO $ putStrLn $ "\nRunException: "
+                                    ++ show ex
+              RunBreak{} -> error "\nRunBreak"
+            return ()
+          _ -> return ()
 
     collectedErrors
 
@@ -169,6 +191,13 @@ showSDocForUser :: DynFlags -> PrintUnqualified -> MsgDoc -> String
 showSDocForUser  flags uqual msg = GHC.showSDocForUser flags uqual msg
 #else
 showSDocForUser _flags uqual msg = GHC.showSDocForUser       uqual msg
+#endif
+
+showSDocDebug :: DynFlags -> MsgDoc -> String
+#if __GLASGOW_HASKELL__ >= 706
+showSDocDebug  flags msg = GHC.showSDocDebug flags msg
+#else
+showSDocDebug _flags msg = GHC.showSDocDebug        msg
 #endif
 
 extractErrSpan :: SrcSpan -> Maybe (FilePath, (Int, Int), (Int, Int))

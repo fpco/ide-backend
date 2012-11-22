@@ -39,7 +39,7 @@ parFib n
 -------------------------------------------------------------------------------
 
 result :: Integer
-result = parFib 38
+result = parFib 24
 
 -------------------------------------------------------------------------------
 
@@ -49,7 +49,7 @@ secDiff (TOD secs1 psecs1) (TOD secs2 psecs2)
 
 -------------------------------------------------------------------------------
 
-main :: IO ()
+main :: IO String
 main
   = do putStrLn "ParFib"
        t0 <- getClockTime
@@ -57,5 +57,6 @@ main
        t1 <- getClockTime
        putStrLn ("fib = " ++ show result)
        putStrLn ("Time: " ++ show (secDiff t0 t1))
+       return $ show result
 
 -------------------------------------------------------------------------------
