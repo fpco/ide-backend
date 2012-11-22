@@ -38,7 +38,7 @@ main = do
     _ -> do
       let (originalSourcesDir, opts) = case args of
             ["--help"] ->
-              error "usage: typecheck-dir [source-dir] [ghc-options]"
+              error "usage: typecheck-dir [source-dir [ghc-options]]"
             [dir] -> (dir, defaultExtensions)
             dir : optsArg -> (dir, optsArg)
             [] -> ("test/Cabal.Distribution.PackageDescription",
