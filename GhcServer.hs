@@ -105,7 +105,8 @@ ghcServerEngine GhcInitData{dOpts}
         -- TODO: verify that it's the "compiling M" message
         handlerOutput _ = updateCounter
         handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-    errs <- checkModule files dynOpts verbosity handlerOutput handlerRemaining
+    errs <- checkModule files dynOpts Nothing verbosity
+                        handlerOutput handlerRemaining
     -- Don't block, GHC should not be slowed down.
     b <- isEmptyMVar mvCounter
     if b

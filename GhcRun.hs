@@ -28,6 +28,7 @@ import System.Process
 import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
+import Control.Monad (void)
 
 import Common
 
@@ -44,17 +45,24 @@ optsToDynFlags = DynamicOpts . map noLoc
 
 checkModule :: [FilePath]        -- ^ target files
             -> DynamicOpts       -- ^ dynamic flags for this run of runGhc
+            -> Maybe String      -- ^ name of the function to run, if any
             -> Int               -- ^ verbosity level
             -> (String -> IO ()) -- ^ handler for each SevOutput message
             -> (String -> IO ()) -- ^ handler for remaining non-error messages
             -> IO [SourceError]  -- ^ any errors and warnings
-checkModule targets (DynamicOpts dynOpts) verbosity handlerOutput handlerRemaining = do
+checkModule targets (DynamicOpts dynOpts) funToRun verbosity
+            handlerOutput handlerRemaining = do
   errsRef <- newIORef []
   let collectedErrors = reverse <$> readIORef errsRef
-  let handleOtherErrors =
+      handleOtherErrors =
         Ex.handle $ \e -> do
           let exError = OtherError (show (e :: Ex.SomeException))
           (++ [exError]) <$> collectedErrors
+      (hscTarget, ghcLink, runOrNot) = case funToRun of
+        Nothing  -> (HscNothing,     NoLink,
+                     return ())
+        Just fun -> (HscInterpreted, LinkInMemory,
+                     void $ runStmt fun RunToCompletion)
   handleOtherErrors $ do
 
     libdir <- getGhcLibdir
@@ -67,8 +75,8 @@ checkModule targets (DynamicOpts dynOpts) verbosity handlerOutput handlerRemaini
 
       defaultCleanupHandler flags $ do
         setSessionDynFlags flags {
-                             hscTarget  = HscNothing,
-                             ghcLink    = NoLink,
+                             hscTarget,
+                             ghcLink,
                              ghcMode    = CompManager,
 #if __GLASGOW_HASKELL__ >= 706
                              log_action = collectSrcError errsRef handlerOutput handlerRemaining,
@@ -85,7 +93,7 @@ checkModule targets (DynamicOpts dynOpts) verbosity handlerOutput handlerRemaini
                 }
         mapM_ addSingle targets
         load LoadAllTargets
-        return ()
+        runOrNot
 
     collectedErrors
 
