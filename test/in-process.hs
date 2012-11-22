@@ -15,7 +15,7 @@ main = do
   target <-
     case args of
       [f] -> return f
-      []  -> return "test/Cabal.Distribution.PackageDescription/Parse.hs"
+      []  -> return "test/MainModule/ParFib.hs"
       _   -> fail "usage: in-process [file.hs]"
 
   errs <- checkModule [target] (optsToDynFlags []) (return ())
