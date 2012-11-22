@@ -18,6 +18,7 @@ main = do
       []  -> return "test/MainModule/ParFib.hs"
       _   -> fail "usage: in-process [file.hs]"
 
-  errs <- checkModule [target] (optsToDynFlags []) (return ())
+  putStrLn ""
+  errs <- checkModule [target] (optsToDynFlags []) 2 putStrLn putStrLn
   putStrLn $ "\nErrors and warnings:\n" ++ List.intercalate "\n"
     (map formatSourceError errs) ++ "\n"

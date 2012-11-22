@@ -44,9 +44,11 @@ optsToDynFlags = DynamicOpts . map noLoc
 
 checkModule :: [FilePath]        -- ^ target files
             -> DynamicOpts       -- ^ dynamic flags for this run of runGhc
-            -> IO ()             -- ^ handler for each "compiling M" message
+            -> Int               -- ^ verbosity level
+            -> (String -> IO ()) -- ^ handler for each SevOutput message
+            -> (String -> IO ()) -- ^ handler for remaining non-error messages
             -> IO [SourceError]  -- ^ any errors and warnings
-checkModule targets (DynamicOpts dynOpts) handler = do
+checkModule targets (DynamicOpts dynOpts) verbosity handlerOutput handlerRemaining = do
   errsRef <- newIORef []
   let collectedErrors = reverse <$> readIORef errsRef
   let handleOtherErrors =
@@ -69,12 +71,11 @@ checkModule targets (DynamicOpts dynOpts) handler = do
                              ghcLink    = NoLink,
                              ghcMode    = CompManager,
 #if __GLASGOW_HASKELL__ >= 706
-                             log_action = collectSrcError errsRef handler,
+                             log_action = collectSrcError errsRef handlerOutput handlerRemaining,
 #else
-                             log_action = collectSrcError errsRef handler flags,
+                             log_action = collectSrcError errsRef handlerOutput handlerRemaining flags,
 #endif
-                             -- print "compiling M ... done." for each module
-                             verbosity  = 1
+                             verbosity
                            }
         let addSingle filename = do
               addTarget Target
@@ -97,10 +98,12 @@ getGhcLibdir = do
     _        -> fail "cannot parse output of ghc --print-libdir"
 
 -- Put into the log_action field for extra debugging. Also, set verbosity to 3.
-_collectSrcError_debug :: IORef [SourceError] -> IO ()
+_collectSrcError_debug :: IORef [SourceError]
+                       -> (String -> IO ())
+                       -> (String -> IO ())
                        -> DynFlags
                        -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
-_collectSrcError_debug errsRef handler flags severity srcspan style msg = do
+_collectSrcError_debug errsRef handlerOutput handlerRemaining flags severity srcspan style msg = do
   let showSeverity SevOutput  = "SevOutput"
 #if __GLASGOW_HASKELL__ >= 706
       showSeverity SevDump    = "SevDump"
@@ -115,12 +118,15 @@ _collectSrcError_debug errsRef handler flags severity srcspan style msg = do
 --    ++ "  PprStyle: " ++ show style
     ++ "  MsgDoc: "   ++ showSDocForUser flags (qualName style,qualModule style) msg
     ++ "\n"
-  collectSrcError errsRef handler flags severity srcspan style msg
+  collectSrcError
+    errsRef handlerOutput handlerRemaining flags severity srcspan style msg
 
-collectSrcError :: IORef [SourceError] -> IO ()
+collectSrcError :: IORef [SourceError]
+                -> (String -> IO ())
+                -> (String -> IO ())
                 -> DynFlags
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
-collectSrcError errsRef _handler flags severity srcspan style msg
+collectSrcError errsRef _ _ flags severity srcspan style msg
   | Just errKind <- case severity of
                       SevWarning -> Just KindWarning
                       SevError   -> Just KindError
@@ -130,16 +136,17 @@ collectSrcError errsRef _handler flags severity srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in modifyIORef errsRef (SrcError errKind file st end msgstr:)
 
-collectSrcError errsRef _handler flags SevError _srcspan style msg
+collectSrcError errsRef _ _ flags SevError _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in modifyIORef errsRef (OtherError msgstr:)
 
-collectSrcError _errsRef handler _flags SevOutput _srcspan _style _msg =
-  -- TODO: verify that it's the "compiling M" message
-  handler
+collectSrcError _errsRef handlerOutput _ flags SevOutput _srcspan style msg
+  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+     in handlerOutput msgstr
 
-collectSrcError _ _ _ _ _ _ _ = return ()
-
+collectSrcError _errsRef _ handlerRemaining flags _severity _srcspan style msg
+  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+     in handlerRemaining msgstr
 
 -----------------------
 -- GHC version compat

@@ -100,7 +100,12 @@ ghcServerEngine GhcInitData{dOpts}
             -- If not consumed, increment count and keep working.
             else modifyMVar_ mvCounter (return . incrementCounter)
         dynOpts = maybe dOpts optsToDynFlags ideNewOpts
-    errs <- checkModule files dynOpts updateCounter
+        -- Let GHC API print "compiling M ... done." for each module.
+        verbosity  = 1
+        -- TODO: verify that it's the "compiling M" message
+        handlerOutput _ = updateCounter
+        handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
+    errs <- checkModule files dynOpts verbosity handlerOutput handlerRemaining
     -- Don't block, GHC should not be slowed down.
     b <- isEmptyMVar mvCounter
     if b
