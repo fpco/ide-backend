@@ -16,7 +16,7 @@ main = do
     case args of
       [f] -> return f
       []  -> return "test/MainModule/ParFib.hs"
-      _   -> fail "usage: in-process [file.hs]"
+      _   -> fail "usage: in-process [file]"
 
   putStrLn ""
   errs <- checkModule [target] (optsToDynFlags []) (Just ("Main", "main")) 2

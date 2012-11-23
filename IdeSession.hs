@@ -356,7 +356,7 @@ newtype ModuleName = ModuleName String
 
 internalFile :: SessionConfig -> ModuleName -> FilePath
 internalFile SessionConfig{configSourcesDir} (ModuleName n) =
-  configSourcesDir </> n <.> ".hs"
+  configSourcesDir </> n
 
 -- | A session update that changes a data file. Data files can be added,
 -- updated or deleted.

@@ -1,7 +1,7 @@
 module Main where
 
 import System.Environment
-import System.FilePath ((</>), takeExtension, dropExtension)
+import System.FilePath ((</>), takeExtension)
 import System.Directory
 import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
@@ -60,9 +60,9 @@ check opts originalSourcesDir configSourcesDir = do
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
   -- HACK: here we fake module names, guessing them from file names.
   cnts <- getDirectoryContents originalSourcesDir
-  let originalFiles = filter ((`elem` [".hs"]) . takeExtension) cnts
+  let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
       originalModules =
-        map (\ f -> (ModuleName $ dropExtension f, f)) originalFiles
+        map (\ f -> (ModuleName f, f)) originalFiles
       upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
       originalUpdate = mconcat $ map upd originalModules
       len = show $ length originalFiles

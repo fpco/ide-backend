@@ -3,8 +3,9 @@
 -- need to know.
 module Common
   ( SourceError(..), SourceErrorKind(..)
-  , SymbolDefinitionMap
   , formatSourceError
+  , SymbolDefinitionMap
+  , hsExtentions, cpExtentions
   ) where
 
 import Data.Aeson.TH (deriveJSON)
@@ -37,3 +38,12 @@ formatSourceError err@(OtherError _ ) = show err
 -- it can be serialised etc.
 --
 data SymbolDefinitionMap
+
+-- | These source files are type-checked.
+hsExtentions:: [FilePath]
+hsExtentions = [".hs", ".lhs"]
+
+-- | These source files are either type-checked or used
+-- for type-checking others, so they are worth copying over.
+cpExtentions :: [FilePath]
+cpExtentions = ".h" : hsExtentions
