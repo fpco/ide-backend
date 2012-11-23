@@ -9,6 +9,7 @@ import Data.Version
 import Data.List
 import Data.Maybe
 import Text.Printf
+import Control.Monad
 
 import Test.Framework (Test, defaultMain, testGroup, buildTest)
 import Test.Golden
@@ -42,7 +43,11 @@ golden logName = buildTest $ do
       n = case tail $ takeExtension goldenLog of
         "log" -> 0
         f     -> read f
-      ext = printf "%03d" $ n + 1
-  copyFile currentLog
-           (oldLogsDir </> logName <.> ext)
+      nextExt = printf "%03d" $ n + 1
+  goldenLogCnts  <- readFile goldenLog
+  currentLogCnts <- readFile currentLog
+  -- Checking the equality independently of goldenVsFile, to decide
+  -- whether to record a new log version. This is a bit goofy.
+  when (goldenLogCnts /= currentLogCnts) $
+    copyFile currentLog (oldLogsDir </> logName <.> nextExt)
   return test
