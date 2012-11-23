@@ -7,6 +7,7 @@ import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
 import Data.Monoid ((<>), mempty, mconcat)
 import qualified Data.ByteString.Lazy.Char8 as BS
+import System.IO (hFlush, stdout, stderr)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -23,7 +24,9 @@ testAll opts originalSourcesDir =
 
 check :: [String] -> FilePath -> FilePath -> IO ()
 check opts originalSourcesDir configSourcesDir = do
-  putStrLn $ "\n\nCopying files from: " ++ originalSourcesDir ++ "\n"
+  hFlush stdout
+  hFlush stderr
+  putStrLn $ "\nCopying files from: " ++ originalSourcesDir ++ "\n"
   -- Init session.
   let sessionConfig = SessionConfig{ configSourcesDir
                                    , configWorkingDir = configSourcesDir
@@ -86,7 +89,8 @@ check opts originalSourcesDir configSourcesDir = do
                (userError "This session state does not admit queries.")
                (getSourceErrors s10)
   let optionsUpdate = originalUpdate
-                      <> updateModule (OptionsSet $ Just ["-XNamedFieldPuns"])
+                      <> updateModule (OptionsSet $ Just ["-XNamedFieldPuns",
+                                                          "-XRecordWildCards"])
   s11 <- updateSession s10 optionsUpdate (progressWaitConsume displayCounter)
   msgs11 <- getSourceErrors s11
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
