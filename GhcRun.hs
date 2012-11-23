@@ -45,7 +45,8 @@ optsToDynFlags = DynamicOpts . map noLoc
 
 checkModule :: [FilePath]        -- ^ target files
             -> DynamicOpts       -- ^ dynamic flags for this run of runGhc
-            -> Maybe String      -- ^ name of the function to run, if any
+            -> Maybe (String, String)
+                                 -- ^ module and function to run, if any
             -> Int               -- ^ verbosity level
             -> (String -> IO ()) -- ^ handler for each SevOutput message
             -> (String -> IO ()) -- ^ handler for remaining non-error messages
@@ -98,8 +99,8 @@ checkModule targets (DynamicOpts dynOpts) funToRun verbosity
                             ++ showSDocDebug flags (GHC.ppr context)
 
 -}      case funToRun of
-          Just fun | succeeded loadRes -> do
-            setContext $ [IIDecl $ simpleImportDecl $ mkModuleName "Main"]
+          Just (m, fun) | succeeded loadRes -> do
+            setContext $ [IIDecl $ simpleImportDecl $ mkModuleName m]
 {- debug: contest is ["Main"]
             context <- getContext
             liftIO $ putStrLn $ "getContext: "

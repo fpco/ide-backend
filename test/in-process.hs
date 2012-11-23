@@ -19,7 +19,7 @@ main = do
       _   -> fail "usage: in-process [file.hs]"
 
   putStrLn ""
-  errs <- checkModule [target] (optsToDynFlags []) (Just "Main.main") 2
+  errs <- checkModule [target] (optsToDynFlags []) (Just ("Main", "main")) 2
                       putStrLn putStrLn
   putStrLn $ "\nErrors and warnings:\n" ++ List.intercalate "\n"
     (map formatSourceError errs) ++ "\n"
