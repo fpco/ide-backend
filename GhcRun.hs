@@ -29,6 +29,7 @@ import System.Process
 import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
+import Data.Maybe (catMaybes)
 
 import Common
 
@@ -112,8 +113,7 @@ checkModule targets (DynamicOpts dynOpts) funToRun verbosity
                 liftIO $ putStrLn $ "\nRunOk: "
                                     ++ showSDocDebug flags (GHC.ppr names)
               RunException ex ->
-                liftIO $ putStrLn $ "\nRunException: "
-                                    ++ show ex
+                liftIO $ putStrLn $ "\nRunException: " ++ showExWithClass ex
               RunBreak{} -> error "\nRunBreak"
             return ()
           _ -> return ()
@@ -183,6 +183,52 @@ extractErrSpan (RealSrcSpan srcspan) =
        ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
        ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
 extractErrSpan _ = Nothing
+
+showExWithClass :: Ex.SomeException -> String
+showExWithClass ex =
+  -- All exception classes defined in Control.Exception.
+  let fr :: Ex.Exception e => Ex.SomeException -> Maybe e
+      fr = Ex.fromException
+      fshow :: Show a => String -> Maybe a -> Maybe String
+      fshow s = fmap ((s ++) . show)
+      exs = catMaybes $
+        [ fshow "IOException: "
+            (fr ex :: Maybe Ex.IOException)
+        , fshow "ErrorCall: "
+            (fr ex :: Maybe Ex.ErrorCall)
+        , fshow "ArithException: "
+            (fr ex :: Maybe Ex.ArithException)
+        , fshow "ArrayException: "
+            (fr ex :: Maybe Ex.ArrayException)
+        , fshow "AssertionFailed: "
+            (fr ex :: Maybe Ex.AssertionFailed)
+        , fshow "AsyncException: "
+            (fr ex :: Maybe Ex.AsyncException)
+        , fshow "NonTermination: "
+            (fr ex :: Maybe Ex.NonTermination)
+        , fshow "NestedAtomically: "
+            (fr ex :: Maybe Ex.NestedAtomically)
+        , fshow "BlockedIndefinitelyOnMVar: "
+            (fr ex :: Maybe Ex.BlockedIndefinitelyOnMVar)
+        , fshow "BlockedIndefinitelyOnSTM: "
+            (fr ex :: Maybe Ex.BlockedIndefinitelyOnSTM)
+        , fshow "Deadlock: "
+            (fr ex :: Maybe Ex.Deadlock)
+        , fshow "NoMethodError: "
+            (fr ex :: Maybe Ex.NoMethodError)
+        , fshow "PatternMatchFail: "
+            (fr ex :: Maybe Ex.PatternMatchFail)
+        , fshow "RecUpdError: "
+            (fr ex :: Maybe Ex.RecUpdError)
+        , fshow "RecConError: "
+            (fr ex :: Maybe Ex.RecConError)
+        , fshow "RecSelError: "
+            (fr ex :: Maybe Ex.RecSelError)
+        , -- This one is always not Nothing.
+          fshow "SomeException: "
+            (fr ex :: Maybe Ex.SomeException)
+        ]
+  in head exs
 
 -- Debugging code in case of obscure RPC errors. Try to debug GHC API
 -- problems using the in-process test tool first and debug RPC problems
