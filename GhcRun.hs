@@ -24,6 +24,7 @@ import ErrUtils   ( Message )
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
 import FastString ( unpackFS )
+import Data.Typeable (Typeable, typeOf)
 
 import System.Process
 import Data.IORef
@@ -189,44 +190,27 @@ showExWithClass ex =
   -- All exception classes defined in Control.Exception.
   let fr :: Ex.Exception e => Ex.SomeException -> Maybe e
       fr = Ex.fromException
-      fshow :: Show a => String -> Maybe a -> Maybe String
-      fshow s = fmap ((s ++) . show)
+      fshow :: (Show e, Typeable e) => Maybe e -> Maybe String
+      fshow = fmap $ \ e -> (show (typeOf e) ++ ": " ++ show e)
       exs = catMaybes $
-        [ fshow "IOException: "
-            (fr ex :: Maybe Ex.IOException)
-        , fshow "ErrorCall: "
-            (fr ex :: Maybe Ex.ErrorCall)
-        , fshow "ArithException: "
-            (fr ex :: Maybe Ex.ArithException)
-        , fshow "ArrayException: "
-            (fr ex :: Maybe Ex.ArrayException)
-        , fshow "AssertionFailed: "
-            (fr ex :: Maybe Ex.AssertionFailed)
-        , fshow "AsyncException: "
-            (fr ex :: Maybe Ex.AsyncException)
-        , fshow "NonTermination: "
-            (fr ex :: Maybe Ex.NonTermination)
-        , fshow "NestedAtomically: "
-            (fr ex :: Maybe Ex.NestedAtomically)
-        , fshow "BlockedIndefinitelyOnMVar: "
-            (fr ex :: Maybe Ex.BlockedIndefinitelyOnMVar)
-        , fshow "BlockedIndefinitelyOnSTM: "
-            (fr ex :: Maybe Ex.BlockedIndefinitelyOnSTM)
-        , fshow "Deadlock: "
-            (fr ex :: Maybe Ex.Deadlock)
-        , fshow "NoMethodError: "
-            (fr ex :: Maybe Ex.NoMethodError)
-        , fshow "PatternMatchFail: "
-            (fr ex :: Maybe Ex.PatternMatchFail)
-        , fshow "RecUpdError: "
-            (fr ex :: Maybe Ex.RecUpdError)
-        , fshow "RecConError: "
-            (fr ex :: Maybe Ex.RecConError)
-        , fshow "RecSelError: "
-            (fr ex :: Maybe Ex.RecSelError)
+        [ fshow (fr ex :: Maybe Ex.IOException)
+        , fshow (fr ex :: Maybe Ex.ErrorCall)
+        , fshow (fr ex :: Maybe Ex.ArithException)
+        , fshow (fr ex :: Maybe Ex.ArrayException)
+        , fshow (fr ex :: Maybe Ex.AssertionFailed)
+        , fshow (fr ex :: Maybe Ex.AsyncException)
+        , fshow (fr ex :: Maybe Ex.NonTermination)
+        , fshow (fr ex :: Maybe Ex.NestedAtomically)
+        , fshow (fr ex :: Maybe Ex.BlockedIndefinitelyOnMVar)
+        , fshow (fr ex :: Maybe Ex.BlockedIndefinitelyOnSTM)
+        , fshow (fr ex :: Maybe Ex.Deadlock)
+        , fshow (fr ex :: Maybe Ex.NoMethodError)
+        , fshow (fr ex :: Maybe Ex.PatternMatchFail)
+        , fshow (fr ex :: Maybe Ex.RecUpdError)
+        , fshow (fr ex :: Maybe Ex.RecConError)
+        , fshow (fr ex :: Maybe Ex.RecSelError)
         , -- This one is always not Nothing.
-          fshow "SomeException: "
-            (fr ex :: Maybe Ex.SomeException)
+          fshow (fr ex :: Maybe Ex.SomeException)
         ]
   in head exs
 
