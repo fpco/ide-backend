@@ -24,13 +24,11 @@ import ErrUtils   ( Message )
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
 import FastString ( unpackFS )
-import Data.Typeable (Typeable, typeOf)
 
 import System.Process
 import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
-import Data.Maybe (catMaybes)
 
 import Common
 
@@ -52,7 +50,7 @@ checkModule :: [FilePath]        -- ^ target files
             -> Int               -- ^ verbosity level
             -> (String -> IO ()) -- ^ handler for each SevOutput message
             -> (String -> IO ()) -- ^ handler for remaining non-error messages
-            -> IO [SourceError]  -- ^ any errors and warnings
+            -> IO RunOutcome     -- ^ any errors and warnings
 checkModule targets (DynamicOpts dynOpts) funToRun verbosity
             handlerOutput handlerRemaining = do
   errsRef <- newIORef []
@@ -60,7 +58,8 @@ checkModule targets (DynamicOpts dynOpts) funToRun verbosity
       handleOtherErrors =
         Ex.handle $ \e -> do
           let exError = OtherError (show (e :: Ex.SomeException))
-          (++ [exError]) <$> collectedErrors
+          errs <- collectedErrors
+          return $ Right $ errs ++ [exError]
       (hscTarget, ghcLink) = case funToRun of
         Nothing -> (HscNothing,     NoLink)
         -- TODO: typecheck only what's needed for the function in funToRun?
@@ -69,8 +68,8 @@ checkModule targets (DynamicOpts dynOpts) funToRun verbosity
 
     libdir <- getGhcLibdir
 
-    runGhc (Just libdir) $
-      handleSourceError printException $ do
+    runOutcome <- runGhc (Just libdir) $
+      handleSourceError (\ e -> printException e >> return (Right [])) $ do
 
       flags0 <- getSessionDynFlags
       (flags, _, _) <- parseDynamicFlags flags0 dynOpts
@@ -110,16 +109,23 @@ checkModule targets (DynamicOpts dynOpts) funToRun verbosity
 -}
             runRes <- runStmt fun RunToCompletion
             case runRes of
-              RunOk names ->
-                liftIO $ putStrLn $ "\nRunOk: "
-                                    ++ showSDocDebug flags (GHC.ppr names)
-              RunException ex ->
+              RunOk [name] -> do
+                let ident = showSDocDebug flags (GHC.ppr name)
+                -- debug
+                liftIO $ putStrLn $ "\nRunOk: " ++ ident
+                return $ Left $ Left ident
+              RunOk _ -> error "checkModule: unexpected names in RunOk"
+              RunException ex -> do
+                -- debug
                 liftIO $ putStrLn $ "\nRunException: " ++ showExWithClass ex
-              RunBreak{} -> error "\nRunBreak"
-            return ()
-          _ -> return ()
+                return $ Left $ Right ex
+              RunBreak{} -> error "checkModule: RunBreak"
+          _ -> return $ Right []  -- no errors know yet; is expanded below
 
-    collectedErrors
+    case runOutcome :: RunOutcome of
+      Left _   -> return runOutcome
+      Right [] -> fmap Right collectedErrors
+      Right _  -> error "checkModule: early GHC API exception"
 
 getGhcLibdir :: IO FilePath
 getGhcLibdir = do
@@ -184,35 +190,6 @@ extractErrSpan (RealSrcSpan srcspan) =
        ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
        ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
 extractErrSpan _ = Nothing
-
-showExWithClass :: Ex.SomeException -> String
-showExWithClass ex =
-  -- All exception classes defined in Control.Exception.
-  let fr :: Ex.Exception e => Ex.SomeException -> Maybe e
-      fr = Ex.fromException
-      fshow :: (Show e, Typeable e) => Maybe e -> Maybe String
-      fshow = fmap $ \ e -> (show (typeOf e) ++ ": " ++ show e)
-      exs = catMaybes $
-        [ fshow (fr ex :: Maybe Ex.IOException)
-        , fshow (fr ex :: Maybe Ex.ErrorCall)
-        , fshow (fr ex :: Maybe Ex.ArithException)
-        , fshow (fr ex :: Maybe Ex.ArrayException)
-        , fshow (fr ex :: Maybe Ex.AssertionFailed)
-        , fshow (fr ex :: Maybe Ex.AsyncException)
-        , fshow (fr ex :: Maybe Ex.NonTermination)
-        , fshow (fr ex :: Maybe Ex.NestedAtomically)
-        , fshow (fr ex :: Maybe Ex.BlockedIndefinitelyOnMVar)
-        , fshow (fr ex :: Maybe Ex.BlockedIndefinitelyOnSTM)
-        , fshow (fr ex :: Maybe Ex.Deadlock)
-        , fshow (fr ex :: Maybe Ex.NoMethodError)
-        , fshow (fr ex :: Maybe Ex.PatternMatchFail)
-        , fshow (fr ex :: Maybe Ex.RecUpdError)
-        , fshow (fr ex :: Maybe Ex.RecConError)
-        , fshow (fr ex :: Maybe Ex.RecSelError)
-        , -- This one is always not Nothing.
-          fshow (fr ex :: Maybe Ex.SomeException)
-        ]
-  in head exs
 
 -- Debugging code in case of obscure RPC errors. Try to debug GHC API
 -- problems using the in-process test tool first and debug RPC problems

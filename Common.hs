@@ -6,10 +6,15 @@ module Common
   , formatSourceError
   , SymbolDefinitionMap
   , hsExtentions, cpExtentions
+  , RunOutcome
+  , showExWithClass
   ) where
 
 import Data.Aeson.TH (deriveJSON)
 import System.FilePath (takeFileName)
+import qualified Control.Exception as Ex
+import Data.Typeable (Typeable, typeOf)
+import Data.Maybe (catMaybes)
 
 -- | An error or warning in a source module.
 --
@@ -47,3 +52,39 @@ hsExtentions = [".hs", ".lhs"]
 -- for type-checking others, so they are worth copying over.
 cpExtentions :: [FilePath]
 cpExtentions = ".h" : hsExtentions
+
+-- | An identifier bound to the resulting value or an exception
+-- thrown by the user code or a list of compilation errors
+-- (including arbitrary compilation exceptions raised by the GHC API).
+type RunOutcome = Either (Either String Ex.SomeException) [SourceError]
+
+-- | Show an exception together with its most precise type tag.
+-- All exception classes defined in Control.Exception are handled
+-- (there are a few more instances of Exception defined elsewhere).
+showExWithClass :: Ex.SomeException -> String
+showExWithClass ex =
+  let fr :: Ex.Exception e => Ex.SomeException -> Maybe e
+      fr = Ex.fromException
+      fshow :: (Show e, Typeable e) => Maybe e -> Maybe String
+      fshow = fmap $ \ e -> (show (typeOf e) ++ ": " ++ show e)
+      exs = catMaybes $
+        [ fshow (fr ex :: Maybe Ex.IOException)
+        , fshow (fr ex :: Maybe Ex.ErrorCall)
+        , fshow (fr ex :: Maybe Ex.ArithException)
+        , fshow (fr ex :: Maybe Ex.ArrayException)
+        , fshow (fr ex :: Maybe Ex.AssertionFailed)
+        , fshow (fr ex :: Maybe Ex.AsyncException)
+        , fshow (fr ex :: Maybe Ex.NonTermination)
+        , fshow (fr ex :: Maybe Ex.NestedAtomically)
+        , fshow (fr ex :: Maybe Ex.BlockedIndefinitelyOnMVar)
+        , fshow (fr ex :: Maybe Ex.BlockedIndefinitelyOnSTM)
+        , fshow (fr ex :: Maybe Ex.Deadlock)
+        , fshow (fr ex :: Maybe Ex.NoMethodError)
+        , fshow (fr ex :: Maybe Ex.PatternMatchFail)
+        , fshow (fr ex :: Maybe Ex.RecUpdError)
+        , fshow (fr ex :: Maybe Ex.RecConError)
+        , fshow (fr ex :: Maybe Ex.RecSelError)
+        , -- This one is always not Nothing.
+          fshow (fr ex :: Maybe Ex.SomeException)
+        ]
+  in head exs

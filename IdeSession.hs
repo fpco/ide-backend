@@ -92,6 +92,10 @@ module IdeSession (
   getSymbolDefinitionMap,
   SymbolDefinitionMap,
 
+  -- ** Run code
+  runStmt,
+  RunOutcome
+
   -- * Additional notes
   -- ** Responsibility for managing and mutating files in the sources dir.
   -- | In general, updating and changing source files in the sources dir has to
@@ -421,3 +425,15 @@ getSourceErrors IdeSession{ideComputed} = do
 --
 getSymbolDefinitionMap :: Query SymbolDefinitionMap
 getSymbolDefinitionMap = undefined
+
+-- | Run a given function in a given module and return either a result
+-- (either an identifier bound to the resulting value or an exception
+-- raised by the function) or a list of compilation warnings and errors
+-- (type errors and/or compilation exceptions raised by the GHC API).
+--
+-- If there are no compilations errors, we do not return compilation
+-- warnings. To obtain the warnings, call 'updateSession' and then
+-- make a query using 'getSourceErrors'
+--
+runStmt :: IdeSession -> String -> String -> IO RunOutcome
+runStmt sess m fun = undefined
