@@ -7,6 +7,7 @@ where
 import System.Time
 import Control.Parallel
 import System.Mem
+import qualified System.IO as System.IO
 
 -------------------------------------------------------------------------------
 -- A purely sequential implementaiton of fib.
@@ -49,8 +50,8 @@ secDiff (TOD secs1 psecs1) (TOD secs2 psecs2)
 
 -------------------------------------------------------------------------------
 
-main :: IO String
-main
+main' :: IO String
+main'
   = do putStrLn "ParFib"
        t0 <- getClockTime
        pseq result (return ())
@@ -58,5 +59,7 @@ main
        putStrLn ("fib = " ++ show result)
        putStrLn ("Time: " ++ show (secDiff t0 t1))
        return $ show result
+
+main = main' >>= \ r -> System.IO.hFlush System.IO.stdout >> return r
 
 -------------------------------------------------------------------------------
