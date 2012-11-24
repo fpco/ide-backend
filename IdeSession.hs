@@ -146,7 +146,7 @@ import Control.Monad
 import Control.Concurrent
 import System.IO (openBinaryTempFile, hClose)
 import System.Directory
-import System.FilePath ((</>), (<.>), splitFileName)
+import System.FilePath ((</>), (<.>), splitFileName, takeExtension)
 import qualified Control.Exception as Ex
 import Data.Monoid (Monoid(..))
 import Data.ByteString.Lazy (ByteString)
@@ -356,7 +356,10 @@ newtype ModuleName = ModuleName String
 
 internalFile :: SessionConfig -> ModuleName -> FilePath
 internalFile SessionConfig{configSourcesDir} (ModuleName n) =
-  configSourcesDir </> n
+  let ext = takeExtension n
+  in if ext `elem` cpExtentions
+     then configSourcesDir </> n            -- assume full file name
+     else configSourcesDir </> n <.> ".hs"  -- assume bare module name
 
 -- | A session update that changes a data file. Data files can be added,
 -- updated or deleted.
