@@ -123,7 +123,15 @@ tests =
     , testCase "A subdirectory of Cabal code"
       $ testAll defOpts "test/Cabal.Distribution.PackageDescription"
     , testCase "A file requiring -XNamedFieldPuns"
-      $ testAll defOpts "test/Puns"
+      $ testAll [ "-hide-all-packages"
+                , "-package mtl"
+                , "-package base"
+                , "-package array"
+                , "-package bytestring"
+                , "-package containers"
+                , "-package binary"
+                ]
+                "test/Puns"
     ]
   ]
 
