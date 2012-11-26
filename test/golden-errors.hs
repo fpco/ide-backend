@@ -14,6 +14,16 @@ import Control.Monad
 import Test.Framework (Test, defaultMain, testGroup, buildTest)
 import Test.Golden
 
+-- Check the results of ghc-errors test against older logs, if any.
+-- This test has to be run together with the ghc-errors test,
+-- e.g., as part of 'cabal test'.
+--
+-- Ocassionally, on a busy machine, the test fails and the diff shows
+-- that the intermediate progress numbers do not match older logs.
+-- This is as intended. The GHC API is never allowed to wait until
+-- all the intermediate progress information is generated, so sometimes
+-- the result is ready before all progress information is emitted.
+
 main :: IO ()
 main = defaultMain tests
 
