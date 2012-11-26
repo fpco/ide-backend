@@ -310,13 +310,14 @@ updateSession sess (IdeSessionUpdate update) handler = do
                     , ideGenerateCode } <- update sess
 
   -- Last, communicating with the GHC server.
-  let f (RespWorking c) = c  -- advancement counter
-      f (RespDone _)    = error "updateSession: unexpected RespDone"
-      g (RespWorking _) = error "updateSession: unexpected RespWorking"
-      g (RespDone r) = newSess { ideToken    = newToken
-                               , ideComputed = Just r
-                               }
-  rpcGhcServer ideGhcServer ideNewOpts configSourcesDir ideGenerateCode
+  let f (RespWorking c)      = c  -- advancement counter
+      f (RespDone _)         = error "updateSession: unexpected RespDone"
+      g (RespWorking _)      = error "updateSession: unexpected RespWorking"
+      g (RespDone (Left _))  = error "updateSession: unexpected Left"
+      g (RespDone (Right r)) = newSess { ideToken    = newToken
+                                       , ideComputed = Just r
+                                       }
+  rpcGhcServer ideGhcServer ideNewOpts configSourcesDir ideGenerateCode Nothing
                (handler . bimapProgress f g)
 
 -- | Writes a file atomically.
@@ -450,4 +451,17 @@ setCodeGeneration sess ideGenerateCode = return $ sess {ideGenerateCode}
 -- warnings. To obtain the warnings, call 'getSourceErrors'.
 --
 runStmt :: IdeSession -> String -> String -> IO RunOutcome
-runStmt sess m fun = undefined
+runStmt IdeSession{ ideConfig=SessionConfig{configSourcesDir}
+                  , ideGhcServer
+                  , ideNewOpts
+                  } m fun =
+  -- TODO: do something if ideGenerateCode is False
+  -- Communicating with the GHC server.
+  -- TODO: perhaps take a handler that uses the progress information somehow.
+  let f (RespWorking c) = c  -- advancement counter
+      f (RespDone _)    = error "runStmt: unexpected RespDone"
+      g (RespWorking _) = error "runStmt: unexpected RespWorking"
+      g (RespDone r)    = r
+  in rpcGhcServer ideGhcServer ideNewOpts configSourcesDir
+                  True (Just (m, fun))
+                  (progressWaitCompletion . bimapProgress f g)
