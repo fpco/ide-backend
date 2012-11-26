@@ -107,13 +107,13 @@ ghcServerEngine GhcInitData{dOpts}
         -- TODO: verify that it's the "compiling M" message
         handlerOutput _ = updateCounter
         handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-    runOrErrs <- checkModule files dynOpts ideGenerateCode funToRun verbosity
+    runOutcome <- checkModule files dynOpts ideGenerateCode funToRun verbosity
                              handlerOutput handlerRemaining
     -- Don't block, GHC should not be slowed down.
     b <- isEmptyMVar mvCounter
     if b
-      then putMVar mvCounter (Left runOrErrs)
-      else modifyMVar_ mvCounter (return . const (Left runOrErrs))
+      then putMVar mvCounter (Left runOutcome)
+      else modifyMVar_ mvCounter (return . const (Left runOutcome))
   let p :: Int -> Progress GhcResponse GhcResponse
       p counter = Progress $ do
         -- Block until GHC processes the next file.

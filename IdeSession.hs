@@ -310,13 +310,13 @@ updateSession sess (IdeSessionUpdate update) handler = do
                     , ideGenerateCode } <- update sess
 
   -- Last, communicating with the GHC server.
-  let f (RespWorking c)      = c  -- advancement counter
-      f (RespDone _)         = error "updateSession: unexpected RespDone"
-      g (RespWorking _)      = error "updateSession: unexpected RespWorking"
-      g (RespDone (Left _))  = error "updateSession: unexpected Left"
-      g (RespDone (Right r)) = newSess { ideToken    = newToken
-                                       , ideComputed = Just r
-                                       }
+  let f (RespWorking c)         = c  -- advancement counter
+      f (RespDone _)            = error "updateSession: unexpected RespDone"
+      g (RespWorking _)         = error "updateSession: unexpected RespWorking"
+      g (RespDone (_, Just _))  = error "updateSession: unexpected Just"
+      g (RespDone (r, Nothing)) = newSess { ideToken    = newToken
+                                          , ideComputed = Just r
+                                          }
   rpcGhcServer ideGhcServer ideNewOpts configSourcesDir ideGenerateCode Nothing
                (handler . bimapProgress f g)
 
@@ -438,24 +438,23 @@ getSymbolDefinitionMap = undefined
 setCodeGeneration :: IdeSession -> Bool -> IO IdeSession
 setCodeGeneration sess ideGenerateCode = return $ sess {ideGenerateCode}
 
--- | Run a given function in a given module and return either a result
--- (either an identifier bound to the resulting value or an exception
--- raised by the function) or a list of compilation warnings and errors
--- (type errors and/or compilation exceptions raised by the GHC API).
--- This is a query-like operation, that is, it works only if preceded
--- by 'updateSession' and moreover when 'setCodeGeneration' is on.
--- However, it's not instantaneous; it blocks and waits for the execution
--- to finish. In particular, if the executed code loops, it waits forever.
---
--- If there are no compilations errors, we do not return compilation
--- warnings. To obtain the warnings, call 'getSourceErrors'.
+-- TODO: Currently runStmt type-checks code and generates bytecode afresh.
+-- In the future we will try to re-use the code generated in updateSession
+-- if ideGenerateCode is on. This can save some time if we often type-check
+-- and, after some delay, run code. We may even go as far as to refuse
+-- generating code in runStmt, but I do not see any gain in doing so ATM.
+-- | Run a given function in a given module and return all the compilation
+-- warnings and errors and (if there were only warnings) either an identifier
+-- bound to the resulting value or an exception raised by the function).
+-- The function resembles a query, but it's not instantaneous. It blocks
+-- and waits for the execution to finish. In particular, if the executed
+-- code loops, it waits forever.
 --
 runStmt :: IdeSession -> String -> String -> IO RunOutcome
 runStmt IdeSession{ ideConfig=SessionConfig{configSourcesDir}
                   , ideGhcServer
                   , ideNewOpts
                   } m fun =
-  -- TODO: do something if ideGenerateCode is False
   -- Communicating with the GHC server.
   -- TODO: perhaps take a handler that uses the progress information somehow.
   let f (RespWorking c) = c  -- advancement counter

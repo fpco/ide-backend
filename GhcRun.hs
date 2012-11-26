@@ -60,15 +60,15 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
         Ex.handle $ \e -> do
           let exError = OtherError (show (e :: Ex.SomeException))
           errs <- collectedErrors
-          return $ Right $ errs ++ [exError]
+          return $ (errs ++ [exError], Nothing)
       (hscTarget, ghcLink) | generateCode = (HscInterpreted, LinkInMemory)
                            | otherwise    = (HscNothing,     NoLink)
   handleOtherErrors $ do
 
     libdir <- getGhcLibdir
 
-    runOutcome <- runGhc (Just libdir) $
-      handleSourceError (\ e -> printException e >> return (Right [])) $ do
+    resOrEx <- runGhc (Just libdir) $
+      handleSourceError (\ e -> printException e >> return Nothing) $ do
 
       flags0 <- getSessionDynFlags
       (flags, _, _) <- parseDynamicFlags flags0 dynOpts
@@ -112,20 +112,18 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
                 let ident = showSDocDebug flags (GHC.ppr name)
                 -- debug
                 liftIO $ putStrLn $ "\nRunOk: " ++ ident
-                return $ Left $ Left ident
+                return $ Just $ Left ident
               RunOk _ -> error "checkModule: unexpected names in RunOk"
               RunException ex -> do
                 let exDesc = showExWithClass ex
                 -- debug
                 liftIO $ putStrLn $ "\nRunException: " ++ exDesc
-                return $ Left $ Right exDesc
+                return $ Just $ Right exDesc
               RunBreak{} -> error "checkModule: RunBreak"
-          _ -> return $ Right []  -- no errors know yet; is expanded below
+          _ -> return Nothing
 
-    case runOutcome :: RunOutcome of
-      Left _   -> return runOutcome
-      Right [] -> fmap Right collectedErrors
-      Right _  -> error "checkModule: early GHC API exception"
+    errs <- collectedErrors
+    return (errs, resOrEx)
 
 getGhcLibdir :: IO FilePath
 getGhcLibdir = do

@@ -6,7 +6,7 @@ module Common
   , formatSourceError
   , SymbolDefinitionMap
   , hsExtentions, cpExtentions
-  , RunOutcome
+  , RunResult, RunException, RunOutcome
   , showExWithClass
   ) where
 
@@ -53,11 +53,15 @@ hsExtentions = [".hs", ".lhs"]
 cpExtentions :: [FilePath]
 cpExtentions = ".h" : hsExtentions
 
--- | An identifier bound to the resulting value or an exception
--- thrown by the user code or a list of compilation errors
--- (including arbitrary compilation exceptions raised by the GHC API).
-type RunOutcome = Either (Either String String{-Ex.SomeException-})
-                         [SourceError]
+type RunResult = String
+type RunException = String
+
+-- | The first component holds compilation warnings and errors
+-- (including arbitrary compilation exceptions raised by the compiler API).
+-- The second component, empty if no code execution was requested,
+-- holds an identifier bound to the resulting value or a (pretty-printed)
+-- exception thrown by the user code.
+type RunOutcome = ([SourceError], Maybe (Either RunResult RunException))
 
 -- | Show an exception together with its most precise type tag.
 -- All exception classes defined in Control.Exception are handled
