@@ -9,6 +9,15 @@ import qualified Data.List as List
 import Common
 import GhcRun
 
+-- A program, for debugging and experiments, that type-checks
+-- a file and runs its main function.
+-- It interfaces with the GHC API code in-process, as opposed
+-- to out-of-process that the IdeSession API uses.
+
+defOpts :: [String]
+defOpts = [ "-hide-all-packages"
+          , "-package parallel", "-package base", "-package old-time" ]
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -19,7 +28,7 @@ main = do
       _   -> fail "usage: in-process [file]"
 
   putStrLn ""
-  runOrErrs <- checkModule [target] (optsToDynFlags [])
+  runOrErrs <- checkModule [target] (optsToDynFlags defOpts)
                            (Just ("Main", "main")) 2
                            putStrLn putStrLn
   putStrLn $ "\nRun results:\n"

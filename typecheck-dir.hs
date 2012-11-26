@@ -13,22 +13,25 @@ import Progress
 import Common
 
 --- A sample program using the library. It type-checks all files
---- in the given directory and prints out the list of errors
---- in JSON format.
+--- in the given directory and prints out the list of errors.
 
--- | Some common extensions (please fill in).
-defaultExtensions :: [String]
-defaultExtensions = [ "-XCPP"
-                    , "-XTemplateHaskell"
-                    , "-XBangPatterns"
-                    , "-XRecordWildCards"
-                    , "-XNamedFieldPuns"
-                    , "-XPatternGuards"
-                    , "-XScopedTypeVariables"
-                    , "-XMultiParamTypeClasses"
-                    , "-XRankNTypes"
-                    , "-XTypeFamilies"
-                    ]
+-- | Some common extensions, etc. (please fill in).
+-- Curiously "-XTypeFamilies" causes the type-checking of the default
+-- test file to fail. The same file type-checks OK with the ghc-errors
+-- test program (with no GHC extensions set).
+defOpts :: [String]
+defOpts = [ "-no-user-package-conf"
+          , "-XCPP"
+          , "-XTemplateHaskell"
+          , "-XBangPatterns"
+          , "-XRecordWildCards"
+          , "-XNamedFieldPuns"
+          , "-XPatternGuards"
+          , "-XScopedTypeVariables"
+          , "-XMultiParamTypeClasses"
+          , "-XRankNTypes"
+          , "-XTypeFamilies"
+          ]
 
 main :: IO ()
 main = do
@@ -39,10 +42,10 @@ main = do
       let (originalSourcesDir, opts) = case args of
             ["--help"] ->
               error "usage: typecheck-dir [source-dir [ghc-options]]"
-            [dir] -> (dir, defaultExtensions)
+            [dir] -> (dir, defOpts)
             dir : optsArg -> (dir, optsArg)
             [] -> ("test/Cabal.Distribution.PackageDescription",
-                   defaultExtensions)
+                   defOpts)
       withTemporaryDirectory "typecheck-dir" $ check opts originalSourcesDir
 
 check :: [String] -> FilePath -> FilePath -> IO ()

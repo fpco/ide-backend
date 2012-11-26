@@ -18,6 +18,9 @@ import Progress
 import Common
 import TestTools
 
+-- Tests using various functions of the IdeSession API
+-- and a variety of small test Haskell projects.
+
 testAll :: [String] -> FilePath -> IO ()
 testAll opts originalSourcesDir =
   withTemporaryDirectory "ide-backend-test" $ check opts originalSourcesDir
@@ -88,9 +91,9 @@ check opts originalSourcesDir configSourcesDir = do
   assertRaises "getSourceErrors s10"
                (userError "This session state does not admit queries.")
                (getSourceErrors s10)
-  let optionsUpdate = originalUpdate
-                      <> updateModule (OptionsSet $ Just ["-XNamedFieldPuns",
-                                                          "-XRecordWildCards"])
+  let punOpts = defOpts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
+      optionsUpdate = originalUpdate
+                      <> updateModule (OptionsSet $ Just punOpts)
   s11 <- updateSession s10 optionsUpdate (progressWaitConsume displayCounter)
   msgs11 <- getSourceErrors s11
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
@@ -106,16 +109,21 @@ check opts originalSourcesDir configSourcesDir = do
 
 -- Driver
 
+defOpts :: [String]
+defOpts = [ "-no-user-package-conf" ]
+
 tests :: [Test]
 tests =
   [ testGroup "Full integration tests"
-    [ testCase "A depends on B, no errors"  $ testAll [] "test/ABnoError"
-    , testCase "A depends on B, error in A" $ testAll [] "test/AerrorB"
-    , testCase "A depends on B, error in B" $ testAll [] "test/ABerror"
-    , testCase "Our own code, package 'ghc' missing" $ testAll [] "."
+    [ testCase "A depends on B, no errors"  $ testAll defOpts "test/ABnoError"
+    , testCase "A depends on B, error in A" $ testAll defOpts "test/AerrorB"
+    , testCase "A depends on B, error in B" $ testAll defOpts "test/ABerror"
+    , testCase "Our own code, package 'ghc' missing"
+      $ testAll [] "."
     , testCase "A subdirectory of Cabal code"
-      $ testAll [] "test/Cabal.Distribution.PackageDescription"
-    , testCase "A file requiring -XNamedFieldPuns" $ testAll [] "test/Puns"
+      $ testAll defOpts "test/Cabal.Distribution.PackageDescription"
+    , testCase "A file requiring -XNamedFieldPuns"
+      $ testAll defOpts "test/Puns"
     ]
   ]
 
