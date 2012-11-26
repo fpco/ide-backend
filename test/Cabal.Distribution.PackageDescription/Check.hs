@@ -70,6 +70,7 @@ import Control.Monad
 import qualified System.Directory as System
          ( doesFileExist, doesDirectoryExist )
 
+import Distribution.Package ( pkgName )
 import Distribution.PackageDescription
 import Distribution.PackageDescription.Configuration
          ( flattenPackageDescription, finalizePackageDescription )
@@ -91,7 +92,7 @@ import Distribution.Version
          , asVersionIntervals, UpperBound(..), isNoVersion )
 import Distribution.Package
          ( PackageName(PackageName), packageName, packageVersion
-         , Dependency(..), pkgName )
+         , Dependency(..) )
 
 import Distribution.Text
          ( display, disp )
@@ -179,7 +180,6 @@ checkConfiguredPackage pkg =
  ++ checkSourceRepos pkg
  ++ checkGhcOptions pkg
  ++ checkCCOptions pkg
- ++ checkCPPOptions pkg
  ++ checkPaths pkg
  ++ checkCabalVersion pkg
 
@@ -411,7 +411,7 @@ checkFields pkg =
       PackageDistSuspicious $
            "Deprecated extensions: "
         ++ commaSep (map (quote . display . fst) deprecatedExtensions)
-        ++ ". " ++ unwords
+        ++ ". " ++ intercalate " "
              [ "Instead of '" ++ display ext
             ++ "' use '" ++ display replacement ++ "'."
              | (ext, Just replacement) <- deprecatedExtensions ]
@@ -423,7 +423,7 @@ checkFields pkg =
       PackageDistSuspicious "No 'maintainer' field."
 
   , check (null (synopsis pkg) && null (description pkg)) $
-      PackageDistInexcusable "No 'synopsis' or 'description' field."
+      PackageDistInexcusable $ "No 'synopsis' or 'description' field."
 
   , check (null (description pkg) && not (null (synopsis pkg))) $
       PackageDistSuspicious "No 'description' field."
@@ -516,9 +516,6 @@ checkLicense pkg =
     unknownLicenseVersion (LGPL (Just v))
       | v `notElem` knownVersions = Just knownVersions
       where knownVersions = [ v' | LGPL (Just v') <- knownLicenses ]
-    unknownLicenseVersion (Apache  (Just v))
-      | v `notElem` knownVersions = Just knownVersions
-      where knownVersions = [ v' | Apache  (Just v') <- knownLicenses ]
     unknownLicenseVersion _ = Nothing
 
 checkSourceRepos :: PackageDescription -> [PackageCheck]
@@ -531,19 +528,19 @@ checkSourceRepos pkg =
                    ++ "The repo kind is usually 'head' or 'this'"
       _ -> Nothing
 
-  , check (isNothing (repoType repo)) $
+  , check (repoType repo == Nothing) $
       PackageDistInexcusable
         "The source-repository 'type' is a required field."
 
-  , check (isNothing (repoLocation repo)) $
+  , check (repoLocation repo == Nothing) $
       PackageDistInexcusable
         "The source-repository 'location' is a required field."
 
-  , check (repoType repo == Just CVS && isNothing (repoModule repo)) $
+  , check (repoType repo == Just CVS && repoModule repo == Nothing) $
       PackageDistInexcusable
         "For a CVS source-repository, the 'module' is a required field."
 
-  , check (repoKind repo == RepoThis && isNothing (repoTag repo)) $
+  , check (repoKind repo == RepoThis && repoTag repo == Nothing) $
       PackageDistInexcusable $
            "For the 'this' kind of source-repository, the 'tag' is a required "
         ++ "field. It should specify the tag corresponding to this version "
@@ -584,11 +581,6 @@ checkGhcOptions pkg =
         ++ "needs -via-C for correctness rather than performance then it "
         ++ "is using the FFI incorrectly and will probably not work with GHC "
         ++ "6.10 or later."
-
-  , checkFlags ["-fdefer-type-errors"] $
-      PackageDistInexcusable $
-          "'ghc-options: -fdefer-type-errors' is fine during development but "
-       ++ "is not appropriate for a distributed package."
 
   , checkFlags ["-fhpc"] $
       PackageDistInexcusable $
@@ -759,15 +751,6 @@ checkCCOptions pkg =
 
         checkCCFlags :: [String] -> PackageCheck -> Maybe PackageCheck
         checkCCFlags flags = check (any (`elem` flags) all_ccOptions)
-
-checkCPPOptions :: PackageDescription -> [PackageCheck]
-checkCPPOptions pkg =
-  catMaybes [
-    checkAlternatives "cpp-options" "include-dirs"
-      [ (flag, dir) | flag@('-':'I':dir) <- all_cppOptions]
-    ]
-  where all_cppOptions = [ opts | bi <- allBuildInfo pkg
-                                , opts <- cppOptions bi ]
 
 checkAlternatives :: String -> String -> [(String, String)] -> Maybe PackageCheck
 checkAlternatives badField goodField flags =
