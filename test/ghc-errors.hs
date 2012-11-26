@@ -91,7 +91,7 @@ check opts originalSourcesDir configSourcesDir = do
   assertRaises "getSourceErrors s10"
                (userError "This session state does not admit queries.")
                (getSourceErrors s10)
-  let punOpts = defOpts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
+  let punOpts = opts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
       optionsUpdate = originalUpdate
                       <> updateModule (OptionsSet $ Just punOpts)
   s11 <- updateSession s10 optionsUpdate (progressWaitConsume displayCounter)
