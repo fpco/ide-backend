@@ -45,13 +45,14 @@ optsToDynFlags = DynamicOpts . map noLoc
 
 checkModule :: [FilePath]        -- ^ target files
             -> DynamicOpts       -- ^ dynamic flags for this run of runGhc
+            -> Bool              -- ^ whether to generate code
             -> Maybe (String, String)
                                  -- ^ module and function to run, if any
             -> Int               -- ^ verbosity level
             -> (String -> IO ()) -- ^ handler for each SevOutput message
             -> (String -> IO ()) -- ^ handler for remaining non-error messages
             -> IO RunOutcome     -- ^ any errors and warnings
-checkModule targets (DynamicOpts dynOpts) funToRun verbosity
+checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
             handlerOutput handlerRemaining = do
   errsRef <- newIORef []
   let collectedErrors = reverse <$> readIORef errsRef
@@ -60,10 +61,8 @@ checkModule targets (DynamicOpts dynOpts) funToRun verbosity
           let exError = OtherError (show (e :: Ex.SomeException))
           errs <- collectedErrors
           return $ Right $ errs ++ [exError]
-      (hscTarget, ghcLink) = case funToRun of
-        Nothing -> (HscNothing,     NoLink)
-        -- TODO: typecheck only what's needed for the function in funToRun?
-        Just _  -> (HscInterpreted, LinkInMemory)
+      (hscTarget, ghcLink) | generateCode = (HscInterpreted, LinkInMemory)
+                           | otherwise    = (HscNothing,     NoLink)
   handleOtherErrors $ do
 
     libdir <- getGhcLibdir

@@ -93,6 +93,7 @@ module IdeSession (
   SymbolDefinitionMap,
 
   -- ** Run code
+  setCodeGeneration,
   runStmt,
   RunOutcome
 
@@ -172,10 +173,13 @@ data IdeSession = IdeSession
   { ideConfig    :: SessionConfig
   , ideGhcServer :: GhcServer
   , ideToken     :: StateToken
+    -- The result computed by the last `updateSession` invocation.
   , ideComputed  :: (Maybe Computed)
-    -- | Compiler dynamic options. If they are not set, the options from
+    -- Compiler dynamic options. If they are not set, the options from
     -- SessionConfig are used.
   , ideNewOpts   :: Maybe [String]
+    -- Whether to generate code in addition to type-checking.
+  , ideGenerateCode :: Bool
   }
 
 -- | Configuration parameters for a session. These remain the same throughout
@@ -250,6 +254,7 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configDataDir
   let ideComputed = Nothing  -- can't query before the first call to GHC
       ideNewOpts  = Nothing  -- options from SessionConfig used initially
+      ideGenerateCode = False
   ideToken <- initToken
   ideGhcServer <- forkGhcServer configStaticOpts configTempDir
   return IdeSession{..}
@@ -301,7 +306,8 @@ updateSession sess (IdeSessionUpdate update) handler = do
   -- Then, updating files ASAP (using the already invalidated session).
   newSess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
                     , ideGhcServer
-                    , ideNewOpts } <- update sess
+                    , ideNewOpts
+                    , ideGenerateCode } <- update sess
 
   -- Last, communicating with the GHC server.
   let f (RespWorking c) = c  -- advancement counter
@@ -310,7 +316,7 @@ updateSession sess (IdeSessionUpdate update) handler = do
       g (RespDone r) = newSess { ideToken    = newToken
                                , ideComputed = Just r
                                }
-  rpcGhcServer ideGhcServer ideNewOpts configSourcesDir
+  rpcGhcServer ideGhcServer ideNewOpts configSourcesDir ideGenerateCode
                (handler . bimapProgress f g)
 
 -- | Writes a file atomically.
@@ -426,14 +432,22 @@ getSourceErrors IdeSession{ideComputed} = do
 getSymbolDefinitionMap :: Query SymbolDefinitionMap
 getSymbolDefinitionMap = undefined
 
+-- | Enable or disable code generation in addition to type-checking.
+--
+setCodeGeneration :: IdeSession -> Bool -> IO IdeSession
+setCodeGeneration sess ideGenerateCode = return $ sess {ideGenerateCode}
+
 -- | Run a given function in a given module and return either a result
 -- (either an identifier bound to the resulting value or an exception
 -- raised by the function) or a list of compilation warnings and errors
 -- (type errors and/or compilation exceptions raised by the GHC API).
+-- This is a query-like operation, that is, it works only if preceded
+-- by 'updateSession' and moreover when 'setCodeGeneration' is on.
+-- However, it's not instantaneous; it blocks and waits for the execution
+-- to finish. In particular, if the executed code loops, it waits forever.
 --
 -- If there are no compilations errors, we do not return compilation
--- warnings. To obtain the warnings, call 'updateSession' and then
--- make a query using 'getSourceErrors'
+-- warnings. To obtain the warnings, call 'getSourceErrors'.
 --
 runStmt :: IdeSession -> String -> String -> IO RunOutcome
 runStmt sess m fun = undefined

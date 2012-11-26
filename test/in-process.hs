@@ -29,7 +29,7 @@ main = do
 
   putStrLn ""
   runOrErrs <- checkModule [target] (optsToDynFlags defOpts)
-                           (Just ("Main", "main")) 2
+                           True (Just ("Main", "main")) 2
                            putStrLn putStrLn
   putStrLn $ "\nRun results:\n"
     ++ case runOrErrs of

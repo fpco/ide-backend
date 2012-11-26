@@ -49,7 +49,7 @@ import GhcRun
 import Progress
 
 type PCounter = Int
-data GhcRequest  = ReqCompute (Maybe [String]) FilePath
+data GhcRequest  = ReqCompute (Maybe [String]) FilePath Bool
   deriving Show
 data GhcResponse = RespWorking PCounter | RespDone [SourceError]
   deriving Show
@@ -75,7 +75,7 @@ type GhcServer = RpcServer GhcRequest GhcResponse
 ghcServerEngine :: GhcInitData -> GhcRequest
                 -> IO (Progress GhcResponse GhcResponse)
 ghcServerEngine GhcInitData{dOpts}
-                (ReqCompute ideNewOpts configSourcesDir) = do
+                (ReqCompute ideNewOpts configSourcesDir ideGenerateCode) = do
   mvCounter <- newMVar (Right 0)  -- Report progress step [0/n], too.
   let forkCatch :: IO () -> IO ()
       forkCatch p = do
@@ -102,7 +102,7 @@ ghcServerEngine GhcInitData{dOpts}
         -- TODO: verify that it's the "compiling M" message
         handlerOutput _ = updateCounter
         handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-    runOrErrs <- checkModule files dynOpts Nothing verbosity
+    runOrErrs <- checkModule files dynOpts ideGenerateCode Nothing verbosity
                              handlerOutput handlerRemaining
     let errs = case runOrErrs of
           Left _ -> error "ghcServerEngine: run result"
@@ -138,10 +138,11 @@ forkGhcServer opts configTempDir = do
   prog <- getExecutablePath
   forkRpcServer prog ("--server" : opts) configTempDir
 
-rpcGhcServer :: GhcServer -> (Maybe [String]) -> FilePath
+rpcGhcServer :: GhcServer -> (Maybe [String]) -> FilePath -> Bool
              -> (Progress GhcResponse GhcResponse -> IO a) -> IO a
-rpcGhcServer gs ideNewOpts configSourcesDir handler =
-  rpcWithProgress gs (ReqCompute ideNewOpts configSourcesDir) handler
+rpcGhcServer gs ideNewOpts configSourcesDir ideGenerateCode handler =
+  rpcWithProgress gs (ReqCompute ideNewOpts configSourcesDir ideGenerateCode)
+                     handler
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs
