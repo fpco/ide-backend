@@ -56,7 +56,8 @@ cpExtentions = ".h" : hsExtentions
 -- | An identifier bound to the resulting value or an exception
 -- thrown by the user code or a list of compilation errors
 -- (including arbitrary compilation exceptions raised by the GHC API).
-type RunOutcome = Either (Either String Ex.SomeException) [SourceError]
+type RunOutcome = Either (Either String String{-Ex.SomeException-})
+                         [SourceError]
 
 -- | Show an exception together with its most precise type tag.
 -- All exception classes defined in Control.Exception are handled

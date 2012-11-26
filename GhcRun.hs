@@ -115,9 +115,10 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
                 return $ Left $ Left ident
               RunOk _ -> error "checkModule: unexpected names in RunOk"
               RunException ex -> do
+                let exDesc = showExWithClass ex
                 -- debug
-                liftIO $ putStrLn $ "\nRunException: " ++ showExWithClass ex
-                return $ Left $ Right ex
+                liftIO $ putStrLn $ "\nRunException: " ++ exDesc
+                return $ Left $ Right exDesc
               RunBreak{} -> error "checkModule: RunBreak"
           _ -> return $ Right []  -- no errors know yet; is expanded below
 

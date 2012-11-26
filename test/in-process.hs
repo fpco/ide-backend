@@ -34,5 +34,5 @@ main = do
   putStrLn $ "\nRun results:\n"
     ++ case runOrErrs of
       Left (Left ident) -> ident
-      Left (Right ex)   -> showExWithClass ex
+      Left (Right ex)   -> ex
       Right errs -> List.intercalate "\n" (map formatSourceError errs) ++ "\n"
