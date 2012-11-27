@@ -47,7 +47,7 @@ check opts originalSourcesDir configSourcesDir = do
       originalUpdate = mconcat $ map upd originalModules
       displayCounter :: PCounter -> IO ()
       displayCounter n = putStr (show n)
-  s0 <- updateSession sP mempty (progressWaitConsume displayCounter)
+  s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
   msgs0 <- getSourceErrors s0
   putStrLn $ "Error 0:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs0) ++ "\n"

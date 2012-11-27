@@ -133,7 +133,7 @@ main = do
         handlerOutput _ = updateCounter
         handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
     runOutcome <- checkModule [target] (optsToDynFlags defOpts)
-                                   True (Just ("Main", "main")) 3
+                                   True Nothing 3
                                    handlerOutput handlerRemaining
     b <- isEmptyMVar mvCounter
     if b
