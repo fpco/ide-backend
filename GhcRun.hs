@@ -30,6 +30,7 @@ import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
 import Control.Monad (when)
+import System.IO (hPutStrLn, hFlush, stderr)
 
 import Common
 
@@ -65,8 +66,10 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
   let collectedErrors = reverse <$> readIORef errsRef
       handleOtherErrors =
         Ex.handle $ \e -> do
-          when debugging $ appendFile "log_debug"
-            $ "handleOtherErrors: " ++ showExWithClass e
+          when debugging $ do
+            hPutStrLn stderr $ showExWithClass e
+            hFlush stderr
+            appendFile "log_debug" $ "handleOtherErrors: " ++ showExWithClass e
           let exError = OtherError (show (e :: Ex.SomeException))
           errs <- collectedErrors
           return $ (errs ++ [exError], Nothing)
