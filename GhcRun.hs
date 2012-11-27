@@ -40,7 +40,7 @@ newtype DynamicOpts = DynamicOpts [Located String]
 -- problems using the in-process test tool first and debug RPC problems
 -- in isolation using variations on the existing synthetic tests.
 debugging :: Bool
-debugging = False
+debugging = True
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
@@ -99,7 +99,7 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
 #else
                              log_action = collectSrcError errsRef handlerOutput handlerRemaining flags,
 #endif
-                             verbosity
+                             verbosity = 3
                            }
         let addSingle filename = do
               addTarget Target
