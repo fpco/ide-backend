@@ -29,10 +29,17 @@ import System.Process
 import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
+import Control.Monad (when)
 
 import Common
 
 newtype DynamicOpts = DynamicOpts [Located String]
+
+-- Debugging flag in case of obscure RPC errors. Try to debug GHC API
+-- problems using the in-process test tool first and debug RPC problems
+-- in isolation using variations on the existing synthetic tests.
+debugging :: Bool
+debugging = False
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
@@ -58,6 +65,8 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
   let collectedErrors = reverse <$> readIORef errsRef
       handleOtherErrors =
         Ex.handle $ \e -> do
+          when debugging $ appendFile "log_debug"
+            $ "handleOtherErrors: " ++ showExWithClass e
           let exError = OtherError (show (e :: Ex.SomeException))
           errs <- collectedErrors
           return $ (errs ++ [exError], Nothing)
@@ -68,7 +77,11 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
     libdir <- getGhcLibdir
 
     resOrEx <- runGhc (Just libdir) $
-      handleSourceError (\ e -> printException e >> return Nothing) $ do
+      handleSourceError (\ e -> do
+                            when debugging $ liftIO $ appendFile "log_debug"
+                              $ "handleSourceError:" ++ show e
+                            printException e
+                            return Nothing) $ do
 
       flags0 <- getSessionDynFlags
       (flags, _, _) <- parseDynamicFlags flags0 dynOpts
@@ -101,7 +114,7 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
 -}      case funToRun of
           Just (m, fun) | succeeded loadRes -> do
             setContext $ [IIDecl $ simpleImportDecl $ mkModuleName m]
-{- debug: contest is ["Main"]
+{- debug: context is ["Main"]
             context <- getContext
             liftIO $ putStrLn $ "getContext: "
                                 ++ showSDocDebug flags (GHC.ppr context)
@@ -138,7 +151,33 @@ collectSrcError :: IORef [SourceError]
                 -> (String -> IO ())
                 -> DynFlags
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
-collectSrcError errsRef _ _ flags severity srcspan style msg
+collectSrcError errsRef handlerOutput handlerRemaining flags
+                severity srcspan style msg = do
+  when debugging $ do
+    let showSeverity SevOutput  = "SevOutput"
+#if __GLASGOW_HASKELL__ >= 706
+        showSeverity SevDump    = "SevDump"
+#endif
+        showSeverity SevInfo    = "SevInfo"
+        showSeverity SevWarning = "SevWarning"
+        showSeverity SevError   = "SevError"
+        showSeverity SevFatal   = "SevFatal"
+    appendFile "log_debug"
+      $  "Severity: "   ++ showSeverity severity
+      ++ "  SrcSpan: "  ++ show srcspan
+--    ++ "  PprStyle: " ++ show style
+      ++ "  MsgDoc: "
+      ++ showSDocForUser flags (qualName style,qualModule style) msg
+      ++ "\n"
+  collectSrcError'
+    errsRef handlerOutput handlerRemaining flags severity srcspan style msg
+
+collectSrcError' :: IORef [SourceError]
+                -> (String -> IO ())
+                -> (String -> IO ())
+                -> DynFlags
+                -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
+collectSrcError' errsRef _ _ flags severity srcspan style msg
   | Just errKind <- case severity of
                       SevWarning -> Just KindWarning
                       SevError   -> Just KindError
@@ -148,15 +187,15 @@ collectSrcError errsRef _ _ flags severity srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in modifyIORef errsRef (SrcError errKind file st end msgstr:)
 
-collectSrcError errsRef _ _ flags SevError _srcspan style msg
+collectSrcError' errsRef _ _ flags SevError _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in modifyIORef errsRef (OtherError msgstr:)
 
-collectSrcError _errsRef handlerOutput _ flags SevOutput _srcspan style msg
+collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in handlerOutput msgstr
 
-collectSrcError _errsRef _ handlerRemaining flags _severity _srcspan style msg
+collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in handlerRemaining msgstr
 
@@ -188,31 +227,3 @@ extractErrSpan (RealSrcSpan srcspan) =
        ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
        ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
 extractErrSpan _ = Nothing
-
--- Debugging code in case of obscure RPC errors. Try to debug GHC API
--- problems using the in-process test tool first and debug RPC problems
--- in isolation using variations on the existing synthetic tests.
-
--- Put into the log_action field for extra debugging. Also, set verbosity to 3.
-_collectSrcError_debug :: IORef [SourceError]
-                       -> (String -> IO ())
-                       -> (String -> IO ())
-                       -> DynFlags
-                       -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
-_collectSrcError_debug errsRef handlerOutput handlerRemaining flags severity srcspan style msg = do
-  let showSeverity SevOutput  = "SevOutput"
-#if __GLASGOW_HASKELL__ >= 706
-      showSeverity SevDump    = "SevDump"
-#endif
-      showSeverity SevInfo    = "SevInfo"
-      showSeverity SevWarning = "SevWarning"
-      showSeverity SevError   = "SevError"
-      showSeverity SevFatal   = "SevFatal"
-  appendFile "log_debug"
-    $  "Severity: "   ++ showSeverity severity
-    ++ "  SrcSpan: "  ++ show srcspan
---    ++ "  PprStyle: " ++ show style
-    ++ "  MsgDoc: "   ++ showSDocForUser flags (qualName style,qualModule style) msg
-    ++ "\n"
-  collectSrcError
-    errsRef handlerOutput handlerRemaining flags severity srcspan style msg

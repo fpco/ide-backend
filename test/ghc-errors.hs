@@ -37,6 +37,34 @@ check opts originalSourcesDir configSourcesDir = do
                                    , configTempDir    = "."
                                    , configStaticOpts = opts
                                    }
+  sP' <- initSession sessionConfig
+  sP <- setCodeGeneration sP' True
+  cnts <- getDirectoryContents originalSourcesDir
+  let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
+      originalModules =
+        map (\ f -> (ModuleName f, f)) originalFiles
+      upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
+      originalUpdate = mconcat $ map upd originalModules
+      displayCounter :: PCounter -> IO ()
+      displayCounter n = putStr (show n)
+  s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
+  msgs0 <- getSourceErrors s0
+  putStrLn $ "Error 0:\n" ++ List.intercalate "\n\n"
+    (map formatSourceError msgs0) ++ "\n"
+  shutdownSession s0
+
+check' :: [String] -> FilePath -> FilePath -> IO ()
+check' opts originalSourcesDir configSourcesDir = do
+  hFlush stdout
+  hFlush stderr
+  putStrLn $ "\nCopying files from: " ++ originalSourcesDir ++ "\n"
+  -- Init session.
+  let sessionConfig = SessionConfig{ configSourcesDir
+                                   , configWorkingDir = configSourcesDir
+                                   , configDataDir    = configSourcesDir
+                                   , configTempDir    = "."
+                                   , configStaticOpts = opts
+                                   }
   sP <- initSession sessionConfig
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
   -- HACK: here we fake module names, guessing them from file names.
