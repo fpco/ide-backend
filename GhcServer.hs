@@ -48,6 +48,8 @@ import Common
 import GhcRun
 import Progress
 
+import Debug.Trace
+
 type PCounter = Int
 data GhcRequest  =
   ReqCompute (Maybe [String]) FilePath Bool (Maybe (String, String))
@@ -107,13 +109,13 @@ ghcServerEngine GhcInitData{dOpts}
         -- TODO: verify that it's the "compiling M" message
         handlerOutput _ = updateCounter
         handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-    runOutcome <- checkModule files dynOpts ideGenerateCode funToRun verbosity
+    runOutcome <- trace "1checkModule" $ checkModule files dynOpts ideGenerateCode funToRun verbosity
                              handlerOutput handlerRemaining
     -- Don't block, GHC should not be slowed down.
     b <- isEmptyMVar mvCounter
     if b
-      then putMVar mvCounter (Left runOutcome)
-      else modifyMVar_ mvCounter (return . const (Left runOutcome))
+      then trace "7a putMVar" $ putMVar mvCounter (Left runOutcome)
+      else trace "7b modifyMVar_" $ modifyMVar_ mvCounter (return . const (Left runOutcome))
   let p :: Int -> Progress GhcResponse GhcResponse
       p counter = Progress $ do
         -- Block until GHC processes the next file.
@@ -126,7 +128,7 @@ ghcServerEngine GhcInitData{dOpts}
             return $ Right (RespWorking newCounter, p newCounter)
           Left errs ->
             return $ Left $ RespDone errs
-  return (p 0)
+  trace "8return (p 0)" $ return (p 0)
 
 createGhcServer :: [String] -> IO ()
 createGhcServer opts = do

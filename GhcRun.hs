@@ -34,6 +34,8 @@ import System.IO (hPutStrLn, hFlush, stderr)
 
 import Common
 
+import Debug.Trace
+
 newtype DynamicOpts = DynamicOpts [Located String]
 
 -- Debugging flag in case of obscure RPC errors. Try to debug GHC API
@@ -75,11 +77,11 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
           return $ (errs ++ [exError], Nothing)
       (hscTarget, ghcLink) | generateCode = (HscInterpreted, LinkInMemory)
                            | otherwise    = (HscNothing,     NoLink)
-  handleOtherErrors $ do
+  trace "2handleOtherErrors" $ handleOtherErrors $ do
 
     libdir <- getGhcLibdir
 
-    resOrEx <- runGhc (Just libdir) $
+    resOrEx <- trace "3runGhc" $ runGhc (Just libdir) $
       handleSourceError (\ e -> do
                             when debugging $ liftIO $ appendFile "log_debug"
                               $ "handleSourceError:" ++ show e
@@ -108,7 +110,7 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
                 , targetContents     = Nothing
                 }
         mapM_ addSingle targets
-        loadRes <- load LoadAllTargets
+        loadRes <- trace "4load" $ load LoadAllTargets
 {- debug; context is []
         context <- getContext
         liftIO $ putStrLn $ "getContext: "
@@ -136,9 +138,9 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
                 liftIO $ putStrLn $ "\nRunException: " ++ exDesc
                 return $ Just $ Right exDesc
               RunBreak{} -> error "checkModule: RunBreak"
-          _ -> return Nothing
+          _ -> trace "5return Nothing" $ return Nothing
 
-    errs <- collectedErrors
+    errs <- trace "6collectedErrors" collectedErrors
     return (errs, resOrEx)
 
 getGhcLibdir :: IO FilePath
