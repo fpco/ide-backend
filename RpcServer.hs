@@ -16,6 +16,7 @@ module RpcServer
   , serverKilledException
   ) where
 
+import Prelude hiding (take)
 import System.IO
   ( Handle
   , hSetBinaryMode
@@ -34,6 +35,7 @@ import System.Process
   , waitForProcess
   )
 import System.Directory (removeFile)
+import Data.Function (on)
 import Data.Typeable (Typeable)
 import Data.Aeson
   ( FromJSON
@@ -57,8 +59,8 @@ import Control.Concurrent.MVar
   , modifyMVar
   , takeMVar
   )
-import Data.ByteString.Lazy (ByteString, hPut, hGetContents)
-import Data.ByteString.Lazy.Char8 (pack)
+import Data.ByteString.Lazy (ByteString, hPut, hGetContents, take)
+import Data.ByteString.Lazy.Char8 (pack, unpack)
 import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
 
 import Progress
@@ -70,19 +72,29 @@ import Progress
 
 -- | Exceptions thrown by the remote server
 --
--- The record accessor ensures deriveJSON wraps the whole thing in an object
--- so that we can send it as a top-level JSON object
-data ExternalException = ExternalException { externalException :: String }
-  deriving (Typeable, Eq)
+-- NOTE: Equality on 'ExternalException' looks at the 'externalStdErr' only.
+data ExternalException = ExternalException {
+     -- | The output from the server on stderr
+     externalStdErr    :: String
+     -- | The local exception that was thrown and alerted us to the problem
+   , externalException :: Maybe Ex.IOException
+   }
+  deriving (Typeable)
+
+instance Eq ExternalException where
+  (==) = (==) `on` externalStdErr
 
 instance Show ExternalException where
-  show ex = "External exception: " ++ externalException ex
+  show (ExternalException err Nothing) =
+    "External exception: " ++ err
+  show (ExternalException err (Just ex)) =
+    "External exception: " ++ err ++ ". Local exception: " ++ show ex
 
 instance Ex.Exception ExternalException
 
 -- | Generic exception thrown if the server gets killed for unknown reason
-serverKilledException :: ExternalException
-serverKilledException = ExternalException "Server killed"
+serverKilledException :: Maybe Ex.IOException -> ExternalException
+serverKilledException ex = ExternalException "Server killed" ex
 
 --------------------------------------------------------------------------------
 -- Internal data types                                                        --
@@ -242,7 +254,7 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
         case mOut of
           Right out -> do
             (out', value) <- mapIOToExternal server $ case parse json' out of
-                               Fail _ _ err  -> Ex.throwIO (userError err)
+                               Fail _ _ err  -> Ex.throwIO $ parseError err out
                                Done out' val -> return (out', val)
             case fromJSON value of
               Success (FinalResponse resp) ->
@@ -253,6 +265,10 @@ rpcWithProgress server req handler = withRpcServer server $ \st ->
                 Ex.throwIO (userError err)
           Left _ ->
             Ex.throwIO overconsumptionException
+
+    parseError :: String -> ByteString -> Ex.IOException
+    parseError err out = userError $
+      "Could not parse server response '" ++ unpack (take 80 out) ++ "': " ++ err
 
 underconsumptionException :: Ex.IOException
 underconsumptionException =
@@ -375,8 +391,8 @@ mapIOToExternal server p = Ex.catch p $ \ex -> do
   merr <- tryReadFile (rpcErr server)
   ignoreIOExceptions $ removeFile (rpcErr server)
   if null merr
-    then Ex.throwIO serverKilledException
-    else Ex.throwIO (ExternalException merr)
+    then Ex.throwIO (serverKilledException (Just ex))
+    else Ex.throwIO (ExternalException merr (Just ex))
 
 -- | Write a bytestring to a buffer and flush
 hPutFlush :: Handle -> ByteString -> IO ()

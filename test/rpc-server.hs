@@ -163,7 +163,7 @@ testShutdown server = do
 -- | Test crashing server
 testCrash :: RpcServer () () -> Assertion
 testCrash server =
-  assertRpcRaises server () $ ExternalException (show crash)
+  assertRpcRaises server () $ ExternalException (show crash) Nothing
 
 testCrashServer :: () -> IO (Progress () ())
 testCrashServer () = return . Progress $ Ex.throwIO crash
@@ -175,7 +175,7 @@ crash = userError "Intentional crash"
 testKill :: RpcServer String String -> Assertion
 testKill server = do
   assertRpcEqual server "ping" "ping" -- First request goes through
-  assertRpcRaises server "ping" serverKilledException
+  assertRpcRaises server "ping" (serverKilledException Nothing)
 
 testKillServer :: MVar Bool -> String -> IO (Progress String String)
 testKillServer firstRequest req = return . Progress $ do
@@ -189,7 +189,7 @@ testKillAsync :: RpcServer String String -> Assertion
 testKillAsync server = do
   assertRpcEqual server "ping" "ping"
   threadDelay 500000 -- Wait for server to exit
-  assertRpcRaises server "ping" serverKilledException
+  assertRpcRaises server "ping" (serverKilledException Nothing)
 
 testKillAsyncServer :: String -> IO (Progress String String)
 testKillAsyncServer req = return . Progress $ do
@@ -207,7 +207,7 @@ $(deriveToJSON id ''TypeWithFaultyDecoder)
 
 testFaultyDecoder :: RpcServer TypeWithFaultyDecoder () -> Assertion
 testFaultyDecoder server =
-  assertRpcRaises server TypeWithFaultyDecoder (ExternalException . show . userError $ "Faulty decoder")
+  assertRpcRaises server TypeWithFaultyDecoder $ ExternalException (show (userError "Faulty decoder")) Nothing
 
 testFaultyDecoderServer :: TypeWithFaultyDecoder -> IO (Progress () ())
 testFaultyDecoderServer _ = return . Progress $ return (Left ())
@@ -222,11 +222,21 @@ instance ToJSON TypeWithFaultyEncoder where
 
 testFaultyEncoder :: RpcServer () TypeWithFaultyEncoder -> Assertion
 testFaultyEncoder server =
-  assertRpcRaises server () (ExternalException "Faulty encoder")
+  assertRpcRaises server () (ExternalException "Faulty encoder" Nothing)
 
 testFaultyEncoderServer :: () -> IO (Progress TypeWithFaultyEncoder TypeWithFaultyEncoder)
 testFaultyEncoderServer () = return . Progress $
   return (Left TypeWithFaultyEncoder)
+
+-- | Test server which outputs something unexpected to standard output
+testUnexpectedStdOut :: RpcServer String String -> Assertion
+testUnexpectedStdOut server =
+  assertRpcRaises server "ping" (serverKilledException Nothing)
+
+testUnexpectedStdOutServer :: String -> IO (Progress String String)
+testUnexpectedStdOutServer msg = do
+  putStrLn msg -- <----- this is a buggy server
+  return . Progress . return . Left $ msg
 
 --------------------------------------------------------------------------------
 -- Test errors during RPC calls with multiple responses                       --
@@ -235,7 +245,7 @@ testFaultyEncoderServer () = return . Progress $
 -- | Test server which crashes after sending some intermediate responses
 testCrashMulti :: RpcServer Int Int -> Assertion
 testCrashMulti server =
-  assertRpc server 5 [5, 4 .. 1] (Just . ExternalException . show $ crash)
+  assertRpc server 5 [5, 4 .. 1] (Just (ExternalException (show crash) Nothing))
 
 testCrashMultiServer :: Int -> IO (Progress Int Int)
 testCrashMultiServer crashAfter = do
@@ -249,7 +259,7 @@ testCrashMultiServer crashAfter = do
 -- | Like 'CrashMulti', but killed rather than an exception
 testKillMulti :: RpcServer Int Int -> Assertion
 testKillMulti server =
-  assertRpc server 5 [5, 4 .. 1] (Just serverKilledException)
+  assertRpc server 5 [5, 4 .. 1] (Just (serverKilledException Nothing))
 
 testKillMultiServer :: Int -> IO (Progress Int Int)
 testKillMultiServer crashAfter = do
@@ -263,7 +273,7 @@ testKillMultiServer crashAfter = do
 -- | Like 'KillMulti', but now the server gets killed *between* messages
 testKillAsyncMulti :: RpcServer Int Int -> Assertion
 testKillAsyncMulti server =
-  assertRpc server 5 [5, 4 .. 1] (Just serverKilledException)
+  assertRpc server 5 [5, 4 .. 1] (Just (serverKilledException Nothing))
 
 testKillAsyncMultiServer :: Int -> IO (Progress Int Int)
 testKillAsyncMultiServer crashAfter = do
@@ -309,7 +319,7 @@ testOverconsumption server = do
 -- (The actual type is the type of the echo server: RpcServer String String)
 testInvalidReqType :: RpcServer () String -> Assertion
 testInvalidReqType server =
-    assertRpcRaises server () (ExternalException . show . userError $ parseEx)
+    assertRpcRaises server () $ ExternalException (show (userError parseEx)) Nothing
   where
     -- TODO: do we want to insist on this particular parse error?
     parseEx = "when expecting a String, encountered Array instead"
@@ -346,6 +356,7 @@ tests = [
       , testRPC "killAsync"        testKillAsync
       , testRPC "faultyDecoder"    testFaultyDecoder
       , testRPC "faultyEncoder"    testFaultyEncoder
+      , testRPC "unexpectedStdOut" testUnexpectedStdOut
       ]
   , testGroup "Error handling during RPC calls with multiple responses" [
         testRPC "crashMulti"       testCrashMulti
@@ -394,6 +405,8 @@ main = do
       startTestServer testFaultyDecoderServer
     ["--server", "faultyEncoder"] ->
       startTestServer testFaultyEncoderServer
+    ["--server", "unexpectedStdOut"] ->
+      startTestServer testUnexpectedStdOutServer
     ["--server", "illscoped"] ->
       startTestServer testEchoServer
     ["--server", "underconsumption"] ->
