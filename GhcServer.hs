@@ -49,6 +49,7 @@ import GhcRun
 import Progress
 
 import Debug.Trace
+import System.IO (hPutStrLn, hFlush, stderr, stdout)
 
 type PCounter = Int
 data GhcRequest  =
@@ -113,9 +114,18 @@ ghcServerEngine GhcInitData{dOpts}
                              handlerOutput handlerRemaining
     -- Don't block, GHC should not be slowed down.
     b <- isEmptyMVar mvCounter
+    hFlush stderr
+
     if b
-      then trace "7a putMVar" $ putMVar mvCounter (Left runOutcome)
+      then do
+           trace "7a started" $ return ()
+           hFlush stderr
+           trace "7a putMVar" $ putMVar mvCounter (Left runOutcome)
+           trace "7a finished" $ return ()
+           hFlush stderr
       else trace "7b modifyMVar_" $ modifyMVar_ mvCounter (return . const (Left runOutcome))
+    hFlush stderr
+  hFlush stderr
   let p :: Int -> Progress GhcResponse GhcResponse
       p counter = Progress $ do
         -- Block until GHC processes the next file.
@@ -128,7 +138,10 @@ ghcServerEngine GhcInitData{dOpts}
             return $ Right (RespWorking newCounter, p newCounter)
           Left errs ->
             return $ Left $ RespDone errs
-  trace "8return (p 0)" $ return (p 0)
+  hFlush stderr
+  let finalP = trace "8(p 0)" p 0
+  hFlush stderr
+  trace "9return finalP" $ return finalP
 
 createGhcServer :: [String] -> IO ()
 createGhcServer opts = do

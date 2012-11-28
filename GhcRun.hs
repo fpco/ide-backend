@@ -140,7 +140,9 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
               RunBreak{} -> error "checkModule: RunBreak"
           _ -> trace "5return Nothing" $ return Nothing
 
+    hFlush stderr
     errs <- trace "6collectedErrors" collectedErrors
+    hFlush stderr
     return (errs, resOrEx)
 
 getGhcLibdir :: IO FilePath
