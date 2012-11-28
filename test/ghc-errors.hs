@@ -70,7 +70,7 @@ check opts originalSourcesDir configSourcesDir = do
   assertRaises "updateSession s0 update2 (progressWaitConsume displayCounter)"
                (== userError "Invalid session token 1 /= 2")
                (updateSession s0 update2 (progressWaitConsume displayCounter))
-  s3 <- return s2 -- setCodeGeneration s2 True   -- crashes
+  s3 <- setCodeGeneration s2 True
   s4 <- updateSession s3 update2 (progressWaitConsume displayCounter)
   msgs4 <- getSourceErrors s4
   putStrLn $ "Error 4:\n" ++ List.intercalate "\n\n"
@@ -102,12 +102,11 @@ check opts originalSourcesDir configSourcesDir = do
   assertRaises "shutdownSession s10"
                (== userError "Invalid session token 0 /= 1")
                (shutdownSession s10)
-  s12 <- return s11 -- setCodeGeneration s11 True   -- crashes
+  s12 <- setCodeGeneration s11 True
   s13 <- updateSession s12 mempty (progressWaitConsume displayCounter)
   msgs13 <- getSourceErrors s13
   putStrLn $ "Error 13:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs13) ++ "\n"
-{- crashes:
   (errs, resOrEx) <- runStmt s13 "Main" "main"
   putStrLn $ "\nErrors and warnings:\n"
              ++ List.intercalate "\n" (map formatSourceError errs)
@@ -118,7 +117,6 @@ check opts originalSourcesDir configSourcesDir = do
                   Just (Right ex)   -> ex
                   Nothing           -> "Run failed."
              ++ "\n"
--}
   shutdownSession s13
 
 
