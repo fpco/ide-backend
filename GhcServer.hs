@@ -138,7 +138,7 @@ createGhcServer opts = do
 forkGhcServer :: [String] -> FilePath -> IO GhcServer
 forkGhcServer opts configTempDir = do
   prog <- getExecutablePath
-  forkRpcServer prog ("--server" : opts) configTempDir
+  forkRpcServer prog ("--server" : opts) --configTempDir
 
 rpcGhcServer :: GhcServer -> (Maybe [String]) -> FilePath
              -> Bool -> Maybe (String, String)

@@ -1,7 +1,6 @@
 {-# LANGUAGE TemplateHaskell, ScopedTypeVariables #-}
 module Main where
 
-import System.IO (stdin, stdout, stderr)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
 import System.Posix.Signals (sigKILL)
@@ -25,17 +24,11 @@ import TestTools
 -- RPC-specific auxiliary                                                     --
 --------------------------------------------------------------------------------
 
--- | Specialized version of 'rpcServer' that uses the standard I/O
-startTestServer :: (FromJSON req, ToJSON resp)
-                => (req -> IO (Progress resp resp))
-                -> IO ()
-startTestServer = rpcServer stdin stdout stderr
-
 -- | Call the current executable and pass the right arguments
 forkTestServer :: String -> IO (RpcServer req resp)
 forkTestServer test = do
   prog <- getExecutablePath
-  forkRpcServer prog ["--server", test] "."
+  forkRpcServer prog ["--server", test]
 
 -- | Do an RPC call and verify the result
 assertRpcEqual :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp)
@@ -167,6 +160,18 @@ testShutdown server = do
   shutdown server
   assertRpcRaises server "ping" (== (userError "Manual shutdown"))
 
+-- | Test that stdout is available as usual on the server
+testStdout :: RpcServer String String -> Assertion
+testStdout server = do
+  assertRpcEqual server "ping" "ping"
+  shutdown server
+  assertRpcRaises server "ping" (== (userError "Manual shutdown"))
+
+testStdoutServer :: String -> IO (Progress String String)
+testStdoutServer msg = do
+  putStrLn "   vvvv    testStdout intentionally printing to stdout"
+  return . Progress . return . Left $ msg
+
 --------------------------------------------------------------------------------
 -- Error handling tests                                                       --
 --------------------------------------------------------------------------------
@@ -238,24 +243,6 @@ testFaultyEncoder server =
 testFaultyEncoderServer :: () -> IO (Progress TypeWithFaultyEncoder TypeWithFaultyEncoder)
 testFaultyEncoderServer () = return . Progress $
   return (Left TypeWithFaultyEncoder)
-
--- | Test server which outputs something unexpected to standard output
-testUnexpectedStdOut :: RpcServer String String -> Assertion
-testUnexpectedStdOut server =
-    assertRpcRaises server "ping" verifyLocalException
-  where
-    verifyLocalException :: ExternalException -> Bool
-    verifyLocalException = (== Just (userError parseError)) . externalException
-
-    parseError :: String
-    parseError = "Could not parse server response "
-              ++ "'ping\n{\"FinalResponse\":{\"response\":\"ping\"}}'"
-              ++ ": Failed reading: satisfy"
-
-testUnexpectedStdOutServer :: String -> IO (Progress String String)
-testUnexpectedStdOutServer msg = do
-  putStrLn msg -- <----- this is a buggy server
-  return . Progress . return . Left $ msg
 
 --------------------------------------------------------------------------------
 -- Test errors during RPC calls with multiple responses                       --
@@ -368,6 +355,7 @@ tests = [
       , testRPC "custom"           testCustom
       , testRPC "progress"         testProgress
       , testRPC "shutdown"         testShutdown
+      , testRPC "stdout"           testStdout
       ]
   , testGroup "Error handling" [
         testRPC "crash"            testCrash
@@ -375,7 +363,6 @@ tests = [
       , testRPC "killAsync"        testKillAsync
       , testRPC "faultyDecoder"    testFaultyDecoder
       , testRPC "faultyEncoder"    testFaultyEncoder
-      , testRPC "unexpectedStdOut" testUnexpectedStdOut
       ]
   , testGroup "Error handling during RPC calls with multiple responses" [
         testRPC "crashMulti"       testCrashMulti
@@ -401,47 +388,28 @@ main :: IO ()
 main = do
   args <- getArgs
   case args of
-    ["--server", "echo"] ->
-      startTestServer testEchoServer
-    ["--server", "state"] -> do
-      st <- newMVar 0
-      startTestServer (testStateServer st)
-    ["--server", "custom"] -> do
-      st <- newMVar 0
-      startTestServer (testCustomServer st)
-    ["--server", "progress"] ->
-      startTestServer testProgressServer
-    ["--server", "shutdown"] ->
-      startTestServer testEchoServer
-    ["--server", "crash"] ->
-      startTestServer testCrashServer
-    ["--server", "kill"] -> do
-      firstRequest <- newMVar True
-      startTestServer (testKillServer firstRequest)
-    ["--server", "killAsync"] ->
-      startTestServer testKillAsyncServer
-    ["--server", "faultyDecoder"] ->
-      startTestServer testFaultyDecoderServer
-    ["--server", "faultyEncoder"] ->
-      startTestServer testFaultyEncoderServer
-    ["--server", "unexpectedStdOut"] ->
-      startTestServer testUnexpectedStdOutServer
-    ["--server", "illscoped"] ->
-      startTestServer testEchoServer
-    ["--server", "underconsumption"] ->
-      startTestServer testEchoServer
-    ["--server", "overconsumption"] ->
-      startTestServer testEchoServer
-    ["--server", "crashMulti"] ->
-      startTestServer testCrashMultiServer
-    ["--server", "killMulti"] ->
-      startTestServer testKillMultiServer
-    ["--server", "killAsyncMulti"] ->
-      startTestServer testKillAsyncMultiServer
-    ["--server", "invalidReqType"] ->
-      startTestServer testEchoServer
-    ["--server", "invalidRespType"] ->
-      startTestServer testEchoServer
-    ["--server", serverName] ->
-      error $ "Invalid server " ++ show serverName
+    "--server" : test : args' -> case test of
+      "echo"            -> rpcServer' args' testEchoServer
+      "state"           -> do st <- newMVar 0
+                              rpcServer' args' (testStateServer st)
+      "custom"          -> do st <- newMVar 0
+                              rpcServer' args' (testCustomServer st)
+      "progress"        -> rpcServer' args' testProgressServer
+      "shutdown"        -> rpcServer' args' testEchoServer
+      "stdout"          -> rpcServer' args' testStdoutServer
+      "crash"           -> rpcServer' args' testCrashServer
+      "kill"            -> do firstRequest <- newMVar True
+                              rpcServer' args' (testKillServer firstRequest)
+      "killAsync"       -> rpcServer' args' testKillAsyncServer
+      "faultyDecoder"   -> rpcServer' args' testFaultyDecoderServer
+      "faultyEncoder"   -> rpcServer' args' testFaultyEncoderServer
+      "illscoped"       -> rpcServer' args' testEchoServer
+      "underconsumption"-> rpcServer' args' testEchoServer
+      "overconsumption" -> rpcServer' args' testEchoServer
+      "crashMulti"      -> rpcServer' args' testCrashMultiServer
+      "killMulti"       -> rpcServer' args' testKillMultiServer
+      "killAsyncMulti"  -> rpcServer' args' testKillAsyncMultiServer
+      "invalidReqType"  -> rpcServer' args' testEchoServer
+      "invalidRespType" -> rpcServer' args' testEchoServer
+      _ -> error $ "Invalid server " ++ show test
     _ -> defaultMain tests
