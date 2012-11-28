@@ -96,7 +96,7 @@ check' opts originalSourcesDir configSourcesDir = do
   putStrLn $ "Error 2:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs2) ++ "\n"
   assertRaises "updateSession s0 update2 (progressWaitConsume displayCounter)"
-               (userError "Invalid session token 1 /= 2")
+               (== userError "Invalid session token 1 /= 2")
                (updateSession s0 update2 (progressWaitConsume displayCounter))
   s3 <- return s2 -- setCodeGeneration s2 True   -- crashes
   s4 <- updateSession s3 update2 (progressWaitConsume displayCounter)
@@ -108,8 +108,8 @@ check' opts originalSourcesDir configSourcesDir = do
     (map formatSourceError msgs2') ++ "\n"
   shutdownSession s4
   assertRaises "initSession sessionConfig"
-               (userError
-                $ "Directory " ++ configSourcesDir ++ " is not empty")
+               (== userError
+                 ("Directory " ++ configSourcesDir ++ " is not empty"))
                (initSession sessionConfig)
   -- Remove file from the source directory to satisfy the precondition
   -- of initSession.
@@ -118,7 +118,7 @@ check' opts originalSourcesDir configSourcesDir = do
   -- so the old state does not interfere.
   s10 <- initSession sessionConfig
   assertRaises "getSourceErrors s10"
-               (userError "This session state does not admit queries.")
+               (== userError "This session state does not admit queries.")
                (getSourceErrors s10)
   let punOpts = opts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
       optionsUpdate = originalUpdate
@@ -128,7 +128,7 @@ check' opts originalSourcesDir configSourcesDir = do
   putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs11) ++ "\n"
   assertRaises "shutdownSession s10"
-               (userError "Invalid session token 0 /= 1")
+               (== userError "Invalid session token 0 /= 1")
                (shutdownSession s10)
   s12 <- return s11 -- setCodeGeneration s11 True   -- crashes
   s13 <- updateSession s12 mempty (progressWaitConsume displayCounter)

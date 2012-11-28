@@ -5,29 +5,26 @@ import System.Posix.Signals (raiseSignal, Signal)
 import Data.Maybe (fromJust)
 import qualified Control.Exception as Ex
 import Control.Applicative ((<$>), (<|>))
-import Test.HUnit (Assertion, assertEqual, assertFailure)
+import Test.HUnit (Assertion, assertBool, assertFailure)
 
 import RpcServer
 
 -- | Check that the given IO action raises the specified exception
 assertRaises :: (Ex.Exception e, Eq e, Show e)
-             => String     -- ^ Message displayed if assertion fails
-             -> e          -- ^ Expected exception
-             -> IO a       -- ^ Action to run
+             => String      -- ^ Message displayed if assertion fails
+             -> (e -> Bool) -- ^ Expected exception
+             -> IO a        -- ^ Action to run
              -> Assertion
-assertRaises msg ex p = do
+assertRaises msg checkEx p = do
   mex <- Ex.try p
   case mex of
     Right _  -> assertFailure (msg ++ ": No exception was raised")
-    Left ex' ->
-      case Ex.fromException ex' of
-        Just ex'' -> assertEqual msg ex ex''
-        Nothing   -> assertFailure $ msg ++ ": "
+    Left ex ->
+      case Ex.fromException ex of
+        Just ex' -> assertBool (msg ++ ": Got the wrong exception: " ++ show ex') (checkEx ex')
+        Nothing  -> assertFailure $ msg ++ ": "
                                   ++ "Raised exception of the wrong type "
-                                  ++ exceptionType ex' ++ ": "
-                                  ++ show ex'
-                                  ++ ". Expected exception of type "
-                                  ++ exceptionType (Ex.toException ex) ++ ": "
+                                  ++ exceptionType ex ++ ": "
                                   ++ show ex
 
 -- | Find the type of an exception (only a few kinds of exceptions are supported)

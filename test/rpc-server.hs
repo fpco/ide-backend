@@ -5,6 +5,7 @@ import System.IO (stdin, stdout, stderr)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
 import System.Posix.Signals (sigKILL)
+import Data.Function (on)
 import Data.Aeson (FromJSON(parseJSON), ToJSON(toJSON))
 import Data.Aeson.TH (deriveJSON, deriveToJSON, deriveFromJSON)
 import Control.Monad (forM_, void)
@@ -53,16 +54,16 @@ assertRpcEquals :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp)
                 -> [resp]              -- ^ Expected responses
                 -> Assertion
 assertRpcEquals server req resps =
-  assertRpc server req resps (Nothing :: Maybe Ex.IOException) -- Random choice
+  assertRpc server req resps (Nothing :: Maybe (Ex.IOException -> Bool)) -- Random choice
 
 -- | Verify that the RPC call raises the given exception immediately
 assertRpcRaises :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp, Eq e, Ex.Exception e)
                 => RpcServer req resp  -- ^ RPC server
                 -> req                 -- ^ Request
-                -> e                   -- ^ Expected exception
+                -> (e -> Bool)         -- ^ Expected exception
                 -> Assertion
-assertRpcRaises server req ex =
-  assertRpc server req [] (Just ex)
+assertRpcRaises server req checkEx =
+  assertRpc server req [] (Just checkEx)
 
 -- | The most general form for checking an RPC response: send a request,
 -- and verify the returned responses, possibly followed by an exception.
@@ -70,17 +71,19 @@ assertRpc :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp, Eq e, Ex.
           => RpcServer req resp  -- ^ RPC server
           -> req                 -- ^ Request
           -> [resp]              -- ^ Expected responses
-          -> Maybe e             -- ^ Exception after the responses
+          -> Maybe (e -> Bool)   -- ^ Exception after the responses
           -> Assertion
-assertRpc server req resps mEx =
-    case mEx of
-      Just ex -> -- assertRaises on the outside, because it the exception might
-                 -- be raised before the first call to progressWait
-                 assertRaises ("Request " ++ show req) ex $ rpcWithProgress server req (handler resps)
-      Nothing -> rpcWithProgress server req (handler resps)
+assertRpc server req resps mCheckEx =
+    case mCheckEx of
+      Just checkEx -> assertRaises ("Request " ++ show req) checkEx $
+        -- assertRaises on the outside, because it the exception might be
+        -- raised before the first call to progressWait
+        rpcWithProgress server req (handler resps)
+      Nothing ->
+        rpcWithProgress server req (handler resps)
   where
     handler [] p =
-      case mEx of
+      case mCheckEx of
         Just _  -> -- Do another call so that we can get the exception
                    void $ progressWait p
         Nothing -> assertFailure ("Request " ++ show req ++ ": Unexpected message")
@@ -92,6 +95,14 @@ assertRpc server req resps mEx =
         Right (intermediateResponse, p') -> do
           assertEqual ("Request " ++ show req) r intermediateResponse
           handler rs p'
+
+isServerKilledException :: ExternalException -> Bool
+isServerKilledException =
+  ((==) `on` externalStdErr) (serverKilledException undefined)
+
+isServerIOException :: Ex.IOException -> ExternalException -> Bool
+isServerIOException ex =
+  (== show ex) . externalStdErr
 
 --------------------------------------------------------------------------------
 -- Feature tests                                                              --
@@ -154,7 +165,7 @@ testShutdown :: RpcServer String String -> Assertion
 testShutdown server = do
   assertRpcEqual server "ping" "ping"
   shutdown server
-  assertRpcRaises server "ping" (userError "Manual shutdown")
+  assertRpcRaises server "ping" (== (userError "Manual shutdown"))
 
 --------------------------------------------------------------------------------
 -- Error handling tests                                                       --
@@ -163,7 +174,7 @@ testShutdown server = do
 -- | Test crashing server
 testCrash :: RpcServer () () -> Assertion
 testCrash server =
-  assertRpcRaises server () $ ExternalException (show crash) Nothing
+  assertRpcRaises server () (isServerIOException crash)
 
 testCrashServer :: () -> IO (Progress () ())
 testCrashServer () = return . Progress $ Ex.throwIO crash
@@ -175,7 +186,7 @@ crash = userError "Intentional crash"
 testKill :: RpcServer String String -> Assertion
 testKill server = do
   assertRpcEqual server "ping" "ping" -- First request goes through
-  assertRpcRaises server "ping" (serverKilledException Nothing)
+  assertRpcRaises server "ping" isServerKilledException
 
 testKillServer :: MVar Bool -> String -> IO (Progress String String)
 testKillServer firstRequest req = return . Progress $ do
@@ -189,7 +200,7 @@ testKillAsync :: RpcServer String String -> Assertion
 testKillAsync server = do
   assertRpcEqual server "ping" "ping"
   threadDelay 500000 -- Wait for server to exit
-  assertRpcRaises server "ping" (serverKilledException Nothing)
+  assertRpcRaises server "ping" isServerKilledException
 
 testKillAsyncServer :: String -> IO (Progress String String)
 testKillAsyncServer req = return . Progress $ do
@@ -207,7 +218,7 @@ $(deriveToJSON id ''TypeWithFaultyDecoder)
 
 testFaultyDecoder :: RpcServer TypeWithFaultyDecoder () -> Assertion
 testFaultyDecoder server =
-  assertRpcRaises server TypeWithFaultyDecoder $ ExternalException (show (userError "Faulty decoder")) Nothing
+  assertRpcRaises server TypeWithFaultyDecoder $ isServerIOException (userError "Faulty decoder")
 
 testFaultyDecoderServer :: TypeWithFaultyDecoder -> IO (Progress () ())
 testFaultyDecoderServer _ = return . Progress $ return (Left ())
@@ -222,7 +233,7 @@ instance ToJSON TypeWithFaultyEncoder where
 
 testFaultyEncoder :: RpcServer () TypeWithFaultyEncoder -> Assertion
 testFaultyEncoder server =
-  assertRpcRaises server () (ExternalException "Faulty encoder" Nothing)
+  assertRpcRaises server () ((== "Faulty encoder") . externalStdErr)
 
 testFaultyEncoderServer :: () -> IO (Progress TypeWithFaultyEncoder TypeWithFaultyEncoder)
 testFaultyEncoderServer () = return . Progress $
@@ -231,7 +242,15 @@ testFaultyEncoderServer () = return . Progress $
 -- | Test server which outputs something unexpected to standard output
 testUnexpectedStdOut :: RpcServer String String -> Assertion
 testUnexpectedStdOut server =
-  assertRpcRaises server "ping" (serverKilledException Nothing)
+    assertRpcRaises server "ping" verifyLocalException
+  where
+    verifyLocalException :: ExternalException -> Bool
+    verifyLocalException = (== Just (userError parseError)) . externalException
+
+    parseError :: String
+    parseError = "Could not parse server response "
+              ++ "'ping\n{\"FinalResponse\":{\"response\":\"ping\"}}'"
+              ++ ": Failed reading: satisfy"
 
 testUnexpectedStdOutServer :: String -> IO (Progress String String)
 testUnexpectedStdOutServer msg = do
@@ -245,7 +264,7 @@ testUnexpectedStdOutServer msg = do
 -- | Test server which crashes after sending some intermediate responses
 testCrashMulti :: RpcServer Int Int -> Assertion
 testCrashMulti server =
-  assertRpc server 5 [5, 4 .. 1] (Just (ExternalException (show crash) Nothing))
+  assertRpc server 5 [5, 4 .. 1] (Just (isServerIOException crash))
 
 testCrashMultiServer :: Int -> IO (Progress Int Int)
 testCrashMultiServer crashAfter = do
@@ -259,7 +278,7 @@ testCrashMultiServer crashAfter = do
 -- | Like 'CrashMulti', but killed rather than an exception
 testKillMulti :: RpcServer Int Int -> Assertion
 testKillMulti server =
-  assertRpc server 5 [5, 4 .. 1] (Just (serverKilledException Nothing))
+  assertRpc server 5 [5, 4 .. 1] (Just isServerKilledException)
 
 testKillMultiServer :: Int -> IO (Progress Int Int)
 testKillMultiServer crashAfter = do
@@ -273,7 +292,7 @@ testKillMultiServer crashAfter = do
 -- | Like 'KillMulti', but now the server gets killed *between* messages
 testKillAsyncMulti :: RpcServer Int Int -> Assertion
 testKillAsyncMulti server =
-  assertRpc server 5 [5, 4 .. 1] (Just (serverKilledException Nothing))
+  assertRpc server 5 [5, 4 .. 1] (Just isServerKilledException)
 
 testKillAsyncMultiServer :: Int -> IO (Progress Int Int)
 testKillAsyncMultiServer crashAfter = do
@@ -298,18 +317,18 @@ testIllscoped server = do
     -- Consume the reply, then let the Progress object escape from the scope
     progressWait p
     return p
-  assertRaises "" overconsumptionException $ progressWait progress
+  assertRaises "" (== overconsumptionException) $ progressWait progress
 
 -- | Test consuming too few messages
 testUnderconsumption :: RpcServer String String -> Assertion
 testUnderconsumption server =
-  assertRaises "" underconsumptionException $
+  assertRaises "" (== underconsumptionException) $
     rpcWithProgress server "ping" return
 
 -- | Test consuming too many messages
 testOverconsumption :: RpcServer String String -> Assertion
 testOverconsumption server = do
-  assertRaises "" overconsumptionException $
+  assertRaises "" (== overconsumptionException) $
     rpcWithProgress server "ping" $ \p -> do
       progressWait p
       progressWait p
@@ -319,7 +338,7 @@ testOverconsumption server = do
 -- (The actual type is the type of the echo server: RpcServer String String)
 testInvalidReqType :: RpcServer () String -> Assertion
 testInvalidReqType server =
-    assertRpcRaises server () $ ExternalException (show (userError parseEx)) Nothing
+    assertRpcRaises server () $ isServerIOException (userError parseEx)
   where
     -- TODO: do we want to insist on this particular parse error?
     parseEx = "when expecting a String, encountered Array instead"
@@ -332,7 +351,7 @@ testInvalidReqType server =
 -- (The actual type is the type of the echo server: RpcServer String String)
 testInvalidRespType :: RpcServer String () -> Assertion
 testInvalidRespType server =
-    assertRpcRaises server "hi" (userError parseEx)
+    assertRpcRaises server "hi" (== userError parseEx)
   where
     -- TODO: do we want to insist on this particular parse error?
     parseEx = "when expecting a (), encountered String instead"
