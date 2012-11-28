@@ -103,7 +103,7 @@ ghcServerEngine GhcInitData{dOpts}
             else modifyMVar_ mvCounter (return . incrementCounter)
         dynOpts = maybe dOpts optsToDynFlags ideNewOpts
         -- Let GHC API print "compiling M ... done." for each module.
-        verbosity  = 1
+        verbosity = 1
         -- TODO: verify that it's the "compiling M" message
         handlerOutput _ = updateCounter
         handlerRemaining _ = return ()  -- TODO: put into logs somewhere?

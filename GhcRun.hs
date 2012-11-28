@@ -29,8 +29,6 @@ import System.Process
 import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
-import Control.Monad (when)
-import System.IO (hPutStrLn, hFlush, stderr)
 
 import Common
 
@@ -39,8 +37,9 @@ newtype DynamicOpts = DynamicOpts [Located String]
 -- Debugging flag in case of obscure RPC errors. Try to debug GHC API
 -- problems using the in-process test tool first and debug RPC problems
 -- in isolation using variations on the existing synthetic tests.
-debugging :: Bool
-debugging = False
+debugFile :: Maybe FilePath
+debugFile = Nothing
+--debugFile = Just "GhcRun.debug.log"
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
@@ -66,10 +65,10 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
   let collectedErrors = reverse <$> readIORef errsRef
       handleOtherErrors =
         Ex.handle $ \e -> do
-          when debugging $ do
-            hPutStrLn stderr $ showExWithClass e
-            hFlush stderr
-            appendFile "log_debug" $ "handleOtherErrors: " ++ showExWithClass e
+          case debugFile of
+            Nothing -> return ()
+            Just logName -> appendFile logName
+              $ "handleOtherErrors: " ++ showExWithClass e ++ "\n"
           let exError = OtherError (show (e :: Ex.SomeException))
           errs <- collectedErrors
           return $ (errs ++ [exError], Nothing)
@@ -81,8 +80,6 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
 
     resOrEx <- runGhc (Just libdir) $
       handleSourceError (\ e -> do
-                            when debugging $ liftIO $ appendFile "log_debug"
-                              $ "handleSourceError:" ++ show e
                             printException e
                             return Nothing) $ do
 
@@ -109,31 +106,31 @@ checkModule targets (DynamicOpts dynOpts) generateCode funToRun verbosity
                 }
         mapM_ addSingle targets
         loadRes <- load LoadAllTargets
-{- debug; context is []
-        context <- getContext
-        liftIO $ putStrLn $ "getContext: "
-                            ++ showSDocDebug flags (GHC.ppr context)
-
--}      case funToRun of
+        case debugFile of
+          Nothing -> return ()
+          Just logName -> do
+            context <- getContext
+            liftIO $ appendFile logName
+              $ "getContext1: " ++ showSDocDebug flags (GHC.ppr context)
+                ++"\n"
+        case funToRun of
           Just (m, fun) | succeeded loadRes -> do
             setContext $ [IIDecl $ simpleImportDecl $ mkModuleName m]
-{- debug: context is ["Main"]
-            context <- getContext
-            liftIO $ putStrLn $ "getContext: "
-                                ++ showSDocDebug flags (GHC.ppr context)
--}
+            case debugFile of
+              Nothing -> return ()
+              Just logName -> do
+                context <- getContext
+                liftIO $ appendFile logName
+                  $ "getContext2: " ++ showSDocDebug flags (GHC.ppr context)
+                    ++ "\n"
             runRes <- runStmt fun RunToCompletion
             case runRes of
               RunOk [name] -> do
                 let ident = showSDocDebug flags (GHC.ppr name)
-                -- debug
-                liftIO $ putStrLn $ "\nRunOk: " ++ ident
                 return $ Just $ Left ident
               RunOk _ -> error "checkModule: unexpected names in RunOk"
               RunException ex -> do
                 let exDesc = showExWithClass ex
-                -- debug
-                liftIO $ putStrLn $ "\nRunException: " ++ exDesc
                 return $ Just $ Right exDesc
               RunBreak{} -> error "checkModule: RunBreak"
           _ -> return Nothing
@@ -156,7 +153,9 @@ collectSrcError :: IORef [SourceError]
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 collectSrcError errsRef handlerOutput handlerRemaining flags
                 severity srcspan style msg = do
-  when debugging $ do
+  case debugFile of
+   Nothing -> return ()
+   Just logName -> do
     let showSeverity SevOutput  = "SevOutput"
 #if __GLASGOW_HASKELL__ >= 706
         showSeverity SevDump    = "SevDump"
@@ -165,7 +164,7 @@ collectSrcError errsRef handlerOutput handlerRemaining flags
         showSeverity SevWarning = "SevWarning"
         showSeverity SevError   = "SevError"
         showSeverity SevFatal   = "SevFatal"
-    appendFile "log_debug"
+    appendFile logName
       $  "Severity: "   ++ showSeverity severity
       ++ "  SrcSpan: "  ++ show srcspan
 --    ++ "  PprStyle: " ++ show style
