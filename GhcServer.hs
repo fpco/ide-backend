@@ -12,7 +12,7 @@ module GhcServer
     -- * A handle to the server
   , GhcServer
     -- * Server-side operations
-  , createGhcServer
+  , ghcServer
     -- * Client-side operations
   , forkGhcServer
   , rpcGhcServer
@@ -25,11 +25,6 @@ import System.Environment.Executable (getExecutablePath)
 import System.FilePath ((</>), takeExtension)
 import System.Directory
 import Data.Aeson.TH (deriveJSON)
-import System.IO
-  ( stdin
-  , stdout
-  , stderr
-  )
 import Control.Monad (void)
 import Control.Concurrent
   ( forkIO
@@ -128,17 +123,18 @@ ghcServerEngine GhcInitData{dOpts}
             return $ Left $ RespDone errs
   return (p 0)
 
-createGhcServer :: [String] -> IO ()
-createGhcServer opts = do
+ghcServer :: [String] -> IO ()
+ghcServer fdsAndOpts = do
+  let (opts, markerAndfds) = span (/= "--ghc-opts-end") fdsAndOpts
   dOpts <- submitStaticOpts opts
-  rpcServer stdin stdout stderr (ghcServerEngine GhcInitData{..})
+  rpcServer (tail markerAndfds) (ghcServerEngine GhcInitData{..})
 
 -- * Client-side operations
 
-forkGhcServer :: [String] -> FilePath -> IO GhcServer
-forkGhcServer opts configTempDir = do
+forkGhcServer :: [String] -> IO GhcServer
+forkGhcServer opts = do
   prog <- getExecutablePath
-  forkRpcServer prog ("--server" : opts) --configTempDir
+  forkRpcServer prog $ ["--server"] ++ opts ++ ["--ghc-opts-end"]
 
 rpcGhcServer :: GhcServer -> (Maybe [String]) -> FilePath
              -> Bool -> Maybe (String, String)

@@ -37,7 +37,7 @@ main :: IO ()
 main = do
   args <- getArgs
   case args of
-    "--server" : opts -> createGhcServer opts  -- @opts@ are GHC static flags
+    "--server" : opts -> ghcServer opts  -- @opts@ are GHC static flags
     _ -> do
       let (originalSourcesDir, opts) = case args of
             ["--help"] ->

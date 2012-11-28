@@ -27,7 +27,7 @@ library
                       attoparsec,
                       aeson                >= 0.6 && < 0.7,
                       executable-path      >= 0.0 && < 0.1,
-                      unix >= 2.5 && < 2.6
+                      unix >= 2.5 && < 2.7
 
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,
@@ -52,7 +52,7 @@ test-suite typecheck-dir
                       attoparsec,
                       aeson                >= 0.6 && < 0.7,
                       executable-path      >= 0.0 && < 0.1,
-                      unix >= 2.5 && < 2.6,
+                      unix >= 2.5 && < 2.7,
 -- pretty beastly deps:
                       Unixutils >= 1.50
 

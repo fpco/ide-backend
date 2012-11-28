@@ -256,7 +256,7 @@ initSession ideConfig@SessionConfig{..} = do
       ideNewOpts  = Nothing  -- options from SessionConfig used initially
       ideGenerateCode = False
   ideToken <- initToken
-  ideGhcServer <- forkGhcServer configStaticOpts configTempDir
+  ideGhcServer <- forkGhcServer configStaticOpts
   return IdeSession{..}
 
 -- | Close a session down, releasing the resources.

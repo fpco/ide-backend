@@ -389,27 +389,27 @@ main = do
   args <- getArgs
   case args of
     "--server" : test : args' -> case test of
-      "echo"            -> rpcServer' args' testEchoServer
+      "echo"            -> rpcServer args' testEchoServer
       "state"           -> do st <- newMVar 0
-                              rpcServer' args' (testStateServer st)
+                              rpcServer args' (testStateServer st)
       "custom"          -> do st <- newMVar 0
-                              rpcServer' args' (testCustomServer st)
-      "progress"        -> rpcServer' args' testProgressServer
-      "shutdown"        -> rpcServer' args' testEchoServer
-      "stdout"          -> rpcServer' args' testStdoutServer
-      "crash"           -> rpcServer' args' testCrashServer
+                              rpcServer args' (testCustomServer st)
+      "progress"        -> rpcServer args' testProgressServer
+      "shutdown"        -> rpcServer args' testEchoServer
+      "stdout"          -> rpcServer args' testStdoutServer
+      "crash"           -> rpcServer args' testCrashServer
       "kill"            -> do firstRequest <- newMVar True
-                              rpcServer' args' (testKillServer firstRequest)
-      "killAsync"       -> rpcServer' args' testKillAsyncServer
-      "faultyDecoder"   -> rpcServer' args' testFaultyDecoderServer
-      "faultyEncoder"   -> rpcServer' args' testFaultyEncoderServer
-      "illscoped"       -> rpcServer' args' testEchoServer
-      "underconsumption"-> rpcServer' args' testEchoServer
-      "overconsumption" -> rpcServer' args' testEchoServer
-      "crashMulti"      -> rpcServer' args' testCrashMultiServer
-      "killMulti"       -> rpcServer' args' testKillMultiServer
-      "killAsyncMulti"  -> rpcServer' args' testKillAsyncMultiServer
-      "invalidReqType"  -> rpcServer' args' testEchoServer
-      "invalidRespType" -> rpcServer' args' testEchoServer
+                              rpcServer args' (testKillServer firstRequest)
+      "killAsync"       -> rpcServer args' testKillAsyncServer
+      "faultyDecoder"   -> rpcServer args' testFaultyDecoderServer
+      "faultyEncoder"   -> rpcServer args' testFaultyEncoderServer
+      "illscoped"       -> rpcServer args' testEchoServer
+      "underconsumption"-> rpcServer args' testEchoServer
+      "overconsumption" -> rpcServer args' testEchoServer
+      "crashMulti"      -> rpcServer args' testCrashMultiServer
+      "killMulti"       -> rpcServer args' testKillMultiServer
+      "killAsyncMulti"  -> rpcServer args' testKillAsyncMultiServer
+      "invalidReqType"  -> rpcServer args' testEchoServer
+      "invalidRespType" -> rpcServer args' testEchoServer
       _ -> error $ "Invalid server " ++ show test
     _ -> defaultMain tests

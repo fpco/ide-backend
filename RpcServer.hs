@@ -75,7 +75,7 @@ data ExternalException = ExternalException {
      -- | The local exception that was thrown and alerted us to the problem
    , externalException :: Maybe Ex.IOException
    }
-  deriving (Typeable)
+  deriving (Eq, Typeable)
 
 instance Show ExternalException where
   show (ExternalException err Nothing) =
