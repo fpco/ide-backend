@@ -3,6 +3,7 @@
 module RpcServer
   ( -- * Server-side
     rpcServer
+  , RpcServerActions(..)
     -- * Client-side
   , RpcServer
   , forkRpcServer
@@ -113,8 +114,8 @@ $(deriveJSON tail ''Response)
 -- Start the RPC server. For an explanation of the command line arguments, see
 -- 'forkRpcServer'. This function does not return unless there is an error.
 rpcServer :: (FromJSON req, ToJSON resp)
-          => [String]                          -- ^ Command line arguments
-          -> (req -> IO (Progress resp resp))  -- ^ Request handler
+          => [String]                                   -- ^ Command line args
+          -> (RpcServerActions req resp resp -> IO ())  -- ^ Request server
           -> IO ()
 rpcServer fds handler = do
   let readFd :: String -> Fd
@@ -131,14 +132,21 @@ rpcServer fds handler = do
 
   rpcServer' requestR' responseW' errorsW' handler
 
+data RpcServerActions req prog resp
+   = RpcServerActions {
+       getRequest   :: IO req,
+       putProgress  :: prog -> IO (),
+       putResponse  :: resp -> IO ()
+     }
+
 -- | Start the RPC server
 rpcServer' :: (FromJSON req, ToJSON resp)
            => Handle                           -- ^ Input
            -> Handle                           -- ^ Output
            -> Handle                           -- ^ Errors
-           -> (req -> IO (Progress resp resp)) -- ^ The request handler
+           -> (RpcServerActions req resp resp -> IO ()) -- ^ The request server
            -> IO ()
-rpcServer' hin hout herr handler = do
+rpcServer' hin hout herr server = do
   requests  <- newChan
   responses <- newChan
   exception <- newEmptyMVar :: IO (MVar Ex.SomeException)
@@ -149,7 +157,7 @@ rpcServer' hin hout herr handler = do
 
   tid1 <- forkCatch $ readRequests hin requests
   tid2 <- forkCatch $ writeResponses responses hout
-  tid3 <- forkCatch $ channelHandler requests responses handler
+  tid3 <- forkCatch $ channelHandler requests responses server
 
   ex <- readMVar exception
   hPutFlush herr (pack (show ex))
@@ -407,20 +415,14 @@ writeResponses ch h = forever $ readChan ch >>= hPutFlush h . encode
 -- | Run a handler repeatedly, given input and output channels
 channelHandler :: Chan (Request req)
                -> Chan (Response resp)
-               -> (req -> IO (Progress resp resp))
+               -> (RpcServerActions req resp resp -> IO ())
                -> IO ()
-channelHandler inp outp handler = forever $ do
-    Request req <- readChan inp
-    handler req >>= go
-  where
-    go p = do
-      resp <- progressWait p
-      case resp of
-        Left lastResponse ->
-          writeChan outp (FinalResponse lastResponse)
-        Right (intermediateResponse, p') -> do
-          writeChan outp (IntermediateResponse intermediateResponse)
-          go p'
+channelHandler inp outp server =
+    server RpcServerActions {
+      getRequest   = _request <$> readChan inp,
+      putProgress  = writeChan outp . IntermediateResponse,
+      putResponse  = writeChan outp . FinalResponse
+    }
 
 -- | Set all the specified handles to binary mode and block buffering
 setBinaryBlockBuffered :: [Handle] -> IO ()

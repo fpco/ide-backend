@@ -33,7 +33,7 @@ import Control.Concurrent
 import Control.Concurrent.MVar
   ( newMVar
   , putMVar
-  , modifyMVar_
+  , modifyMVar
   , takeMVar
   , isEmptyMVar
   )
@@ -62,7 +62,12 @@ type GhcServer = RpcServer GhcRequest GhcResponse
 
 -- * Server-side operations
 
--- TODO: this function is getting to complex: boolean, Maybe, complex
+ghcServer :: [String] -> IO ()
+ghcServer fdsAndOpts = do
+  let (opts, markerAndFds) = span (/= "--ghc-opts-end") fdsAndOpts
+  rpcServer (tail markerAndFds) (ghcServerEngine opts)
+
+-- TODO: this function is getting too complex: boolean, Maybe, complex
 -- results, etc.; perhaps change GhcRequest and GhcResponse to reflect
 -- the options in a better way and split the code paths?
 -- TODO: Do we want to return partial error information while it's
@@ -71,63 +76,50 @@ type GhcServer = RpcServer GhcRequest GhcResponse
 -- doing \ m -> load (LoadUpTo m)) or rewrite collectSrcError to place
 -- warnings in an mvar instead of IORef and read from it into Progress,
 -- as soon as they appear.
-ghcServerEngine :: GhcInitData -> GhcRequest
-                -> IO (Progress GhcResponse GhcResponse)
-ghcServerEngine GhcInitData{dOpts}
-                (ReqCompute ideNewOpts configSourcesDir
-                            ideGenerateCode funToRun) = do
-  mvCounter <- newMVar (Right 0)  -- Report progress step [0/n], too.
-  let forkCatch :: IO () -> IO ()
-      forkCatch p = do
-        tid <- myThreadId
-        void $ forkIO $ Ex.catch p (\ (ex :: Ex.SomeException) ->
-                                     Ex.throwTo tid ex)
-  forkCatch $ do
+ghcServerEngine :: [String]
+                -> RpcServerActions GhcRequest GhcResponse GhcResponse
+                -> IO ()
+ghcServerEngine opts rpcActions@RpcServerActions{..} = do
+
+  dOpts <- submitStaticOpts opts
+
+  -- should do other init and runGhc here so dispatcher runs in Ghc monad
+  dispatcher GhcInitData{..}
+
+  where
+    dispatcher ghcInitData = do
+      req <- getRequest
+      resp <- ghcServerHandler ghcInitData putProgress req
+      putResponse resp
+      dispatcher ghcInitData
+
+
+--TODO: this should be in the Ghc monad:
+ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ()) -> GhcRequest
+                 -> IO GhcResponse
+ghcServerHandler GhcInitData{dOpts}
+                 reportProgress (ReqCompute ideNewOpts configSourcesDir
+                                            ideGenerateCode funToRun) = do
+
+    mvCounter <- newMVar 0  -- Report progress step [0/n], too.
+
     cnts <- getDirectoryContents configSourcesDir
     let files = map (configSourcesDir </>)
                 $ filter ((`elem` hsExtentions) . takeExtension) cnts
-        incrementCounter (Right c) = Right (c + 1)
-        incrementCounter (Left _)  = error "ghcServerEngine: unexpected Left"
-        updateCounter = do
-          -- Don't block, GHC should not be slowed down.
-          b <- isEmptyMVar mvCounter
-          if b
-            -- Indicate that another one file was type-checked.
-            then putMVar mvCounter (Right 1)
-            -- If not consumed, increment count and keep working.
-            else modifyMVar_ mvCounter (return . incrementCounter)
+
         dynOpts = maybe dOpts optsToDynFlags ideNewOpts
         -- Let GHC API print "compiling M ... done." for each module.
         verbosity = 1
-        -- TODO: verify that it's the "compiling M" message
-        handlerOutput _ = updateCounter
+        -- TODO: verify that _ is the "compiling M" message
+        handlerOutput _ = do
+          oldCounter <- modifyMVar mvCounter (\c -> return (c+1, c))
+          reportProgress (RespWorking oldCounter)
         handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-    runOutcome <- checkModule files dynOpts ideGenerateCode funToRun verbosity
-                             handlerOutput handlerRemaining
-    -- Don't block, GHC should not be slowed down.
-    b <- isEmptyMVar mvCounter
-    if b
-      then putMVar mvCounter (Left runOutcome)
-      else modifyMVar_ mvCounter (return . const (Left runOutcome))
-  let p :: Int -> Progress GhcResponse GhcResponse
-      p counter = Progress $ do
-        -- Block until GHC processes the next file.
-        merrs <- takeMVar mvCounter
-        case merrs of
-          Right new -> do
-            -- Add the count of files type-checked since last time reported.
-            -- The count is 1, unless the machine is busy and @p@ runs rarely.
-            let newCounter = new + counter
-            return $ Right (RespWorking newCounter, p newCounter)
-          Left errs ->
-            return $ Left $ RespDone errs
-  return (p 0)
 
-ghcServer :: [String] -> IO ()
-ghcServer fdsAndOpts = do
-  let (opts, markerAndfds) = span (/= "--ghc-opts-end") fdsAndOpts
-  dOpts <- submitStaticOpts opts
-  rpcServer (tail markerAndfds) (ghcServerEngine GhcInitData{..})
+    runOutcome <- checkModule files dynOpts ideGenerateCode funToRun verbosity
+                              handlerOutput handlerRemaining
+
+    return (RespDone runOutcome)
 
 -- * Client-side operations
 
