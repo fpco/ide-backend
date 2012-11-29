@@ -24,13 +24,13 @@ main = do
   target <-
     case args of
       [f] -> return f
-      []  -> return "test/MainModule/ParFib.hs"
-      _   -> fail "usage: in-process [file]"
+      []  -> return "test/MainModule"
+      _   -> fail "usage: in-process [dir]"
 
   putStrLn ""
-  (errs, resOrEx) <- checkModule [target] (optsToDynFlags defOpts)
+  (errs, resOrEx) <- checkModule target (optsToDynFlags defOpts)
                                  True (Just ("Main", "main")) 2
-                                 putStrLn putStrLn
+                                 (const putStrLn) putStrLn
   putStrLn $ "\nErrors and warnings:\n"
              ++ List.intercalate "\n" (map formatSourceError errs)
              ++ "\n"
