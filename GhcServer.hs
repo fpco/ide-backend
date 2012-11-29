@@ -101,7 +101,7 @@ ghcServerHandler GhcInitData{dOpts}
                  reportProgress (ReqCompute ideNewOpts configSourcesDir
                                             ideGenerateCode funToRun) = do
 
-    mvCounter <- newMVar 0  -- Report progress step [0/n], too.
+    mvCounter <- newMVar 1  -- Report progress from step [1/n] onwards.
 
     cnts <- getDirectoryContents configSourcesDir
     let files = map (configSourcesDir </>)
