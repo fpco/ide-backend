@@ -10,6 +10,9 @@ module GhcRun
   ( DynamicOpts
   , submitStaticOpts
   , optsToDynFlags
+  , runFromGhc
+  , controlGhc
+  , debugFile
   , checkModule
   ) where
 
@@ -52,46 +55,23 @@ submitStaticOpts opts = do
 optsToDynFlags :: [String] -> DynamicOpts
 optsToDynFlags = DynamicOpts . map noLoc
 
-checkModule :: FilePath          -- ^ target directory
-            -> DynamicOpts       -- ^ dynamic flags for this run of runGhc
-            -> Bool              -- ^ whether to generate code
-            -> Maybe (String, String)
-                                 -- ^ module and function to run, if any
-            -> Int               -- ^ verbosity level
-            -> (IORef PCounter -> String -> IO ()) -- ^ handler for each SevOutput message
-            -> (String -> IO ()) -- ^ handler for remaining non-error messages
-            -> IO RunOutcome     -- ^ errors,warnings and run results, if any
-checkModule configSourcesDir dynOpts ideGenerateCode funToRun verbosity
-            handlerOutput handlerRemaining = do
-  errsRef <- newIORef []
-  let collectedErrors = reverse <$> readIORef errsRef
-      handleOtherErrors =
-        Ex.handle $ \e -> do
-          case debugFile of
-            Nothing -> return ()
-            Just logName -> appendFile logName
-              $ "handleOtherErrors: " ++ showExWithClass e ++ "\n"
-          let exError = OtherError (show (e :: Ex.SomeException))
-          -- In case of an exception, don't lose saved errors.
-          errs <- collectedErrors
-          return $ (errs ++ [exError], Nothing)
-  -- Catch all errors.
-  handleOtherErrors $ do
+getGhcLibdir :: IO FilePath
+getGhcLibdir = do
+  let ghcbinary = "ghc-" ++ GHC.cProjectVersion
+  out <- readProcess ghcbinary ["--print-libdir"] ""
+  case lines out of
+    [libdir] -> return libdir
+    _        -> fail "cannot parse output of ghc --print-libdir"
 
-    let ghcbinary = "ghc-" ++ GHC.cProjectVersion
-    out <- readProcess ghcbinary ["--print-libdir"] ""
-    libdir <- case lines out of
-      [libdir] -> return libdir
-      _        -> fail "cannot parse output of ghc --print-libdir"
-    -- Call the GHC API.
-    runGhc (Just libdir)
-      $ controlGHC configSourcesDir dynOpts ideGenerateCode funToRun verbosity
-                   errsRef handlerOutput handlerRemaining
+runFromGhc :: Ghc a -> IO a
+runFromGhc a = do
+  libdir <- getGhcLibdir
+  runGhc (Just libdir) a
 
 liftToGhc :: IO a -> Ghc a
 liftToGhc = liftIO
 
-controlGHC :: FilePath            -- ^ target directory
+controlGhc :: FilePath            -- ^ target directory
            -> DynamicOpts         -- ^ dynamic flags for this run of runGhc
            -> Bool                -- ^ whether to generate code
            -> Maybe (String, String)
@@ -101,15 +81,14 @@ controlGHC :: FilePath            -- ^ target directory
            -> (IORef PCounter -> String -> IO ())   -- ^ handler for each SevOutput message
            -> (String -> IO ())   -- ^ handler for remaining non-error msgs
            -> Ghc RunOutcome
-controlGHC configSourcesDir (DynamicOpts dynOpts)
+controlGhc configSourcesDir (DynamicOpts dynOpts)
            generateCode funToRun verbosity
            errsRef handlerOutput handlerRemaining = do
-
+    -- Reset errors storage.
     liftToGhc $ writeIORef errsRef []
-    let collectedErrors = liftToGhc $ reverse <$> readIORef errsRef
-
+    -- Setup progress counter.
     counterIORef <- liftToGhc $ newIORef 1  -- Progress goes [1/n] onwards.
-
+    -- Determine files to process.
     cnts <- liftToGhc $ getDirectoryContents configSourcesDir
     let targets = map (configSourcesDir </>)
                   $ filter ((`elem` hsExtentions) . takeExtension) cnts
@@ -173,7 +152,7 @@ controlGHC configSourcesDir (DynamicOpts dynOpts)
               RunBreak{} -> error "checkModule: RunBreak"
           _ -> return Nothing
         -- Recover all saved errors.
-        errs <- collectedErrors
+        errs <- liftToGhc $ reverse <$> readIORef errsRef
         return (errs, resOrEx)
 
 collectSrcError :: IORef [SourceError]
@@ -259,3 +238,35 @@ extractErrSpan (RealSrcSpan srcspan) =
        ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
        ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
 extractErrSpan _ = Nothing
+
+-- Kept for in-process tests.
+checkModule :: FilePath          -- ^ target directory
+            -> DynamicOpts       -- ^ dynamic flags for this run of runGhc
+            -> Bool              -- ^ whether to generate code
+            -> Maybe (String, String)
+                                 -- ^ module and function to run, if any
+            -> Int               -- ^ verbosity level
+            -> (IORef PCounter -> String -> IO ()) -- ^ handler for each SevOutput message
+            -> (String -> IO ()) -- ^ handler for remaining non-error messages
+            -> IO RunOutcome     -- ^ errors,warnings and run results, if any
+checkModule configSourcesDir dynOpts ideGenerateCode funToRun verbosity
+            handlerOutput handlerRemaining = do
+  errsRef <- newIORef []
+  let collectedErrors = reverse <$> readIORef errsRef
+      handleOtherErrors =
+        Ex.handle $ \e -> do
+          case debugFile of
+            Nothing -> return ()
+            Just logName -> appendFile logName
+              $ "handleOtherErrors: " ++ showExWithClass e ++ "\n"
+          let exError = OtherError (show (e :: Ex.SomeException))
+          -- In case of an exception, don't lose saved errors.
+          errs <- collectedErrors
+          return $ (errs ++ [exError], Nothing)
+  -- Catch all errors.
+  handleOtherErrors $ do
+    libdir <- getGhcLibdir
+    -- Call the GHC API.
+    runGhc (Just libdir)
+      $ controlGhc configSourcesDir dynOpts ideGenerateCode funToRun verbosity
+                   errsRef handlerOutput handlerRemaining

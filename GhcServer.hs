@@ -22,15 +22,9 @@ module GhcServer
 -- getExecutablePath is in base only for >= 4.6
 import qualified Control.Exception as Ex
 import System.Environment.Executable (getExecutablePath)
-import System.FilePath ((</>), takeExtension)
-import System.Directory
 import Data.Aeson.TH (deriveJSON)
-import Control.Monad (void)
-import Control.Concurrent
-  ( forkIO
-  , myThreadId
-  )
 import Data.IORef
+import Control.Applicative
 
 import RpcServer
 import Common
@@ -72,7 +66,7 @@ ghcServer fdsAndOpts = do
 ghcServerEngine :: [String]
                 -> RpcServerActions GhcRequest GhcResponse GhcResponse
                 -> IO ()
-ghcServerEngine opts rpcActions@RpcServerActions{..} = do
+ghcServerEngine opts RpcServerActions{..} = do
 
   dOpts <- submitStaticOpts opts
 
@@ -93,22 +87,34 @@ ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ()) -> GhcRequest
 ghcServerHandler GhcInitData{dOpts}
                  reportProgress (ReqCompute ideNewOpts configSourcesDir
                                             ideGenerateCode funToRun) = do
-
-    let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
-        -- Let GHC API print "compiling M ... done." for each module.
-        verbosity = 1
-        -- TODO: verify that _ is the "compiling M" message
-        handlerOutput ioRef _ = do
-          oldCounter <- readIORef ioRef
-          modifyIORef ioRef (+1)
-          reportProgress (RespWorking oldCounter)
-        handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-
-    runOutcome <- checkModule configSourcesDir dynOpts
-                              ideGenerateCode funToRun verbosity
-                              handlerOutput handlerRemaining
-
-    return (RespDone runOutcome)
+  -- Init the inteface to the RPC architecture.
+  let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
+      -- Let GHC API print "compiling M ... done." for each module.
+      verbosity = 1
+      -- TODO: verify that _ is the "compiling M" message
+      handlerOutput ioRef _ = do
+        oldCounter <- readIORef ioRef
+        modifyIORef ioRef (+1)
+        reportProgress (RespWorking oldCounter)
+      handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
+  -- Init error collection and exception handlers.
+  errsRef <- newIORef []
+  let handleOtherErrors =
+        Ex.handle $ \e -> do
+          case debugFile of
+            Nothing -> return ()
+            Just logName -> appendFile logName
+              $ "handleOtherErrors: " ++ showExWithClass e ++ "\n"
+          let exError = OtherError (show (e :: Ex.SomeException))
+          -- In case of an exception, don't lose saved errors.
+          errs <- reverse <$> readIORef errsRef
+          return $ (errs ++ [exError], Nothing)
+  -- Catch all errors.
+  runOutcome <- handleOtherErrors $ do
+    runFromGhc
+      $ controlGhc configSourcesDir dynOpts ideGenerateCode funToRun verbosity
+                   errsRef handlerOutput handlerRemaining
+  return (RespDone runOutcome)
 
 -- * Client-side operations
 
