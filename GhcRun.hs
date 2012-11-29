@@ -29,6 +29,8 @@ import System.Process
 import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
+import System.Directory
+import System.FilePath ((</>), takeExtension)
 
 import Common
 
@@ -50,7 +52,7 @@ submitStaticOpts opts = do
 optsToDynFlags :: [String] -> DynamicOpts
 optsToDynFlags = DynamicOpts . map noLoc
 
-checkModule :: [FilePath]        -- ^ target files
+checkModule :: FilePath          -- ^ target directory
             -> DynamicOpts       -- ^ dynamic flags for this run of runGhc
             -> Bool              -- ^ whether to generate code
             -> Maybe (String, String)
@@ -59,7 +61,7 @@ checkModule :: [FilePath]        -- ^ target files
             -> (String -> IO ()) -- ^ handler for each SevOutput message
             -> (String -> IO ()) -- ^ handler for remaining non-error messages
             -> IO RunOutcome     -- ^ errors,warnings and run results, if any
-checkModule targets opts generateCode funToRun verbosity
+checkModule configSourcesDir opts generateCode funToRun verbosity
             handlerOutput handlerRemaining = do
   -- Init error collection and exception handlers.
   errsRef <- newIORef []
@@ -83,24 +85,29 @@ checkModule targets opts generateCode funToRun verbosity
       _        -> fail "cannot parse output of ghc --print-libdir"
     -- Call the GHC API.
     resOrEx <- runGhc (Just libdir)
-      $ controlGHC targets opts generateCode funToRun verbosity
+      $ controlGHC configSourcesDir opts generateCode funToRun verbosity
                    handlerOutput handlerRemaining errsRef
     -- Recover all saved errors.
     errs <- collectedErrors
     return (errs, resOrEx)
 
-controlGHC :: [FilePath]           -- ^ target files
-            -> DynamicOpts         -- ^ dynamic flags for this run of runGhc
-            -> Bool                -- ^ whether to generate code
-            -> Maybe (String, String)
-                                   -- ^ module and function to run, if any
-            -> Int                 -- ^ verbosity level
-            -> (String -> IO ())   -- ^ handler for each SevOutput message
-            -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-            -> IORef [SourceError] -- ^ the ref that error msgs are written to
-            -> Ghc (Maybe (Either RunResult RunException))
-controlGHC targets (DynamicOpts dynOpts) generateCode funToRun verbosity
-           handlerOutput handlerRemaining errsRef =
+controlGHC :: FilePath            -- ^ target directory
+           -> DynamicOpts         -- ^ dynamic flags for this run of runGhc
+           -> Bool                -- ^ whether to generate code
+           -> Maybe (String, String)
+                                  -- ^ module and function to run, if any
+           -> Int                 -- ^ verbosity level
+           -> (String -> IO ())   -- ^ handler for each SevOutput message
+           -> (String -> IO ())   -- ^ handler for remaining non-error msgs
+           -> IORef [SourceError] -- ^ the ref that error msgs are written to
+           -> Ghc (Maybe (Either RunResult RunException))
+controlGHC configSourcesDir (DynamicOpts dynOpts)
+           generateCode funToRun verbosity
+           handlerOutput handlerRemaining errsRef = do
+
+    cnts <- liftIO $ getDirectoryContents configSourcesDir
+    let targets = map (configSourcesDir </>)
+                  $ filter ((`elem` hsExtentions) . takeExtension) cnts
     handleSourceError (\ e -> do
                           printException e
                           return Nothing) $ do

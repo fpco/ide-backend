@@ -103,11 +103,7 @@ ghcServerHandler GhcInitData{dOpts}
 
     mvCounter <- newMVar 1  -- Report progress from step [1/n] onwards.
 
-    cnts <- getDirectoryContents configSourcesDir
-    let files = map (configSourcesDir </>)
-                $ filter ((`elem` hsExtentions) . takeExtension) cnts
-
-        dynOpts = maybe dOpts optsToDynFlags ideNewOpts
+    let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
         -- Let GHC API print "compiling M ... done." for each module.
         verbosity = 1
         -- TODO: verify that _ is the "compiling M" message
@@ -116,7 +112,8 @@ ghcServerHandler GhcInitData{dOpts}
           reportProgress (RespWorking oldCounter)
         handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
 
-    runOutcome <- checkModule files dynOpts ideGenerateCode funToRun verbosity
+    runOutcome <- checkModule configSourcesDir dynOpts
+                              ideGenerateCode funToRun verbosity
                               handlerOutput handlerRemaining
 
     return (RespDone runOutcome)
