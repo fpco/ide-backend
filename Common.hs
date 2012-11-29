@@ -6,6 +6,7 @@ module Common
   , formatSourceError
   , SymbolDefinitionMap
   , hsExtentions, cpExtentions
+  , PCounter
   , RunResult, RunException, RunOutcome
   , showExWithClass
   ) where
@@ -52,6 +53,8 @@ hsExtentions = [".hs", ".lhs"]
 -- for type-checking others, so they are worth copying over.
 cpExtentions :: [FilePath]
 cpExtentions = ".h" : hsExtentions
+
+type PCounter = Int
 
 type RunResult = String
 type RunException = String

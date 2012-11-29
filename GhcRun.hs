@@ -31,6 +31,14 @@ import Control.Applicative
 import qualified Control.Exception as Ex
 import System.Directory
 import System.FilePath ((</>), takeExtension)
+import Control.Concurrent.MVar
+  ( MVar
+  , newMVar
+  , putMVar
+  , modifyMVar
+  , takeMVar
+  , isEmptyMVar
+  )
 
 import Common
 
@@ -58,7 +66,7 @@ checkModule :: FilePath          -- ^ target directory
             -> Maybe (String, String)
                                  -- ^ module and function to run, if any
             -> Int               -- ^ verbosity level
-            -> (String -> IO ()) -- ^ handler for each SevOutput message
+            -> (MVar PCounter -> String -> IO ()) -- ^ handler for each SevOutput message
             -> (String -> IO ()) -- ^ handler for remaining non-error messages
             -> IO RunOutcome     -- ^ errors,warnings and run results, if any
 checkModule configSourcesDir opts generateCode funToRun verbosity
@@ -97,13 +105,16 @@ controlGHC :: FilePath            -- ^ target directory
            -> Maybe (String, String)
                                   -- ^ module and function to run, if any
            -> Int                 -- ^ verbosity level
-           -> (String -> IO ())   -- ^ handler for each SevOutput message
+           -> (MVar PCounter -> String -> IO ())   -- ^ handler for each SevOutput message
            -> (String -> IO ())   -- ^ handler for remaining non-error msgs
            -> IORef [SourceError] -- ^ the ref that error msgs are written to
            -> Ghc (Maybe (Either RunResult RunException))
 controlGHC configSourcesDir (DynamicOpts dynOpts)
            generateCode funToRun verbosity
            handlerOutput handlerRemaining errsRef = do
+
+    -- TODO: switch to IORef
+    mvCounter <- liftIO $ newMVar 1  -- Report progress from [1/n] onwards.
 
     cnts <- liftIO $ getDirectoryContents configSourcesDir
     let targets = map (configSourcesDir </>)
@@ -123,9 +134,9 @@ controlGHC configSourcesDir (DynamicOpts dynOpts)
                              ghcLink,
                              ghcMode    = CompManager,
 #if __GLASGOW_HASKELL__ >= 706
-                             log_action = collectSrcError errsRef handlerOutput handlerRemaining,
+                             log_action = collectSrcError errsRef (handlerOutput mvCounter) handlerRemaining,
 #else
-                             log_action = collectSrcError errsRef handlerOutput handlerRemaining flags,
+                             log_action = collectSrcError errsRef (handlerOutput mvCounter) handlerRemaining flags,
 #endif
                              verbosity
                            }

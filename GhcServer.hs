@@ -43,7 +43,6 @@ import Common
 import GhcRun
 import Progress
 
-type PCounter = Int
 data GhcRequest  =
   ReqCompute (Maybe [String]) FilePath Bool (Maybe (String, String))
   deriving Show
@@ -101,14 +100,12 @@ ghcServerHandler GhcInitData{dOpts}
                  reportProgress (ReqCompute ideNewOpts configSourcesDir
                                             ideGenerateCode funToRun) = do
 
-    mvCounter <- newMVar 1  -- Report progress from step [1/n] onwards.
-
     let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
         -- Let GHC API print "compiling M ... done." for each module.
         verbosity = 1
         -- TODO: verify that _ is the "compiling M" message
-        handlerOutput _ = do
-          oldCounter <- modifyMVar mvCounter (\c -> return (c+1, c))
+        handlerOutput mv _ = do
+          oldCounter <- modifyMVar mv (\c -> return (c+1, c))
           reportProgress (RespWorking oldCounter)
         handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
 
