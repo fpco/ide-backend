@@ -69,11 +69,9 @@ checkModule :: FilePath          -- ^ target directory
             -> (MVar PCounter -> String -> IO ()) -- ^ handler for each SevOutput message
             -> (String -> IO ()) -- ^ handler for remaining non-error messages
             -> IO RunOutcome     -- ^ errors,warnings and run results, if any
-checkModule configSourcesDir opts generateCode funToRun verbosity
+checkModule configSourcesDir dynOpts ideGenerateCode funToRun verbosity
             handlerOutput handlerRemaining = do
-  -- Init error collection and exception handlers.
-  errsRef <- newIORef []
-  let collectedErrors = reverse <$> readIORef errsRef
+  let ---- collectedErrors = reverse <$> readIORef errsRef
       handleOtherErrors =
         Ex.handle $ \e -> do
           case debugFile of
@@ -82,22 +80,23 @@ checkModule configSourcesDir opts generateCode funToRun verbosity
               $ "handleOtherErrors: " ++ showExWithClass e ++ "\n"
           let exError = OtherError (show (e :: Ex.SomeException))
           -- In case of an exception, don't lose saved errors.
-          errs <- collectedErrors
-          return $ (errs ++ [exError], Nothing)
+          ---- errs <- collectedErrors
+          return $ ({-errs ++-} [exError], Nothing)
   -- Catch all errors.
   handleOtherErrors $ do
+
     let ghcbinary = "ghc-" ++ GHC.cProjectVersion
     out <- readProcess ghcbinary ["--print-libdir"] ""
     libdir <- case lines out of
       [libdir] -> return libdir
       _        -> fail "cannot parse output of ghc --print-libdir"
     -- Call the GHC API.
-    resOrEx <- runGhc (Just libdir)
-      $ controlGHC configSourcesDir opts generateCode funToRun verbosity
-                   handlerOutput handlerRemaining errsRef
-    -- Recover all saved errors.
-    errs <- collectedErrors
-    return (errs, resOrEx)
+    runGhc (Just libdir)
+      $ controlGHC configSourcesDir dynOpts ideGenerateCode funToRun verbosity
+                   handlerOutput handlerRemaining
+
+liftToGhc :: IO a -> Ghc a
+liftToGhc = liftIO
 
 controlGHC :: FilePath            -- ^ target directory
            -> DynamicOpts         -- ^ dynamic flags for this run of runGhc
@@ -107,21 +106,23 @@ controlGHC :: FilePath            -- ^ target directory
            -> Int                 -- ^ verbosity level
            -> (MVar PCounter -> String -> IO ())   -- ^ handler for each SevOutput message
            -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-           -> IORef [SourceError] -- ^ the ref that error msgs are written to
-           -> Ghc (Maybe (Either RunResult RunException))
+           -> Ghc RunOutcome
 controlGHC configSourcesDir (DynamicOpts dynOpts)
            generateCode funToRun verbosity
-           handlerOutput handlerRemaining errsRef = do
+           handlerOutput handlerRemaining = do
+
+    errsRef <- liftToGhc $ newIORef []
+    let collectedErrors = liftToGhc $ reverse <$> readIORef errsRef
 
     -- TODO: switch to IORef
-    mvCounter <- liftIO $ newMVar 1  -- Report progress from [1/n] onwards.
+    mvCounter <- liftToGhc $ newMVar 1  -- Report progress from [1/n] onwards.
 
-    cnts <- liftIO $ getDirectoryContents configSourcesDir
+    cnts <- liftToGhc $ getDirectoryContents configSourcesDir
     let targets = map (configSourcesDir </>)
                   $ filter ((`elem` hsExtentions) . takeExtension) cnts
     handleSourceError (\ e -> do
                           printException e
-                          return Nothing) $ do
+                          return ([], Nothing)) $ do
       -- Se tup GHC flags.
       flags0 <- getSessionDynFlags
       (flags, _, _) <- parseDynamicFlags flags0 dynOpts
@@ -149,22 +150,24 @@ controlGHC configSourcesDir (DynamicOpts dynOpts)
         mapM_ addSingle targets
         -- Load module to typech and perhaps generate code, too.
         loadRes <- load LoadAllTargets
+        -- Recover all saved errors.
+        errs <- collectedErrors
         case debugFile of
           Nothing -> return ()
           Just logName -> do
             context <- getContext
-            liftIO $ appendFile logName
+            liftToGhc $ appendFile logName
               $ "getContext1: " ++ showSDocDebug flags (GHC.ppr context)
                 ++"\n"
         -- Run code, if requested.
-        case funToRun of
+        resOrEx <- case funToRun of
           Just (m, fun) | succeeded loadRes -> do
             setContext $ [IIDecl $ simpleImportDecl $ mkModuleName m]
             case debugFile of
               Nothing -> return ()
               Just logName -> do
                 context <- getContext
-                liftIO $ appendFile logName
+                liftToGhc $ appendFile logName
                   $ "getContext2: " ++ showSDocDebug flags (GHC.ppr context)
                     ++ "\n"
             runRes <- runStmt fun RunToCompletion
@@ -178,6 +181,7 @@ controlGHC configSourcesDir (DynamicOpts dynOpts)
                 return $ Just $ Right exDesc
               RunBreak{} -> error "checkModule: RunBreak"
           _ -> return Nothing
+        return (errs, resOrEx)
 
 collectSrcError :: IORef [SourceError]
                 -> (String -> IO ())
