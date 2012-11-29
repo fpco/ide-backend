@@ -143,8 +143,6 @@ controlGHC configSourcesDir (DynamicOpts dynOpts)
         mapM_ addSingle targets
         -- Load module to typech and perhaps generate code, too.
         loadRes <- load LoadAllTargets
-        -- Recover all saved errors.
-        errs <- collectedErrors
         case debugFile of
           Nothing -> return ()
           Just logName -> do
@@ -174,6 +172,8 @@ controlGHC configSourcesDir (DynamicOpts dynOpts)
                 return $ Just $ Right exDesc
               RunBreak{} -> error "checkModule: RunBreak"
           _ -> return Nothing
+        -- Recover all saved errors.
+        errs <- collectedErrors
         return (errs, resOrEx)
 
 collectSrcError :: IORef [SourceError]
