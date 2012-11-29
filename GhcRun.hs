@@ -7,7 +7,8 @@
 -- based on source files and provides progress information.
 -- Only this file should import the GHC-internals modules.
 module GhcRun
-  ( DynamicOpts
+  ( Ghc
+  , DynamicOpts
   , submitStaticOpts
   , optsToDynFlags
   , runFromGhc
@@ -95,7 +96,7 @@ controlGhc configSourcesDir (DynamicOpts dynOpts)
     handleSourceError (\ e -> do
                           printException e
                           return ([], Nothing)) $ do
-      -- Se tup GHC flags.
+      -- Set up GHC flags.
       flags0 <- getSessionDynFlags
       (flags, _, _) <- parseDynamicFlags flags0 dynOpts
       let (hscTarget, ghcLink) | generateCode = (HscInterpreted, LinkInMemory)

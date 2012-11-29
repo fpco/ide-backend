@@ -43,7 +43,9 @@ $(deriveJSON id ''GhcResponse)
 -- Keeps the dynamic portion of the options specified at server startup
 -- (they are among the options listed in SessionConfig).
 -- They are only fed to GHC if no options are set via a session update command.
-newtype GhcInitData = GhcInitData { dOpts :: DynamicOpts }
+data GhcInitData = GhcInitData { dOpts :: DynamicOpts
+                               , errsRef :: IORef [SourceError]
+                               }
 
 type GhcServer = RpcServer GhcRequest GhcResponse
 
@@ -67,24 +69,35 @@ ghcServerEngine :: [String]
                 -> RpcServerActions GhcRequest GhcResponse GhcResponse
                 -> IO ()
 ghcServerEngine opts RpcServerActions{..} = do
-
+  -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts opts
+  -- Init error collection and exception handlers.
+  errsRef <- newIORef []
 
-  -- should do other init and runGhc here so dispatcher runs in Ghc monad
   dispatcher GhcInitData{..}
 
-  where
-    dispatcher ghcInitData = do
-      req <- getRequest
-      resp <- ghcServerHandler ghcInitData putProgress req
-      putResponse resp
-      dispatcher ghcInitData
+ where
+  dispatcher :: GhcInitData -> IO ()
+  dispatcher ghcInitData@GhcInitData{errsRef} = do
+    let handleOtherErrors =
+          Ex.handle $ \e -> do
+            case debugFile of
+              Nothing -> return ()
+              Just logName -> appendFile logName
+                $ "handleOtherErrors: " ++ showExWithClass e ++ "\n"
+            let exError = OtherError (show (e :: Ex.SomeException))
+            -- In case of an exception, don't lose saved errors.
+            errs <- reverse <$> readIORef errsRef
+            return $ RespDone (errs ++ [exError], Nothing)
+    req <- getRequest
+    resp <- handleOtherErrors $
+      runFromGhc $ ghcServerHandler ghcInitData putProgress req
+    putResponse resp
+    dispatcher ghcInitData
 
-
---TODO: this should be in the Ghc monad:
 ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ()) -> GhcRequest
-                 -> IO GhcResponse
-ghcServerHandler GhcInitData{dOpts}
+                 -> Ghc GhcResponse
+ghcServerHandler GhcInitData{dOpts, errsRef}
                  reportProgress (ReqCompute ideNewOpts configSourcesDir
                                             ideGenerateCode funToRun) = do
   -- Init the inteface to the RPC architecture.
@@ -97,23 +110,10 @@ ghcServerHandler GhcInitData{dOpts}
         modifyIORef ioRef (+1)
         reportProgress (RespWorking oldCounter)
       handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-  -- Init error collection and exception handlers.
-  errsRef <- newIORef []
-  let handleOtherErrors =
-        Ex.handle $ \e -> do
-          case debugFile of
-            Nothing -> return ()
-            Just logName -> appendFile logName
-              $ "handleOtherErrors: " ++ showExWithClass e ++ "\n"
-          let exError = OtherError (show (e :: Ex.SomeException))
-          -- In case of an exception, don't lose saved errors.
-          errs <- reverse <$> readIORef errsRef
-          return $ (errs ++ [exError], Nothing)
   -- Catch all errors.
-  runOutcome <- handleOtherErrors $ do
-    runFromGhc
-      $ controlGhc configSourcesDir dynOpts ideGenerateCode funToRun verbosity
-                   errsRef handlerOutput handlerRemaining
+  runOutcome <- controlGhc configSourcesDir dynOpts
+                           ideGenerateCode funToRun verbosity
+                           errsRef handlerOutput handlerRemaining
   return (RespDone runOutcome)
 
 -- * Client-side operations
