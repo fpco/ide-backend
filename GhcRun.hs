@@ -31,14 +31,6 @@ import Control.Applicative
 import qualified Control.Exception as Ex
 import System.Directory
 import System.FilePath ((</>), takeExtension)
-import Control.Concurrent.MVar
-  ( MVar
-  , newMVar
-  , putMVar
-  , modifyMVar
-  , takeMVar
-  , isEmptyMVar
-  )
 
 import Common
 
@@ -66,12 +58,13 @@ checkModule :: FilePath          -- ^ target directory
             -> Maybe (String, String)
                                  -- ^ module and function to run, if any
             -> Int               -- ^ verbosity level
-            -> (MVar PCounter -> String -> IO ()) -- ^ handler for each SevOutput message
+            -> (IORef PCounter -> String -> IO ()) -- ^ handler for each SevOutput message
             -> (String -> IO ()) -- ^ handler for remaining non-error messages
             -> IO RunOutcome     -- ^ errors,warnings and run results, if any
 checkModule configSourcesDir dynOpts ideGenerateCode funToRun verbosity
             handlerOutput handlerRemaining = do
-  let ---- collectedErrors = reverse <$> readIORef errsRef
+  errsRef <- newIORef []
+  let collectedErrors = reverse <$> readIORef errsRef
       handleOtherErrors =
         Ex.handle $ \e -> do
           case debugFile of
@@ -80,8 +73,8 @@ checkModule configSourcesDir dynOpts ideGenerateCode funToRun verbosity
               $ "handleOtherErrors: " ++ showExWithClass e ++ "\n"
           let exError = OtherError (show (e :: Ex.SomeException))
           -- In case of an exception, don't lose saved errors.
-          ---- errs <- collectedErrors
-          return $ ({-errs ++-} [exError], Nothing)
+          errs <- collectedErrors
+          return $ (errs ++ [exError], Nothing)
   -- Catch all errors.
   handleOtherErrors $ do
 
@@ -93,7 +86,7 @@ checkModule configSourcesDir dynOpts ideGenerateCode funToRun verbosity
     -- Call the GHC API.
     runGhc (Just libdir)
       $ controlGHC configSourcesDir dynOpts ideGenerateCode funToRun verbosity
-                   handlerOutput handlerRemaining
+                   errsRef handlerOutput handlerRemaining
 
 liftToGhc :: IO a -> Ghc a
 liftToGhc = liftIO
@@ -104,18 +97,18 @@ controlGHC :: FilePath            -- ^ target directory
            -> Maybe (String, String)
                                   -- ^ module and function to run, if any
            -> Int                 -- ^ verbosity level
-           -> (MVar PCounter -> String -> IO ())   -- ^ handler for each SevOutput message
+           -> IORef [SourceError] -- ^ the IORef where GHC stores errors
+           -> (IORef PCounter -> String -> IO ())   -- ^ handler for each SevOutput message
            -> (String -> IO ())   -- ^ handler for remaining non-error msgs
            -> Ghc RunOutcome
 controlGHC configSourcesDir (DynamicOpts dynOpts)
            generateCode funToRun verbosity
-           handlerOutput handlerRemaining = do
+           errsRef handlerOutput handlerRemaining = do
 
-    errsRef <- liftToGhc $ newIORef []
+    liftToGhc $ writeIORef errsRef []
     let collectedErrors = liftToGhc $ reverse <$> readIORef errsRef
 
-    -- TODO: switch to IORef
-    mvCounter <- liftToGhc $ newMVar 1  -- Report progress from [1/n] onwards.
+    counterIORef <- liftToGhc $ newIORef 1  -- Progress goes [1/n] onwards.
 
     cnts <- liftToGhc $ getDirectoryContents configSourcesDir
     let targets = map (configSourcesDir </>)
@@ -135,9 +128,9 @@ controlGHC configSourcesDir (DynamicOpts dynOpts)
                              ghcLink,
                              ghcMode    = CompManager,
 #if __GLASGOW_HASKELL__ >= 706
-                             log_action = collectSrcError errsRef (handlerOutput mvCounter) handlerRemaining,
+                             log_action = collectSrcError errsRef (handlerOutput counterIORef) handlerRemaining,
 #else
-                             log_action = collectSrcError errsRef (handlerOutput mvCounter) handlerRemaining flags,
+                             log_action = collectSrcError errsRef (handlerOutput counterIORef) handlerRemaining flags,
 #endif
                              verbosity
                            }

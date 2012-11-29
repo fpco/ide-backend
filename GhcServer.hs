@@ -30,13 +30,7 @@ import Control.Concurrent
   ( forkIO
   , myThreadId
   )
-import Control.Concurrent.MVar
-  ( newMVar
-  , putMVar
-  , modifyMVar
-  , takeMVar
-  , isEmptyMVar
-  )
+import Data.IORef
 
 import RpcServer
 import Common
@@ -104,8 +98,9 @@ ghcServerHandler GhcInitData{dOpts}
         -- Let GHC API print "compiling M ... done." for each module.
         verbosity = 1
         -- TODO: verify that _ is the "compiling M" message
-        handlerOutput mv _ = do
-          oldCounter <- modifyMVar mv (\c -> return (c+1, c))
+        handlerOutput ioRef _ = do
+          oldCounter <- readIORef ioRef
+          modifyIORef ioRef (+1)
           reportProgress (RespWorking oldCounter)
         handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
 
