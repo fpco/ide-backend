@@ -37,7 +37,8 @@ check opts originalSourcesDir configSourcesDir = do
                                    , configTempDir    = "."
                                    , configStaticOpts = opts
                                    }
-  sP <- initSession sessionConfig
+  sP' <- initSession sessionConfig
+  sP <- setCodeGeneration sP' True
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
   -- HACK: here we fake module names, guessing them from file names.
   cnts <- getDirectoryContents originalSourcesDir
@@ -88,7 +89,8 @@ check opts originalSourcesDir configSourcesDir = do
   mapM_ removeFile $ map (configSourcesDir </>) originalFiles
   -- Init another session. It strarts a new process with GHC,
   -- so the old state does not interfere.
-  s10 <- initSession sessionConfig
+  s10' <- initSession sessionConfig
+  s10 <- setCodeGeneration s10' True
   assertRaises "getSourceErrors s10"
                (== userError "This session state does not admit queries.")
                (getSourceErrors s10)
