@@ -173,8 +173,8 @@ data IdeSession = IdeSession
   { ideConfig    :: SessionConfig
   , ideGhcServer :: GhcServer
   , ideToken     :: StateToken
-    -- The result computed by the last `updateSession` invocation.
-  , ideComputed  :: (Maybe Computed)
+    -- The result computed by the last 'updateSession' invocation.
+  , ideComputed  :: Computed
     -- Compiler dynamic options. If they are not set, the options from
     -- SessionConfig are used.
   , ideNewOpts   :: Maybe [String]
@@ -237,7 +237,11 @@ checkToken (StateToken mv k) = do
 -- can be queried at will. Note that there may be some working files
 -- produced by GHC while obtaining these values. They are not captured here,
 -- so queries are not allowed to read them.
-type Computed = [SourceError]
+data Computed = Computed
+  { cerrors :: [SourceError]  -- ^ last compilation and run errors
+  , cvalid  :: Bool           -- ^ whether session state is up-to-date
+                              -- wrt other session components
+  }
 
 ensureDirEmpty :: FilePath -> IO ()
 ensureDirEmpty dir = do
@@ -252,7 +256,7 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configSourcesDir
   ensureDirEmpty configWorkingDir
   ensureDirEmpty configDataDir
-  let ideComputed = Nothing  -- can't query before the first call to GHC
+  let ideComputed = Computed [] False  -- can't query before the first update
       ideNewOpts  = Nothing  -- options from SessionConfig used initially
       ideGenerateCode = False
   ideToken <- initToken
@@ -315,8 +319,7 @@ updateSession sess (IdeSessionUpdate update) handler = do
       g (RespWorking _)         = error "updateSession: unexpected RespWorking"
       g (RespDone (_, Just _))  = error "updateSession: unexpected Just"
       g (RespDone (r, Nothing)) = newSess { ideToken    = newToken
-                                          , ideComputed = Just r
-                                          }
+                                          , ideComputed = Computed r True }
       req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
   rpcGhcServer ideGhcServer req (handler . bimapProgress f g)
 
@@ -356,7 +359,7 @@ updateModule mc = IdeSessionUpdate $ \ sess@IdeSession{ideConfig} ->
       return sess
     OptionsSet opts -> return $ sess {ideNewOpts = opts}
 
--- @OptionsSet@ affects only 'updateSession', not `runStmt`.
+-- @OptionsSet@ affects only 'updateSession', not 'runStmt'.
 data ModuleChange = ModulePut    ModuleName ByteString
                   | ModuleSource ModuleName FilePath
                   | ModuleDelete ModuleName
@@ -421,10 +424,11 @@ getDataFile n IdeSession{ideConfig=SessionConfig{configDataDir}} =
 -- would return all warnings (as if you did clean and rebuild each time).
 --
 getSourceErrors :: Query [SourceError]
-getSourceErrors IdeSession{ideComputed} = do
-  case ideComputed of
-    Nothing -> fail "This session state does not admit queries."
-    Just c  -> return c
+getSourceErrors IdeSession{ideComputed=Computed{cvalid=True, cerrors}} =
+  return cerrors
+-- Optionally, this could give last reported errors, instead forcing
+-- IDE to wait for the next sessionUpdate to finish.
+getSourceErrors _ = fail "This session state does not admit queries."
 
 -- | Get a mapping from where symbols are used to where they are defined.
 -- That is, given a symbol used at a particular location in a source module
@@ -435,11 +439,17 @@ getSymbolDefinitionMap :: Query SymbolDefinitionMap
 getSymbolDefinitionMap = undefined
 
 -- | Enable or disable code generation in addition to type-checking.
--- Affect only 'updateSession', not `runStmt`. The latter assume
--- a @updateSession@ with @setCodeGeneration@ turned on.
+-- Used by 'updateSession', assumed by 'runStmt' (it moreover assumes
+-- that the last @updateSession@ was run with @setCodeGeneration@ turned on).
 --
 setCodeGeneration :: IdeSession -> Bool -> IO IdeSession
-setCodeGeneration sess ideGenerateCode = return $ sess {ideGenerateCode}
+setCodeGeneration sess@IdeSession{ideGenerateCode, ideComputed}
+                  newIdeGenerateCode =
+  if ideGenerateCode == newIdeGenerateCode
+  then return sess  -- nothing to change
+  else return $ sess { ideGenerateCode=newIdeGenerateCode
+                     , ideComputed=ideComputed {cvalid = False}
+                     }  -- invalidate previous computed results
 
 -- TODO: detect and fail if the last updateSession was not done
 -- with @setCodeGeneration@ turned on.
@@ -451,7 +461,10 @@ setCodeGeneration sess ideGenerateCode = return $ sess {ideGenerateCode}
 -- code loops, it waits forever.
 --
 runStmt :: IdeSession -> String -> String -> IO RunOutcome
-runStmt IdeSession{ideGhcServer} m fun =
+runStmt IdeSession{ ideComputed=Computed{cvalid=True}
+                  , ideGenerateCode=True
+                  , ideGhcServer }
+        m fun =
   -- Communicating with the GHC server.
   -- TODO: perhaps take a handler that uses the progress information somehow.
   let f (RespWorking c) = c  -- advancement counter
@@ -461,3 +474,4 @@ runStmt IdeSession{ideGhcServer} m fun =
       req = ReqRun (m, fun)
   in rpcGhcServer ideGhcServer req
                   (progressWaitCompletion . bimapProgress f g)
+runStmt _ _ _ = fail "runStmt: can't run, before the code is generated"
