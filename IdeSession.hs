@@ -356,6 +356,7 @@ updateModule mc = IdeSessionUpdate $ \ sess@IdeSession{ideConfig} ->
       return sess
     OptionsSet opts -> return $ sess {ideNewOpts = opts}
 
+-- @OptionsSet@ affects only 'updateSession', not `runStmt`.
 data ModuleChange = ModulePut    ModuleName ByteString
                   | ModuleSource ModuleName FilePath
                   | ModuleDelete ModuleName
@@ -434,15 +435,14 @@ getSymbolDefinitionMap :: Query SymbolDefinitionMap
 getSymbolDefinitionMap = undefined
 
 -- | Enable or disable code generation in addition to type-checking.
+-- Affect only 'updateSession', not `runStmt`. The latter assume
+-- a @updateSession@ with @setCodeGeneration@ turned on.
 --
 setCodeGeneration :: IdeSession -> Bool -> IO IdeSession
 setCodeGeneration sess ideGenerateCode = return $ sess {ideGenerateCode}
 
--- TODO: Currently runStmt type-checks code and generates bytecode afresh.
--- In the future we will try to re-use the code generated in updateSession
--- if ideGenerateCode is on. This can save some time if we often type-check
--- and, after some delay, run code. We may even go as far as to refuse
--- generating code in runStmt, but I do not see any gain in doing so ATM.
+-- TODO: detect and fail if the last updateSession was not done
+-- with @setCodeGeneration@ turned on.
 -- | Run a given function in a given module and return all the compilation
 -- warnings and errors and (if there were only warnings) either an identifier
 -- bound to the resulting value or an exception raised by the function).
@@ -451,16 +451,13 @@ setCodeGeneration sess ideGenerateCode = return $ sess {ideGenerateCode}
 -- code loops, it waits forever.
 --
 runStmt :: IdeSession -> String -> String -> IO RunOutcome
-runStmt IdeSession{ ideConfig=SessionConfig{configSourcesDir}
-                  , ideGhcServer
-                  , ideNewOpts
-                  } m fun =
+runStmt IdeSession{ideGhcServer} m fun =
   -- Communicating with the GHC server.
   -- TODO: perhaps take a handler that uses the progress information somehow.
   let f (RespWorking c) = c  -- advancement counter
       f (RespDone _)    = error "runStmt: unexpected RespDone"
       g (RespWorking _) = error "runStmt: unexpected RespWorking"
       g (RespDone r)    = r
-      req = ReqRun ideNewOpts configSourcesDir (m, fun)
+      req = ReqRun (m, fun)
   in rpcGhcServer ideGhcServer req
                   (progressWaitCompletion . bimapProgress f g)

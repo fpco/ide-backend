@@ -33,7 +33,7 @@ import Progress
 
 data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
-  | ReqRun     (Maybe [String]) FilePath (String, String)
+  | ReqRun     (String, String)
   deriving Show
 data GhcResponse = RespWorking PCounter | RespDone RunOutcome
   deriving Show
@@ -111,28 +111,12 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
         modifyIORef ioRef (+1)
         reportProgress (RespWorking oldCounter)
       handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-  -- Catch all errors.
-  runOutcome <- controlGhc configSourcesDir dynOpts
-                           ideGenerateCode Nothing verbosity
-                           errsRef handlerOutput handlerRemaining
+  runOutcome <- compileInGhc configSourcesDir dynOpts
+                             ideGenerateCode verbosity
+                             errsRef handlerOutput handlerRemaining
   return (RespDone runOutcome)
-ghcServerHandler GhcInitData{dOpts, errsRef}
-                 reportProgress
-                 (ReqRun ideNewOpts configSourcesDir funToRun) = do
-  -- Init the inteface to the RPC architecture.
-  let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
-      -- Let GHC API print "compiling M ... done." for each module.
-      verbosity = 1
-      -- TODO: verify that _ is the "compiling M" message
-      handlerOutput ioRef _ = do
-        oldCounter <- readIORef ioRef
-        modifyIORef ioRef (+1)
-        reportProgress (RespWorking oldCounter)
-      handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-  -- Catch all errors.
-  runOutcome <- controlGhc configSourcesDir dynOpts
-                           True (Just funToRun) verbosity
-                           errsRef handlerOutput handlerRemaining
+ghcServerHandler GhcInitData{errsRef} _ (ReqRun funToRun) = do
+  runOutcome <- runInGhc funToRun errsRef
   return (RespDone runOutcome)
 
 -- * Client-side operations
