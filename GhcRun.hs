@@ -8,6 +8,7 @@
 -- Only this file should import the GHC-internals modules.
 module GhcRun
   ( Ghc
+  , liftToGhc
   , DynamicOpts
   , submitStaticOpts
   , optsToDynFlags
@@ -70,6 +71,7 @@ runFromGhc a = do
   libdir <- getGhcLibdir
   runGhc (Just libdir) a
 
+-- | Lift a computation from @IO@ monad to @Ghc@ monad.
 liftToGhc :: IO a -> Ghc a
 liftToGhc = liftIO
 
