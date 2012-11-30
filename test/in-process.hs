@@ -30,7 +30,7 @@ main = do
   putStrLn ""
   (errs, resOrEx) <- checkModule target (optsToDynFlags defOpts)
                                  True (Just ("Main", "main")) 2
-                                 (const putStrLn) putStrLn
+                                 putStrLn putStrLn
   putStrLn $ "\nErrors and warnings:\n"
              ++ List.intercalate "\n" (map formatSourceError errs)
              ++ "\n"

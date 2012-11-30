@@ -81,8 +81,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> Bool                -- ^ whether to generate code
              -> Int                 -- ^ verbosity level
              -> IORef [SourceError] -- ^ the IORef where GHC stores errors
-             -> (IORef PCounter -> String -> IO ())
-                                    -- ^ handler for each SevOutput message
+             -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc RunOutcome
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
@@ -90,8 +89,6 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
              errsRef handlerOutput handlerRemaining = do
     -- Reset errors storage.
     liftToGhc $ writeIORef errsRef []
-    -- Setup progress counter.
-    counterIORef <- liftToGhc $ newIORef 1  -- Progress goes [1/n] onwards.
     -- Determine files to process.
     cnts <- liftToGhc $ getDirectoryContents configSourcesDir
     let targets = map (configSourcesDir </>)
@@ -111,9 +108,9 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                              ghcLink,
                              ghcMode    = CompManager,
 #if __GLASGOW_HASKELL__ >= 706
-                             log_action = collectSrcError errsRef (handlerOutput counterIORef) handlerRemaining,
+                             log_action = collectSrcError errsRef handlerOutput handlerRemaining,
 #else
-                             log_action = collectSrcError errsRef (handlerOutput counterIORef) handlerRemaining flags,
+                             log_action = collectSrcError errsRef handlerOutput handlerRemaining flags,
 #endif
                              verbosity
                            }
@@ -278,7 +275,7 @@ checkModule :: FilePath          -- ^ target directory
             -> Maybe (String, String)
                                  -- ^ module and function to run, if any
             -> Int               -- ^ verbosity level
-            -> (IORef PCounter -> String -> IO ()) -- ^ handler for each SevOutput message
+            -> (String -> IO ()) -- ^ handler for each SevOutput message
             -> (String -> IO ()) -- ^ handler for remaining non-error messages
             -> IO RunOutcome     -- ^ errors,warnings and run results, if any
 checkModule configSourcesDir dynOpts ideGenerateCode funToRun verbosity

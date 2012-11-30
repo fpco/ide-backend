@@ -103,14 +103,15 @@ ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ()) -> GhcRequest
 ghcServerHandler GhcInitData{dOpts, errsRef}
                  reportProgress
                  (ReqCompile ideNewOpts configSourcesDir ideGenerateCode) = do
-  -- Init the inteface to the RPC architecture.
+  -- Setup progress counter. It goes from [1/n] onwards.
+  counterIORef <- liftToGhc $ newIORef 1
   let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
       -- Let GHC API print "compiling M ... done." for each module.
       verbosity = 1
       -- TODO: verify that _ is the "compiling M" message
-      handlerOutput ioRef _ = do
-        oldCounter <- readIORef ioRef
-        modifyIORef ioRef (+1)
+      handlerOutput _ = do
+        oldCounter <- readIORef counterIORef
+        modifyIORef counterIORef (+1)
         reportProgress (RespWorking oldCounter)
       handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
   runOutcome <- compileInGhc configSourcesDir dynOpts
