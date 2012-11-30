@@ -96,24 +96,26 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     handleSourceError (\ e -> do
                           printException e
                           return ([], Nothing)) $ do
-      -- Set up GHC flags.
+      -- Compute new GHC flags.
       flags0 <- getSessionDynFlags
-      (flags, _, _) <- parseDynamicFlags flags0 dynOpts
+      (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
       let (hscTarget, ghcLink) | generateCode = (HscInterpreted, LinkInMemory)
                                | otherwise    = (HscNothing,     NoLink)
-      -- Set up GHC parameters.
-      defaultCleanupHandler flags $ do
-        setSessionDynFlags flags {
-                             hscTarget,
-                             ghcLink,
-                             ghcMode    = CompManager,
+          flags = flags1 {
+                           hscTarget,
+                           ghcLink,
+                           ghcMode    = CompManager,
+                           verbosity,
 #if __GLASGOW_HASKELL__ >= 706
-                             log_action = collectSrcError errsRef handlerOutput handlerRemaining,
+                           log_action = collectSrcError errsRef handlerOutput handlerRemaining
 #else
-                             log_action = collectSrcError errsRef handlerOutput handlerRemaining flags,
+                           log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
 #endif
-                             verbosity
                            }
+      defaultCleanupHandler flags $ do
+        -- Set up the GHC flags.
+        setSessionDynFlags flags
+        -- Set up targets.
         oldTargets <- getTargets
         let targetIdFromFile file = TargetFile file Nothing
             addSingle filename = do
@@ -129,7 +131,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
             oldFiles = map fileFromTarget oldTargets
         mapM_ addSingle (targets \\ oldFiles)
         mapM_ removeTarget $ map targetIdFromFile $ oldFiles \\ targets
-        -- Load module to typech and perhaps generate code, too.
+        -- Load modules to typecheck and perhaps generate code, too.
         _loadRes <- load LoadAllTargets
         case debugFile of
           Nothing -> return ()

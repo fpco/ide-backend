@@ -84,11 +84,12 @@ ghcServerEngine opts RpcServerActions{..} = do
           errs <- reverse <$> readIORef errsRef
           -- Don't disrupt the communication.
           putResponse $ RespDone (errs ++ [exError], Nothing)
-          -- Don't exit the loop.
-          mainLoop
-      mainLoop = handleOtherErrors $ runFromGhc $ dispatcher GhcInitData{..}
+          -- Restart the Ghc session.
+          startGhcSession
+      startGhcSession =
+        handleOtherErrors $ runFromGhc $ dispatcher GhcInitData{..}
 
-  mainLoop
+  startGhcSession
 
  where
   dispatcher :: GhcInitData -> Ghc ()
