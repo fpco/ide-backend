@@ -83,7 +83,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> IORef [SourceError] -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-             -> Ghc RunOutcome
+             -> Ghc [SourceError]
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
              errsRef handlerOutput handlerRemaining = do
@@ -95,7 +95,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                   $ filter ((`elem` hsExtentions) . takeExtension) cnts
     handleSourceError (\ e -> do
                           printException e
-                          return ([], Nothing)) $ do
+                          return []) $ do
       -- Compute new GHC flags.
       flags0 <- getSessionDynFlags
       (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
@@ -140,10 +140,9 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
             liftToGhc $ appendFile logName
               $ "getContext1: " ++ showSDocDebug flags (GHC.ppr context)
                 ++"\n"
-        -- Recover all saved errors.
-        errs <- liftToGhc $ reverse <$> readIORef errsRef
         -- TODO: record the boolean 'succeeded loadRes' below:
-        return (errs, Nothing)
+        -- Recover all saved errors.
+        liftToGhc $ reverse <$> readIORef errsRef
 
 runInGhc :: (String, String)    -- ^ module and function to run, if any
          -> IORef [SourceError] -- ^ the IORef where GHC stores errors
@@ -299,9 +298,9 @@ checkModule configSourcesDir dynOpts ideGenerateCode funToRun verbosity
     libdir <- getGhcLibdir
     -- Call the GHC API.
     runGhc (Just libdir) $ do
-        runOutcome <- compileInGhc configSourcesDir dynOpts
-                                   ideGenerateCode verbosity
-                                   errsRef handlerOutput handlerRemaining
+        errs <- compileInGhc configSourcesDir dynOpts
+                             ideGenerateCode verbosity
+                             errsRef handlerOutput handlerRemaining
         case funToRun of
           Just mfun -> runInGhc mfun errsRef
-          Nothing -> return runOutcome
+          Nothing -> return (errs, Nothing)
