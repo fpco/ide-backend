@@ -149,7 +149,7 @@ module IdeSession (
 
 import Control.Monad
 import Control.Concurrent
-import System.IO (openBinaryTempFile, hClose)
+import System.IO (openBinaryTempFile, hClose, hFlush, stdout, stderr)
 import System.Directory
 import System.FilePath ((</>), (<.>), splitFileName, takeExtension)
 import qualified Control.Exception as Ex
@@ -269,6 +269,9 @@ shutdownSession :: IdeSession -> IO ()
 shutdownSession IdeSession{ideToken, ideGhcServer} = do
   -- Invalidate the current session.
   void $ incrementToken ideToken
+  -- Flush all, to avoid broken pipes.
+  hFlush stdout
+  hFlush stderr
   -- Shutdown GHC server.
   shutdownGhcServer ideGhcServer
 
