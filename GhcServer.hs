@@ -31,8 +31,9 @@ import Common
 import GhcRun
 import Progress
 
-data GhcRequest  =
-  ReqCompute (Maybe [String]) FilePath Bool (Maybe (String, String))
+data GhcRequest
+  = ReqCompile (Maybe [String]) FilePath Bool
+  | ReqRun     (Maybe [String]) FilePath (String, String)
   deriving Show
 data GhcResponse = RespWorking PCounter | RespDone RunOutcome
   deriving Show
@@ -98,8 +99,8 @@ ghcServerEngine opts RpcServerActions{..} = do
 ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ()) -> GhcRequest
                  -> Ghc GhcResponse
 ghcServerHandler GhcInitData{dOpts, errsRef}
-                 reportProgress (ReqCompute ideNewOpts configSourcesDir
-                                            ideGenerateCode funToRun) = do
+                 reportProgress
+                 (ReqCompile ideNewOpts configSourcesDir ideGenerateCode) = do
   -- Init the inteface to the RPC architecture.
   let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
       -- Let GHC API print "compiling M ... done." for each module.
@@ -112,7 +113,25 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
       handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
   -- Catch all errors.
   runOutcome <- controlGhc configSourcesDir dynOpts
-                           ideGenerateCode funToRun verbosity
+                           ideGenerateCode Nothing verbosity
+                           errsRef handlerOutput handlerRemaining
+  return (RespDone runOutcome)
+ghcServerHandler GhcInitData{dOpts, errsRef}
+                 reportProgress
+                 (ReqRun ideNewOpts configSourcesDir funToRun) = do
+  -- Init the inteface to the RPC architecture.
+  let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
+      -- Let GHC API print "compiling M ... done." for each module.
+      verbosity = 1
+      -- TODO: verify that _ is the "compiling M" message
+      handlerOutput ioRef _ = do
+        oldCounter <- readIORef ioRef
+        modifyIORef ioRef (+1)
+        reportProgress (RespWorking oldCounter)
+      handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
+  -- Catch all errors.
+  runOutcome <- controlGhc configSourcesDir dynOpts
+                           True (Just funToRun) verbosity
                            errsRef handlerOutput handlerRemaining
   return (RespDone runOutcome)
 
@@ -123,13 +142,9 @@ forkGhcServer opts = do
   prog <- getExecutablePath
   forkRpcServer prog $ ["--server"] ++ opts ++ ["--ghc-opts-end"]
 
-rpcGhcServer :: GhcServer -> (Maybe [String]) -> FilePath
-             -> Bool -> Maybe (String, String)
+rpcGhcServer :: GhcServer -> GhcRequest
              -> (Progress GhcResponse GhcResponse -> IO a) -> IO a
-rpcGhcServer gs ideNewOpts configSourcesDir ideGenerateCode funToRun handler =
-  rpcWithProgress gs (ReqCompute ideNewOpts configSourcesDir
-                                 ideGenerateCode funToRun)
-                     handler
+rpcGhcServer = rpcWithProgress
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs

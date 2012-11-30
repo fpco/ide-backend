@@ -317,8 +317,8 @@ updateSession sess (IdeSessionUpdate update) handler = do
       g (RespDone (r, Nothing)) = newSess { ideToken    = newToken
                                           , ideComputed = Just r
                                           }
-  rpcGhcServer ideGhcServer ideNewOpts configSourcesDir ideGenerateCode Nothing
-               (handler . bimapProgress f g)
+      req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
+  rpcGhcServer ideGhcServer req (handler . bimapProgress f g)
 
 -- | Writes a file atomically.
 --
@@ -461,6 +461,6 @@ runStmt IdeSession{ ideConfig=SessionConfig{configSourcesDir}
       f (RespDone _)    = error "runStmt: unexpected RespDone"
       g (RespWorking _) = error "runStmt: unexpected RespWorking"
       g (RespDone r)    = r
-  in rpcGhcServer ideGhcServer ideNewOpts configSourcesDir
-                  True (Just (m, fun))
+      req = ReqRun ideNewOpts configSourcesDir (m, fun)
+  in rpcGhcServer ideGhcServer req
                   (progressWaitCompletion . bimapProgress f g)
