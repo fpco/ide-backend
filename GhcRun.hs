@@ -37,6 +37,7 @@ import Control.Applicative
 import qualified Control.Exception as Ex
 import System.Directory
 import System.FilePath ((</>), takeExtension)
+import Data.List ((\\))
 
 import Common
 
@@ -116,13 +117,21 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 #endif
                              verbosity
                            }
-        let addSingle filename = do
+        oldTargets <- getTargets
+        let targetIdFromFile file = TargetFile file Nothing
+            addSingle filename = do
               addTarget Target
-                { targetId           = TargetFile filename Nothing
+                { targetId           = targetIdFromFile filename
                 , targetAllowObjCode = True
                 , targetContents     = Nothing
                 }
-        mapM_ addSingle targets
+            fileFromTarget Target{targetId} =
+              case targetId of
+                TargetFile file Nothing -> file
+                _ -> error "fileFromTarget: not a known target"
+            oldFiles = map fileFromTarget oldTargets
+        mapM_ addSingle (targets \\ oldFiles)
+        mapM_ removeTarget $ map targetIdFromFile $ oldFiles \\ targets
         -- Load module to typech and perhaps generate code, too.
         _loadRes <- load LoadAllTargets
         case debugFile of
@@ -153,7 +162,7 @@ runInGhc (m, fun) errsRef = do
           Just logName -> do
             context <- getContext
             liftToGhc $ appendFile logName
-              $ "getContext1: " ++ showSDocDebug flags (GHC.ppr context)
+              $ "getContext2: " ++ showSDocDebug flags (GHC.ppr context)
                 ++"\n"
         -- Run code.
         setContext $ [IIDecl $ simpleImportDecl $ mkModuleName m]
@@ -162,7 +171,7 @@ runInGhc (m, fun) errsRef = do
           Just logName -> do
             context <- getContext
             liftToGhc $ appendFile logName
-              $ "getContext2: " ++ showSDocDebug flags (GHC.ppr context)
+              $ "getContext3: " ++ showSDocDebug flags (GHC.ppr context)
                 ++ "\n"
         runRes <- runStmt fun RunToCompletion
         let resOrEx = case runRes of
