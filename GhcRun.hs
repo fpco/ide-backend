@@ -94,8 +94,8 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     let targets = map (configSourcesDir </>)
                   $ filter ((`elem` hsExtentions) . takeExtension) cnts
     handleSourceError (\ e -> do
-                          printException e
-                          return []) $ do
+                          errs <- liftToGhc $ reverse <$> readIORef errsRef
+                          return (errs ++ [OtherError (show e)])) $ do
       -- Compute new GHC flags.
       flags0 <- getSessionDynFlags
       (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
@@ -111,7 +111,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 #else
                            log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
 #endif
-                           }
+                         }
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
         setSessionDynFlags flags
@@ -226,11 +226,11 @@ collectSrcError' errsRef _ _ flags severity srcspan style msg
                       _          -> Nothing
   , Just (file, st, end) <- extractErrSpan srcspan
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
-     in modifyIORef errsRef (SrcError errKind file st end msgstr:)
+     in modifyIORef errsRef (SrcError errKind file st end msgstr :)
 
 collectSrcError' errsRef _ _ flags SevError _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
-     in modifyIORef errsRef (OtherError msgstr:)
+     in modifyIORef errsRef (OtherError msgstr :)
 
 collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
