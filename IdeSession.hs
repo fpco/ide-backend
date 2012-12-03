@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module IdeSession (
 
   -- | This module provides an interface to the IDE backend.
@@ -150,11 +151,16 @@ import Control.Monad
 import Control.Concurrent
 import System.IO (openBinaryTempFile, hClose, hFlush, stdout, stderr)
 import System.Directory
-import System.FilePath ((</>), (<.>), splitFileName, takeExtension)
+import System.FilePath ((</>), (<.>), splitFileName)
 import qualified Control.Exception as Ex
 import Data.Monoid (Monoid(..))
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
+#if __GLASGOW_HASKELL__ >= 706
+import Data.Time
+#else
+import System.Time
+#endif
 
 import Common
 import GhcServer
@@ -169,14 +175,20 @@ import Progress
 -- accidentally use an old invalid one, then it's a dynamically checked error.)
 --
 data IdeSession = IdeSession
-  { ideConfig    :: SessionConfig
-  , ideGhcServer :: GhcServer
-  , ideToken     :: StateToken
+  { ideConfig       :: SessionConfig
+  , ideGhcServer    :: GhcServer
+  , ideToken        :: StateToken
+    -- Source files modified since the last 'updateSession' invocation.
+#if __GLASGOW_HASKELL__ >= 706
+  , ideTouchedFiles :: [(ModuleName, UTCTime)]
+#else
+  , ideTouchedFiles :: [(ModuleName, ClockTime)]
+#endif
     -- The result computed by the last 'updateSession' invocation.
-  , ideComputed  :: Maybe Computed
+  , ideComputed     :: Maybe Computed
     -- Compiler dynamic options. If they are not set, the options from
     -- SessionConfig are used.
-  , ideNewOpts   :: Maybe [String]
+  , ideNewOpts      :: Maybe [String]
     -- Whether to generate code in addition to type-checking.
   , ideGenerateCode :: Bool
   }
@@ -255,6 +267,7 @@ initSession ideConfig@SessionConfig{..} = do
   let ideComputed = Nothing  -- can't query before the first update
       ideNewOpts  = Nothing  -- options from SessionConfig used initially
       ideGenerateCode = False
+      ideTouchedFiles = []
   ideToken <- initToken
   ideGhcServer <- forkGhcServer configStaticOpts
   return IdeSession{..}
@@ -309,6 +322,7 @@ updateSession sess (IdeSessionUpdate update) handler = do
   -- Then, updating files ASAP (using the already invalidated session).
   newSess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
                     , ideGhcServer
+                    , ideTouchedFiles  -- TODO
                     , ideNewOpts
                     , ideGenerateCode } <- update sess
 
@@ -317,9 +331,11 @@ updateSession sess (IdeSessionUpdate update) handler = do
       f (RespDone _)            = error "updateSession: unexpected RespDone"
       g (RespWorking _)         = error "updateSession: unexpected RespWorking"
       g (RespDone (_, Just _))  = error "updateSession: unexpected Just"
-      g (RespDone (r, Nothing)) = newSess { ideToken    = newToken
+      g (RespDone (r, Nothing)) = newSess { ideToken = newToken
+                                          , ideTouchedFiles = []
                                           , ideComputed = Just (Computed r) }
-      req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
+      req = ReqCompile ideNewOpts configSourcesDir
+                       ideGenerateCode ideTouchedFiles
   rpcGhcServer ideGhcServer req (handler . bimapProgress f g)
 
 -- | Writes a file atomically.
@@ -345,19 +361,29 @@ writeFileAtomic targetPath content = do
 -- updated or deleted.
 --
 updateModule :: ModuleChange -> IdeSessionUpdate
-updateModule mc = IdeSessionUpdate $ \ sess@IdeSession{ideConfig} ->
+updateModule mc = IdeSessionUpdate
+  $ \ sess@IdeSession{ideConfig=SessionConfig{configSourcesDir}} ->
   case mc of
     ModulePut m bs -> do
-      writeFileAtomic (internalFile ideConfig m) bs
-      return sess
+      writeFileAtomic (internalFile configSourcesDir m) bs
+      touch sess m
     ModuleSource m p -> do
-      copyFile p (internalFile ideConfig m)
-      return sess
+      copyFile p (internalFile configSourcesDir m)
+      touch sess m
     ModuleDelete m -> do
-      removeFile (internalFile ideConfig m)
+      removeFile (internalFile configSourcesDir m)
       return sess
     ChangeOptions opts -> return $ sess {ideNewOpts = opts}
     ChangeCodeGeneration b -> return $ sess {ideGenerateCode = b}
+ where
+  touch :: IdeSession -> ModuleName -> IO IdeSession
+  touch sess@IdeSession{ideTouchedFiles} m = do
+#if __GLASGOW_HASKELL__ >= 706
+    strtime <- getCurrentTime
+#else
+    strtime <- getClockTime
+#endif
+    return sess {ideTouchedFiles = (m, strtime) : ideTouchedFiles}
 
 -- @OptionsSet@ affects only 'updateSession', not 'runStmt'.
 data ModuleChange = ModulePut    ModuleName ByteString
@@ -369,15 +395,6 @@ data ModuleChange = ModulePut    ModuleName ByteString
                     -- | Enable or disable code generation in addition
                     -- to type-checking. Required by 'runStmt.
                   | ChangeCodeGeneration Bool
-
-newtype ModuleName = ModuleName String
-
-internalFile :: SessionConfig -> ModuleName -> FilePath
-internalFile SessionConfig{configSourcesDir} (ModuleName n) =
-  let ext = takeExtension n
-  in if ext `elem` cpExtentions
-     then configSourcesDir </> n            -- assume full file name
-     else configSourcesDir </> n <.> ".hs"  -- assume bare module name
 
 -- | A session update that changes a data file. Data files can be added,
 -- updated or deleted.
@@ -408,8 +425,8 @@ type Query a = IdeSession -> IO a
 -- | Read the current value of one of the source modules.
 --
 getSourceModule :: ModuleName -> Query ByteString
-getSourceModule m IdeSession{ideConfig} =
-  BS.readFile $ internalFile ideConfig m
+getSourceModule m IdeSession{ideConfig=SessionConfig{configDataDir}} =
+  BS.readFile $ internalFile configDataDir m
 
 -- | Read the current value of one of the data files.
 --

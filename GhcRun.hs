@@ -29,6 +29,7 @@ import ErrUtils   ( Message )
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
 import FastString ( unpackFS )
+import StringBuffer ( hGetStringBuffer )
 
 import System.Process
 import Data.IORef
@@ -36,7 +37,12 @@ import Control.Applicative
 import qualified Control.Exception as Ex
 import System.Directory
 import System.FilePath ((</>), takeExtension)
-import Data.List ((\\))
+-- import Data.List ((\\))
+#if __GLASGOW_HASKELL__ >= 706
+import Data.Time
+#else
+import System.Time
+#endif
 
 import Common
 
@@ -71,20 +77,25 @@ liftToGhc = liftIO
 compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this run of runGhc
              -> Bool                -- ^ whether to generate code
+#if __GLASGOW_HASKELL__ >= 706
+             -> [(ModuleName, UTCTime)]    -- ^ modified files
+#else
+             -> [(ModuleName, ClockTime)]  -- ^ modified files
+#endif
              -> Int                 -- ^ verbosity level
              -> IORef [SourceError] -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc [SourceError]
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
-             generateCode verbosity
+             generateCode reqTouchedFiles verbosity
              errsRef handlerOutput handlerRemaining = do
     -- Reset errors storage.
     liftToGhc $ writeIORef errsRef []
-    -- Determine files to process.
-    cnts <- liftToGhc $ getDirectoryContents configSourcesDir
-    let targets = map (configSourcesDir </>)
-                  $ filter ((`elem` hsExtentions) . takeExtension) cnts
+--  -- Determine files to process.
+--  cnts <- liftToGhc $ getDirectoryContents configSourcesDir
+--  let targets = map (configSourcesDir </>)
+--                $ filter ((`elem` hsExtentions) . takeExtension) cnts
     handleSourceError (\ e -> do
                           errs <- liftToGhc $ reverse <$> readIORef errsRef
                           return (errs ++ [OtherError (show e)])) $ do
@@ -108,21 +119,29 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         -- Set up the GHC flags.
         setSessionDynFlags flags
         -- Set up targets.
-        oldTargets <- getTargets
-        let targetIdFromFile file = TargetFile file Nothing
-            addSingle filename = do
+--      oldTargets <- getTargets
+        let targetIdFromFile m =
+              TargetFile (internalFile configSourcesDir m) Nothing
+--      let targetIdFromFile (ModuleName n) = TargetModule $ mkModuleName n
+            addSingle (m, timestamp) = do
+              strbuf <-
+                liftToGhc $ hGetStringBuffer (internalFile configSourcesDir m)
+              let targetContents = Just (strbuf, timestamp)
+                  targetId = targetIdFromFile m
+              removeTarget targetId
               addTarget Target
-                { targetId           = targetIdFromFile filename
+                { targetId
                 , targetAllowObjCode = True
-                , targetContents     = Nothing
+                , targetContents
                 }
-            fileFromTarget Target{targetId} =
-              case targetId of
-                TargetFile file Nothing -> file
-                _ -> error "fileFromTarget: not a known target"
-            oldFiles = map fileFromTarget oldTargets
-        mapM_ addSingle (targets \\ oldFiles)
-        mapM_ removeTarget $ map targetIdFromFile $ oldFiles \\ targets
+--          fileFromTarget Target{targetId} =
+--            case targetId of
+--              TargetFile file Nothing -> file
+--              _ -> error "fileFromTarget: not a known target"
+--          oldFiles = map fileFromTarget oldTargets
+--      mapM_ addSingle (targets \\ oldFiles)
+        mapM_ addSingle reqTouchedFiles
+--      mapM_ removeTarget $ map targetIdFromFile $ oldFiles \\ targets
         -- Load modules to typecheck and perhaps generate code, too.
         _loadRes <- load LoadAllTargets
         debugPpContext flags "context after LoadAllTargets"
@@ -277,8 +296,17 @@ checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
     libdir <- getGhcLibdir
     -- Call the GHC API.
     runGhc (Just libdir) $ do
+        -- Determine files to process.
+#if __GLASGOW_HASKELL__ >= 706
+        strtime <- liftToGhc $ getCurrentTime
+#else
+        strtime <- liftToGhc $ getClockTime
+#endif
+        cnts <- liftToGhc $ getDirectoryContents configSourcesDir
+        let targets = map (\m -> (ModuleName m, strtime))
+                      $ filter ((`elem` hsExtentions) . takeExtension) cnts
         errs <- compileInGhc configSourcesDir dynOpts
-                             ideGenerateCode verbosity
+                             ideGenerateCode targets verbosity
                              errsRef handlerOutput handlerRemaining
         case funToRun of
           Just mfun -> runInGhc mfun errsRef

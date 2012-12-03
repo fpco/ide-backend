@@ -1,4 +1,6 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | GHC-independent types that the GHC-specific modules nevertheless
 -- need to know.
 module Common
@@ -6,6 +8,7 @@ module Common
   , formatSourceError
   , SymbolDefinitionMap
   , hsExtentions, cpExtentions
+  , ModuleName(..), internalFile
   , PCounter
   , RunResult, RunException, RunOutcome
   , showExWithClass
@@ -13,12 +16,17 @@ module Common
   ) where
 
 import Data.Aeson.TH (deriveJSON)
-import System.FilePath (takeFileName)
 import qualified Control.Exception as Ex
 import Data.Typeable (Typeable, typeOf)
 import Data.Maybe (catMaybes)
 import Control.Monad (when)
 import System.IO (hFlush, hPutStr, stderr)
+import System.FilePath ((</>), (<.>), takeExtension, takeFileName)
+#if __GLASGOW_HASKELL__ >= 706
+import Data.Time
+#else
+import System.Time
+#endif
 
 -- | An error or warning in a source module.
 --
@@ -33,8 +41,17 @@ data SourceError =
 data SourceErrorKind = KindError | KindWarning
   deriving Show
 
+newtype ModuleName = ModuleName String
+  deriving Show
+
 $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)
+$(deriveJSON id ''ModuleName)
+#if __GLASGOW_HASKELL__ >= 706
+$(deriveJSON id ''UTCTime)
+#else
+$(deriveJSON id ''ClockTime)
+#endif
 
 formatSourceError :: SourceError -> String
 formatSourceError (SrcError kind path ii jj s) =
@@ -56,6 +73,13 @@ hsExtentions = [".hs", ".lhs"]
 -- for type-checking others, so they are worth copying over.
 cpExtentions :: [FilePath]
 cpExtentions = ".h" : hsExtentions
+
+internalFile :: FilePath -> ModuleName -> FilePath
+internalFile configSourcesDir (ModuleName n) =
+  let ext = takeExtension n
+  in if ext `elem` cpExtentions
+     then configSourcesDir </> n            -- assume full file name
+     else configSourcesDir </> n <.> ".hs"  -- assume bare module name
 
 type PCounter = Int
 

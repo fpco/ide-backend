@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 -- | Implementation of the server that controls the long-running GHC instance.
 -- This is the place where the GHC-specific part joins the part
@@ -25,15 +26,29 @@ import System.Environment.Executable (getExecutablePath)
 import Data.Aeson.TH (deriveJSON)
 import Data.IORef
 import Control.Applicative
+#if __GLASGOW_HASKELL__ >= 706
+import Data.Time
+#else
+import System.Time
+#endif
 
 import RpcServer
 import Common
 import GhcRun
 import Progress
 
-data GhcRequest
-  = ReqCompile (Maybe [String]) FilePath Bool
-  | ReqRun     (String, String)
+data GhcRequest =
+    ReqCompile
+      { reqNewOpts      :: Maybe [String]
+      , reqSourcesDir   :: FilePath
+      , reqGenerateCode :: Bool
+#if __GLASGOW_HASKELL__ >= 706
+      , reqTouchedFiles :: [(ModuleName, UTCTime)]
+#else
+      , reqTouchedFiles :: [(ModuleName, ClockTime)]
+#endif
+      }
+  | ReqRun (String, String)
   deriving Show
 data GhcResponse = RespWorking PCounter | RespDone RunOutcome
   deriving Show
@@ -104,10 +119,10 @@ ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ())
 ghcServerHandler GhcInitData{dOpts, errsRef}
                  reportProgress
                  counterIORef
-                 (ReqCompile ideNewOpts configSourcesDir ideGenerateCode) = do
+                 ReqCompile{..} = do
   -- Setup progress counter. It goes from [1/n] onwards.
   liftToGhc $ writeIORef counterIORef 1
-  let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
+  let dynOpts = maybe dOpts optsToDynFlags reqNewOpts
       -- Let GHC API print "compiling M ... done." for each module.
       verbosity = 1
       -- TODO: verify that _ is the "compiling M" message
@@ -116,8 +131,8 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
         modifyIORef counterIORef (+1)
         reportProgress (RespWorking oldCounter)
       handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-  errs <- compileInGhc configSourcesDir dynOpts
-                       ideGenerateCode verbosity
+  errs <- compileInGhc reqSourcesDir dynOpts
+                       reqGenerateCode reqTouchedFiles verbosity
                        errsRef handlerOutput handlerRemaining
   liftToGhc $ debug dVerbosity "returned from compileInGhc"
   return (RespDone (errs, Nothing))
