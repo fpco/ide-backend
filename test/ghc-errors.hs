@@ -73,9 +73,6 @@ check opts originalSourcesDir configSourcesDir = do
   msgs2 <- getSourceErrors s2
   putFlush $ "Error 2:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs2) ++ "\n"
-  assertRaises "updateSession s0 update2 (progressWaitConsume displayCounter)"
-               (== userError "Invalid session token 1 /= 2")
-               (updateSession s0 update2 (progressWaitConsume displayCounter))
   s4 <- updateSession s2 update2 (progressWaitConsume displayCounter)
   msgs4 <- getSourceErrors s4
   putFlush $ "Error 4:\n" ++ List.intercalate "\n\n"
@@ -83,6 +80,9 @@ check opts originalSourcesDir configSourcesDir = do
   msgs2' <- getSourceErrors s2
   putFlush $ "Error 2 again:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs2') ++ "\n"
+  assertRaises "updateSession s2 update1 (progressWaitConsume displayCounter)"
+               (== userError "Invalid session token 2 /= 3")
+               (updateSession s2 update1 (progressWaitConsume displayCounter))
   shutdownSession s4
   assertRaises "initSession sessionConfig"
                (== userError
@@ -93,10 +93,12 @@ check opts originalSourcesDir configSourcesDir = do
   mapM_ removeFile $ map (configSourcesDir </>) originalFiles
   -- Init another session. It strarts a new process with GHC,
   -- so the old state does not interfere.
-  s10 <- initSession sessionConfig
-  assertRaises "getSourceErrors s10"
+  s9 <- initSession sessionConfig
+  assertRaises "getSourceErrors s9"
                (== userError "This session state does not admit queries.")
-               (getSourceErrors s10)
+               (getSourceErrors s9)
+  shutdownSession s9
+  s10 <- initSession sessionConfig
   let punOpts = opts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
       optionsUpdate = originalUpdate
                       <> updateModule (ChangeOptions $ Just punOpts)
@@ -104,15 +106,12 @@ check opts originalSourcesDir configSourcesDir = do
   msgs11 <- getSourceErrors s11
   putFlush $ "Error 11:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs11) ++ "\n"
-  assertRaises "shutdownSession s10"
-               (== userError "Invalid session token 0 /= 1")
-               (shutdownSession s10)
   let update12 = updateModule (ChangeCodeGeneration True)
-  s13 <- updateSession s11 update12 (progressWaitConsume displayCounter)
-  msgs13 <- getSourceErrors s13
-  putFlush $ "Error 13:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs13) ++ "\n"
-  (errs, resOrEx) <- runStmt s13 "Main" "main"
+  s12 <- updateSession s11 update12 (progressWaitConsume displayCounter)
+  msgs12 <- getSourceErrors s12
+  putFlush $ "Error 12:\n" ++ List.intercalate "\n\n"
+    (map formatSourceError msgs12) ++ "\n"
+  (errs, resOrEx) <- runStmt s12 "Main" "main"
   putFlush $ "\nErrors and warnings:\n"
              ++ List.intercalate "\n" (map formatSourceError errs)
              ++ "\n"
@@ -122,7 +121,10 @@ check opts originalSourcesDir configSourcesDir = do
                   Just (Right ex)   -> ex
                   Nothing           -> "Run failed."
              ++ "\n"
-  shutdownSession s13
+  assertRaises "shutdownSession s11"
+               (== userError "Invalid session token 1 /= 2")
+               (shutdownSession s11)
+  shutdownSession s12
 
 
 -- Driver
