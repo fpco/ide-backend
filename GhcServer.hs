@@ -83,26 +83,30 @@ ghcServerEngine opts RpcServerActions{..} = do
           putResponse $ RespDone (errs ++ [exError], Nothing)
           -- Restart the Ghc session.
           startGhcSession
-      startGhcSession =
-        handleOtherErrors $ runFromGhc $ dispatcher GhcInitData{..}
+      startGhcSession = do
+        counterIORef <- newIORef 1
+        handleOtherErrors $ runFromGhc $ dispatcher counterIORef GhcInitData{..}
 
   startGhcSession
 
  where
-  dispatcher :: GhcInitData -> Ghc ()
-  dispatcher ghcInitData = do
+  dispatcher :: IORef Int -> GhcInitData -> Ghc ()
+  dispatcher counterIORef ghcInitData = do
     req <- liftToGhc $ getRequest
-    resp <- ghcServerHandler ghcInitData putProgress req
+    resp <- ghcServerHandler ghcInitData putProgress counterIORef req
     liftToGhc $ putResponse resp
-    dispatcher ghcInitData
+    dispatcher counterIORef ghcInitData
 
-ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ()) -> GhcRequest
+ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ())
+                 -> IORef Int
+                 -> GhcRequest
                  -> Ghc GhcResponse
 ghcServerHandler GhcInitData{dOpts, errsRef}
                  reportProgress
+                 counterIORef
                  (ReqCompile ideNewOpts configSourcesDir ideGenerateCode) = do
   -- Setup progress counter. It goes from [1/n] onwards.
-  counterIORef <- liftToGhc $ newIORef 1
+  liftToGhc $ writeIORef counterIORef 1
   let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
       -- Let GHC API print "compiling M ... done." for each module.
       verbosity = 1
@@ -117,7 +121,7 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
                        errsRef handlerOutput handlerRemaining
   liftToGhc $ debug dVerbosity "returned from compileInGhc"
   return (RespDone (errs, Nothing))
-ghcServerHandler GhcInitData{errsRef} _ (ReqRun funToRun) = do
+ghcServerHandler GhcInitData{errsRef} _ _ (ReqRun funToRun) = do
   runOutcome <- runInGhc funToRun errsRef
   liftToGhc $ debug dVerbosity "returned from runInGhc"
   return (RespDone runOutcome)
