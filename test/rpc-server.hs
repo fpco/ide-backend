@@ -7,10 +7,10 @@ import System.Posix.Signals (sigKILL)
 import Data.Function (on)
 import Data.Aeson (FromJSON(parseJSON), ToJSON(toJSON))
 import Data.Aeson.TH (deriveJSON, deriveToJSON, deriveFromJSON)
-import Control.Monad (forM_, void)
+import Control.Monad (forM_, void, forever)
 import qualified Control.Exception as Ex
 import Control.Concurrent (threadDelay, forkIO)
-import Control.Concurrent.MVar (MVar, newMVar, modifyMVar)
+import Control.Concurrent.MVar (MVar, newMVar, modifyMVar_)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -105,16 +105,21 @@ isServerIOException ex =
 testEcho :: RpcServer String String -> Assertion
 testEcho server = assertRpcEqual server "ping" "ping"
 
-testEchoServer :: String -> IO (Progress String String)
-testEchoServer = return . Progress . return . Left
+testEchoServer :: RpcServerActions String String String -> IO ()
+testEchoServer RpcServerActions{..} = forever $ do
+  req <- getRequest
+  putResponse req
 
 -- | Test stateful server
 testState :: RpcServer () Int -> Assertion
 testState server = forM_ ([0 .. 9] :: [Int]) $ assertRpcEqual server ()
 
-testStateServer :: MVar Int -> () -> IO (Progress Int Int)
-testStateServer st () = return . Progress . modifyMVar st $ \i ->
-  return (i + 1, Left i)
+testStateServer :: MVar Int -> RpcServerActions () Int Int -> IO ()
+testStateServer st RpcServerActions{..} = forever $ do
+  () <- getRequest
+  modifyMVar_ st $ \i -> do
+    putResponse i
+    return (i + 1)
 
 -- | Test with request and response custom data types
 data CountRequest  = Increment | GetCount deriving Show
@@ -130,28 +135,28 @@ testCustom server = do
   assertRpcEqual server GetCount (Count 1)
 
 testCustomServer :: MVar Int
-                          -> CountRequest
-                          -> IO (Progress CountResponse CountResponse)
-testCustomServer st Increment = return . Progress $
-  modifyMVar st $ \i -> return (i + 1, Left Done)
-testCustomServer st GetCount = return . Progress $
-  modifyMVar st $ \i -> return (i, Left (Count i))
+                 -> RpcServerActions CountRequest CountResponse CountResponse
+                 -> IO ()
+testCustomServer st RpcServerActions{..} = forever $ do
+  req <- getRequest
+  case req of
+    Increment -> modifyMVar_ st $ \i -> do
+      putResponse Done
+      return (i + 1)
+    GetCount -> modifyMVar_ st $ \i -> do
+      putResponse (Count i)
+      return i
 
 -- | Test progress messages
 testProgress :: RpcServer Int Int -> Assertion
 testProgress server =
   forM_ [0 .. 9] $ \i -> assertRpcEquals server i [i, i - 1 .. 0]
 
-testProgressServer :: Int -> IO (Progress Int Int)
-testProgressServer n = do
-    left <- newMVar n
-    return (go left)
-  where
-    go left = Progress $
-      modifyMVar left $ \m ->
-        if m == 0
-          then return (0, Left 0)
-          else return (m - 1, Right (m, go left))
+testProgressServer :: RpcServerActions Int Int Int -> IO ()
+testProgressServer RpcServerActions{..} = forever $ do
+  req <- getRequest
+  forM_ [req, req - 1 .. 1] $ putProgress
+  putResponse 0
 
 -- | Test shutdown
 testShutdown :: RpcServer String String -> Assertion
@@ -167,10 +172,11 @@ testStdout server = do
   shutdown server
   assertRpcRaises server "ping" (== (userError "Manual shutdown"))
 
-testStdoutServer :: String -> IO (Progress String String)
-testStdoutServer msg = do
+testStdoutServer :: RpcServerActions String String String -> IO ()
+testStdoutServer RpcServerActions{..} = forever $ do
+  req <- getRequest
   putStrLn "   vvvv    testStdout intentionally printing to stdout"
-  return . Progress . return . Left $ msg
+  putResponse req
 
 --------------------------------------------------------------------------------
 -- Error handling tests                                                       --
@@ -181,8 +187,10 @@ testCrash :: RpcServer () () -> Assertion
 testCrash server =
   assertRpcRaises server () (isServerIOException crash)
 
-testCrashServer :: () -> IO (Progress () ())
-testCrashServer () = return . Progress $ Ex.throwIO crash
+testCrashServer :: RpcServerActions () () () -> IO ()
+testCrashServer RpcServerActions{..} = do
+  () <- getRequest
+  Ex.throwIO crash
 
 crash :: Ex.IOException
 crash = userError "Intentional crash"
@@ -193,12 +201,14 @@ testKill server = do
   assertRpcEqual server "ping" "ping" -- First request goes through
   assertRpcRaises server "ping" isServerKilledException
 
-testKillServer :: MVar Bool -> String -> IO (Progress String String)
-testKillServer firstRequest req = return . Progress $ do
-  isFirst <- modifyMVar firstRequest $ \b -> return (False, b)
-  if isFirst
-    then return (Left req)
-    else throwSignal sigKILL
+testKillServer :: MVar Bool -> RpcServerActions String String String -> IO ()
+testKillServer firstRequest RpcServerActions{..} = forever $ do
+  req <- getRequest
+  modifyMVar_ firstRequest $ \isFirst -> do
+    if isFirst
+      then putResponse req
+      else throwSignal sigKILL
+    return False
 
 -- | Test server which gets killed between requests
 testKillAsync :: RpcServer String String -> Assertion
@@ -207,11 +217,12 @@ testKillAsync server = do
   threadDelay 500000 -- Wait for server to exit
   assertRpcRaises server "ping" isServerKilledException
 
-testKillAsyncServer :: String -> IO (Progress String String)
-testKillAsyncServer req = return . Progress $ do
+testKillAsyncServer :: RpcServerActions String String String -> IO ()
+testKillAsyncServer RpcServerActions{..} = forever $ do
+  req <- getRequest
   -- Fork a thread which causes the server to crash 0.5 seconds after the request
   forkIO $ threadDelay 250000 >> throwSignal sigKILL
-  return (Left req)
+  putResponse req
 
 -- | Test crash during decoding
 data TypeWithFaultyDecoder = TypeWithFaultyDecoder deriving Show
@@ -225,8 +236,10 @@ testFaultyDecoder :: RpcServer TypeWithFaultyDecoder () -> Assertion
 testFaultyDecoder server =
   assertRpcRaises server TypeWithFaultyDecoder $ isServerIOException (userError "Faulty decoder")
 
-testFaultyDecoderServer :: TypeWithFaultyDecoder -> IO (Progress () ())
-testFaultyDecoderServer _ = return . Progress $ return (Left ())
+testFaultyDecoderServer :: RpcServerActions TypeWithFaultyDecoder () () -> IO ()
+testFaultyDecoderServer RpcServerActions{..} = forever $ do
+  TypeWithFaultyDecoder <- getRequest
+  putResponse ()
 
 -- | Test crash during encoding
 data TypeWithFaultyEncoder = TypeWithFaultyEncoder deriving (Show, Eq)
@@ -240,9 +253,10 @@ testFaultyEncoder :: RpcServer () TypeWithFaultyEncoder -> Assertion
 testFaultyEncoder server =
   assertRpcRaises server () ((== "Faulty encoder") . externalStdErr)
 
-testFaultyEncoderServer :: () -> IO (Progress TypeWithFaultyEncoder TypeWithFaultyEncoder)
-testFaultyEncoderServer () = return . Progress $
-  return (Left TypeWithFaultyEncoder)
+testFaultyEncoderServer :: RpcServerActions () TypeWithFaultyEncoder TypeWithFaultyEncoder -> IO ()
+testFaultyEncoderServer RpcServerActions{..} = forever $ do
+  () <- getRequest
+  putResponse TypeWithFaultyEncoder
 
 --------------------------------------------------------------------------------
 -- Test errors during RPC calls with multiple responses                       --
@@ -253,45 +267,33 @@ testCrashMulti :: RpcServer Int Int -> Assertion
 testCrashMulti server =
   assertRpc server 5 [5, 4 .. 1] (Just (isServerIOException crash))
 
-testCrashMultiServer :: Int -> IO (Progress Int Int)
-testCrashMultiServer crashAfter = do
-  mvar <- newMVar crashAfter
-  let go = Progress $ modifyMVar mvar $ \n ->
-             if n == 0
-               then Ex.throwIO crash
-               else return (n - 1, Right (n, go))
-  return go
+testCrashMultiServer :: RpcServerActions Int Int Int -> IO ()
+testCrashMultiServer RpcServerActions{..} = forever $ do
+  req <- getRequest
+  forM_ [req, req - 1 .. 1] $ putProgress
+  Ex.throwIO crash
 
 -- | Like 'CrashMulti', but killed rather than an exception
 testKillMulti :: RpcServer Int Int -> Assertion
 testKillMulti server =
   assertRpc server 5 [5, 4 .. 1] (Just isServerKilledException)
 
-testKillMultiServer :: Int -> IO (Progress Int Int)
-testKillMultiServer crashAfter = do
-  mvar <- newMVar crashAfter
-  let go = Progress $ modifyMVar mvar $ \n ->
-             if n == 0
-               then throwSignal sigKILL
-               else return (n - 1, Right (n, go))
-  return go
+testKillMultiServer :: RpcServerActions Int Int Int -> IO ()
+testKillMultiServer RpcServerActions{..} = forever $ do
+  req <- getRequest
+  forM_ [req, req - 1 .. 1] $ putProgress
+  throwSignal sigKILL
 
 -- | Like 'KillMulti', but now the server gets killed *between* messages
 testKillAsyncMulti :: RpcServer Int Int -> Assertion
 testKillAsyncMulti server =
   assertRpc server 5 [5, 4 .. 1] (Just isServerKilledException)
 
-testKillAsyncMultiServer :: Int -> IO (Progress Int Int)
-testKillAsyncMultiServer crashAfter = do
-  mvar <- newMVar crashAfter
-  let go = Progress $ do
-             threadDelay 500000
-             modifyMVar mvar $ \n -> case n of
-               0 -> return (0, Left 0)
-               1 -> do forkIO $ threadDelay 250000 >> throwSignal sigKILL
-                       return (n - 1, Right (n, go))
-               _ -> return (n - 1, Right (n, go))
-  return go
+testKillAsyncMultiServer :: RpcServerActions Int Int Int -> IO ()
+testKillAsyncMultiServer RpcServerActions{..} = forever $ do
+  req <- getRequest
+  forkIO $ threadDelay (250000 + (req - 1) * 50000) >> throwSignal sigKILL
+  forM_ [req, req - 1 .. 1] $ \i -> threadDelay 50000 >> putProgress i
 
 --------------------------------------------------------------------------------
 -- Tests for errors in client code                                            --
