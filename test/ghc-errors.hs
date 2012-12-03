@@ -50,7 +50,8 @@ check opts originalSourcesDir configSourcesDir = do
       originalModules =
         map (\ f -> (ModuleName f, f)) originalFiles
       upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
-      originalUpdate = mconcat $ map upd originalModules
+      originalUpdate = updateModule (ChangeCodeGeneration False)
+                       <> (mconcat $ map upd originalModules)
       displayCounter :: PCounter -> IO ()
       displayCounter n = putStr (show n)
   s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
@@ -62,7 +63,8 @@ check opts originalSourcesDir configSourcesDir = do
         [] -> ModuleName "testEmptyDirModule"
         (m, _) : _ -> m
       update1 =
-        (updateModule $ ModulePut overName (BS.pack "module M where\n2"))
+        updateModule (ChangeCodeGeneration False)
+        <> (updateModule $ ModulePut overName (BS.pack "module M where\n2"))
         <> (updateModule $ ModulePut overName (BS.pack "module M where\nx = a2"))
       update2 =
         updateModule (ChangeCodeGeneration True)
@@ -80,10 +82,23 @@ check opts originalSourcesDir configSourcesDir = do
   msgs2' <- getSourceErrors s2
   putFlush $ "Error 2 again:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs2') ++ "\n"
+  s5 <- updateSession s4 originalUpdate (progressWaitConsume displayCounter)
+  let update6 = updateModule (ChangeCodeGeneration True)
+  s6 <- updateSession s5 update6 (progressWaitConsume displayCounter)
+  (errs, resOrEx) <- runStmt s6 "Main" "main"
+  putFlush $ "\nErrors and warnings for s6:\n"
+             ++ List.intercalate "\n" (map formatSourceError errs)
+             ++ "\n"
+  putFlush $ "Run result for s6: "
+             ++ case resOrEx of
+                  Just (Left ident) -> ident
+                  Just (Right ex)   -> ex
+                  Nothing           -> "Run failed."
+             ++ "\n"
   assertRaises "updateSession s2 update1 (progressWaitConsume displayCounter)"
-               (== userError "Invalid session token 2 /= 3")
+               (== userError "Invalid session token 2 /= 5")
                (updateSession s2 update1 (progressWaitConsume displayCounter))
-  shutdownSession s4
+  shutdownSession s6
   assertRaises "initSession sessionConfig"
                (== userError
                  ("Directory " ++ configSourcesDir ++ " is not empty"))
@@ -111,12 +126,12 @@ check opts originalSourcesDir configSourcesDir = do
   msgs12 <- getSourceErrors s12
   putFlush $ "Error 12:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs12) ++ "\n"
-  (errs, resOrEx) <- runStmt s12 "Main" "main"
-  putFlush $ "\nErrors and warnings:\n"
-             ++ List.intercalate "\n" (map formatSourceError errs)
+  (errs12, resOrEx12) <- runStmt s12 "Main" "main"
+  putFlush $ "\nErrors and warnings for s12:\n"
+             ++ List.intercalate "\n" (map formatSourceError errs12)
              ++ "\n"
-  putFlush $ "Run result: "
-             ++ case resOrEx of
+  putFlush $ "Run result for s12: "
+             ++ case resOrEx12 of
                   Just (Left ident) -> ident
                   Just (Right ex)   -> ex
                   Nothing           -> "Run failed."
