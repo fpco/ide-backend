@@ -25,11 +25,16 @@ testAll :: [String] -> FilePath -> IO ()
 testAll opts originalSourcesDir =
   withTemporaryDirectory "ide-backend-test" $ check opts originalSourcesDir
 
+putFlush :: String -> IO ()
+putFlush msg = do
+  putStrLn msg
+  hFlush stdout
+
 check :: [String] -> FilePath -> FilePath -> IO ()
 check opts originalSourcesDir configSourcesDir = do
   hFlush stdout
   hFlush stderr
-  putStrLn $ "\nCopying files from: " ++ originalSourcesDir ++ "\n"
+  putFlush $ "\nCopying files from: " ++ originalSourcesDir ++ "\n"
   -- Init session.
   let sessionConfig = SessionConfig{ configSourcesDir
                                    , configWorkingDir = configSourcesDir
@@ -50,7 +55,7 @@ check opts originalSourcesDir configSourcesDir = do
       displayCounter n = putStr (show n)
   s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
   msgs0 <- getSourceErrors s0
-  putStrLn $ "Error 0:\n" ++ List.intercalate "\n\n"
+  putFlush $ "Error 0:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs0) ++ "\n"
   -- Overwrite some copied files.
   let overName = case originalModules of
@@ -66,17 +71,17 @@ check opts originalSourcesDir configSourcesDir = do
   -- Test the computations.
   s2 <- updateSession s0 update1 (progressWaitConsume displayCounter)
   msgs2 <- getSourceErrors s2
-  putStrLn $ "Error 2:\n" ++ List.intercalate "\n\n"
+  putFlush $ "Error 2:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs2) ++ "\n"
   assertRaises "updateSession s0 update2 (progressWaitConsume displayCounter)"
                (== userError "Invalid session token 1 /= 2")
                (updateSession s0 update2 (progressWaitConsume displayCounter))
   s4 <- updateSession s2 update2 (progressWaitConsume displayCounter)
   msgs4 <- getSourceErrors s4
-  putStrLn $ "Error 4:\n" ++ List.intercalate "\n\n"
+  putFlush $ "Error 4:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs4) ++ "\n"
   msgs2' <- getSourceErrors s2
-  putStrLn $ "Error 2 again:\n" ++ List.intercalate "\n\n"
+  putFlush $ "Error 2 again:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs2') ++ "\n"
   shutdownSession s4
   assertRaises "initSession sessionConfig"
@@ -97,7 +102,7 @@ check opts originalSourcesDir configSourcesDir = do
                       <> updateModule (ChangeOptions $ Just punOpts)
   s11 <- updateSession s10 optionsUpdate (progressWaitConsume displayCounter)
   msgs11 <- getSourceErrors s11
-  putStrLn $ "Error 11:\n" ++ List.intercalate "\n\n"
+  putFlush $ "Error 11:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs11) ++ "\n"
   assertRaises "shutdownSession s10"
                (== userError "Invalid session token 0 /= 1")
@@ -105,13 +110,13 @@ check opts originalSourcesDir configSourcesDir = do
   let update12 = updateModule (ChangeCodeGeneration True)
   s13 <- updateSession s11 update12 (progressWaitConsume displayCounter)
   msgs13 <- getSourceErrors s13
-  putStrLn $ "Error 13:\n" ++ List.intercalate "\n\n"
+  putFlush $ "Error 13:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs13) ++ "\n"
   (errs, resOrEx) <- runStmt s13 "Main" "main"
-  putStrLn $ "\nErrors and warnings:\n"
+  putFlush $ "\nErrors and warnings:\n"
              ++ List.intercalate "\n" (map formatSourceError errs)
              ++ "\n"
-  putStrLn $ "Run result: "
+  putFlush $ "Run result: "
              ++ case resOrEx of
                   Just (Left ident) -> ident
                   Just (Right ex)   -> ex

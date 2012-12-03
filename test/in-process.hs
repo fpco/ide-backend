@@ -28,9 +28,9 @@ main = do
       _   -> fail "usage: in-process [dir]"
 
   putStrLn ""
-  (errs, resOrEx) <- checkModule target (optsToDynFlags defOpts)
-                                 True (Just ("Main", "main")) 2
-                                 putStrLn putStrLn
+  (errs, resOrEx) <- checkModuleInProcess target (optsToDynFlags defOpts)
+                                          True (Just ("Main", "main")) 2
+                                          putStrLn putStrLn
   putStrLn $ "\nErrors and warnings:\n"
              ++ List.intercalate "\n" (map formatSourceError errs)
              ++ "\n"

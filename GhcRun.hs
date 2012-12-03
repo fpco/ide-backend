@@ -15,8 +15,7 @@ module GhcRun
   , runFromGhc
   , compileInGhc
   , runInGhc
-  , debugFile
-  , checkModule
+  , checkModuleInProcess
   ) where
 
 import GHC hiding (flags, ModuleName, RunResult)
@@ -42,13 +41,6 @@ import Data.List ((\\))
 import Common
 
 newtype DynamicOpts = DynamicOpts [Located String]
-
--- Debugging flag in case of obscure RPC errors. Try to debug GHC API
--- problems using the in-process test tool first and debug RPC problems
--- in isolation using variations on the existing synthetic tests.
-debugFile :: Maybe FilePath
-debugFile = Nothing
---debugFile = Just "GhcRun.debug.log"
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
@@ -133,13 +125,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         mapM_ removeTarget $ map targetIdFromFile $ oldFiles \\ targets
         -- Load modules to typecheck and perhaps generate code, too.
         _loadRes <- load LoadAllTargets
-        case debugFile of
-          Nothing -> return ()
-          Just logName -> do
-            context <- getContext
-            liftToGhc $ appendFile logName
-              $ "getContext1: " ++ showSDocDebug flags (GHC.ppr context)
-                ++"\n"
+        debugPpContext flags "context after LoadAllTargets"
         -- TODO: record the boolean 'succeeded loadRes' below:
         -- Recover all saved errors.
         liftToGhc $ reverse <$> readIORef errsRef
@@ -155,22 +141,10 @@ runInGhc (m, fun) errsRef = do
       flags <- getSessionDynFlags
       -- TODO: not sure if this cleanup handler is needed:
       defaultCleanupHandler flags $ do
-        case debugFile of
-          Nothing -> return ()
-          Just logName -> do
-            context <- getContext
-            liftToGhc $ appendFile logName
-              $ "getContext2: " ++ showSDocDebug flags (GHC.ppr context)
-                ++"\n"
+        debugPpContext flags "context before setContext"
         -- Run code.
         setContext $ [IIDecl $ simpleImportDecl $ mkModuleName m]
-        case debugFile of
-          Nothing -> return ()
-          Just logName -> do
-            context <- getContext
-            liftToGhc $ appendFile logName
-              $ "getContext3: " ++ showSDocDebug flags (GHC.ppr context)
-                ++ "\n"
+        debugPpContext flags "context after setContext"
         runRes <- runStmt fun RunToCompletion
         let resOrEx = case runRes of
               RunOk [name] ->
@@ -192,24 +166,23 @@ collectSrcError :: IORef [SourceError]
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 collectSrcError errsRef handlerOutput handlerRemaining flags
                 severity srcspan style msg = do
-  case debugFile of
-   Nothing -> return ()
-   Just logName -> do
-    let showSeverity SevOutput  = "SevOutput"
+  -- Prepare debug prints.
+  let showSeverity SevOutput  = "SevOutput"
 #if __GLASGOW_HASKELL__ >= 706
-        showSeverity SevDump    = "SevDump"
+      showSeverity SevDump    = "SevDump"
 #endif
-        showSeverity SevInfo    = "SevInfo"
-        showSeverity SevWarning = "SevWarning"
-        showSeverity SevError   = "SevError"
-        showSeverity SevFatal   = "SevFatal"
-    appendFile logName
-      $  "Severity: "   ++ showSeverity severity
-      ++ "  SrcSpan: "  ++ show srcspan
---    ++ "  PprStyle: " ++ show style
-      ++ "  MsgDoc: "
-      ++ showSDocForUser flags (qualName style,qualModule style) msg
-      ++ "\n"
+      showSeverity SevInfo    = "SevInfo"
+      showSeverity SevWarning = "SevWarning"
+      showSeverity SevError   = "SevError"
+      showSeverity SevFatal   = "SevFatal"
+  debug dVerbosity
+   $  "Severity: "   ++ showSeverity severity
+   ++ "  SrcSpan: "  ++ show srcspan
+-- ++ "  PprStyle: " ++ show style
+   ++ "  MsgDoc: "
+   ++ showSDocForUser flags (qualName style,qualModule style) msg
+   ++ "\n"
+  -- Actually collect errors.
   collectSrcError'
     errsRef handlerOutput handlerRemaining flags severity srcspan style msg
 
@@ -269,26 +242,32 @@ extractErrSpan (RealSrcSpan srcspan) =
        ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
 extractErrSpan _ = Nothing
 
+debugPpContext :: DynFlags -> String -> Ghc ()
+debugPpContext flags msg = do
+  context <- getContext
+  liftToGhc $ debug dVerbosity
+    $ msg ++ ": " ++ showSDocDebug flags (GHC.ppr context)
+
 -- Kept for in-process tests.
-checkModule :: FilePath          -- ^ target directory
-            -> DynamicOpts       -- ^ dynamic flags for this run of runGhc
-            -> Bool              -- ^ whether to generate code
-            -> Maybe (String, String)
-                                 -- ^ module and function to run, if any
-            -> Int               -- ^ verbosity level
-            -> (String -> IO ()) -- ^ handler for each SevOutput message
-            -> (String -> IO ()) -- ^ handler for remaining non-error messages
-            -> IO RunOutcome     -- ^ errors,warnings and run results, if any
-checkModule configSourcesDir dynOpts ideGenerateCode funToRun verbosity
-            handlerOutput handlerRemaining = do
+checkModuleInProcess :: FilePath     -- ^ target directory
+                     -> DynamicOpts  -- ^ dynamic flags for this run of runGhc
+                     -> Bool         -- ^ whether to generate code
+                     -> Maybe (String, String)
+                                     -- ^ module and function to run, if any
+                     -> Int          -- ^ verbosity level
+                     -> (String -> IO ())
+                                     -- ^ handler for each SevOutput message
+                     -> (String -> IO ())
+                                     -- ^ handler for remaining non-error msgs
+                     -> IO RunOutcome
+                                     -- ^ errors, warnings and results, if any
+checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
+                     verbosity handlerOutput handlerRemaining = do
   errsRef <- newIORef []
   let collectedErrors = reverse <$> readIORef errsRef
       handleOtherErrors =
         Ex.handle $ \e -> do
-          case debugFile of
-            Nothing -> return ()
-            Just logName -> appendFile logName
-              $ "handleOtherErrors: " ++ showExWithClass e ++ "\n"
+          debug dVerbosity $ "handleOtherErrors: " ++ showExWithClass e
           let exError = OtherError (show (e :: Ex.SomeException))
           -- In case of an exception, don't lose saved errors.
           errs <- collectedErrors

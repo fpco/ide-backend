@@ -9,6 +9,7 @@ module Common
   , PCounter
   , RunResult, RunException, RunOutcome
   , showExWithClass
+  , dVerbosity, debug
   ) where
 
 import Data.Aeson.TH (deriveJSON)
@@ -16,6 +17,8 @@ import System.FilePath (takeFileName)
 import qualified Control.Exception as Ex
 import Data.Typeable (Typeable, typeOf)
 import Data.Maybe (catMaybes)
+import Control.Monad (when)
+import System.IO (hFlush, hPutStr, stderr)
 
 -- | An error or warning in a source module.
 --
@@ -96,3 +99,20 @@ showExWithClass ex =
           fshow (fr ex :: Maybe Ex.SomeException)
         ]
   in head exs
+
+dVerbosity :: Int
+dVerbosity = 4
+
+debugFile :: Maybe FilePath
+debugFile = Just "debug.log"
+
+debug :: Int -> String -> IO ()
+debug verbosity msg =
+  when (verbosity >= 3) $ do
+    case debugFile of
+      Nothing -> return ()
+      Just logName ->
+        appendFile logName $ msg ++ "\n"
+    when (verbosity >= 4) $ do
+      hPutStr stderr $ "debug: " ++ msg ++ "\n"
+      hFlush stderr

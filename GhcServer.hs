@@ -75,10 +75,7 @@ ghcServerEngine opts RpcServerActions{..} = do
   errsRef <- newIORef []
   let handleOtherErrors =
         Ex.handle $ \e -> do
-          case debugFile of
-            Nothing -> return ()
-            Just logName -> appendFile logName
-              $ "handleOtherErrors: " ++ showExWithClass e ++ "\n"
+          debug dVerbosity $ "handleOtherErrors: " ++ showExWithClass e
           let exError = OtherError (show (e :: Ex.SomeException))
           -- In case of an exception, don't lose saved errors.
           errs <- reverse <$> readIORef errsRef
@@ -118,9 +115,11 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
   errs <- compileInGhc configSourcesDir dynOpts
                        ideGenerateCode verbosity
                        errsRef handlerOutput handlerRemaining
+  liftToGhc $ debug dVerbosity "returned from compileInGhc"
   return (RespDone (errs, Nothing))
 ghcServerHandler GhcInitData{errsRef} _ (ReqRun funToRun) = do
   runOutcome <- runInGhc funToRun errsRef
+  liftToGhc $ debug dVerbosity "returned from runInGhc"
   return (RespDone runOutcome)
 
 -- * Client-side operations
