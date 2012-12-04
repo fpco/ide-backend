@@ -1,169 +1,269 @@
-module Main where
+module Main (main) where
 
-import System.Environment
-import System.FilePath ((</>), takeExtension)
-import System.Directory
 import System.Unix.Directory (withTemporaryDirectory)
-import qualified Data.List as List
-import Data.Monoid ((<>), mconcat)
+import Data.Monoid ((<>), mempty)
+
+--------------------------------------------------------------------------------
+
+import Control.Monad
+import Control.Concurrent
+import System.IO (openBinaryTempFile, hClose)
+import System.Directory
+import System.FilePath ((</>), (<.>), splitFileName, takeExtension)
+import qualified Control.Exception as Ex
+import Data.Monoid (Monoid(..))
+import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
-import System.IO (hFlush, stdout, stderr)
 
-import Test.Framework (Test, defaultMain, testGroup)
-import Test.Framework.Providers.HUnit (testCase)
-
-import IdeSession
+import Common
 import GhcServer
 import Progress
-import Common
-import TestTools
 
--- Tests using various functions of the IdeSession API
--- and a variety of small test Haskell projects.
+-- | This is a state token for the current state of an IDE session. We can run
+-- queries in the current state, and from this state we can perform a batch
+-- of updates, ultimately leading to a new 'IdeSession'.
+--
+-- Note that these state tokens are not persistent, once we perform an update
+-- and get a new 'IdeSession', the old one is no longer valid. (And if you do
+-- accidentally use an old invalid one, then it's a dynamically checked error.)
+--
+data IdeSession = IdeSession
+  { ideConfig    :: SessionConfig
+  , ideGhcServer :: GhcServer
+  , ideToken     :: StateToken
+    -- The result computed by the last 'updateSession' invocation.
+  , ideComputed  :: Maybe Computed
+    -- Compiler dynamic options. If they are not set, the options from
+    -- SessionConfig are used.
+  , ideNewOpts   :: Maybe [String]
+    -- Whether to generate code in addition to type-checking.
+  , ideGenerateCode :: Bool
+  }
 
-testAll :: [String] -> FilePath -> IO ()
-testAll opts originalSourcesDir =
-  withTemporaryDirectory "ide-backend-test" $ check opts originalSourcesDir
+-- | Configuration parameters for a session. These remain the same throughout
+-- the whole session's lifetime.
+--
+data SessionConfig = SessionConfig {
 
-putFlush :: String -> IO ()
-putFlush msg = do
-  putStrLn msg
-  hFlush stdout
+       -- | The directory to use for managing source files.
+       configSourcesDir :: FilePath,
 
-check :: [String] -> FilePath -> FilePath -> IO ()
-check opts originalSourcesDir configSourcesDir = do
-  -- Init session.
-  let sessionConfig = SessionConfig{ configSourcesDir
-                                   , configWorkingDir = configSourcesDir
-                                   , configDataDir    = configSourcesDir
-                                   , configTempDir    = "."
-                                   , configStaticOpts = opts
-                                   }
-  putStrLn "----- 1 ------"
-  sP <- initSession sessionConfig
-  putStrLn "----- 2 ------"
-  -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
-  -- HACK: here we fake module names, guessing them from file names.
-  cnts <- getDirectoryContents originalSourcesDir
-  putStrLn "----- 3 -----"
-  let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
-      originalModules =
-        map (\ f -> (ModuleName f, f)) originalFiles
-      upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
-      originalUpdate = updateModule (ChangeCodeGeneration False)
-                       <> (mconcat $ map upd originalModules)
-      displayCounter :: PCounter -> IO ()
-      displayCounter n = putStr (show n)
-  s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
-  putStrLn "----- 4 ------"
-  msgs0 <- getSourceErrors s0
-  putStrLn "----- 5 ------"
-  -- Overwrite some copied files.
-  let overName = case originalModules of
-        [] -> ModuleName "testEmptyDirModule"
-        (m, _) : _ -> m
-      update1 =
-        updateModule (ChangeCodeGeneration False)
-        <> (updateModule $ ModulePut overName (BS.pack "module M where\n2"))
-        <> (updateModule $ ModulePut overName (BS.pack "module M where\nx = a2"))
-      update2 =
-        updateModule (ChangeCodeGeneration True)
-        <> (updateModule $ ModulePut overName (BS.pack "module M where\n4"))
-        <> (updateModule $ ModulePut overName (BS.pack "module M where\nx = a4"))
-  -- Test the computations.
-  s2 <- updateSession s0 update1 (progressWaitConsume displayCounter)
-  putStrLn "----- 6 ------"
-  msgs2 <- getSourceErrors s2
-  putStrLn "----- 7 ------"
-  s4 <- updateSession s2 update2 (progressWaitConsume displayCounter)
-  putStrLn "----- 8 ------"
-  msgs4 <- getSourceErrors s4
-  putStrLn "----- 9 ------"
-  msgs2' <- getSourceErrors s2
-  putStrLn "----- 10 ------"
-  s5 <- updateSession s4 originalUpdate (progressWaitConsume displayCounter)
-  putStrLn "----- 11 ------"
-  let update6 = updateModule (ChangeCodeGeneration True)
-  s6 <- updateSession s5 update6 (progressWaitConsume displayCounter)
-  putStrLn "----- 12 ------"
-  (errs, resOrEx) <- runStmt s6 "Main" "main"
-  putStrLn "----- 13 ------"
-  assertRaises "updateSession s2 update1 (progressWaitConsume displayCounter)"
-               (== userError "Invalid session token 2 /= 5")
-               (updateSession s2 update1 (progressWaitConsume displayCounter))
-  putStrLn "----- 14 ------"
-  shutdownSession s6
-  putStrLn "----- 15 ------"
-  assertRaises "initSession sessionConfig"
-               (== userError
-                 ("Directory " ++ configSourcesDir ++ " is not empty"))
-               (initSession sessionConfig)
-  putStrLn "----- 16 ------"
-  -- Remove file from the source directory to satisfy the precondition
-  -- of initSession.
-  mapM_ removeFile $ map (configSourcesDir </>) originalFiles
-  putStrLn "----- 17 ------"
-  -- Init another session. It strarts a new process with GHC,
-  -- so the old state does not interfere.
-  s9 <- initSession sessionConfig
-  putStrLn "----- 18 ------"
-  assertRaises "getSourceErrors s9"
-               (== userError "This session state does not admit queries.")
-               (getSourceErrors s9)
-  putStrLn "----- 19 ------"
-  shutdownSession s9
-  putStrLn "----- 20 ------"
-  s10 <- initSession sessionConfig
-  putStrLn "----- 21 ------"
-  let punOpts = opts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
-      optionsUpdate = originalUpdate
-                      <> updateModule (ChangeOptions $ Just punOpts)
-  s11 <- updateSession s10 optionsUpdate (progressWaitConsume displayCounter)
-  putStrLn "----- 22 ------"
-  msgs11 <- getSourceErrors s11
-  putStrLn "----- 23 ------"
-  let update12 = updateModule (ChangeCodeGeneration True)
-  s12 <- updateSession s11 update12 (progressWaitConsume displayCounter)
-  putStrLn "----- 24 ------"
-  msgs12 <- getSourceErrors s12
-  putStrLn "----- 25 ------"
-  (errs12, resOrEx12) <- runStmt s12 "Main" "main"
-  putStrLn "----- 26 ------"
-  assertRaises "shutdownSession s11"
-               (== userError "Invalid session token 1 /= 2")
-               (shutdownSession s11)
-  putStrLn "----- 27 ------"
-  shutdownSession s12
-  putStrLn "----- 28 ------"
+       -- | The directory to use for session state, such as @.hi@ files.
+       configWorkingDir :: FilePath,
+
+       -- | The directory to use for data files that may be accessed by the
+       -- running program. The running program will have this as its CWD.
+       configDataDir :: FilePath,
+
+       -- | The directory to use for purely temporary files.
+       configTempDir :: FilePath,
+
+       -- | GHC static options. Can also contain default dynamic options,
+       -- that are overriden via session update.
+       configStaticOpts :: [String]
+     }
+
+-- This could be equally well implemented as a new mvar created per
+-- each new session state, but this implementation has some minor advantages.
+-- It gives more useful error messages and provides a counter of session
+-- updates, which can be used, e.g.,  to roughly estimate how badly outdated
+-- the info therein is, in order to decide whether to show it to the user
+-- while waiting for a newer version.
+data StateToken = StateToken (MVar Int) Int
+
+initToken :: IO StateToken
+initToken = do
+  mv <- newMVar 0
+  return $ StateToken mv 0
+
+-- Invalidates previous sessions, returns a new token for the new session.
+incrementToken :: StateToken -> IO StateToken
+incrementToken token@(StateToken mv _) = do
+  checkToken token
+  let incrCheckToken current = do
+        let newT = current + 1
+        return (newT, StateToken mv newT)
+  modifyMVar mv incrCheckToken
+
+checkToken :: StateToken -> IO ()
+checkToken (StateToken mv k) = do
+  current <- readMVar mv
+  when (k /= current)
+    $ fail $ "Invalid session token " ++ show k ++ " /= " ++ show current
+
+-- In this implementation, it's fully applicative, and so invalid sessions
+-- can be queried at will. Note that there may be some working files
+-- produced by GHC while obtaining these values. They are not captured here,
+-- so queries are not allowed to read them.
+data Computed = Computed
+  [SourceError] -- ^ last compilation and run errors
+
+ensureDirEmpty :: FilePath -> IO ()
+ensureDirEmpty dir = do
+  cnts <- getDirectoryContents dir
+  when (any (`notElem` [".", ".."]) cnts)
+    $ fail $ "Directory " ++ dir ++ " is not empty"
+
+-- | Create a fresh session, using some initial configuration.
+--
+initSession :: SessionConfig -> IO IdeSession
+initSession ideConfig@SessionConfig{..} = do
+  ensureDirEmpty configSourcesDir
+  ensureDirEmpty configWorkingDir
+  ensureDirEmpty configDataDir
+  let ideComputed = Nothing  -- can't query before the first update
+      ideNewOpts  = Nothing  -- options from SessionConfig used initially
+      ideGenerateCode = False
+  ideToken <- initToken
+  ideGhcServer <- forkGhcServer configStaticOpts
+  return IdeSession{..}
+
+-- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
+-- bunch of updates.
+--
+-- In particular it is an instance of 'Monoid', so multiple primitive updates
+-- can be easily combined. Updates can override each other left to right.
+--
+data IdeSessionUpdate = IdeSessionUpdate (IdeSession -> IO IdeSession)
+
+-- We assume, if updates are combined within the monoid, they can all
+-- be applied in the context of the same session.
+-- Otherwise, call 'updateSession' sequentially with the updates.
+instance Monoid IdeSessionUpdate where
+  mempty = IdeSessionUpdate $ \ sess -> return sess
+  mappend (IdeSessionUpdate f) (IdeSessionUpdate g) =
+    IdeSessionUpdate $ f >=> g
+
+-- | Given the current IDE session state, go ahead and
+-- update the session, eventually resulting in a new session state,
+-- with fully updated computed information (typing, etc.).
+--
+-- The update can be a long running operation, so it returns a 'Progress'
+-- which can be used to monitor and wait on the operation.
+-- While the progress is in operation, session state tokens
+-- remain valid as usual. If the progress fails or is canceled,
+-- all it's observable internal state changes are rolled back
+-- and another progress can be initiated. The semantics of @updateFiles@
+-- and @updateSession@ is unspecified while any progress runs.
+--
+updateSession :: IdeSession -> IdeSessionUpdate -> IO IdeSession
+updateSession sess (IdeSessionUpdate update) = do
+  -- First, invalidating the current session ASAP, because the previous
+  -- computed info will shortly no longer be in sync with the files.
+  newToken <- incrementToken $ ideToken sess
+
+  -- Then, updating files ASAP (using the already invalidated session).
+  newSess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
+                    , ideGhcServer
+                    , ideNewOpts
+                    , ideGenerateCode } <- update sess
+
+  -- Last, communicating with the GHC server.
+  let f (RespWorking c)         = c  -- advancement counter
+      f (RespDone _)            = error "updateSession: unexpected RespDone"
+      g (RespWorking _)         = error "updateSession: unexpected RespWorking"
+      g (RespDone (_, Just _))  = error "updateSession: unexpected Just"
+      g (RespDone (r, Nothing)) = newSess { ideToken    = newToken
+                                          , ideComputed = Just (Computed r) }
+      req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
+
+  let handler :: Progress PCounter IdeSession -> IO IdeSession
+      handler = progressWaitConsume (\_ -> return ())
+
+  rpcGhcServer ideGhcServer req (handler . bimapProgress f g)
+
+-- | Writes a file atomically.
+--
+-- The file is either written sucessfully or an IO exception is raised and
+-- the original file is left unchanged.
+--
+-- On windows it is not possible to delete a file that is open by a process.
+-- This case will give an IO exception but the atomic property is not affected.
+--
+writeFileAtomic :: FilePath -> BS.ByteString -> IO ()
+writeFileAtomic targetPath content = do
+  let (targetDir, targetFile) = splitFileName targetPath
+  Ex.bracketOnError
+    (openBinaryTempFile targetDir $ targetFile <.> "tmp")
+    (\(tmpPath, handle) -> hClose handle >> removeFile tmpPath)
+    (\(tmpPath, handle) -> do
+        BS.hPut handle content
+        hClose handle
+        renameFile tmpPath targetPath)
+
+-- | A session update that changes a source module. Modules can be added,
+-- updated or deleted.
+--
+updateModule :: ModuleChange -> IdeSessionUpdate
+updateModule mc = IdeSessionUpdate $ \ sess@IdeSession{ideConfig} ->
+  case mc of
+    ModulePut m bs -> do
+      writeFileAtomic (internalFile ideConfig m) bs
+      return sess
+    ModuleSource m p -> do
+      copyFile p (internalFile ideConfig m)
+      return sess
+    ChangeCodeGeneration b -> return $ sess {ideGenerateCode = b}
+
+-- @OptionsSet@ affects only 'updateSession', not 'runStmt'.
+data ModuleChange = ModulePut    ModuleName ByteString
+                  | ModuleSource ModuleName FilePath
+                  | ChangeCodeGeneration Bool
+
+newtype ModuleName = ModuleName String
+  deriving Show
+
+internalFile :: SessionConfig -> ModuleName -> FilePath
+internalFile SessionConfig{configSourcesDir} (ModuleName n) =
+  let ext = takeExtension n
+  in if ext `elem` cpExtentions
+     then configSourcesDir </> n            -- assume full file name
+     else configSourcesDir </> n <.> ".hs"  -- assume bare module name
 
 
--- Driver
 
-defOpts :: [String]
-defOpts = [ "-no-user-package-conf" ]
 
-tests :: [Test]
-tests =
-  [ testGroup "Full integration tests"
-    [ testCase "A depends on B, no errors"  $ testAll defOpts "test/ABnoError"
-    , testCase "A depends on B, error in A" $ testAll defOpts "test/AerrorB"
-    , testCase "A depends on B, error in B" $ testAll defOpts "test/ABerror"
-    , testCase "Our own code, package 'ghc' missing"
-      $ testAll [] "."
-    , testCase "A subdirectory of Cabal code"
-      $ testAll defOpts "test/Cabal.Distribution.PackageDescription"
-    , testCase "A file requiring -XNamedFieldPuns"
-      $ testAll [ "-hide-all-packages"
-                , "-package mtl"
-                , "-package base"
-                , "-package array"
-                , "-package bytestring"
-                , "-package containers"
-                , "-package binary"
-                ]
-                "test/Puns"
-    ]
-  ]
+
+
+--------------------------------------------------------------------------------
+
+check :: FilePath -> IO ()
+check configSourcesDir = do
+    -- Init session.
+    sP <- initSession sessionConfig
+    -- Test the computations.
+    putStrLn "----- 1 ------"
+    s0 <- updateSession sP originalUpdate
+    putStrLn "----- 2 ------"
+    s2 <- updateSession s0 update1
+    putStrLn "----- 3 ------"
+  where
+    sessionConfig = SessionConfig{ configSourcesDir
+                                 , configWorkingDir = configSourcesDir
+                                 , configDataDir    = configSourcesDir
+                                 , configTempDir    = "."
+                                 , configStaticOpts = ["-no-user-package-conf"]
+                                 }
+
+    originalUpdate = updateModule (ChangeCodeGeneration False)
+                     <> (updateModule $ ModuleSource (ModuleName "B.hs") "test/AerrorB/B.hs")
+                     <> (updateModule $ ModuleSource (ModuleName "A.hs") "test/AerrorB/A.hs")
+
+    update1 = mempty
+
+{-
+    a = BS.pack $ unlines [ "module Main where"
+                          , "import B"
+                          , "main :: IO ()"
+                          , "main = B.b"
+                          ]
+
+    b = BS.pack $ unlines [ "module B where"
+                          , "b :: IO ()"
+                          , "b = return ()"
+                          ]
+-}
 
 main :: IO ()
-main = defaultMain tests
+main = withTemporaryDirectory "ide-backend-test" check
+

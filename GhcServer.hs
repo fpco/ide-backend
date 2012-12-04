@@ -105,11 +105,9 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
         modifyIORef counterIORef (+1)
         reportProgress (RespWorking oldCounter)
       handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-  liftToGhc $ putStrLn ">>>>>>  calling compileInGhc"
   errs <- compileInGhc configSourcesDir dynOpts
                        ideGenerateCode verbosity
                        errsRef handlerOutput handlerRemaining
-  liftToGhc $ putStrLn "<<<<<< /calling compileInGhc"
   liftToGhc $ debug dVerbosity "returned from compileInGhc"
   return (RespDone (errs, Nothing))
 ghcServerHandler GhcInitData{errsRef} _ (ReqRun funToRun) = do
