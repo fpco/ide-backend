@@ -143,9 +143,14 @@ runInGhc (m, fun) errsRef = do
       defaultCleanupHandler flags $ do
         debugPpContext flags "context before setContext"
         -- Run code.
-        setContext $ [IIDecl $ simpleImportDecl $ mkModuleName m]
+        setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName m
+                     , IIDecl $ simpleImportDecl $ mkModuleName "System.IO"
+                     ]
         debugPpContext flags "context after setContext"
-        runRes <- runStmt fun RunToCompletion
+        let expr = "do " ++ fun
+                   ++ "; System.IO.hFlush System.IO.stdout"
+                   ++ "; System.IO.hFlush System.IO.stderr"
+        runRes <- runStmt expr RunToCompletion
         let resOrEx = case runRes of
               RunOk [name] ->
                 let ident = showSDocDebug flags (GHC.ppr name)
