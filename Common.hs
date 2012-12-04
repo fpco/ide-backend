@@ -101,7 +101,7 @@ showExWithClass ex =
   in head exs
 
 dVerbosity :: Int
-dVerbosity = 4
+dVerbosity = 3
 
 debugFile :: Maybe FilePath
 debugFile = Just "debug.log"

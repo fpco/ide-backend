@@ -32,9 +32,6 @@ putFlush msg = do
 
 check :: [String] -> FilePath -> FilePath -> IO ()
 check opts originalSourcesDir configSourcesDir = do
-  hFlush stdout
-  hFlush stderr
-  putFlush $ "\nCopying files from: " ++ originalSourcesDir ++ "\n"
   -- Init session.
   let sessionConfig = SessionConfig{ configSourcesDir
                                    , configWorkingDir = configSourcesDir
@@ -42,10 +39,13 @@ check opts originalSourcesDir configSourcesDir = do
                                    , configTempDir    = "."
                                    , configStaticOpts = opts
                                    }
+  putStrLn "----- 1 ------"
   sP <- initSession sessionConfig
+  putStrLn "----- 2 ------"
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
   -- HACK: here we fake module names, guessing them from file names.
   cnts <- getDirectoryContents originalSourcesDir
+  putStrLn "----- 3 -----"
   let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
       originalModules =
         map (\ f -> (ModuleName f, f)) originalFiles
@@ -55,9 +55,9 @@ check opts originalSourcesDir configSourcesDir = do
       displayCounter :: PCounter -> IO ()
       displayCounter n = putStr (show n)
   s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
+  putStrLn "----- 4 ------"
   msgs0 <- getSourceErrors s0
-  putFlush $ "Error 0:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs0) ++ "\n"
+  putStrLn "----- 5 ------"
   -- Overwrite some copied files.
   let overName = case originalModules of
         [] -> ModuleName "testEmptyDirModule"
@@ -72,74 +72,69 @@ check opts originalSourcesDir configSourcesDir = do
         <> (updateModule $ ModulePut overName (BS.pack "module M where\nx = a4"))
   -- Test the computations.
   s2 <- updateSession s0 update1 (progressWaitConsume displayCounter)
+  putStrLn "----- 6 ------"
   msgs2 <- getSourceErrors s2
-  putFlush $ "Error 2:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs2) ++ "\n"
+  putStrLn "----- 7 ------"
   s4 <- updateSession s2 update2 (progressWaitConsume displayCounter)
+  putStrLn "----- 8 ------"
   msgs4 <- getSourceErrors s4
-  putFlush $ "Error 4:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs4) ++ "\n"
+  putStrLn "----- 9 ------"
   msgs2' <- getSourceErrors s2
-  putFlush $ "Error 2 again:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs2') ++ "\n"
+  putStrLn "----- 10 ------"
   s5 <- updateSession s4 originalUpdate (progressWaitConsume displayCounter)
+  putStrLn "----- 11 ------"
   let update6 = updateModule (ChangeCodeGeneration True)
   s6 <- updateSession s5 update6 (progressWaitConsume displayCounter)
+  putStrLn "----- 12 ------"
   (errs, resOrEx) <- runStmt s6 "Main" "main"
-  putFlush $ "\nErrors and warnings for s6:\n"
-             ++ List.intercalate "\n" (map formatSourceError errs)
-             ++ "\n"
-  putFlush $ "Run result for s6: "
-             ++ case resOrEx of
-                  Just (Left ident) -> ident
-                  Just (Right ex)   -> ex
-                  Nothing           -> "Run failed."
-             ++ "\n"
+  putStrLn "----- 13 ------"
   assertRaises "updateSession s2 update1 (progressWaitConsume displayCounter)"
                (== userError "Invalid session token 2 /= 5")
                (updateSession s2 update1 (progressWaitConsume displayCounter))
+  putStrLn "----- 14 ------"
   shutdownSession s6
+  putStrLn "----- 15 ------"
   assertRaises "initSession sessionConfig"
                (== userError
                  ("Directory " ++ configSourcesDir ++ " is not empty"))
                (initSession sessionConfig)
+  putStrLn "----- 16 ------"
   -- Remove file from the source directory to satisfy the precondition
   -- of initSession.
   mapM_ removeFile $ map (configSourcesDir </>) originalFiles
+  putStrLn "----- 17 ------"
   -- Init another session. It strarts a new process with GHC,
   -- so the old state does not interfere.
   s9 <- initSession sessionConfig
+  putStrLn "----- 18 ------"
   assertRaises "getSourceErrors s9"
                (== userError "This session state does not admit queries.")
                (getSourceErrors s9)
+  putStrLn "----- 19 ------"
   shutdownSession s9
+  putStrLn "----- 20 ------"
   s10 <- initSession sessionConfig
+  putStrLn "----- 21 ------"
   let punOpts = opts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
       optionsUpdate = originalUpdate
                       <> updateModule (ChangeOptions $ Just punOpts)
   s11 <- updateSession s10 optionsUpdate (progressWaitConsume displayCounter)
+  putStrLn "----- 22 ------"
   msgs11 <- getSourceErrors s11
-  putFlush $ "Error 11:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs11) ++ "\n"
+  putStrLn "----- 23 ------"
   let update12 = updateModule (ChangeCodeGeneration True)
   s12 <- updateSession s11 update12 (progressWaitConsume displayCounter)
+  putStrLn "----- 24 ------"
   msgs12 <- getSourceErrors s12
-  putFlush $ "Error 12:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs12) ++ "\n"
+  putStrLn "----- 25 ------"
   (errs12, resOrEx12) <- runStmt s12 "Main" "main"
-  putFlush $ "\nErrors and warnings for s12:\n"
-             ++ List.intercalate "\n" (map formatSourceError errs12)
-             ++ "\n"
-  putFlush $ "Run result for s12: "
-             ++ case resOrEx12 of
-                  Just (Left ident) -> ident
-                  Just (Right ex)   -> ex
-                  Nothing           -> "Run failed."
-             ++ "\n"
+  putStrLn "----- 26 ------"
   assertRaises "shutdownSession s11"
                (== userError "Invalid session token 1 /= 2")
                (shutdownSession s11)
+  putStrLn "----- 27 ------"
   shutdownSession s12
+  putStrLn "----- 28 ------"
 
 
 -- Driver
@@ -171,8 +166,4 @@ tests =
   ]
 
 main :: IO ()
-main = do
-  args <- getArgs
-  case args of
-    "--server" : opts -> ghcServer opts  -- @opts@ are GHC static flags
-    _ -> defaultMain tests
+main = defaultMain tests

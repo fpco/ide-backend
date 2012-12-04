@@ -7,8 +7,6 @@ import qualified Control.Exception as Ex
 import Control.Applicative ((<$>), (<|>))
 import Test.HUnit (Assertion, assertBool, assertFailure)
 
-import RpcServer
-
 -- | Check that the given IO action raises the specified exception
 assertRaises :: (Ex.Exception e, Eq e, Show e)
              => String      -- ^ Message displayed if assertion fails
@@ -33,7 +31,6 @@ exceptionType ex = fromJust $
       ((\(_ :: Ex.IOException)    -> "IOException")       <$> Ex.fromException ex)
   <|> ((\(_ :: Ex.AsyncException) -> "AsyncException")    <$> Ex.fromException ex)
   <|> ((\(_ :: Ex.ErrorCall)      -> "ErrorCall")         <$> Ex.fromException ex)
-  <|> ((\(_ :: ExternalException) -> "ExternalException") <$> Ex.fromException ex)
   <|> Just "Unknown type"
 
 -- | Like 'raiseSignal', but with a more general type
