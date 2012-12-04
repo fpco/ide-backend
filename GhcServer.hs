@@ -26,7 +26,6 @@ import Control.Applicative
 import RpcServer
 import Common
 import GhcRun
-import Progress
 
 data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
@@ -84,17 +83,15 @@ ghcServerEngine opts RpcServerActions{..} = do
   dispatcher :: GhcInitData -> Ghc ()
   dispatcher ghcInitData = do
     req <- liftToGhc $ getRequest
-    resp <- ghcServerHandler ghcInitData putProgress req
+    resp <- ghcServerHandler ghcInitData req
     liftToGhc $ putResponse resp
     dispatcher ghcInitData
 
-ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ()) -> GhcRequest
-                 -> Ghc GhcResponse
+ghcServerHandler :: GhcInitData -> GhcRequest -> Ghc GhcResponse
 ghcServerHandler GhcInitData{dOpts, errsRef}
-                 reportProgress
                  (ReqCompile ideNewOpts configSourcesDir ideGenerateCode) = do
   -- Setup progress counter. It goes from [1/n] onwards.
-  counterIORef <- liftToGhc $ newIORef 1
+  counterIORef <- liftToGhc $ newIORef (1 :: Int)
   let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
       -- Let GHC API print "compiling M ... done." for each module.
       verbosity = 1
@@ -103,14 +100,13 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
         oldCounter <- readIORef counterIORef
         putStrLn $ "~~~~~~ " ++ show oldCounter ++ ": " ++ msg
         modifyIORef counterIORef (+1)
-        reportProgress (RespWorking oldCounter)
       handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
   errs <- compileInGhc configSourcesDir dynOpts
                        ideGenerateCode verbosity
                        errsRef handlerOutput handlerRemaining
   liftToGhc $ debug dVerbosity "returned from compileInGhc"
   return (RespDone (errs, Nothing))
-ghcServerHandler GhcInitData{errsRef} _ (ReqRun funToRun) = do
+ghcServerHandler GhcInitData{errsRef} (ReqRun funToRun) = do
   runOutcome <- runInGhc funToRun errsRef
   liftToGhc $ debug dVerbosity "returned from runInGhc"
   return (RespDone runOutcome)
@@ -121,9 +117,8 @@ forkGhcServer :: [String] -> IO GhcServer
 forkGhcServer opts =
   forkRpcServer (ghcServerEngine opts)
 
-rpcGhcServer :: GhcServer -> GhcRequest
-             -> (Progress GhcResponse GhcResponse -> IO a) -> IO a
-rpcGhcServer = rpcWithProgress
+rpcGhcServer :: GhcServer -> GhcRequest -> IO GhcResponse
+rpcGhcServer = rpc
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs

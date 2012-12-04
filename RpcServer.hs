@@ -1,9 +1,8 @@
 module RpcServer where
 
 import Control.Concurrent
-import Progress
 
-type RpcServer req resp = (ThreadId, Chan req, Chan (Either resp resp))
+type RpcServer req resp = (ThreadId, Chan req, Chan resp)
 
 data RpcServerActions req prog resp = RpcServerActions {
     getRequest  :: IO req
@@ -16,20 +15,17 @@ forkRpcServer server = do
   req  <- newChan
   resp <- newChan
   let getRequest  = readChan req
-      putProgress = writeChan resp . Left
-      putResponse = writeChan resp . Right
+      putProgress = error "putProgress not implementd"
+      putResponse = writeChan resp
   tid <- forkIO $ server RpcServerActions{..}
   return (tid, req, resp)
 
-rpcWithProgress :: RpcServer req resp -> req -> (Progress resp resp -> IO b) -> IO b
-rpcWithProgress (_, req, resp) request handler = do
+rpc :: RpcServer req resp  -- ^ RPC server
+    -> req                 -- ^ Request
+    -> IO resp             -- ^ Response
+rpc (_, req, resp) request = do
   writeChan req request
-  let progress = Progress $ do
-        response <- readChan resp
-        case response of
-          Left intermediate -> return . Right $ (intermediate, progress)
-          Right final       -> return . Left $ final
-  handler progress
+  readChan resp
 
 shutdown :: RpcServer req resp -> IO ()
 shutdown (tid, _, _) = killThread tid
