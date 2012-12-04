@@ -167,6 +167,13 @@ tests =
                 , "-package binary"
                 ]
                 "test/Puns"
+    , testCase "A single file with code to run in parallel"
+      $ testAll [ "-hide-all-packages"
+                , "-package parallel"
+                , "-package base"
+                , "-package old-time"
+                ]
+                "test/MainModule"
     ]
   ]
 
