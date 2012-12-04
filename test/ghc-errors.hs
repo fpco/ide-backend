@@ -1,6 +1,5 @@
 module Main (main) where
 
-import Control.Concurrent (forkIO, newChan, readChan, writeChan)
 import System.Process (readProcess)
 import Data.List ((\\))
 import Control.Monad (void)
@@ -62,29 +61,13 @@ collectSrcError handlerOutput SevOutput _srcspan style msg
 collectSrcError _ _ _ _ _
   = return ()
 
-forkGhc :: IO ([FilePath] -> IO ())
-forkGhc = do
-  req  <- newChan
-  resp <- newChan
-
-  let dispatcher n = do
-        targets <- liftIO $ readChan req
-        response <- compileInGhc targets $ \msg -> print (n, msg)
-        liftIO $ writeChan resp response
-        dispatcher (n + 1)
-
-  forkIO . runFromGhc $ dispatcher (0 :: Int)
-  return (\targets -> writeChan req targets >> readChan resp)
-
 main :: IO ()
-main = do
-  callGhc <- forkGhc
+main = runFromGhc $ do
+  liftIO $ putStrLn "----- 0 ------"
+  compileInGhc ["A.hs", "B.hs"] $ \msg -> print (0 :: Int, msg)
 
-  putStrLn "----- 0 ------"
-  callGhc ["A.hs", "B.hs"]
+  liftIO $ putStrLn "----- 1 ------"
+  compileInGhc ["A.hs", "B.hs"] $ \msg -> print (1 :: Int, msg)
 
-  putStrLn "----- 1 ------"
-  callGhc ["A.hs", "B.hs"]
-
-  putStrLn "----- 2 ------"
-  callGhc ["C.hs"]
+  liftIO $ putStrLn "----- 2 ------"
+  compileInGhc ["C.hs"] $ \msg -> print (2 :: Int, msg)
