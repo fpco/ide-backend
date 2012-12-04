@@ -5,7 +5,6 @@ import System.FilePath ((</>))
 
 -- getExecutablePath is in base only for >= 4.6
 import Data.IORef
-import Control.Applicative
 import Control.Concurrent
 
 import GHC hiding (flags, ModuleName, RunResult)
@@ -14,63 +13,14 @@ import GhcMonad (liftIO)
 import ErrUtils   ( Message )
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
-import FastString ( unpackFS )
 
-import System.Process
-import System.Directory
+import System.Process (readProcess)
+import System.Directory (getDirectoryContents, copyFile)
 import System.FilePath (takeExtension)
 import Data.List ((\\))
 
-import Control.Monad (when)
-import System.IO (hFlush, hPutStr, stderr)
 
 --------------------------------------------------------------------------------
-
-
--- | An error or warning in a source module.
---
--- Most errors are associated with a span of text, but some have only a
--- location point.
---
-data SourceError =
-    SrcError SourceErrorKind FilePath (Int, Int) (Int, Int) String
-  | OtherError String
-  deriving Show
-
-data SourceErrorKind = KindError | KindWarning
-  deriving Show
-
--- | These source files are type-checked.
-hsExtentions:: [FilePath]
-hsExtentions = [".hs", ".lhs"]
-
-dVerbosity :: Int
-dVerbosity = 3
-
-debugFile :: Maybe FilePath
-debugFile = Just "debug.log"
-
-debug :: Int -> String -> IO ()
-debug verbosity msg =
-  when (verbosity >= 3) $ do
-    case debugFile of
-      Nothing -> return ()
-      Just logName ->
-        appendFile logName $ msg ++ "\n"
-    when (verbosity >= 4) $ do
-      hPutStr stderr $ "debug: " ++ msg ++ "\n"
-      hFlush stderr
-
---------------------------------------------------------------------------------
-
-
-newtype DynamicOpts = DynamicOpts [Located String]
-
--- | Set static flags at server startup and return dynamic flags.
-submitStaticOpts :: [String] -> IO DynamicOpts
-submitStaticOpts opts = do
-  (dynFlags, _) <- parseStaticFlags (map noLoc opts)
-  return $ DynamicOpts dynFlags
 
 getGhcLibdir :: IO FilePath
 getGhcLibdir = do
@@ -86,35 +36,23 @@ runFromGhc a = do
   runGhc (Just libdir) a
 
 compileInGhc :: FilePath            -- ^ target directory
-             -> DynamicOpts         -- ^ dynamic flags for this run of runGhc
-             -> Bool                -- ^ whether to generate code
-             -> IORef [SourceError] -- ^ the IORef where GHC stores errors
+             -> [Located String]    -- ^ dynamic flags for this run of runGhc
              -> (String -> IO ())   -- ^ handler for each SevOutput message
-             -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-             -> Ghc [SourceError]
-compileInGhc configSourcesDir (DynamicOpts dynOpts)
-             generateCode
-             errsRef handlerOutput handlerRemaining = do
-    -- Reset errors storage.
-    liftIO $ writeIORef errsRef []
+             -> Ghc ()
+compileInGhc configSourcesDir dynOpts handlerOutput = do
     -- Determine files to process.
     cnts <- liftIO $ getDirectoryContents configSourcesDir
-    let targets = map (configSourcesDir </>)
-                  $ filter ((`elem` hsExtentions) . takeExtension) cnts
-    handleSourceError (\ e -> do
-                          errs <- liftIO $ reverse <$> readIORef errsRef
-                          return (errs ++ [OtherError (show e)])) $ do
+    let targets = map (configSourcesDir </>) $ filter ((== ".hs") . takeExtension) cnts
+    handleSourceError (\_ -> error "uh oh") $ do
       -- Compute new GHC flags.
       flags0 <- getSessionDynFlags
       (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
-      let (hscTarget, ghcLink) | generateCode = (HscInterpreted, LinkInMemory)
-                               | otherwise    = (HscNothing,     NoLink)
-          flags = flags1 {
-                           hscTarget,
-                           ghcLink,
+      let flags = flags1 {
+                           hscTarget  = HscNothing,
+                           ghcLink    = NoLink,
                            ghcMode    = CompManager,
                            verbosity  = 1,
-                           log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
+                           log_action = collectSrcError handlerOutput
                          }
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
@@ -137,61 +75,15 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         mapM_ removeTarget $ map targetIdFromFile $ oldFiles \\ targets
         -- Load modules to typecheck and perhaps generate code, too.
         _loadRes <- load LoadAllTargets
-        debugPpContext flags "context after LoadAllTargets"
-        -- TODO: record the boolean 'succeeded loadRes' below:
-        -- Recover all saved errors.
-        liftIO $ reverse <$> readIORef errsRef
+        return ()
 
-collectSrcError :: IORef [SourceError]
-                -> (String -> IO ())
-                -> (String -> IO ())
-                -> DynFlags
+collectSrcError :: (String -> IO ())
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
-collectSrcError errsRef handlerOutput handlerRemaining flags
-                severity srcspan style msg = do
-  -- Prepare debug prints.
-  let showSeverity SevOutput  = "SevOutput"
-      showSeverity SevInfo    = "SevInfo"
-      showSeverity SevWarning = "SevWarning"
-      showSeverity SevError   = "SevError"
-      showSeverity SevFatal   = "SevFatal"
-  debug dVerbosity
-   $  "Severity: "   ++ showSeverity severity
-   ++ "  SrcSpan: "  ++ show srcspan
--- ++ "  PprStyle: " ++ show style
-   ++ "  MsgDoc: "
-   ++ showSDocForUser flags (qualName style,qualModule style) msg
-   ++ "\n"
-  -- Actually collect errors.
-  collectSrcError'
-    errsRef handlerOutput handlerRemaining flags severity srcspan style msg
-
-collectSrcError' :: IORef [SourceError]
-                -> (String -> IO ())
-                -> (String -> IO ())
-                -> DynFlags
-                -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
-collectSrcError' errsRef _ _ flags severity srcspan style msg
-  | Just errKind <- case severity of
-                      SevWarning -> Just KindWarning
-                      SevError   -> Just KindError
-                      SevFatal   -> Just KindError
-                      _          -> Nothing
-  , Just (file, st, end) <- extractErrSpan srcspan
-  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
-     in modifyIORef errsRef (SrcError errKind file st end msgstr :)
-
-collectSrcError' errsRef _ _ flags SevError _srcspan style msg
-  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
-     in modifyIORef errsRef (OtherError msgstr :)
-
-collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
-  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+collectSrcError handlerOutput SevOutput _srcspan style msg
+  = let msgstr = GHC.showSDocForUser (qualName style,qualModule style) msg
      in handlerOutput msgstr
-
-collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
-  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
-     in handlerRemaining msgstr
+collectSrcError _ _ _ _ _
+  = return ()
 
 -----------------------
 -- GHC version compat
@@ -199,38 +91,8 @@ collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
 
 type MsgDoc = Message
 
-showSDocForUser :: DynFlags -> PrintUnqualified -> MsgDoc -> String
-showSDocForUser _flags uqual msg = GHC.showSDocForUser       uqual msg
-
-showSDocDebug :: DynFlags -> MsgDoc -> String
-showSDocDebug _flags msg = GHC.showSDocDebug        msg
-
-extractErrSpan :: SrcSpan -> Maybe (FilePath, (Int, Int), (Int, Int))
-extractErrSpan (RealSrcSpan srcspan) =
-  Just (unpackFS (srcSpanFile srcspan)
-       ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
-       ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
-extractErrSpan _ = Nothing
-
-debugPpContext :: DynFlags -> String -> Ghc ()
-debugPpContext flags msg = do
-  context <- getContext
-  liftIO $ debug dVerbosity
-    $ msg ++ ": " ++ showSDocDebug flags (GHC.ppr context)
-
-
 --------------------------------------------------------------------------------
 
-
-type GhcRequest = ()
-type GhcResponse = ()
-
--- Keeps the dynamic portion of the options specified at server startup
--- (they are among the options listed in SessionConfig).
--- They are only fed to GHC if no options are set via a session update command.
-data GhcInitData = GhcInitData { dOpts :: DynamicOpts
-                               , errsRef :: IORef [SourceError]
-                               }
 
 -- * Server-side operations
 
@@ -242,25 +104,22 @@ data GhcInitData = GhcInitData { dOpts :: DynamicOpts
 -- as soon as they appear.
 -- | This function runs in end endless loop, most of which takes place
 -- inside the @Ghc@ monad, making incremental compilation possible.
-ghcServerEngine :: FilePath -> Chan () -> Chan GhcResponse -> IO ()
+ghcServerEngine :: FilePath -> Chan () -> Chan () -> IO ()
 ghcServerEngine configSourcesDir req resp = do
   -- Submit static opts and get back leftover dynamic opts.
-  dOpts <- submitStaticOpts []
+  (dOpts, _) <- parseStaticFlags []
   -- Init error collection and define the exception handler.
-  errsRef <- newIORef []
-
-  runFromGhc $ dispatcher GhcInitData{..}
+  runFromGhc $ dispatcher dOpts
 
  where
-  dispatcher :: GhcInitData -> Ghc ()
-  dispatcher ghcInitData = do
-    request <- liftIO $ readChan req
-    response <- ghcServerHandler configSourcesDir ghcInitData request
+  dispatcher dOpts = do
+    liftIO $ readChan req
+    response <- ghcServerHandler configSourcesDir dOpts
     liftIO $ writeChan resp response
-    dispatcher ghcInitData
+    dispatcher dOpts
 
-ghcServerHandler :: FilePath -> GhcInitData -> GhcRequest -> Ghc GhcResponse
-ghcServerHandler configSourcesDir GhcInitData{dOpts, errsRef} () = do
+ghcServerHandler :: FilePath -> [Located String] -> Ghc ()
+ghcServerHandler configSourcesDir dOpts = do
   -- Setup progress counter. It goes from [1/n] onwards.
   counterIORef <- liftIO $ newIORef (1 :: Int)
   let -- Let GHC API print "compiling M ... done." for each module.
@@ -269,12 +128,7 @@ ghcServerHandler configSourcesDir GhcInitData{dOpts, errsRef} () = do
         oldCounter <- readIORef counterIORef
         putStrLn $ "~~~~~~ " ++ show oldCounter ++ ": " ++ msg
         modifyIORef counterIORef (+1)
-      handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-  errs <- compileInGhc configSourcesDir dOpts
-                       False
-                       errsRef handlerOutput handlerRemaining
-  liftIO $ debug dVerbosity "returned from compileInGhc"
-  return ()
+  compileInGhc configSourcesDir dOpts handlerOutput
 
 --------------------------------------------------------------------------------
 
