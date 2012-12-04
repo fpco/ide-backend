@@ -92,9 +92,9 @@ ghcServerEngine opts RpcServerActions{..} = do
  where
   dispatcher :: IORef Int -> GhcInitData -> Ghc ()
   dispatcher counterIORef ghcInitData = do
-    req <- liftToGhc $ getRequest
+    req <- liftIO $ getRequest
     resp <- ghcServerHandler ghcInitData putProgress counterIORef req
-    liftToGhc $ putResponse resp
+    liftIO $ putResponse resp
     dispatcher counterIORef ghcInitData
 
 ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ())
@@ -106,7 +106,7 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
                  counterIORef
                  (ReqCompile ideNewOpts configSourcesDir ideGenerateCode) = do
   -- Setup progress counter. It goes from [1/n] onwards.
-  liftToGhc $ writeIORef counterIORef 1
+  liftIO $ writeIORef counterIORef 1
   let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
       -- Let GHC API print "compiling M ... done." for each module.
       verbosity = 1
@@ -119,11 +119,11 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
   errs <- compileInGhc configSourcesDir dynOpts
                        ideGenerateCode verbosity
                        errsRef handlerOutput handlerRemaining
-  liftToGhc $ debug dVerbosity "returned from compileInGhc"
+  liftIO $ debug dVerbosity "returned from compileInGhc"
   return (RespDone (errs, Nothing))
 ghcServerHandler GhcInitData{errsRef} _ _ (ReqRun funToRun) = do
   runOutcome <- runInGhc funToRun errsRef
-  liftToGhc $ debug dVerbosity "returned from runInGhc"
+  liftIO $ debug dVerbosity "returned from runInGhc"
   return (RespDone runOutcome)
 
 -- * Client-side operations

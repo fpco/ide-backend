@@ -8,7 +8,7 @@
 -- Only this file should import the GHC-internals modules.
 module GhcRun
   ( Ghc
-  , liftToGhc
+  , liftIO
   , DynamicOpts
   , submitStaticOpts
   , optsToDynFlags
@@ -64,10 +64,6 @@ runFromGhc a = do
   libdir <- getGhcLibdir
   runGhc (Just libdir) a
 
--- | Lift a computation from @IO@ monad to @Ghc@ monad.
-liftToGhc :: IO a -> Ghc a
-liftToGhc = liftIO
-
 compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this run of runGhc
              -> Bool                -- ^ whether to generate code
@@ -80,13 +76,13 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
              errsRef handlerOutput handlerRemaining = do
     -- Reset errors storage.
-    liftToGhc $ writeIORef errsRef []
+    liftIO $ writeIORef errsRef []
     -- Determine files to process.
-    cnts <- liftToGhc $ getDirectoryContents configSourcesDir
+    cnts <- liftIO $ getDirectoryContents configSourcesDir
     let targets = map (configSourcesDir </>)
                   $ filter ((`elem` hsExtentions) . takeExtension) cnts
     handleSourceError (\ e -> do
-                          errs <- liftToGhc $ reverse <$> readIORef errsRef
+                          errs <- liftIO $ reverse <$> readIORef errsRef
                           return (errs ++ [OtherError (show e)])) $ do
       -- Compute new GHC flags.
       flags0 <- getSessionDynFlags
@@ -128,7 +124,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         debugPpContext flags "context after LoadAllTargets"
         -- TODO: record the boolean 'succeeded loadRes' below:
         -- Recover all saved errors.
-        liftToGhc $ reverse <$> readIORef errsRef
+        liftIO $ reverse <$> readIORef errsRef
 
 runInGhc :: (String, String)    -- ^ module and function to run, if any
          -> IORef [SourceError] -- ^ the IORef where GHC stores errors
@@ -161,7 +157,7 @@ runInGhc (m, fun) errsRef = do
                 in Just $ Right exDesc
               RunBreak{} -> error "checkModule: RunBreak"
         -- Recover all saved errors.
-        errs <- liftToGhc $ reverse <$> readIORef errsRef
+        errs <- liftIO $ reverse <$> readIORef errsRef
         return (errs, resOrEx)
 
 collectSrcError :: IORef [SourceError]
@@ -250,7 +246,7 @@ extractErrSpan _ = Nothing
 debugPpContext :: DynFlags -> String -> Ghc ()
 debugPpContext flags msg = do
   context <- getContext
-  liftToGhc $ debug dVerbosity
+  liftIO $ debug dVerbosity
     $ msg ++ ": " ++ showSDocDebug flags (GHC.ppr context)
 
 -- Kept for in-process tests.
