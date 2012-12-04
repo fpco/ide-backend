@@ -1,8 +1,6 @@
 module Main (main) where
 
 import Control.Concurrent (forkIO, newChan, readChan, writeChan)
-import ErrUtils (Message)
-import Outputable (PprStyle, qualName, qualModule)
 import System.Process (readProcess)
 import Data.List ((\\))
 import Control.Monad (void)
@@ -11,6 +9,8 @@ import GHC
 import qualified Config as GHC
 import qualified Outputable as GHC
 import GhcMonad (liftIO)
+import ErrUtils (Message)
+import Outputable (PprStyle, qualName, qualModule)
 
 getGhcLibdir :: IO FilePath
 getGhcLibdir = do
@@ -77,15 +77,14 @@ forkGhc = do
   return (\targets -> writeChan req targets >> readChan resp)
 
 main :: IO ()
-main =  do
-  -- Init session.
+main = do
   callGhc <- forkGhc
 
-  -- Test the computations.
+  putStrLn "----- 0 ------"
+  callGhc ["A.hs", "B.hs"]
+
   putStrLn "----- 1 ------"
-  callGhc ["test/AerrorB/A.hs", "test/AerrorB/B.hs"]
+  callGhc ["A.hs", "B.hs"]
 
   putStrLn "----- 2 ------"
-  callGhc ["test/AerrorB/A.hs", "test/AerrorB/B.hs"]
-
-  putStrLn "----- 3 ------"
+  callGhc ["C.hs"]

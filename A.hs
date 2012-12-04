@@ -3,4 +3,4 @@ module Main where
 import B
 
 main :: IO ()
-main = B.b >> 42
+main = B.b >> typeError
