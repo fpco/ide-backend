@@ -28,8 +28,7 @@ import Common
 import GhcRun
 
 data GhcRequest
-  = ReqCompile (Maybe [String]) FilePath Bool
-  | ReqRun     (String, String)
+  = ReqCompile FilePath
   deriving Show
 data GhcResponse = RespWorking PCounter | RespDone RunOutcome
   deriving Show
@@ -89,11 +88,10 @@ ghcServerEngine opts RpcServerActions{..} = do
 
 ghcServerHandler :: GhcInitData -> GhcRequest -> Ghc GhcResponse
 ghcServerHandler GhcInitData{dOpts, errsRef}
-                 (ReqCompile ideNewOpts configSourcesDir ideGenerateCode) = do
+                 (ReqCompile configSourcesDir) = do
   -- Setup progress counter. It goes from [1/n] onwards.
   counterIORef <- liftToGhc $ newIORef (1 :: Int)
-  let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
-      -- Let GHC API print "compiling M ... done." for each module.
+  let -- Let GHC API print "compiling M ... done." for each module.
       verbosity = 1
       -- TODO: verify that _ is the "compiling M" message
       handlerOutput msg = do
@@ -101,15 +99,11 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
         putStrLn $ "~~~~~~ " ++ show oldCounter ++ ": " ++ msg
         modifyIORef counterIORef (+1)
       handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-  errs <- compileInGhc configSourcesDir dynOpts
-                       ideGenerateCode verbosity
+  errs <- compileInGhc configSourcesDir dOpts
+                       False verbosity
                        errsRef handlerOutput handlerRemaining
   liftToGhc $ debug dVerbosity "returned from compileInGhc"
   return (RespDone (errs, Nothing))
-ghcServerHandler GhcInitData{errsRef} (ReqRun funToRun) = do
-  runOutcome <- runInGhc funToRun errsRef
-  liftToGhc $ debug dVerbosity "returned from runInGhc"
-  return (RespDone runOutcome)
 
 -- * Client-side operations
 
