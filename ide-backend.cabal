@@ -12,7 +12,6 @@ build-type:           Simple
 cabal-version:        >=1.10
 
 library
-  exposed-modules:    Common, RpcServer
   other-modules:      Paths_ide_backend
   build-depends:      base      ==4.*,
                       directory ==1.*,

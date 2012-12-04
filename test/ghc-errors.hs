@@ -4,9 +4,9 @@ import System.Unix.Directory (withTemporaryDirectory)
 import System.FilePath ((</>))
 
 -- getExecutablePath is in base only for >= 4.6
-import qualified Control.Exception as Ex
 import Data.IORef
 import Control.Applicative
+import Control.Concurrent
 
 import GHC hiding (flags, ModuleName, RunResult)
 import qualified Config as GHC
@@ -21,8 +21,45 @@ import System.Directory
 import System.FilePath (takeExtension)
 import Data.List ((\\))
 
-import RpcServer
-import Common
+import Control.Monad (when)
+import System.IO (hFlush, hPutStr, stderr)
+
+--------------------------------------------------------------------------------
+
+
+-- | An error or warning in a source module.
+--
+-- Most errors are associated with a span of text, but some have only a
+-- location point.
+--
+data SourceError =
+    SrcError SourceErrorKind FilePath (Int, Int) (Int, Int) String
+  | OtherError String
+  deriving Show
+
+data SourceErrorKind = KindError | KindWarning
+  deriving Show
+
+-- | These source files are type-checked.
+hsExtentions:: [FilePath]
+hsExtentions = [".hs", ".lhs"]
+
+dVerbosity :: Int
+dVerbosity = 3
+
+debugFile :: Maybe FilePath
+debugFile = Just "debug.log"
+
+debug :: Int -> String -> IO ()
+debug verbosity msg =
+  when (verbosity >= 3) $ do
+    case debugFile of
+      Nothing -> return ()
+      Just logName ->
+        appendFile logName $ msg ++ "\n"
+    when (verbosity >= 4) $ do
+      hPutStr stderr $ "debug: " ++ msg ++ "\n"
+      hFlush stderr
 
 --------------------------------------------------------------------------------
 
@@ -51,13 +88,12 @@ runFromGhc a = do
 compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this run of runGhc
              -> Bool                -- ^ whether to generate code
-             -> Int                 -- ^ verbosity level
              -> IORef [SourceError] -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc [SourceError]
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
-             generateCode verbosity
+             generateCode
              errsRef handlerOutput handlerRemaining = do
     -- Reset errors storage.
     liftIO $ writeIORef errsRef []
@@ -77,7 +113,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                            hscTarget,
                            ghcLink,
                            ghcMode    = CompManager,
-                           verbosity,
+                           verbosity  = 1,
                            log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
                          }
       defaultCleanupHandler flags $ do
@@ -187,8 +223,7 @@ debugPpContext flags msg = do
 
 
 type GhcRequest = ()
-data GhcResponse = RespWorking PCounter | RespDone RunOutcome
-  deriving Show
+type GhcResponse = ()
 
 -- Keeps the dynamic portion of the options specified at server startup
 -- (they are among the options listed in SessionConfig).
@@ -207,33 +242,21 @@ data GhcInitData = GhcInitData { dOpts :: DynamicOpts
 -- as soon as they appear.
 -- | This function runs in end endless loop, most of which takes place
 -- inside the @Ghc@ monad, making incremental compilation possible.
-ghcServerEngine :: FilePath -> RpcServerActions GhcRequest GhcResponse GhcResponse -> IO ()
-ghcServerEngine configSourcesDir RpcServerActions{..} = do
+ghcServerEngine :: FilePath -> Chan () -> Chan GhcResponse -> IO ()
+ghcServerEngine configSourcesDir req resp = do
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts []
   -- Init error collection and define the exception handler.
   errsRef <- newIORef []
-  let handleOtherErrors =
-        Ex.handle $ \e -> do
-          debug dVerbosity $ "handleOtherErrors: " ++ showExWithClass e
-          let exError = OtherError (show (e :: Ex.SomeException))
-          -- In case of an exception, don't lose saved errors.
-          errs <- reverse <$> readIORef errsRef
-          -- Don't disrupt the communication.
-          putResponse $ RespDone (errs ++ [exError], Nothing)
-          -- Restart the Ghc session.
-          startGhcSession
-      startGhcSession =
-        handleOtherErrors $ runFromGhc $ dispatcher GhcInitData{..}
 
-  startGhcSession
+  runFromGhc $ dispatcher GhcInitData{..}
 
  where
   dispatcher :: GhcInitData -> Ghc ()
   dispatcher ghcInitData = do
-    req <- liftIO $ getRequest
-    resp <- ghcServerHandler configSourcesDir ghcInitData req
-    liftIO $ putResponse resp
+    request <- liftIO $ readChan req
+    response <- ghcServerHandler configSourcesDir ghcInitData request
+    liftIO $ writeChan resp response
     dispatcher ghcInitData
 
 ghcServerHandler :: FilePath -> GhcInitData -> GhcRequest -> Ghc GhcResponse
@@ -241,7 +264,6 @@ ghcServerHandler configSourcesDir GhcInitData{dOpts, errsRef} () = do
   -- Setup progress counter. It goes from [1/n] onwards.
   counterIORef <- liftIO $ newIORef (1 :: Int)
   let -- Let GHC API print "compiling M ... done." for each module.
-      verbosity = 1
       -- TODO: verify that _ is the "compiling M" message
       handlerOutput msg = do
         oldCounter <- readIORef counterIORef
@@ -249,26 +271,30 @@ ghcServerHandler configSourcesDir GhcInitData{dOpts, errsRef} () = do
         modifyIORef counterIORef (+1)
       handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
   errs <- compileInGhc configSourcesDir dOpts
-                       False verbosity
+                       False
                        errsRef handlerOutput handlerRemaining
   liftIO $ debug dVerbosity "returned from compileInGhc"
-  return (RespDone (errs, Nothing))
+  return ()
 
 --------------------------------------------------------------------------------
 
 check :: FilePath -> IO ()
 check configSourcesDir = do
     -- Init session.
-    ideGhcServer <- forkRpcServer (ghcServerEngine configSourcesDir)
+    req <- newChan
+    resp <- newChan
+    forkIO $ ghcServerEngine configSourcesDir req resp
 
     -- Test the computations.
     putStrLn "----- 1 ------"
     copyFile "test/AerrorB/B.hs" (configSourcesDir </> "B.hs")
     copyFile "test/AerrorB/A.hs" (configSourcesDir </> "A.hs")
-    _ <- rpc ideGhcServer ()
+    writeChan req ()
+    _ <- readChan resp
 
     putStrLn "----- 2 ------"
-    _ <- rpc ideGhcServer ()
+    writeChan req ()
+    _ <- readChan resp
 
     putStrLn "----- 3 ------"
 
