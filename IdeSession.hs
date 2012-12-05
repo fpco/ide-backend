@@ -45,6 +45,7 @@ module IdeSession (
   initSession,
   shutdownSession,
   SessionConfig(..),
+  getSessionConfig,
 
   -- * Updates
   -- | Updates are done in batches: we collect together all of the updates we
@@ -186,6 +187,10 @@ data IdeSession = IdeSession
     -- Logical timestamps (used to force ghc to recompile files)
   , ideLogicalTimestamp :: Int
   }
+
+-- | Recover the fixed config the session was initialized with.
+getSessionConfig :: IdeSession -> SessionConfig
+getSessionConfig = ideConfig
 
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.
@@ -486,4 +491,5 @@ runStmt IdeSession{ ideComputed=Just _
       req = ReqRun (m, fun)
   in rpcGhcServer ideGhcServer req
                   (progressWaitCompletion . bimapProgress f g)
-runStmt _ _ _ = fail "runStmt: can't run, before the code is generated"
+runStmt _ _ _ =
+  fail "Can't run before the code is generated. Set ChangeCodeGeneration."

@@ -1,16 +1,18 @@
 module Main where
 
 import System.Environment
-import System.FilePath ((</>), takeExtension)
+import System.FilePath ((</>), takeExtension, dropExtension)
 import System.Directory
 import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
-import Data.Monoid ((<>), mconcat)
+import Data.Monoid ((<>), mconcat, mempty)
 import qualified Data.ByteString.Lazy.Char8 as BS
 import System.IO (hFlush, stdout, stderr)
+import Data.Maybe (isJust)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
+import Test.HUnit (Assertion, assertBool)
 
 import IdeSession
 import GhcServer
@@ -21,68 +23,95 @@ import TestTools
 -- Tests using various functions of the IdeSession API
 -- and a variety of small test Haskell projects.
 
-testAll :: [String] -> FilePath -> IO ()
-testAll opts originalSourcesDir =
-  withTemporaryDirectory "ide-backend-test" $ check opts originalSourcesDir
+-- Test a single sequence of API calls.
+testSingle :: [String] -> FilePath -> (IdeSession -> IO IdeSession)
+           -> Assertion
+testSingle opts originalSourcesDir check =
+  withTemporaryDirectory "ide-backend-test" $ \ configSourcesDir -> do
+    debug dVerbosity $ "\nCopying files from: " ++ originalSourcesDir
+                       ++ " to: " ++ configSourcesDir
+    -- Init session.
+    let sessionConfig = SessionConfig{ configSourcesDir
+                                     , configWorkingDir = configSourcesDir
+                                     , configDataDir    = configSourcesDir
+                                     , configTempDir    = "."
+                                     , configStaticOpts = opts
+                                     }
+    s0 <- initSession sessionConfig
+    -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
+    -- using the IdeSession's update mechanism.
+    cnts <- getDirectoryContents originalSourcesDir
+    let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
+        -- HACK: here we fake module names, guessing them from file names.
+        originalModules =
+          map (\ f -> (ModuleName f, f)) originalFiles
+        upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
+        -- Let's also disable ChangeCodeGeneration, to keep the test stable
+        -- in case the default value of CodeGeneration changes.
+        originalUpdate = updateModule (ChangeCodeGeneration False)
+                         <> (mconcat $ map upd originalModules)
+    s1 <- updateSessionD s0 originalUpdate (progressWaitConsume displayCounter)
+    -- Perform some API calls and check the results.
+    s2 <- check s1
+    -- Clean up.
+    shutdownSession s2
+    return ()
 
-putFlush :: String -> IO ()
-putFlush msg = do
-  putStrLn msg
-  hFlush stdout
+-- Set of api calls and checks to perform on each project.
+--
+-- TODO: we need much more tests to recover the functionality of the old,
+-- undreadable set, and then we need to much more to test all API functions.
+-- E.g., check that the values of PCounter do not exceeed the number of files.
+featureTests :: [(String, IdeSession -> IO IdeSession)]
+featureTests =
+  [ ("Just typecheck", return)
+  , ("Overwrite with error"
+    , \s1 -> do
+        -- Overwrite one of the copied files.
+        (m, _) <- getModules s1
+        let update =
+              updateModule (ModulePut m (BS.pack "module M where\nx = a2"))
+        s2 <- updateSessionD s1 update (progressWaitConsume displayCounter)
+        msgs <- getSourceErrors s2
+        assertBool "Type error lost" $ length msgs >= 1
+        return s2
+    )
+  , ("Overwrite modules many times"
+    , \s1 -> do
+        -- Overwrite one of the copied files.
+        (m1, lm) <- getModules s1
+        let update1 =
+              updateModule (ChangeCodeGeneration False)
+              <> updateModule (ModulePut m1 (BS.pack "module M where\nx = a2"))
+        s2 <- updateSessionD s1 update1 (progressWaitConsume displayCounter)
+        s3 <- updateSessionD s2 mempty (progressWaitConsume displayCounter)
+        let upd m =
+              let ModuleName n = m
+              in updateModule (ModulePut m (BS.pack
+                   $ "module " ++ dropExtension n ++ " where\nx = 1"))
+                 <> updateModule (ChangeCodeGeneration True)
+                 <> updateModule (ModulePut m (BS.pack
+                     $ "module " ++ dropExtension n ++ " where\ny = 2"))
+            update2 = mconcat $ map upd lm
+        s4 <- updateSessionD s3 update2 (progressWaitConsume displayCounter)
+        s5 <- updateSessionD s4 update1 (progressWaitConsume displayCounter)
+        msgs5 <- getSourceErrors s5
+        assertBool "Type error lost" $ length msgs5 >= 1
+        assertBool ("Too many type errors: "
+                    ++  List.intercalate "\n" (map formatSourceError msgs5))
+          $ length msgs5 <= 1
+        msgs4 <- getSourceErrors s4  -- old session
+        assertBool ("Unexpected type errors: "
+                    ++  List.intercalate "\n" (map formatSourceError msgs4))
+          $ null msgs4
+        assertRaises "runStmt s5 Main main"
+          (== userError "Can't run before the code is generated. Set ChangeCodeGeneration.")
+          (runStmt s5 "Main" "main")
+        return s5
+    )
+  ]
 
-check :: [String] -> FilePath -> FilePath -> IO ()
-check opts originalSourcesDir configSourcesDir = do
-  hFlush stdout
-  hFlush stderr
-  putFlush $ "\nCopying files from: " ++ originalSourcesDir ++ "\n"
-  -- Init session.
-  let sessionConfig = SessionConfig{ configSourcesDir
-                                   , configWorkingDir = configSourcesDir
-                                   , configDataDir    = configSourcesDir
-                                   , configTempDir    = "."
-                                   , configStaticOpts = opts
-                                   }
-  sP <- initSession sessionConfig
-  -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
-  -- HACK: here we fake module names, guessing them from file names.
-  cnts <- getDirectoryContents originalSourcesDir
-  let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
-      originalModules =
-        map (\ f -> (ModuleName f, f)) originalFiles
-      upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
-      originalUpdate = updateModule (ChangeCodeGeneration False)
-                       <> (mconcat $ map upd originalModules)
-      displayCounter :: PCounter -> IO ()
-      displayCounter n = putStr (show n)
-  s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
-  msgs0 <- getSourceErrors s0
-  putFlush $ "Error 0:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs0) ++ "\n"
-  -- Overwrite some copied files.
-  let overName = case originalModules of
-        [] -> ModuleName "testEmptyDirModule"
-        (m, _) : _ -> m
-      update1 =
-        updateModule (ChangeCodeGeneration False)
-        <> (updateModule $ ModulePut overName (BS.pack "module M where\n2"))
-        <> (updateModule $ ModulePut overName (BS.pack "module M where\nx = a2"))
-      update2 =
-        updateModule (ChangeCodeGeneration True)
-        <> (updateModule $ ModulePut overName (BS.pack "module M where\n4"))
-        <> (updateModule $ ModulePut overName (BS.pack "module M where\nx = a4"))
-  -- Test the computations.
-  s2 <- updateSession s0 update1 (progressWaitConsume displayCounter)
-  msgs2 <- getSourceErrors s2
-  putFlush $ "Error 2:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs2) ++ "\n"
-  s4 <- updateSession s2 update2 (progressWaitConsume displayCounter)
-  msgs4 <- getSourceErrors s4
-  putFlush $ "Error 4:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs4) ++ "\n"
-  msgs2' <- getSourceErrors s2
-  putFlush $ "Error 2 again:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs2') ++ "\n"
-  s5 <- updateSession s4 originalUpdate (progressWaitConsume displayCounter)
+{-
   let update6 = updateModule (ChangeCodeGeneration True)
   s6 <- updateSession s5 update6 (progressWaitConsume displayCounter)
   (errs, resOrEx) <- runStmt s6 "Main" "main"
@@ -140,42 +169,52 @@ check opts originalSourcesDir configSourcesDir = do
                (== userError "Invalid session token 1 /= 2")
                (shutdownSession s11)
   shutdownSession s12
-
-
--- Driver
+-}
 
 defOpts :: [String]
 defOpts = [ "-no-user-package-conf" ]
 
+-- Set of projects and options to use for them.
+projects :: [(String, FilePath, [String])]
+projects =
+  [ ("A depends on B, no errors", "test/ABnoError", defOpts)
+  , ("A depends on B, error in A", "test/AerrorB", defOpts)
+  , ("A depends on B, error in B", "test/ABerror", defOpts)
+  , ("Our own code, package 'ghc' missing", ".", [])
+  , ( "A subdirectory of Cabal code"
+    , "test/Cabal.Distribution.PackageDescription"
+    , defOpts
+    )
+  , ("A file requiring -XNamedFieldPuns"
+    , "test/Puns"
+    , [ "-hide-all-packages"
+      , "-package mtl"
+      , "-package base"
+      , "-package array"
+      , "-package bytestring"
+      , "-package containers"
+      , "-package binary"
+      ])
+  , ("A single file with a code to run in parallel"
+    , "test/MainModule"
+    , [ "-hide-all-packages"
+      , "-package parallel"
+      , "-package base"
+      , "-package old-time"
+      ])
+  ]
+
+-- Driver
 tests :: [Test]
 tests =
-  [ testGroup "Full integration tests"
-    [ testCase "A depends on B, no errors"  $ testAll defOpts "test/ABnoError"
-    , testCase "A depends on B, error in A" $ testAll defOpts "test/AerrorB"
-    , testCase "A depends on B, error in B" $ testAll defOpts "test/ABerror"
-    , testCase "Our own code, package 'ghc' missing"
-      $ testAll [] "."
-    , testCase "A subdirectory of Cabal code"
-      $ testAll defOpts "test/Cabal.Distribution.PackageDescription"
-    , testCase "A file requiring -XNamedFieldPuns"
-      $ testAll [ "-hide-all-packages"
-                , "-package mtl"
-                , "-package base"
-                , "-package array"
-                , "-package bytestring"
-                , "-package containers"
-                , "-package binary"
-                ]
-                "test/Puns"
-    , testCase "A single file with code to run in parallel"
-      $ testAll [ "-hide-all-packages"
-                , "-package parallel"
-                , "-package base"
-                , "-package old-time"
-                ]
-                "test/MainModule"
-    ]
-  ]
+  let groupProject (name, path, opts) =
+        testGroup name $ map (caseFeature path opts) featureTests
+      caseFeature originalSourcesDir opts (featureName, check) =
+        testCase featureName
+        $ testSingle opts originalSourcesDir check
+  in [ testGroup "Full integration tests"
+       $ map groupProject projects
+     ]
 
 main :: IO ()
 main = do
@@ -183,3 +222,32 @@ main = do
   case args of
     "--server" : opts -> ghcServer opts  -- @opts@ are GHC static flags
     _ -> defaultMain tests
+
+
+-- Extra debug facilities. Normally turned off.
+
+displayCounter :: PCounter -> IO ()
+displayCounter n = debug dVerbosity $ "PCounter: " ++ (show n) ++ ". "
+
+updateSessionD :: IdeSession -> IdeSessionUpdate
+               -> (Progress PCounter IdeSession -> IO IdeSession)
+               -> IO IdeSession
+updateSessionD s0 update handler = do
+  s1 <- updateSession s0 update handler
+  msgs <- getSourceErrors s1
+  debug dVerbosity $ "getSourceErrors after update: "
+                     ++ List.intercalate "\n" (map formatSourceError msgs)
+  return s1
+
+-- Extra test tools.
+
+getModules :: IdeSession -> IO (ModuleName, [ModuleName])
+getModules sess = do
+  let SessionConfig{configSourcesDir} = getSessionConfig sess
+  cnts <- getDirectoryContents configSourcesDir
+  let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
+      originalModules = map (\ f -> (ModuleName f, f)) originalFiles
+      m = case originalModules of
+        [] -> ModuleName "testDirIsEmpty"
+        (x, _) : _ -> x
+  return (m, map fst originalModules)
