@@ -155,6 +155,7 @@ import qualified Control.Exception as Ex
 import Data.Monoid (Monoid(..))
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
+import System.Posix.Files (setFileTimes)
 
 import Common
 import GhcServer
@@ -179,6 +180,8 @@ data IdeSession = IdeSession
   , ideNewOpts   :: Maybe [String]
     -- Whether to generate code in addition to type-checking.
   , ideGenerateCode :: Bool
+    -- Logical timestamps (used to force ghc to recompile files)
+  , ideLogicalTimestamp :: Int
   }
 
 -- | Configuration parameters for a session. These remain the same throughout
@@ -257,6 +260,7 @@ initSession ideConfig@SessionConfig{..} = do
       ideGenerateCode = False
   ideToken <- initToken
   ideGhcServer <- forkGhcServer configStaticOpts
+  let ideLogicalTimestamp = 0
   return IdeSession{..}
 
 -- | Close a session down, releasing the resources.
@@ -345,14 +349,18 @@ writeFileAtomic targetPath content = do
 -- updated or deleted.
 --
 updateModule :: ModuleChange -> IdeSessionUpdate
-updateModule mc = IdeSessionUpdate $ \ sess@IdeSession{ideConfig} ->
+updateModule mc = IdeSessionUpdate $ \ sess@IdeSession{ideConfig, ideLogicalTimestamp} ->
   case mc of
     ModulePut m bs -> do
-      writeFileAtomic (internalFile ideConfig m) bs
-      return sess
+      let internal = internalFile ideConfig m
+      writeFileAtomic internal bs
+      setFileTimes internal (fromIntegral ideLogicalTimestamp) (fromIntegral ideLogicalTimestamp)
+      return sess {ideLogicalTimestamp = ideLogicalTimestamp + 1}
     ModuleSource m p -> do
-      copyFile p (internalFile ideConfig m)
-      return sess
+      let internal = internalFile ideConfig m
+      copyFile p internal
+      setFileTimes internal (fromIntegral ideLogicalTimestamp) (fromIntegral ideLogicalTimestamp)
+      return sess {ideLogicalTimestamp = ideLogicalTimestamp + 1}
     ModuleDelete m -> do
       removeFile (internalFile ideConfig m)
       return sess
