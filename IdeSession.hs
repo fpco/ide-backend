@@ -88,6 +88,9 @@ module IdeSession (
   getSourceErrors,
   SourceError(..),
 
+  -- ** Loaded modules
+  getLoadedModules,
+
   -- ** Symbol definition maps
   getSymbolDefinitionMap,
   SymbolDefinitionMap,
@@ -239,8 +242,12 @@ checkToken (StateToken mv k) = do
 -- can be queried at will. Note that there may be some working files
 -- produced by GHC while obtaining these values. They are not captured here,
 -- so queries are not allowed to read them.
-data Computed = Computed
-  { cerrors :: [SourceError] } -- ^ last compilation and run errors
+data Computed = Computed {
+    -- | last compilation and run errors
+    computedErrors        :: [SourceError]
+    -- | Modules that got loaded okay
+  , computedLoadedModules :: [ModuleName]
+  }
 
 ensureDirEmpty :: FilePath -> IO ()
 ensureDirEmpty dir = do
@@ -322,7 +329,7 @@ updateSession sess (IdeSessionUpdate update) handler = do
       g (RespWorking _)         = error "updateSession: unexpected RespWorking"
       g (RespDone (_, Just _))  = error "updateSession: unexpected Just"
       g (RespDone (r, Nothing)) = newSess { ideToken    = newToken
-                                          , ideComputed = Just (Computed r) }
+                                          , ideComputed = Just (Computed r []) }
       req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
   rpcGhcServer ideGhcServer req (handler . bimapProgress f g)
 
@@ -379,6 +386,7 @@ data ModuleChange = ModulePut    ModuleName ByteString
                   | ChangeCodeGeneration Bool
 
 newtype ModuleName = ModuleName String
+  deriving (Eq, Show)
 
 internalFile :: SessionConfig -> ModuleName -> FilePath
 internalFile SessionConfig{configSourcesDir} (ModuleName n) =
@@ -435,11 +443,17 @@ getDataFile n IdeSession{ideConfig=SessionConfig{configDataDir}} =
 -- would return all warnings (as if you did clean and rebuild each time).
 --
 getSourceErrors :: Query [SourceError]
-getSourceErrors IdeSession{ideComputed = Just Computed{cerrors}} =
-  return cerrors
+getSourceErrors IdeSession{ideComputed = Just Computed{..}} =
+  return computedErrors
 -- Optionally, this could give last reported errors, instead forcing
 -- IDE to wait for the next sessionUpdate to finish.
 getSourceErrors _ = fail "This session state does not admit queries."
+
+-- | Get the list of correctly compiled modules.
+getLoadedModules :: Query [ModuleName]
+getLoadedModules IdeSession{ideComputed = Just Computed{..}} =
+  return computedLoadedModules
+getLoadedModules _ = fail "This session state does not admit queries."
 
 -- | Get a mapping from where symbols are used to where they are defined.
 -- That is, given a symbol used at a particular location in a source module
