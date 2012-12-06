@@ -59,7 +59,7 @@ check opts originalSourcesDir configSourcesDir = do
                                    , configTempDir    = "."
                                    , configStaticOpts = opts
                                    }
-  sP <- initSession sessionConfig
+  session <- initSession sessionConfig
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
   -- HACK: here we fake module names, guessing them from file names.
   cnts <- getDirectoryContents originalSourcesDir
@@ -71,8 +71,8 @@ check opts originalSourcesDir configSourcesDir = do
       len = show $ length originalFiles
       displayCounter :: PCounter -> IO ()
       displayCounter n = putStrLn ("[" ++ show n ++ "/" ++ len ++ "]")
-  s0 <- updateSession sP originalUpdate (progressWaitConsume displayCounter)
-  msgs0 <- getSourceErrors s0
+  updateSession session originalUpdate (progressWaitConsume displayCounter)
+  msgs0 <- getSourceErrors session
   putStrLn $ "\nErrors and warnings:\n" ++ List.intercalate "\n"
     (map formatSourceError msgs0) ++ "\n"
-  shutdownSession s0
+  shutdownSession session

@@ -9,6 +9,7 @@ import Data.Monoid ((<>), mconcat, mempty)
 import Data.ByteString.Lazy.Char8 (pack)
 import System.IO (hFlush, stdout, stderr)
 import Data.Maybe (isJust)
+import Control.Exception (bracket)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -24,8 +25,7 @@ import TestTools
 -- and a variety of small test Haskell projects.
 
 -- Test a single sequence of API calls.
-testSingle :: [String] -> FilePath -> (IdeSession -> IO IdeSession)
-           -> Assertion
+testSingle :: [String] -> FilePath -> (IdeSession -> IO ()) -> Assertion
 testSingle opts originalSourcesDir check =
   withTemporaryDirectory "ide-backend-test" $ \ configSourcesDir -> do
     debug dVerbosity $ "\nCopying files from: " ++ originalSourcesDir
@@ -37,101 +37,94 @@ testSingle opts originalSourcesDir check =
                                      , configTempDir    = "."
                                      , configStaticOpts = opts
                                      }
-    s0 <- initSession sessionConfig
-    -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
-    -- using the IdeSession's update mechanism.
-    cnts <- getDirectoryContents originalSourcesDir
-    let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
-        -- HACK: here we fake module names, guessing them from file names.
-        originalModules =
-          map (\ f -> (ModuleName f, f)) originalFiles
-        upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
-        -- Let's also disable ChangeCodeGeneration, to keep the test stable
-        -- in case the default value of CodeGeneration changes.
-        originalUpdate = updateModule (ChangeCodeGeneration False)
-                         <> (mconcat $ map upd originalModules)
-    s1 <- updateSessionD s0 originalUpdate
-    -- Perform some API calls and check the results.
-    s2 <- check s1
-    -- Clean up.
-    shutdownSession s2
-    return ()
+    bracket (initSession sessionConfig) shutdownSession $ \session -> do
+      -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
+      -- using the IdeSession's update mechanism.
+      cnts <- getDirectoryContents originalSourcesDir
+      let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
+          -- HACK: here we fake module names, guessing them from file names.
+          originalModules =
+            map (\ f -> (ModuleName f, f)) originalFiles
+          upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
+          -- Let's also disable ChangeCodeGeneration, to keep the test stable
+          -- in case the default value of CodeGeneration changes.
+          originalUpdate = updateModule (ChangeCodeGeneration False)
+                           <> (mconcat $ map upd originalModules)
+      updateSessionD session originalUpdate
+      -- Perform some API calls and check the results.
+      check session
 
 -- Set of api calls and checks to perform on each project.
 --
 -- TODO: we need much more tests to recover the functionality of the old,
 -- undreadable set, and then we need to much more to test all API functions.
 -- E.g., check that the values of PCounter do not exceeed the number of files.
-featureTests :: [(String, IdeSession -> IO IdeSession)]
+featureTests :: [(String, IdeSession -> Assertion)]
 featureTests =
-  [ ("Just typecheck", return)
+  [ ("Just typecheck", \_ -> return ())
   , ("Overwrite with error"
-    , \s1 -> do
+    , \session -> do
         -- Overwrite one of the copied files.
-        (m, _) <- getModules s1
+        (m, _) <- getModules session
         let update = loadModule m "a = unknownX"
-        s2 <- updateSessionD s1 update
-        msgs <- getSourceErrors s2
+        updateSessionD session update
+        msgs <- getSourceErrors session
         assertBool "Type error lost" $ length msgs >= 1
-        return s2
     )
   , ("Overwrite with module name not matching file name"
-    , \s1 -> do
-        (_, lm) <- getModules s1
+    , \session -> do
+        (_, lm) <- getModules session
         let upd m =
               updateModule (ModulePut m (pack "module Wrong where\na = 1"))
             update = mconcat $ map upd lm
-        s2 <- updateSessionD s1 update
-        msgs <- getSourceErrors s2
+        updateSessionD session update
+        msgs <- getSourceErrors session
         assertBool "Wrong module name not caught" $ length msgs >= 1
-        return s2
     )
   , ("Overwrite modules many times"
-    , \s1 -> do
+    , \session -> do
         -- Overwrite one of the copied files with an error.
-        (m1, lm) <- getModules s1
+        (m1, lm) <- getModules session
         let update1 =
               updateModule (ChangeCodeGeneration False)
               <> loadModule m1 "a = unknownX"
-        s2 <- updateSessionD s1 update1
-        s3 <- updateSessionD s2 mempty
+        updateSessionD session update1
+        updateSessionD session mempty
         -- Overwrite all files, many times, with correct modules.
         let upd m = loadModule m "x = 1"
                     <> updateModule (ChangeCodeGeneration True)
                     <> loadModule m "y = 2"
             update2 = mconcat $ map upd lm
-        s4 <- updateSessionD s3 update2
+        updateSessionD session update2
         -- Overwrite again with the error.
-        s5 <- updateSessionD s4 update1
-        msgs5 <- getSourceErrors s5
+        updateSessionD session update1
+        msgs5 <- getSourceErrors session
         assertBool "Type error lost" $ length msgs5 >= 1
         assertBool ("Too many type errors: "
                     ++ List.intercalate "\n" (map formatSourceError msgs5))
           $ length msgs5 <= 1
-        msgs4 <- getSourceErrors s4  -- old session
+        msgs4 <- getSourceErrors session -- old session
         assertBool ("Unexpected type errors: "
                     ++ List.intercalate "\n" (map formatSourceError msgs4))
           $ null msgs4
-        assertRaises "runStmt s5 Main main"
+        assertRaises "runStmt session Main main"
           (== userError "Can't run before the code is generated. Set ChangeCodeGeneration.")
-          (runStmt s5 "Main" "main")
-        return s5
+          (runStmt session "Main" "main")
     )
     , ("Run the sample code; don't fail without an explanation"
-      , \s1 -> do
+      , \session -> do
         let update = updateModule (ChangeCodeGeneration True)
-        s2 <- updateSessionD s1 update
-        (msgs, resOrEx) <- runStmt s2 "Main" "main"
+        updateSessionD session update
+        (msgs, resOrEx) <- runStmt session "Main" "main"
         assertBool "No errors detected, but the run failed" $
           case resOrEx of
             Just (Left _ident) -> True
             Just (Right _ex)   -> length msgs >= 1
             Nothing            -> length msgs >= 1
-        return s2
     )
     , ("Run manually corrected code; don't fail at all"
-      , \s1 -> do
-        (_, lm) <- getModules s1
+      , \session -> do
+        (_, lm) <- getModules session
         let upd m = loadModule m "x = 1"
             update =
               updateModule (ModulePut
@@ -139,15 +132,14 @@ featureTests =
                               (pack "module Main where\nmain = return ()"))
               <> mconcat (map upd lm)
               <> updateModule (ChangeCodeGeneration True)
-        s2 <- updateSessionD s1 update
-        (msgs, resOrEx) <- runStmt s2 "Main" "main"
+        updateSessionD session update
+        (msgs, resOrEx) <- runStmt session "Main" "main"
         assertBool ("Manually corrected code not run successfully: "
                     ++ List.intercalate "\n" (map formatSourceError msgs)) $
           case resOrEx of
             Just (Left _ident) -> True
             Just (Right _ex)   -> False
             Nothing            -> False
-        return s2
     )
   ]
 
@@ -186,11 +178,10 @@ featureTests =
 
 -- | Test that the list of successfully compiled modules is reported correctly
 testListCompiledModules :: Assertion
-testListCompiledModules = testSingle defOpts "." $ \s1 -> do
-    let m = ModuleName "A"
-    s2 <- updateSessionD s1 (loadModule m "")
-    assertEqual "" [m] =<< getLoadedModules s2
-    return s2
+testListCompiledModules = testSingle defOpts "." $ \session -> do
+  let m = ModuleName "A"
+  updateSessionD session (loadModule m "")
+  assertEqual "" [m] =<< getLoadedModules session
 
 defOpts :: [String]
 defOpts = [ "-no-user-package-conf" ]
@@ -253,13 +244,12 @@ main = do
 displayCounter :: PCounter -> IO ()
 displayCounter n = debug dVerbosity $ "PCounter: " ++ (show n) ++ ". "
 
-updateSessionD :: IdeSession -> IdeSessionUpdate -> IO IdeSession
-updateSessionD s0 update = do
-  s1 <- updateSession s0 update (progressWaitConsume displayCounter)
-  msgs <- getSourceErrors s1
+updateSessionD :: IdeSession -> IdeSessionUpdate -> IO ()
+updateSessionD session update = do
+  updateSession session update (progressWaitConsume displayCounter)
+  msgs <- getSourceErrors session
   debug dVerbosity $ "getSourceErrors after update: "
                      ++ List.intercalate "\n" (map formatSourceError msgs)
-  return s1
 
 -- Extra test tools.
 

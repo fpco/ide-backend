@@ -176,7 +176,12 @@ import Progress
 data IdeSession = IdeSession
   { ideConfig    :: SessionConfig
   , ideGhcServer :: GhcServer
-  , ideToken     :: StateToken
+  , ideState     :: MVar IdeSessionState
+  }
+
+data IdeSessionState = IdeSessionState {
+    -- Logical timestamps (used to force ghc to recompile files)
+    ideLogicalTimestamp :: Int
     -- The result computed by the last 'updateSession' invocation.
   , ideComputed  :: Maybe Computed
     -- Compiler dynamic options. If they are not set, the options from
@@ -184,8 +189,6 @@ data IdeSession = IdeSession
   , ideNewOpts   :: Maybe [String]
     -- Whether to generate code in addition to type-checking.
   , ideGenerateCode :: Bool
-    -- Logical timestamps (used to force ghc to recompile files)
-  , ideLogicalTimestamp :: Int
   }
 
 -- | Recover the fixed config the session was initialized with.
@@ -215,34 +218,6 @@ data SessionConfig = SessionConfig {
        configStaticOpts :: [String]
      }
 
--- This could be equally well implemented as a new mvar created per
--- each new session state, but this implementation has some minor advantages.
--- It gives more useful error messages and provides a counter of session
--- updates, which can be used, e.g.,  to roughly estimate how badly outdated
--- the info therein is, in order to decide whether to show it to the user
--- while waiting for a newer version.
-data StateToken = StateToken (MVar Int) Int
-
-initToken :: IO StateToken
-initToken = do
-  mv <- newMVar 0
-  return $ StateToken mv 0
-
--- Invalidates previous sessions, returns a new token for the new session.
-incrementToken :: StateToken -> IO StateToken
-incrementToken token@(StateToken mv _) = do
-  checkToken token
-  let incrCheckToken current = do
-        let newT = current + 1
-        return (newT, StateToken mv newT)
-  modifyMVar mv incrCheckToken
-
-checkToken :: StateToken -> IO ()
-checkToken (StateToken mv k) = do
-  current <- readMVar mv
-  when (k /= current)
-    $ fail $ "Invalid session token " ++ show k ++ " /= " ++ show current
-
 -- In this implementation, it's fully applicative, and so invalid sessions
 -- can be queried at will. Note that there may be some working files
 -- produced by GHC while obtaining these values. They are not captured here,
@@ -267,25 +242,20 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configSourcesDir
   ensureDirEmpty configWorkingDir
   ensureDirEmpty configDataDir
-  let ideComputed = Nothing  -- can't query before the first update
-      ideNewOpts  = Nothing  -- options from SessionConfig used initially
-      ideGenerateCode = False
-  ideToken <- initToken
+
+  ideState <- newMVar IdeSessionState {
+                          ideLogicalTimestamp = 0
+                        , ideComputed         = Nothing
+                        , ideNewOpts          = Nothing
+                        , ideGenerateCode     = False
+                        }
   ideGhcServer <- forkGhcServer configStaticOpts
-  let ideLogicalTimestamp = 0
   return IdeSession{..}
 
 -- | Close a session down, releasing the resources.
 --
 shutdownSession :: IdeSession -> IO ()
-shutdownSession IdeSession{ideToken, ideGhcServer} = do
-  -- Invalidate the current session.
-  void $ incrementToken ideToken
-  -- Flush all, to avoid broken pipes.
-  hFlush stdout
-  hFlush stderr
-  -- Shutdown GHC server.
-  shutdownGhcServer ideGhcServer
+shutdownSession IdeSession{ideGhcServer} = shutdownGhcServer ideGhcServer
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
 -- bunch of updates.
@@ -293,15 +263,15 @@ shutdownSession IdeSession{ideToken, ideGhcServer} = do
 -- In particular it is an instance of 'Monoid', so multiple primitive updates
 -- can be easily combined. Updates can override each other left to right.
 --
-data IdeSessionUpdate = IdeSessionUpdate (IdeSession -> IO IdeSession)
+data IdeSessionUpdate = IdeSessionUpdate (SessionConfig -> IdeSessionState -> IO IdeSessionState)
 
 -- We assume, if updates are combined within the monoid, they can all
 -- be applied in the context of the same session.
 -- Otherwise, call 'updateSession' sequentially with the updates.
 instance Monoid IdeSessionUpdate where
-  mempty = IdeSessionUpdate $ \ sess -> return sess
+  mempty = IdeSessionUpdate $ \_ sess -> return sess
   mappend (IdeSessionUpdate f) (IdeSessionUpdate g) =
-    IdeSessionUpdate $ f >=> g
+    IdeSessionUpdate $ \cfg -> f cfg >=> g cfg
 
 -- | Given the current IDE session state, go ahead and
 -- update the session, eventually resulting in a new session state,
@@ -316,27 +286,28 @@ instance Monoid IdeSessionUpdate where
 -- and @updateSession@ is unspecified while any progress runs.
 --
 updateSession :: IdeSession -> IdeSessionUpdate
-              -> (Progress PCounter IdeSession -> IO a) -> IO a
-updateSession sess (IdeSessionUpdate update) handler = do
-  -- First, invalidating the current session ASAP, because the previous
-  -- computed info will shortly no longer be in sync with the files.
-  newToken <- incrementToken $ ideToken sess
-
-  -- Then, updating files ASAP (using the already invalidated session).
-  newSess@IdeSession{ ideConfig=SessionConfig{configSourcesDir}
-                    , ideGhcServer
-                    , ideNewOpts
-                    , ideGenerateCode } <- update sess
+              -> (Progress PCounter () -> IO a) -> IO a
+updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, ideState, ideGhcServer} (IdeSessionUpdate update) handler = do
+  -- Update the session state
+  IdeSessionState{ideGenerateCode, ideNewOpts} <- modifyMVar ideState $ \state -> do
+    state' <- update ideConfig state
+    return (state', state')
 
   -- Last, communicating with the GHC server.
-  let f (RespWorking c)         = c  -- advancement counter
-      f (RespDone _)            = error "updateSession: unexpected RespDone"
-      g (RespWorking _)         = error "updateSession: unexpected RespWorking"
-      g (RespDone (_, Just _))  = error "updateSession: unexpected Just"
-      g (RespDone (r, Nothing)) = newSess { ideToken    = newToken
-                                          , ideComputed = Just (Computed r []) }
-      req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
-  rpcGhcServer ideGhcServer req (handler . bimapProgress f g)
+  let progress :: Progress GhcResponse GhcResponse -> Progress PCounter ()
+      progress Progress{progressWait} = Progress $ do
+        response <- progressWait
+        case response of
+          Right (RespWorking c, p)     -> return (Right (c, progress p))
+          Right (RespDone _, _)        -> error "updateSession: unexpected RespDone"
+          Left (RespWorking _)         -> error "updateSession: unexpected RespWorking"
+          Left (RespDone (_, Just _))  -> error "updateSession: unexpected Just"
+          Left (RespDone (r, Nothing)) -> do
+            modifyMVar_ ideState $ \state ->
+              return state {ideComputed = Just (Computed r [])}
+            return (Left ())
+  let req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
+  rpcGhcServer ideGhcServer req (handler . progress)
 
 -- | Writes a file atomically.
 --
@@ -361,23 +332,23 @@ writeFileAtomic targetPath content = do
 -- updated or deleted.
 --
 updateModule :: ModuleChange -> IdeSessionUpdate
-updateModule mc = IdeSessionUpdate $ \ sess@IdeSession{ideConfig, ideLogicalTimestamp} ->
+updateModule mc = IdeSessionUpdate $ \ideConfig state@IdeSessionState{ideLogicalTimestamp} ->
   case mc of
     ModulePut m bs -> do
       let internal = internalFile ideConfig m
       writeFileAtomic internal bs
       setFileTimes internal (fromIntegral ideLogicalTimestamp) (fromIntegral ideLogicalTimestamp)
-      return sess {ideLogicalTimestamp = ideLogicalTimestamp + 1}
+      return state {ideLogicalTimestamp = ideLogicalTimestamp + 1}
     ModuleSource m p -> do
       let internal = internalFile ideConfig m
       copyFile p internal
       setFileTimes internal (fromIntegral ideLogicalTimestamp) (fromIntegral ideLogicalTimestamp)
-      return sess {ideLogicalTimestamp = ideLogicalTimestamp + 1}
+      return state {ideLogicalTimestamp = ideLogicalTimestamp + 1}
     ModuleDelete m -> do
       removeFile (internalFile ideConfig m)
-      return sess
-    ChangeOptions opts -> return $ sess {ideNewOpts = opts}
-    ChangeCodeGeneration b -> return $ sess {ideGenerateCode = b}
+      return state
+    ChangeOptions opts -> return $ state {ideNewOpts = opts}
+    ChangeCodeGeneration b -> return $ state {ideGenerateCode = b}
 
 -- @OptionsSet@ affects only 'updateSession', not 'runStmt'.
 data ModuleChange = ModulePut    ModuleName ByteString
@@ -404,15 +375,13 @@ internalFile SessionConfig{configSourcesDir} (ModuleName n) =
 -- updated or deleted.
 --
 updateDataFile :: DataFileChange -> IdeSessionUpdate
-updateDataFile mc =
-  IdeSessionUpdate
-  $ \ sess@IdeSession{ideConfig=SessionConfig{configDataDir}} -> do
-    case mc of
-      DataFilePut n bs -> writeFileAtomic (configDataDir </> n) bs
-      DataFileSource n p -> copyFile (configDataDir </> n)
-                                     (configDataDir </> p)
-      DataFileDelete n -> removeFile (configDataDir </> n)
-    return sess
+updateDataFile mc = IdeSessionUpdate $ \SessionConfig{configDataDir} state -> do
+  case mc of
+    DataFilePut n bs   -> writeFileAtomic (configDataDir </> n) bs
+    DataFileSource n p -> copyFile (configDataDir </> n)
+                                   (configDataDir </> p)
+    DataFileDelete n   -> removeFile (configDataDir </> n)
+  return state
 
 data DataFileChange = DataFilePut    FilePath ByteString
                     | DataFileSource FilePath FilePath
@@ -448,17 +417,21 @@ getDataFile n IdeSession{ideConfig=SessionConfig{configDataDir}} =
 -- would return all warnings (as if you did clean and rebuild each time).
 --
 getSourceErrors :: Query [SourceError]
-getSourceErrors IdeSession{ideComputed = Just Computed{..}} =
-  return computedErrors
+getSourceErrors IdeSession{ideState} =
+  withMVar ideState $ \IdeSessionState{ideComputed} ->
+    case ideComputed of
+      Just Computed{..} -> return computedErrors
 -- Optionally, this could give last reported errors, instead forcing
 -- IDE to wait for the next sessionUpdate to finish.
-getSourceErrors _ = fail "This session state does not admit queries."
+      Nothing           -> fail "This session state does not admit queries."
 
 -- | Get the list of correctly compiled modules.
 getLoadedModules :: Query [ModuleName]
-getLoadedModules IdeSession{ideComputed = Just Computed{..}} =
-  return computedLoadedModules
-getLoadedModules _ = fail "This session state does not admit queries."
+getLoadedModules IdeSession{ideState} =
+  withMVar ideState $ \IdeSessionState{ideComputed} ->
+    case ideComputed of
+      Just Computed{..} -> return computedLoadedModules
+      Nothing           -> fail "This session state does not admit queries."
 
 -- | Get a mapping from where symbols are used to where they are defined.
 -- That is, given a symbol used at a particular location in a source module
@@ -478,18 +451,17 @@ getSymbolDefinitionMap = undefined
 -- code loops, it waits forever.
 --
 runStmt :: IdeSession -> String -> String -> IO RunOutcome
-runStmt IdeSession{ ideComputed=Just _
-                  , ideGenerateCode=True
-                  , ideGhcServer }
-        m fun =
-  -- Communicating with the GHC server.
-  -- TODO: perhaps take a handler that uses the progress information somehow.
-  let f (RespWorking c) = c  -- advancement counter
-      f (RespDone _)    = error "runStmt: unexpected RespDone"
-      g (RespWorking _) = error "runStmt: unexpected RespWorking"
-      g (RespDone r)    = r
-      req = ReqRun (m, fun)
-  in rpcGhcServer ideGhcServer req
-                  (progressWaitCompletion . bimapProgress f g)
-runStmt _ _ _ =
-  fail "Can't run before the code is generated. Set ChangeCodeGeneration."
+runStmt IdeSession{ideGhcServer,ideState} m fun = do
+  IdeSessionState{ideComputed,ideGenerateCode} <- readMVar ideState
+
+  case (ideComputed, ideGenerateCode) of
+    (Just _, True) ->
+      let g :: GhcResponse -> RunOutcome
+          g (RespWorking _) = error "runStmt: unexpected RespWorking"
+          g (RespDone r)    = r
+
+          req = ReqRun (m, fun)
+
+      in rpcGhcServer ideGhcServer req (liftM g . progressWaitCompletion)
+    _ ->
+     fail "Can't run before the code is generated. Set ChangeCodeGeneration."
