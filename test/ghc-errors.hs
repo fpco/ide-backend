@@ -96,6 +96,10 @@ featureTests =
                     <> loadModule m "y = 2"
             update2 = mconcat $ map upd lm
         updateSessionD session update2
+        msgs4 <- getSourceErrors session
+        assertBool ("Unexpected type errors: "
+                    ++ List.intercalate "\n" (map formatSourceError msgs4))
+          $ null msgs4
         -- Overwrite again with the error.
         updateSessionD session update1
         msgs5 <- getSourceErrors session
@@ -103,10 +107,6 @@ featureTests =
         assertBool ("Too many type errors: "
                     ++ List.intercalate "\n" (map formatSourceError msgs5))
           $ length msgs5 <= 1
-        msgs4 <- getSourceErrors session -- old session
-        assertBool ("Unexpected type errors: "
-                    ++ List.intercalate "\n" (map formatSourceError msgs4))
-          $ null msgs4
         assertRaises "runStmt session Main main"
           (== userError "Can't run before the code is generated. Set ChangeCodeGeneration.")
           (runStmt session "Main" "main")
