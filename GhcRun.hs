@@ -130,10 +130,13 @@ runInGhc :: (String, String)    -- ^ module and function to run, if any
          -> IORef [SourceError] -- ^ the IORef where GHC stores errors
          -> Ghc RunOutcome
 runInGhc (m, fun) errsRef = do
-    -- TODO: not sure if this handler is needed:
+    -- Reset errors storage. TODO: optionally we refuse resetting the storage
+    -- and keep here errors from the last typechecking, as an explanation
+    -- of run failures, if any.
+    liftIO $ writeIORef errsRef []
     handleSourceError (\ e -> do
-                          printException e
-                          return ([], Nothing)) $ do
+                          errs <- liftIO $ reverse <$> readIORef errsRef
+                          return (errs ++ [OtherError (show e)], Nothing)) $ do
       flags <- getSessionDynFlags
       -- TODO: not sure if this cleanup handler is needed:
       defaultCleanupHandler flags $ do
