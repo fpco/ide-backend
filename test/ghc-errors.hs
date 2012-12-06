@@ -75,52 +75,83 @@ featureTests =
         assertBool "Type error lost" $ length msgs >= 1
         return s2
     )
+  , ("Overwrite with module name not matching file name"
+    , \s1 -> do
+        (_, lm) <- getModules s1
+        let upd m =
+              updateModule (ModulePut m (pack "module Wrong where\na = 1"))
+            update = mconcat $ map upd lm
+        s2 <- updateSessionD s1 update (progressWaitConsume displayCounter)
+        msgs <- getSourceErrors s2
+        assertBool "Wrong module name not caught" $ length msgs >= 1
+        return s2
+    )
   , ("Overwrite modules many times"
     , \s1 -> do
-        -- Overwrite one of the copied files.
+        -- Overwrite one of the copied files with an error.
         (m1, lm) <- getModules s1
         let update1 =
               updateModule (ChangeCodeGeneration False)
               <> loadModule m1 "a = unknownX"
         s2 <- updateSessionD s1 update1 (progressWaitConsume displayCounter)
         s3 <- updateSessionD s2 mempty (progressWaitConsume displayCounter)
-        let upd m =
-              let ModuleName n = m
-              in loadModule m "x = 1"
-                 <> updateModule (ChangeCodeGeneration True)
-                 <> loadModule m "y = 2"
+        -- Overwrite all files, many times, with correct modules.
+        let upd m = loadModule m "x = 1"
+                    <> updateModule (ChangeCodeGeneration True)
+                    <> loadModule m "y = 2"
             update2 = mconcat $ map upd lm
         s4 <- updateSessionD s3 update2 (progressWaitConsume displayCounter)
+        -- Overwrite again with the error.
         s5 <- updateSessionD s4 update1 (progressWaitConsume displayCounter)
         msgs5 <- getSourceErrors s5
         assertBool "Type error lost" $ length msgs5 >= 1
         assertBool ("Too many type errors: "
-                    ++  List.intercalate "\n" (map formatSourceError msgs5))
+                    ++ List.intercalate "\n" (map formatSourceError msgs5))
           $ length msgs5 <= 1
         msgs4 <- getSourceErrors s4  -- old session
         assertBool ("Unexpected type errors: "
-                    ++  List.intercalate "\n" (map formatSourceError msgs4))
+                    ++ List.intercalate "\n" (map formatSourceError msgs4))
           $ null msgs4
         assertRaises "runStmt s5 Main main"
           (== userError "Can't run before the code is generated. Set ChangeCodeGeneration.")
           (runStmt s5 "Main" "main")
         return s5
     )
+    , ("Run the sample code; don't fail without an explanation"
+      , \s1 -> do
+        let update = updateModule (ChangeCodeGeneration True)
+        s2 <- updateSessionD s1 update (progressWaitConsume displayCounter)
+        (msgs, resOrEx) <- runStmt s2 "Main" "main"
+        assertBool "No errors detected, but the run failed" $
+          case resOrEx of
+            Just (Left _ident) -> True
+            Just (Right _ex)   -> length msgs >= 1
+            Nothing            -> length msgs >= 1
+        return s2
+    )
+    , ("Run manually corrected code; don't fail at all"
+      , \s1 -> do
+        (_, lm) <- getModules s1
+        let upd m = loadModule m "x = 1"
+            update =
+              updateModule (ModulePut
+                              (ModuleName "Main")
+                              (pack "module Main where\nmain = return ()"))
+              <> mconcat (map upd lm)
+              <> updateModule (ChangeCodeGeneration True)
+        s2 <- updateSessionD s1 update (progressWaitConsume displayCounter)
+        (msgs, resOrEx) <- runStmt s2 "Main" "main"
+        assertBool ("Manually corrected code not run successfully: "
+                    ++ List.intercalate "\n" (map formatSourceError msgs)) $
+          case resOrEx of
+            Just (Left _ident) -> True
+            Just (Right _ex)   -> False
+            Nothing            -> False
+        return s2
+    )
   ]
 
 {-
-  let update6 = updateModule (ChangeCodeGeneration True)
-  s6 <- updateSession s5 update6 (progressWaitConsume displayCounter)
-  (errs, resOrEx) <- runStmt s6 "Main" "main"
-  putFlush $ "\nErrors and warnings for s6:\n"
-             ++ List.intercalate "\n" (map formatSourceError errs)
-             ++ "\n"
-  putFlush $ "Run result for s6: "
-             ++ case resOrEx of
-                  Just (Left ident) -> ident
-                  Just (Right ex)   -> ex
-                  Nothing           -> "Run failed."
-             ++ "\n"
   assertRaises "updateSession s2 update1 (progressWaitConsume displayCounter)"
                (== userError "Invalid session token 2 /= 5")
                (updateSession s2 update1 (progressWaitConsume displayCounter))
@@ -147,21 +178,6 @@ featureTests =
   msgs11 <- getSourceErrors s11
   putFlush $ "Error 11:\n" ++ List.intercalate "\n\n"
     (map formatSourceError msgs11) ++ "\n"
-  let update12 = updateModule (ChangeCodeGeneration True)
-  s12 <- updateSession s11 update12 (progressWaitConsume displayCounter)
-  msgs12 <- getSourceErrors s12
-  putFlush $ "Error 12:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs12) ++ "\n"
-  (errs12, resOrEx12) <- runStmt s12 "Main" "main"
-  putFlush $ "\nErrors and warnings for s12:\n"
-             ++ List.intercalate "\n" (map formatSourceError errs12)
-             ++ "\n"
-  putFlush $ "Run result for s12: "
-             ++ case resOrEx12 of
-                  Just (Left ident) -> ident
-                  Just (Right ex)   -> ex
-                  Nothing           -> "Run failed."
-             ++ "\n"
   assertRaises "shutdownSession s11"
                (== userError "Invalid session token 1 /= 2")
                (shutdownSession s11)
