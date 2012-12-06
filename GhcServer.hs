@@ -26,6 +26,11 @@ import Data.Aeson.TH (deriveJSON)
 import Data.IORef
 import Control.Applicative
 
+import System.IO (stdout, hFlush)
+import System.Posix (Fd)
+import System.Posix.IO.ByteString
+import Data.ByteString.Char8 (pack)
+
 import RpcServer
 import Common
 import GhcRun
@@ -120,15 +125,18 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
         modifyIORef counterIORef (+1)
         reportProgress (RespWorking oldCounter)
       handlerRemaining _ = return ()  -- TODO: put into logs somewhere?
-  errs <- compileInGhc configSourcesDir dynOpts
-                       ideGenerateCode verbosity
-                       errsRef handlerOutput handlerRemaining
+  errs <- surpressGhcStdout $
+            compileInGhc configSourcesDir dynOpts
+                         ideGenerateCode verbosity
+                         errsRef handlerOutput handlerRemaining
   liftIO $ debug dVerbosity "returned from compileInGhc"
   return (RespDone (errs, Nothing))
 ghcServerHandler GhcInitData{errsRef} _ _ (ReqRun funToRun) = do
   runOutcome <- runInGhc funToRun errsRef
   liftIO $ debug dVerbosity "returned from runInGhc"
   return (RespDone runOutcome)
+
+
 
 -- * Client-side operations
 
@@ -143,3 +151,32 @@ rpcGhcServer = rpcWithProgress
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs
+
+--------------------------------------------------------------------------------
+-- Auxiliary                                                                  --
+--------------------------------------------------------------------------------
+
+surpressGhcStdout :: Ghc a -> Ghc a
+surpressGhcStdout p = do
+  stdOutputBackup <- liftIO $ surpressStdOutput
+  x <- p
+  liftIO $ restoreStdOutput stdOutputBackup
+  return x
+
+type StdOutputBackup = Fd
+
+surpressStdOutput :: IO StdOutputBackup
+surpressStdOutput = do
+  hFlush stdout
+  stdOutputBackup <- dup stdOutput
+  closeFd stdOutput
+  -- Will use next available file descriptor: that is, stdout
+  _ <- openFd (pack "/dev/null") WriteOnly Nothing defaultFileFlags
+  return stdOutputBackup
+
+restoreStdOutput :: StdOutputBackup -> IO ()
+restoreStdOutput stdOutputBackup = do
+  hFlush stdout
+  closeFd stdOutput
+  dup stdOutputBackup
+  closeFd stdOutputBackup
