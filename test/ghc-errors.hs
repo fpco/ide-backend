@@ -1,12 +1,12 @@
-module Main where
+module Main (main) where
 
-import System.Environment
+import System.Environment (getArgs)
 import System.FilePath ((</>), takeExtension, dropExtension)
 import System.Directory
 import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
 import Data.Monoid ((<>), mconcat, mempty)
-import qualified Data.ByteString.Lazy.Char8 as BS
+import Data.ByteString.Lazy.Char8 (pack)
 import System.IO (hFlush, stdout, stderr)
 import Data.Maybe (isJust)
 
@@ -69,8 +69,7 @@ featureTests =
     , \s1 -> do
         -- Overwrite one of the copied files.
         (m, _) <- getModules s1
-        let update =
-              updateModule (ModulePut m (BS.pack "module M where\nx = a2"))
+        let update = loadModule m "a = unknownX"
         s2 <- updateSessionD s1 update (progressWaitConsume displayCounter)
         msgs <- getSourceErrors s2
         assertBool "Type error lost" $ length msgs >= 1
@@ -82,16 +81,14 @@ featureTests =
         (m1, lm) <- getModules s1
         let update1 =
               updateModule (ChangeCodeGeneration False)
-              <> updateModule (ModulePut m1 (BS.pack "module M where\nx = a2"))
+              <> loadModule m1 "a = unknownX"
         s2 <- updateSessionD s1 update1 (progressWaitConsume displayCounter)
         s3 <- updateSessionD s2 mempty (progressWaitConsume displayCounter)
         let upd m =
               let ModuleName n = m
-              in updateModule (ModulePut m (BS.pack
-                   $ "module " ++ dropExtension n ++ " where\nx = 1"))
+              in loadModule m "x = 1"
                  <> updateModule (ChangeCodeGeneration True)
-                 <> updateModule (ModulePut m (BS.pack
-                     $ "module " ++ dropExtension n ++ " where\ny = 2"))
+                 <> loadModule m "y = 2"
             update2 = mconcat $ map upd lm
         s4 <- updateSessionD s3 update2 (progressWaitConsume displayCounter)
         s5 <- updateSessionD s4 update1 (progressWaitConsume displayCounter)
@@ -251,3 +248,10 @@ getModules sess = do
         [] -> ModuleName "testDirIsEmpty"
         (x, _) : _ -> x
   return (m, map fst originalModules)
+
+loadModule :: ModuleName -> String -> IdeSessionUpdate
+loadModule m contents =
+  let ModuleName n = m
+      name = dropExtension n
+  in updateModule . ModulePut m . pack
+     $ "module " ++ name ++ " where\n" ++ contents
