@@ -107,7 +107,7 @@ testEcho server = assertRpcEqual server "ping" "ping"
 
 testEchoServer :: RpcServerActions String String String -> IO ()
 testEchoServer RpcServerActions{..} = forever $ do
-  req <- getRequest
+  Just req <- getRequest
   putResponse req
 
 -- | Test stateful server
@@ -116,7 +116,7 @@ testState server = forM_ ([0 .. 9] :: [Int]) $ assertRpcEqual server ()
 
 testStateServer :: MVar Int -> RpcServerActions () Int Int -> IO ()
 testStateServer st RpcServerActions{..} = forever $ do
-  () <- getRequest
+  Just () <- getRequest
   modifyMVar_ st $ \i -> do
     putResponse i
     return (i + 1)
@@ -138,7 +138,7 @@ testCustomServer :: MVar Int
                  -> RpcServerActions CountRequest CountResponse CountResponse
                  -> IO ()
 testCustomServer st RpcServerActions{..} = forever $ do
-  req <- getRequest
+  Just req <- getRequest
   case req of
     Increment -> modifyMVar_ st $ \i -> do
       putResponse Done
@@ -154,7 +154,7 @@ testProgress server =
 
 testProgressServer :: RpcServerActions Int Int Int -> IO ()
 testProgressServer RpcServerActions{..} = forever $ do
-  req <- getRequest
+  Just req <- getRequest
   forM_ [req, req - 1 .. 1] $ putProgress
   putResponse 0
 
@@ -174,7 +174,7 @@ testStdout server = do
 
 testStdoutServer :: RpcServerActions String String String -> IO ()
 testStdoutServer RpcServerActions{..} = forever $ do
-  req <- getRequest
+  Just req <- getRequest
   putStrLn "   vvvv    testStdout intentionally printing to stdout"
   putResponse req
 
@@ -189,7 +189,7 @@ testCrash server =
 
 testCrashServer :: RpcServerActions () () () -> IO ()
 testCrashServer RpcServerActions{..} = do
-  () <- getRequest
+  Just () <- getRequest
   Ex.throwIO crash
 
 crash :: Ex.IOException
@@ -203,7 +203,7 @@ testKill server = do
 
 testKillServer :: MVar Bool -> RpcServerActions String String String -> IO ()
 testKillServer firstRequest RpcServerActions{..} = forever $ do
-  req <- getRequest
+  Just req <- getRequest
   modifyMVar_ firstRequest $ \isFirst -> do
     if isFirst
       then putResponse req
@@ -219,7 +219,7 @@ testKillAsync server = do
 
 testKillAsyncServer :: RpcServerActions String String String -> IO ()
 testKillAsyncServer RpcServerActions{..} = forever $ do
-  req <- getRequest
+  Just req <- getRequest
   -- Fork a thread which causes the server to crash 0.5 seconds after the request
   forkIO $ threadDelay 250000 >> throwSignal sigKILL
   putResponse req
@@ -238,7 +238,7 @@ testFaultyDecoder server =
 
 testFaultyDecoderServer :: RpcServerActions TypeWithFaultyDecoder () () -> IO ()
 testFaultyDecoderServer RpcServerActions{..} = forever $ do
-  TypeWithFaultyDecoder <- getRequest
+  Just TypeWithFaultyDecoder <- getRequest
   putResponse ()
 
 -- | Test crash during encoding
@@ -255,7 +255,7 @@ testFaultyEncoder server =
 
 testFaultyEncoderServer :: RpcServerActions () TypeWithFaultyEncoder TypeWithFaultyEncoder -> IO ()
 testFaultyEncoderServer RpcServerActions{..} = forever $ do
-  () <- getRequest
+  Just () <- getRequest
   putResponse TypeWithFaultyEncoder
 
 --------------------------------------------------------------------------------
@@ -269,7 +269,7 @@ testCrashMulti server =
 
 testCrashMultiServer :: RpcServerActions Int Int Int -> IO ()
 testCrashMultiServer RpcServerActions{..} = forever $ do
-  req <- getRequest
+  Just req <- getRequest
   forM_ [req, req - 1 .. 1] $ putProgress
   Ex.throwIO crash
 
@@ -280,7 +280,7 @@ testKillMulti server =
 
 testKillMultiServer :: RpcServerActions Int Int Int -> IO ()
 testKillMultiServer RpcServerActions{..} = forever $ do
-  req <- getRequest
+  Just req <- getRequest
   forM_ [req, req - 1 .. 1] $ putProgress
   throwSignal sigKILL
 
@@ -291,7 +291,7 @@ testKillAsyncMulti server =
 
 testKillAsyncMultiServer :: RpcServerActions Int Int Int -> IO ()
 testKillAsyncMultiServer RpcServerActions{..} = forever $ do
-  req <- getRequest
+  Just req <- getRequest
   forkIO $ threadDelay (250000 + (req - 1) * 50000) >> throwSignal sigKILL
   forM_ [req, req - 1 .. 1] $ \i -> threadDelay 50000 >> putProgress i
 
@@ -380,7 +380,7 @@ tests = [
       ]
   ]
   where
-    testRPC :: String -> (RpcServer req resp -> Assertion) -> Test
+    testRPC :: ToJSON req => String -> (RpcServer req resp -> Assertion) -> Test
     testRPC name testWith = testCase name $ do
       server <- forkTestServer name
       testWith server

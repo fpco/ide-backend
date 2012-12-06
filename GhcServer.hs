@@ -92,10 +92,14 @@ ghcServerEngine opts RpcServerActions{..} = do
  where
   dispatcher :: IORef Int -> GhcInitData -> Ghc ()
   dispatcher counterIORef ghcInitData = do
-    req <- liftIO $ getRequest
-    resp <- ghcServerHandler ghcInitData putProgress counterIORef req
-    liftIO $ putResponse resp
-    dispatcher counterIORef ghcInitData
+    mReq <- liftIO $ getRequest
+    case mReq of
+      Just req -> do
+        resp <- ghcServerHandler ghcInitData putProgress counterIORef req
+        liftIO $ putResponse resp
+        dispatcher counterIORef ghcInitData
+      Nothing ->
+        return () -- Terminate
 
 ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ())
                  -> IORef Int

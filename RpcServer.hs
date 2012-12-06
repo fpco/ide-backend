@@ -24,7 +24,6 @@ import System.IO
   , hSetBuffering
   , BufferMode(BlockBuffering, BlockBuffering)
   , hFlush
-  , hClose
   )
 import System.Process
   ( createProcess
@@ -45,9 +44,9 @@ import Data.Aeson
   )
 import Data.Aeson.TH (deriveJSON)
 import Control.Applicative ((<$>))
-import Control.Monad (forever, void)
+import Control.Monad (void)
 import qualified Control.Exception as Ex
-import Control.Concurrent (forkIO, killThread)
+import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar
   ( MVar
@@ -101,6 +100,7 @@ serverKilledException ex = ExternalException "Server killed" ex
 --------------------------------------------------------------------------------
 
 data Request  a = Request { _request :: a }
+                | RequestShutdown
 data Response a = FinalResponse        { _response :: a }
                 | IntermediateResponse { _response :: a }
 
@@ -134,10 +134,17 @@ rpcServer fds handler = do
 
 data RpcServerActions req prog resp
    = RpcServerActions {
-       getRequest   :: IO req,
+       getRequest   :: IO (Maybe req),
        putProgress  :: prog -> IO (),
        putResponse  :: resp -> IO ()
      }
+
+data RPCServerException =
+    NormalShutdown
+  | ExceptionReadingRequest  Ex.SomeException
+  | ExceptionWritingResponse Ex.SomeException
+  | ExceptionInHandler       Ex.SomeException
+  deriving Show
 
 -- | Start the RPC server
 rpcServer' :: (FromJSON req, ToJSON resp)
@@ -147,21 +154,58 @@ rpcServer' :: (FromJSON req, ToJSON resp)
            -> (RpcServerActions req resp resp -> IO ()) -- ^ The request server
            -> IO ()
 rpcServer' hin hout herr server = do
-  requests  <- newChan
-  responses <- newChan
-  exception <- newEmptyMVar :: IO (MVar Ex.SomeException)
+    requests  <- newChan
+    responses <- newChan
+    exception <- newEmptyMVar
 
-  setBinaryBlockBuffered [hin, hout, herr]
+    setBinaryBlockBuffered [hin, hout, herr]
 
-  let forkCatch p = forkIO $ Ex.catch p (putMVar exception)
+    let forkCatch f p = forkIO $ Ex.catch p (putMVar exception . f)
 
-  tid1 <- forkCatch $ readRequests hin requests
-  tid2 <- forkCatch $ writeResponses responses hout
-  tid3 <- forkCatch $ channelHandler requests responses server
+    tid1 <- forkCatch ExceptionReadingRequest $ do
+              readRequests hin requests
+              -- This thread terminates when the server is shutdown explicitly
+              putMVar exception NormalShutdown
+    tid2 <- forkCatch ExceptionWritingResponse $
+              writeResponses responses hout
+    tid3 <- forkCatch ExceptionInHandler $
+              channelHandler requests responses server
 
-  ex <- readMVar exception
-  hPutFlush herr (pack (show ex))
-  mapM_ killThread [tid1, tid2, tid3]
+    mEx <- readMVar exception
+    -- On a shutdown or an exception, we need to terminate three threads:
+    --
+    -- 1. the "reader" thread that reads the requests
+    -- 2. the "writer" thread that writes the responses
+    -- 3. the "server" thread with the user code translating requests to responses
+    --
+    -- We make an attempt to shut these down as nicely as possible
+    case mEx of
+      NormalShutdown -> do
+        {- reader -} -- already terminated
+        {- writer -} writeChan responses Nothing
+        {- server -} writeChan requests Nothing
+      ExceptionReadingRequest ex -> do
+                     tryShowException ex
+        {- reader -} -- already terminated
+        {- writer -} writeChan responses Nothing
+        {- server -} writeChan requests Nothing
+      ExceptionWritingResponse ex -> do
+                     tryShowException ex
+        {- reader -} -- we have no means of killing the reader thread nicely
+        {- writer -} -- already terminated
+        {- server -} writeChan requests Nothing
+      ExceptionInHandler ex -> do
+                     tryShowException ex
+        {- reader -} -- we have no means of killing the reader thread nicely
+        {- writer -} writeChan responses Nothing
+        {- server -} -- already terminated
+
+    threadDelay 100000 -- Give everybody a chance to termiante
+    mapM_ killThread [tid1, tid2, tid3]
+  where
+    -- We don't want to throw an exception showing the previous exception
+    tryShowException :: Ex.SomeException -> IO ()
+    tryShowException = hPutFlush herr . pack . show
 
 --------------------------------------------------------------------------------
 -- Client-side API                                                            --
@@ -354,20 +398,24 @@ rpcWithProgressCallback server req callback = rpcWithProgress server req handler
 -- This simply kills the remote process. If you want to shut down the remote
 -- process cleanly you must implement your own termination protocol before
 -- calling 'shutdown'.
-shutdown :: RpcServer req resp -> IO ()
+shutdown :: ToJSON req => RpcServer req resp -> IO ()
 shutdown server = withRpcServer server $ \_ -> do
   terminate server
   let ex = Ex.toException (userError "Manual shutdown")
   return (RpcStopped ex, ())
 
 -- | Force-terminate the external process
-terminate :: RpcServer req resp -> IO ()
+terminate :: forall req resp. ToJSON req => RpcServer req resp -> IO ()
 terminate server = do
-  ignoreIOExceptions $ hClose (rpcRequestW server)
-  void $ waitForProcess (rpcProc server)
+    ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode requestShutdown)
+    void $ waitForProcess (rpcProc server)
+  where
+    requestShutdown :: Request req
+    requestShutdown = RequestShutdown
 
 -- | Like modifyMVar, but terminate the server on exceptions
-withRpcServer :: RpcServer req resp
+withRpcServer :: ToJSON req
+              => RpcServer req resp
               -> (RpcState req resp -> IO (RpcState req resp, a))
               -> IO a
 withRpcServer server io =
@@ -390,14 +438,20 @@ withRpcServer server io =
 --------------------------------------------------------------------------------
 
 -- | Decode messages from a handle and forward them to a channel
-readRequests :: forall req. FromJSON req => Handle -> Chan (Request req) -> IO ()
+readRequests :: forall req. FromJSON req => Handle -> Chan req -> IO ()
 readRequests h ch = hGetContents h >>= go
   where
     go :: ByteString -> IO ()
     go contents =
       case parseJSON contents of
-        Right (contents', req) -> writeChan ch req >> go contents'
-        Left err               -> Ex.throwIO (userError err)
+        Right (contents', req) ->
+          case req of
+            Request req' ->
+              writeChan ch req' >> go contents'
+            RequestShutdown ->
+              return ()
+        Left err ->
+          Ex.throwIO (userError err)
 
     parseJSON :: FromJSON a => ByteString -> Either String (ByteString, a)
     parseJSON bs =
@@ -409,20 +463,29 @@ readRequests h ch = hGetContents h >>= go
             Error err   -> Left err
 
 -- | Encode messages from a channel and forward them on a handle
-writeResponses :: ToJSON resp => Chan (Response resp) -> Handle -> IO ()
-writeResponses ch h = forever $ readChan ch >>= hPutFlush h . encode
+writeResponses :: ToJSON resp => Chan (Maybe (Response resp)) -> Handle -> IO ()
+writeResponses ch h = go
+  where
+    go = do
+      mResp <- readChan ch
+      case mResp of
+        Just resp -> do
+          hPutFlush h (encode resp)
+          go
+        Nothing ->
+          return ()
 
 -- | Run a handler repeatedly, given input and output channels
-channelHandler :: Chan (Request req)
-               -> Chan (Response resp)
+channelHandler :: Chan (Maybe req)
+               -> Chan (Maybe (Response resp))
                -> (RpcServerActions req resp resp -> IO ())
                -> IO ()
 channelHandler inp outp server =
     server RpcServerActions {
-      getRequest   = _request <$> readChan inp,
-      putProgress  = writeChan outp . IntermediateResponse,
-      putResponse  = writeChan outp . FinalResponse
-    }
+        getRequest   = readChan inp
+      , putProgress  = writeChan outp . Just . IntermediateResponse
+      , putResponse  = writeChan outp . Just . FinalResponse
+      }
 
 -- | Set all the specified handles to binary mode and block buffering
 setBinaryBlockBuffered :: [Handle] -> IO ()
