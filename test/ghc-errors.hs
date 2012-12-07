@@ -69,7 +69,7 @@ multipleTests =
         let update = loadModule m "a = unknownX"
         updateSessionD session update
         msgs <- getSourceErrors session
-        assertBool "Type error lost" $ length msgs >= 1
+        assertSomeErrors msgs
     )
   , ("Overwrite with module name not matching file name"
     , \session -> do
@@ -97,9 +97,7 @@ multipleTests =
             update2 = mconcat $ map upd lm
         updateSessionD session update2
         msgs4 <- getSourceErrors session
-        assertBool ("Unexpected errors: "
-                    ++ List.intercalate "\n" (map formatSourceError msgs4))
-          $ null msgs4
+        assertNoErrors msgs4
         -- Overwrite again with the error.
         updateSessionD session update1
         msgs5 <- getSourceErrors session
@@ -198,13 +196,6 @@ multipleTests =
       )
   ]
 
-{-
-  s10 <- initSession sessionConfig
-  let punOpts = opts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
-      optionsUpdate = originalUpdate
-                      <> updateModule (ChangeOptions $ Just punOpts)
--}
-
 syntheticTests :: [(String, Assertion)]
 syntheticTests =
   [ ( "Maintain list of compiled modules"
@@ -234,9 +225,7 @@ syntheticTests =
         let update3 = loadModule (ModuleName "M") "a = 3"
         updateSessionD s3 update3
         msgs3 <- getSourceErrors s3
-        assertBool ("Unexpected errors: "
-                    ++ List.intercalate "\n" (map formatSourceError msgs3))
-          $ null msgs3
+        assertNoErrors msgs3
         shutdownSession s5
         shutdownSession s2
         shutdownSession s4
@@ -258,6 +247,24 @@ syntheticTests =
         msgs <- getSourceErrors session
         assertOneError msgs
     )
+  , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package mtl"
+                        , "-package base"
+                        , "-package array"
+                        , "-package bytestring"
+                        , "-package containers"
+                        , "-package binary"
+                        ]
+      in testSingle packageOpts "test/Puns" $ \session -> do
+        msgs <- getSourceErrors session
+        assertSomeErrors msgs
+        let punOpts = packageOpts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
+            update2 = updateModule (ChangeOptions $ Just punOpts)
+        updateSessionD session update2
+        msgs2 <- getSourceErrors session
+        assertNoErrors msgs2
+    )
   ]
 
 defOpts :: [String]
@@ -272,16 +279,6 @@ projects =
     , "test/Cabal.Distribution.PackageDescription"
     , defOpts
     )
-  , ("A file requiring -XNamedFieldPuns"
-    , "test/Puns"
-    , [ "-hide-all-packages"
-      , "-package mtl"
-      , "-package base"
-      , "-package array"
-      , "-package bytestring"
-      , "-package containers"
-      , "-package binary"
-      ])
   , ("A single file with a code to run in parallel"
     , "test/MainModule"
     , [ "-hide-all-packages"
@@ -345,9 +342,19 @@ loadModule m contents =
   in updateModule . ModulePut m . pack
      $ "module " ++ name ++ " where\n" ++ contents
 
+assertNoErrors :: [SourceError] -> Assertion
+assertNoErrors msgs = do
+  assertBool ("Unexpected errors: "
+            ++ List.intercalate "\n" (map formatSourceError msgs))
+  $ null msgs
+
+assertSomeErrors :: [SourceError] -> Assertion
+assertSomeErrors msgs = do
+  assertBool "Type error lost" $ length msgs >= 1
+
 assertOneError :: [SourceError] -> Assertion
 assertOneError msgs = do
-  assertBool "Type error lost" $ length msgs >= 1
+  assertSomeErrors msgs
   assertBool ("Too many type errors: "
               ++ List.intercalate "\n" (map formatSourceError msgs))
     $ length msgs <= 1
