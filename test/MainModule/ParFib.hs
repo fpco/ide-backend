@@ -51,11 +51,10 @@ secDiff (TOD secs1 psecs1) (TOD secs2 psecs2)
 
 main :: IO String
 main
-  = do putStrLn "ParFib"
-       t0 <- getClockTime
+  = do t0 <- getClockTime
        pseq result (return ())
        t1 <- getClockTime
-       putStrLn ("fib = " ++ show result)
+       putStrLn $ "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = " ++ show result
 --       putStrLn ("Time: " ++ show (secDiff t0 t1))
        return $ show result
 

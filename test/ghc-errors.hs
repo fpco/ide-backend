@@ -130,14 +130,14 @@ multipleTests =
             Just (Right _ex)   -> length msgs >= 1
             Nothing            -> length msgs >= 1
       )
-    , ("Run manually corrected code; don't fail at all"
+    , ("Run automatically corrected code; don't fail at all"
       , \session -> do
         (_, lm) <- getModules session
         let upd m = loadModule m "x = 1"
             update =
               updateModule (ModulePut
                               (ModuleName "Main")
-                              (pack "module Main where\nmain = return ()"))
+                              (pack "module Main where\nmain = print \"running automatically generated trivial code\""))
               <> mconcat (map upd lm)
               <> updateModule (ChangeCodeGeneration True)
         updateSessionD session update
