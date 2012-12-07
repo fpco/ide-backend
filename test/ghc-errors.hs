@@ -7,8 +7,6 @@ import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
 import Data.Monoid ((<>), mconcat, mempty)
 import Data.ByteString.Lazy.Char8 (pack)
-import System.IO (hFlush, stdout, stderr)
-import Data.Maybe (isJust)
 import Control.Exception (bracket)
 
 import Test.Framework (Test, defaultMain, testGroup)
@@ -61,8 +59,8 @@ testSingle opts originalSourcesDir check =
 -- E.g., check that the values of PCounter do not exceeed the number of files.
 -- Also, check ModuleDelete and all the DataFileChange constructors,
 -- getSourceModule an getDataFile.
-featureTests :: [(String, IdeSession -> Assertion)]
-featureTests =
+multipleTests :: [(String, IdeSession -> Assertion)]
+multipleTests =
   [ ("Just typecheck", \_ -> return ())
   , ("Overwrite with error"
     , \session -> do
@@ -105,10 +103,7 @@ featureTests =
         -- Overwrite again with the error.
         updateSessionD session update1
         msgs5 <- getSourceErrors session
-        assertBool "Type error lost" $ length msgs5 >= 1
-        assertBool ("Too many type errors: "
-                    ++ List.intercalate "\n" (map formatSourceError msgs5))
-          $ length msgs5 <= 1
+        assertOneError msgs5
         assertRaises "runStmt session Main main"
           (== userError "Cannot run before the code is generated.")
           (runStmt session "Main" "main")
@@ -210,30 +205,31 @@ featureTests =
                       <> updateModule (ChangeOptions $ Just punOpts)
 -}
 
--- | Test that the list of successfully compiled modules is reported correctly
-testListCompiledModules :: Assertion
-testListCompiledModules = testSingle defOpts "." $ \session -> do
-  let m = ModuleName "A"
-  updateSessionD session (loadModule m "")
-  assertEqual "" [m] =<< getLoadedModules session
-
-testNestedSession :: Assertion
-testNestedSession = testSingle defOpts "test/ABnoError" $ \session -> do
+syntheticTests :: [(String, Assertion)]
+syntheticTests =
+  [ ( "Maintain list of compiled modules"
+    , testSingle defOpts "." $ \session -> do
+        let m = ModuleName "A"
+        updateSessionD session (loadModule m "")
+        assertEqual "" [m] =<< getLoadedModules session
+    )
+  , ( "Permit a session within a session and duplicated shutdownSession"
+    , testSingle defOpts "test/ABnoError" $ \session -> do
         let config = getSessionConfig session
             tweakConfig :: Int -> SessionConfig -> IO SessionConfig
-            tweakConfig n config@SessionConfig{configSourcesDir} = do
+            tweakConfig n cfg@SessionConfig{configSourcesDir} = do
               let newDir = configSourcesDir </> "new" ++ show n
               createDirectory newDir
-              return config { configSourcesDir = newDir
-                            , configWorkingDir = newDir
-                            , configDataDir = newDir }
+              return cfg { configSourcesDir = newDir
+                         , configWorkingDir = newDir
+                         , configDataDir = newDir }
         s2 <- initSession =<< tweakConfig 2 config
         s3 <- initSession =<< tweakConfig 3 config
         s4 <- initSession =<< tweakConfig 4 config
         let update2 = loadModule (ModuleName "M") "a = unknownX"
         updateSessionD s2 update2
         msgs2 <- getSourceErrors s2
-        assertBool "Type error lost" $ length msgs2 >= 1
+        assertOneError msgs2
         s5 <- initSession =<< tweakConfig 5 config
         let update3 = loadModule (ModuleName "M") "a = 3"
         updateSessionD s3 update3
@@ -251,6 +247,18 @@ testNestedSession = testSingle defOpts "test/ABnoError" $ \session -> do
         shutdownSession session
         shutdownSession session
         shutdownSession session
+    )
+  , ( "Compile a project: A depends on B, error in A"
+    , testSingle defOpts "test/AerrorB" $ \session -> do
+        msgs <- getSourceErrors session
+        assertOneError msgs
+    )
+  , ( "Compile a project: A depends on B, error in B"
+    , testSingle defOpts "test/ABerror" $ \session -> do
+        msgs <- getSourceErrors session
+        assertOneError msgs
+    )
+  ]
 
 defOpts :: [String]
 defOpts = [ "-no-user-package-conf" ]
@@ -259,8 +267,6 @@ defOpts = [ "-no-user-package-conf" ]
 projects :: [(String, FilePath, [String])]
 projects =
   [ ("A depends on B, no errors", "test/ABnoError", defOpts)
-  , ("A depends on B, error in A", "test/AerrorB", defOpts)
-  , ("A depends on B, error in B", "test/ABerror", defOpts)
   , ("Our own code, package 'ghc' missing", ".", [])
   , ( "A subdirectory of Cabal code"
     , "test/Cabal.Distribution.PackageDescription"
@@ -289,18 +295,14 @@ projects =
 tests :: [Test]
 tests =
   let groupProject (name, path, opts) =
-        testGroup name $ map (caseFeature path opts) featureTests
+        testGroup name $ map (caseFeature path opts) multipleTests
       caseFeature originalSourcesDir opts (featureName, check) =
         testCase featureName
         $ testSingle opts originalSourcesDir check
   in [ testGroup "Full integration tests on multiple project"
        $ map groupProject projects
      , testGroup "Synthetic integration tests"
-         [ testCase "Maintain list of compiled modules" testListCompiledModules
-         , testCase
-             "Permit a session within a session and duplicated shutdownSession"
-             testNestedSession
-         ]
+       $ map (uncurry testCase) syntheticTests
      ]
 
 main :: IO ()
@@ -342,3 +344,10 @@ loadModule m contents =
       name = dropExtension n
   in updateModule . ModulePut m . pack
      $ "module " ++ name ++ " where\n" ++ contents
+
+assertOneError :: [SourceError] -> Assertion
+assertOneError msgs = do
+  assertBool "Type error lost" $ length msgs >= 1
+  assertBool ("Too many type errors: "
+              ++ List.intercalate "\n" (map formatSourceError msgs))
+    $ length msgs <= 1
