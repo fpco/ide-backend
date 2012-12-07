@@ -343,10 +343,9 @@ loadModule m contents =
      $ "module " ++ name ++ " where\n" ++ contents
 
 assertNoErrors :: [SourceError] -> Assertion
-assertNoErrors msgs = do
-  assertBool ("Unexpected errors: "
-            ++ List.intercalate "\n" (map formatSourceError msgs))
-  $ null msgs
+assertNoErrors msgs =
+  assertBool ("Unexpected errors: " ++ show3errors msgs)
+    $ null msgs
 
 assertSomeErrors :: [SourceError] -> Assertion
 assertSomeErrors msgs = do
@@ -355,6 +354,12 @@ assertSomeErrors msgs = do
 assertOneError :: [SourceError] -> Assertion
 assertOneError msgs = do
   assertSomeErrors msgs
-  assertBool ("Too many type errors: "
-              ++ List.intercalate "\n" (map formatSourceError msgs))
+  assertBool ("Too many type errors: " ++ show3errors msgs)
     $ length msgs <= 1
+
+show3errors :: [SourceError] -> String
+show3errors msgs =
+  let shown = List.intercalate "\n" (map formatSourceError $ take 3 $ msgs)
+      more | length msgs > 3 = "\n... and more ..."
+           | otherwise       = ""
+  in shown ++ more
