@@ -8,6 +8,7 @@ import qualified Data.List as List
 import Data.Monoid ((<>), mconcat, mempty)
 import Data.ByteString.Lazy.Char8 (pack)
 import Control.Exception (bracket)
+import Data.Char (toUpper)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -293,9 +294,12 @@ projects =
 tests :: [Test]
 tests =
   let groupProject ((featureName, check), k) =
-        testGroup featureName $ map (caseFeature check k) projects
-      caseFeature check k (projectName, originalSourcesDir, opts) =
-        testCase (projectName ++ " (" ++ show k ++ ")") $
+        testGroup featureName $ map (caseFeature featureName check k) projects
+      caseFeature featureName check k
+                  (projectName, originalSourcesDir, opts) = do
+        let caseName = projectName ++ " (" ++ show k ++ ")"
+        testCase caseName $ do
+          debug dVerbosity $ featureName ++ " / " ++ caseName ++ ":"
           withConfiguredSession opts $ \session -> do
             loadModulesFrom session originalSourcesDir
             check session
@@ -341,9 +345,16 @@ getModules sess = do
 loadModule :: ModuleName -> String -> IdeSessionUpdate
 loadModule m contents =
   let ModuleName n = m
-      name = dropExtension n
+      -- Is there a ready function for that in GHC API?
+      mFixed = capitalize $ map (\c -> if c == '-' then '_' else c) n
+      name = dropExtension mFixed
   in updateModule . ModulePut m . pack
      $ "module " ++ name ++ " where\n" ++ contents
+
+capitalize :: String -> String
+capitalize s = case s of
+  []       -> []
+  c : rest -> toUpper c : rest
 
 assertNoErrors :: [SourceError] -> Assertion
 assertNoErrors msgs =
