@@ -56,7 +56,7 @@ main
        pseq result (return ())
        t1 <- getClockTime
        putStrLn ("fib = " ++ show result)
-       putStrLn ("Time: " ++ show (secDiff t0 t1))
+--       putStrLn ("Time: " ++ show (secDiff t0 t1))
        return $ show result
 
 -------------------------------------------------------------------------------
