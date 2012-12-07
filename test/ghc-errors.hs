@@ -22,35 +22,47 @@ import TestTools
 -- Tests using various functions of the IdeSession API
 -- and a variety of small test Haskell projects.
 
--- Test a single sequence of API calls.
-testSingle :: [String] -> FilePath -> (IdeSession -> IO ()) -> Assertion
-testSingle opts originalSourcesDir check =
-  withTemporaryDirectory "ide-backend-test" $ \ configSourcesDir -> do
-    debug dVerbosity $ "\nCopying files from: " ++ originalSourcesDir
-                       ++ " to: " ++ configSourcesDir
-    -- Init session.
+-- | Update the session with all modules the given directory
+loadModulesFrom :: IdeSession -> FilePath -> IO ()
+loadModulesFrom session originalSourcesDir = do
+  debug dVerbosity $ "\nCopying files from: " ++ originalSourcesDir
+                     ++ " to: " ++ configSourcesDir (getSessionConfig session)
+  -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
+  -- using the IdeSession's update mechanism.
+  cnts <- getDirectoryContents originalSourcesDir
+  let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
+      -- HACK: here we fake module names, guessing them from file names.
+      originalModules =
+        map (\ f -> (ModuleName f, f)) originalFiles
+      upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
+      -- Let's also disable ChangeCodeGeneration, to keep the test stable
+      -- in case the default value of CodeGeneration changes.
+      originalUpdate = updateModule (ChangeCodeGeneration False)
+                       <> (mconcat $ map upd originalModules)
+  updateSessionD session originalUpdate
+
+-- | Run the specified action with a new IDE session, configured to use a
+-- temporary directory
+withConfiguredSession :: [String] -> (IdeSession -> IO a) -> IO a
+withConfiguredSession opts io =
+  withTemporaryDirectory "ide-backend-test" $ \configSourcesDir -> do
     let sessionConfig = SessionConfig{ configSourcesDir
                                      , configWorkingDir = configSourcesDir
                                      , configDataDir    = configSourcesDir
                                      , configTempDir    = "."
                                      , configStaticOpts = opts
                                      }
-    bracket (initSession sessionConfig) shutdownSession $ \session -> do
-      -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
-      -- using the IdeSession's update mechanism.
-      cnts <- getDirectoryContents originalSourcesDir
-      let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
-          -- HACK: here we fake module names, guessing them from file names.
-          originalModules =
-            map (\ f -> (ModuleName f, f)) originalFiles
-          upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
-          -- Let's also disable ChangeCodeGeneration, to keep the test stable
-          -- in case the default value of CodeGeneration changes.
-          originalUpdate = updateModule (ChangeCodeGeneration False)
-                           <> (mconcat $ map upd originalModules)
-      updateSessionD session originalUpdate
-      -- Perform some API calls and check the results.
-      check session
+    withSession sessionConfig io
+
+-- | Run the specified action with a new IDE session
+withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
+withSession config = bracket (initSession config) shutdownSession
+
+-- | Like 'withSession', but with a monadic configuration
+withSession' :: IO SessionConfig -> (IdeSession -> IO a) -> IO a
+withSession' config' io = do
+  config <- config'
+  withSession config io
 
 -- Set of api calls and checks to perform on each project.
 --
@@ -136,76 +148,34 @@ multipleTests =
             Just (Right _ex)   -> False
             Nothing            -> False
       )
-   , ("Reject initSession with a non-empty source directory"
+    , ("Make sure deleting modules removes them from the directory"
       , \session -> do
-        let config = getSessionConfig session
-        shutdownSession session
-        assertRaises "initSession config"
-          (== userError
-            ("Directory " ++ configSourcesDir config ++ " is not empty."))
-          (initSession config)
-      )
-    , ("Reject updateSession without initSession"
-      , \session -> do
-        shutdownSession session
-        assertRaises "updateSessionD session mempty"
-          (== userError "Session already shut down.")
-          (updateSessionD session mempty)
-      )
-    , ("Reject getSourceErrors without initSession"
-      , \session -> do
-        shutdownSession session
-        assertRaises "getSourceErrors session"
-          (== userError "Session already shut down.")
-          (getSourceErrors session)
-      )
-    , ("Reject getSourceErrors without updateSession"
-      , \session -> do
-        shutdownSession session
-        -- Remove file from the source directory to satisfy the precondition
-        -- of initSession.
-        let config = getSessionConfig session
-        (_, lm) <- getModules session
-        let getFile (ModuleName f) = configSourcesDir config </> f
-        mapM_ removeFile $ map getFile lm
-        s2 <- initSession config
-        assertRaises "getSourceErrors session"
-          (== userError "This session state does not admit queries.")
-          (getSourceErrors s2)
-      )
-    , ("Reject runStmt without initSession"
-      , \session -> do
-        shutdownSession session
-        assertRaises "runStmt session Main main"
-          (== userError "Session already shut down.")
-          (runStmt session "Main" "main")
-      )
-    , ("Reject runStmt without updateSession"
-      , \session -> do
-        -- Remove file from the source directory to satisfy the precondition
-        -- of initSession.
         (_, lm) <- getModules session
         let update = mconcat $ map (updateModule . ModuleDelete) lm
         updateSessionD session update
         shutdownSession session
+        -- Start new session in the same directory; should not throw an error
         let config = getSessionConfig session
-        s2 <- initSession config
-        assertRaises "runStmt session Main main"
-          (== userError "Cannot run before the code is generated.")
-          (runStmt s2 "Main" "main")
+        withSession config $ \_ -> return ()
       )
   ]
 
 syntheticTests :: [(String, Assertion)]
 syntheticTests =
   [ ( "Maintain list of compiled modules"
-    , testSingle defOpts "." $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let m = ModuleName "A"
         updateSessionD session (loadModule m "")
         assertEqual "" [m] =<< getLoadedModules session
     )
+  , ( "Duplicate shutdown"
+    , withConfiguredSession defOpts $ \session ->
+        -- withConfiguredSession will shutdown the session as well
+        shutdownSession session
+    )
   , ( "Permit a session within a session and duplicated shutdownSession"
-    , testSingle defOpts "test/ABnoError" $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
+        loadModulesFrom session "test/ABnoError"
         let config = getSessionConfig session
             tweakConfig :: Int -> SessionConfig -> IO SessionConfig
             tweakConfig n cfg@SessionConfig{configSourcesDir} = do
@@ -214,36 +184,29 @@ syntheticTests =
               return cfg { configSourcesDir = newDir
                          , configWorkingDir = newDir
                          , configDataDir = newDir }
-        s2 <- initSession =<< tweakConfig 2 config
-        s3 <- initSession =<< tweakConfig 3 config
-        s4 <- initSession =<< tweakConfig 4 config
-        let update2 = loadModule (ModuleName "M") "a = unknownX"
-        updateSessionD s2 update2
-        msgs2 <- getSourceErrors s2
-        assertOneError msgs2
-        s5 <- initSession =<< tweakConfig 5 config
-        let update3 = loadModule (ModuleName "M") "a = 3"
-        updateSessionD s3 update3
-        msgs3 <- getSourceErrors s3
-        assertNoErrors msgs3
-        shutdownSession s5
-        shutdownSession s2
-        shutdownSession s4
-        shutdownSession s3
-        shutdownSession s2
-        shutdownSession s2
-        shutdownSession session
-        shutdownSession session
-        shutdownSession session
-        shutdownSession session
+        withSession' (tweakConfig 2 config) $ \s2 -> do
+         withSession' (tweakConfig 3 config) $ \s3 -> do
+          withSession' (tweakConfig 4 config) $ \_s4 -> do
+           let update2 = loadModule (ModuleName "M") "a = unknownX"
+           updateSessionD s2 update2
+           msgs2 <- getSourceErrors s2
+           assertOneError msgs2
+           withSession' (tweakConfig 5 config) $ \s5 -> do
+            let update3 = loadModule (ModuleName "M") "a = 3"
+            updateSessionD s3 update3
+            msgs3 <- getSourceErrors s3
+            assertNoErrors msgs3
+            shutdownSession s5 -- <-- duplicate "nested" shutdown
     )
   , ( "Compile a project: A depends on B, error in A"
-    , testSingle defOpts "test/AerrorB" $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
+        loadModulesFrom session "test/AerrorB"
         msgs <- getSourceErrors session
         assertOneError msgs
     )
   , ( "Compile a project: A depends on B, error in B"
-    , testSingle defOpts "test/ABerror" $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
+        loadModulesFrom session "test/ABerror"
         msgs <- getSourceErrors session
         assertOneError msgs
     )
@@ -256,7 +219,8 @@ syntheticTests =
                         , "-package containers"
                         , "-package binary"
                         ]
-      in testSingle packageOpts "test/Puns" $ \session -> do
+      in withConfiguredSession packageOpts $ \session -> do
+        loadModulesFrom session "test/Puns"
         msgs <- getSourceErrors session
         assertSomeErrors msgs
         let punOpts = packageOpts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
@@ -265,6 +229,43 @@ syntheticTests =
         msgs2 <- getSourceErrors session
         assertNoErrors msgs2
     )
+  , ("Reject getSourceErrors without updateSession"
+    , withConfiguredSession defOpts $ \session ->
+        assertRaises "getSourceErrors session"
+          (== userError "This session state does not admit queries.")
+          (getSourceErrors session)
+    )
+  , ("Reject initSession with a non-empty source directory"
+    , withConfiguredSession defOpts $ \session -> do
+        loadModulesFrom session "test/ABnoError"
+        shutdownSession session
+        let config = getSessionConfig session
+        assertRaises "initSession config"
+          (== userError
+            ("Directory " ++ configSourcesDir config ++ " is not empty."))
+          (initSession config)
+    )
+   , ("Reject updateSession after shutdownSession"
+     , withConfiguredSession defOpts $ \session -> do
+         shutdownSession session
+         assertRaises "updateSessionD session mempty"
+           (== userError "Session already shut down.")
+           (updateSessionD session mempty)
+     )
+   , ("Reject getSourceErrors after shutdownSession"
+     , withConfiguredSession defOpts $ \session -> do
+         shutdownSession session
+         assertRaises "getSourceErrors session"
+           (== userError "Session already shut down.")
+           (getSourceErrors session)
+     )
+   , ("Reject runStmt after shutdownSession"
+     , withConfiguredSession defOpts $ \session -> do
+         shutdownSession session
+         assertRaises "runStmt session Main main"
+           (== userError "Session already shut down.")
+           (runStmt session "Main" "main")
+     )
   ]
 
 defOpts :: [String]
@@ -294,8 +295,10 @@ tests =
   let groupProject (name, path, opts) =
         testGroup name $ map (caseFeature path opts) multipleTests
       caseFeature originalSourcesDir opts (featureName, check) =
-        testCase featureName
-        $ testSingle opts originalSourcesDir check
+        testCase featureName $
+          withConfiguredSession opts $ \session -> do
+            loadModulesFrom session originalSourcesDir
+            check session
   in [ testGroup "Full integration tests on multiple project"
        $ map groupProject projects
      , testGroup "Synthetic integration tests"
