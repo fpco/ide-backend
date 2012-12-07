@@ -59,6 +59,8 @@ testSingle opts originalSourcesDir check =
 -- TODO: we need much more tests to recover the functionality of the old,
 -- undreadable set, and then we need to much more to test all API functions.
 -- E.g., check that the values of PCounter do not exceeed the number of files.
+-- Also, check ModuleDelete and all the DataFileChange constructors,
+-- getSourceModule an getDataFile.
 featureTests :: [(String, IdeSession -> Assertion)]
 featureTests =
   [ ("Just typecheck", \_ -> return ())
@@ -97,7 +99,7 @@ featureTests =
             update2 = mconcat $ map upd lm
         updateSessionD session update2
         msgs4 <- getSourceErrors session
-        assertBool ("Unexpected type errors: "
+        assertBool ("Unexpected errors: "
                     ++ List.intercalate "\n" (map formatSourceError msgs4))
           $ null msgs4
         -- Overwrite again with the error.
@@ -108,9 +110,9 @@ featureTests =
                     ++ List.intercalate "\n" (map formatSourceError msgs5))
           $ length msgs5 <= 1
         assertRaises "runStmt session Main main"
-          (== userError "Can't run before the code is generated. Set ChangeCodeGeneration.")
+          (== userError "Cannot run before the code is generated.")
           (runStmt session "Main" "main")
-    )
+      )
     , ("Run the sample code; don't fail without an explanation"
       , \session -> do
         let update = updateModule (ChangeCodeGeneration True)
@@ -121,7 +123,7 @@ featureTests =
             Just (Left _ident) -> True
             Just (Right _ex)   -> length msgs >= 1
             Nothing            -> length msgs >= 1
-    )
+      )
     , ("Run manually corrected code; don't fail at all"
       , \session -> do
         (_, lm) <- getModules session
@@ -140,40 +142,72 @@ featureTests =
             Just (Left _ident) -> True
             Just (Right _ex)   -> False
             Nothing            -> False
-    )
+      )
+   , ("Reject initSession with a non-empty source directory"
+      , \session -> do
+        let config = getSessionConfig session
+        shutdownSession session
+        assertRaises "initSession config"
+          (== userError
+            ("Directory " ++ configSourcesDir config ++ " is not empty."))
+          (initSession config)
+      )
+    , ("Reject updateSession without initSession"
+      , \session -> do
+        shutdownSession session
+        assertRaises "updateSessionD session mempty"
+          (== userError "Session already shut down.")
+          (updateSessionD session mempty)
+      )
+    , ("Reject getSourceErrors without initSession"
+      , \session -> do
+        shutdownSession session
+        assertRaises "getSourceErrors session"
+          (== userError "Session already shut down.")
+          (getSourceErrors session)
+      )
+    , ("Reject getSourceErrors without updateSession"
+      , \session -> do
+        shutdownSession session
+        -- Remove file from the source directory to satisfy the precondition
+        -- of initSession.
+        let config = getSessionConfig session
+        (_, lm) <- getModules session
+        let getFile (ModuleName f) = configSourcesDir config </> f
+        mapM_ removeFile $ map getFile lm
+        s2 <- initSession config
+        assertRaises "getSourceErrors session"
+          (== userError "This session state does not admit queries.")
+          (getSourceErrors s2)
+      )
+    , ("Reject runStmt without initSession"
+      , \session -> do
+        shutdownSession session
+        assertRaises "runStmt session Main main"
+          (== userError "Session already shut down.")
+          (runStmt session "Main" "main")
+      )
+    , ("Reject runStmt without updateSession"
+      , \session -> do
+        -- Remove file from the source directory to satisfy the precondition
+        -- of initSession.
+        (_, lm) <- getModules session
+        let update = mconcat $ map (updateModule . ModuleDelete) lm
+        updateSessionD session update
+        shutdownSession session
+        let config = getSessionConfig session
+        s2 <- initSession config
+        assertRaises "runStmt session Main main"
+          (== userError "Cannot run before the code is generated.")
+          (runStmt s2 "Main" "main")
+      )
   ]
 
 {-
-  assertRaises "updateSession s2 update1 (progressWaitConsume displayCounter)"
-               (== userError "Invalid session token 2 /= 5")
-               (updateSession s2 update1 (progressWaitConsume displayCounter))
-  shutdownSession s6
-  assertRaises "initSession sessionConfig"
-               (== userError
-                 ("Directory " ++ configSourcesDir ++ " is not empty"))
-               (initSession sessionConfig)
-  -- Remove file from the source directory to satisfy the precondition
-  -- of initSession.
-  mapM_ removeFile $ map (configSourcesDir </>) originalFiles
-  -- Init another session. It strarts a new process with GHC,
-  -- so the old state does not interfere.
-  s9 <- initSession sessionConfig
-  assertRaises "getSourceErrors s9"
-               (== userError "This session state does not admit queries.")
-               (getSourceErrors s9)
-  shutdownSession s9
   s10 <- initSession sessionConfig
   let punOpts = opts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
       optionsUpdate = originalUpdate
                       <> updateModule (ChangeOptions $ Just punOpts)
-  s11 <- updateSession s10 optionsUpdate (progressWaitConsume displayCounter)
-  msgs11 <- getSourceErrors s11
-  putFlush $ "Error 11:\n" ++ List.intercalate "\n\n"
-    (map formatSourceError msgs11) ++ "\n"
-  assertRaises "shutdownSession s11"
-               (== userError "Invalid session token 1 /= 2")
-               (shutdownSession s11)
-  shutdownSession s12
 -}
 
 -- | Test that the list of successfully compiled modules is reported correctly
@@ -182,6 +216,41 @@ testListCompiledModules = testSingle defOpts "." $ \session -> do
   let m = ModuleName "A"
   updateSessionD session (loadModule m "")
   assertEqual "" [m] =<< getLoadedModules session
+
+testNestedSession :: Assertion
+testNestedSession = testSingle defOpts "test/ABnoError" $ \session -> do
+        let config = getSessionConfig session
+            tweakConfig :: Int -> SessionConfig -> IO SessionConfig
+            tweakConfig n config@SessionConfig{configSourcesDir} = do
+              let newDir = configSourcesDir </> "new" ++ show n
+              createDirectory newDir
+              return config { configSourcesDir = newDir
+                            , configWorkingDir = newDir
+                            , configDataDir = newDir }
+        s2 <- initSession =<< tweakConfig 2 config
+        s3 <- initSession =<< tweakConfig 3 config
+        s4 <- initSession =<< tweakConfig 4 config
+        let update2 = loadModule (ModuleName "M") "a = unknownX"
+        updateSessionD s2 update2
+        msgs2 <- getSourceErrors s2
+        assertBool "Type error lost" $ length msgs2 >= 1
+        s5 <- initSession =<< tweakConfig 5 config
+        let update3 = loadModule (ModuleName "M") "a = 3"
+        updateSessionD s3 update3
+        msgs3 <- getSourceErrors s3
+        assertBool ("Unexpected errors: "
+                    ++ List.intercalate "\n" (map formatSourceError msgs3))
+          $ null msgs3
+        shutdownSession s5
+        shutdownSession s2
+        shutdownSession s4
+        shutdownSession s3
+        shutdownSession s2
+        shutdownSession s2
+        shutdownSession session
+        shutdownSession session
+        shutdownSession session
+        shutdownSession session
 
 defOpts :: [String]
 defOpts = [ "-no-user-package-conf" ]
@@ -228,6 +297,9 @@ tests =
        $ map groupProject projects
      , testGroup "Synthetic integration tests"
          [ testCase "Maintain list of compiled modules" testListCompiledModules
+         , testCase
+             "Permit a session within a session and duplicated shutdownSession"
+             testNestedSession
          ]
      ]
 
