@@ -292,15 +292,15 @@ projects =
 -- Driver
 tests :: [Test]
 tests =
-  let groupProject (featureName, check) =
-        testGroup featureName $ map (caseFeature check) projects
-      caseFeature check (projectName, originalSourcesDir, opts) =
-        testCase projectName $
+  let groupProject ((featureName, check), k) =
+        testGroup featureName $ map (caseFeature check k) projects
+      caseFeature check k (projectName, originalSourcesDir, opts) =
+        testCase (projectName ++ " (" ++ show k ++ ")") $
           withConfiguredSession opts $ \session -> do
             loadModulesFrom session originalSourcesDir
             check session
   in [ testGroup "Full integration tests on multiple projects"
-       $ map groupProject multipleTests
+       $ map groupProject $ zip multipleTests [1 :: Int ..]
      , testGroup "Synthetic integration tests"
        $ map (uncurry testCase) syntheticTests
      ]
