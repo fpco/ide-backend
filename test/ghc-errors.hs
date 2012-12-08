@@ -40,7 +40,7 @@ loadModulesFrom session originalSourcesDir = do
       -- in case the default value of CodeGeneration changes.
       originalUpdate = updateModule (ChangeCodeGeneration False)
                        <> (mconcat $ map upd originalModules)
-  updateSessionD session originalUpdate
+  updateSessionD session originalUpdate (length originalFiles)
 
 -- | Run the specified action with a new IDE session, configured to use a
 -- temporary directory
@@ -80,7 +80,7 @@ multipleTests =
         -- Overwrite one of the copied files.
         (m, _) <- getModules session
         let update = loadModule m "a = unknownX"
-        updateSessionD session update
+        updateSessionD session update 1  -- at most 1 recompiled
         msgs <- getSourceErrors session
         assertSomeErrors msgs
     )
@@ -90,7 +90,7 @@ multipleTests =
         let upd m =
               updateModule (ModulePut m (pack "module Wrong where\na = 1"))
             update = mconcat $ map upd lm
-        updateSessionD session update
+        updateSessionD session update 2
         msgs <- getSourceErrors session
         if length lm >= 2
           then assertSomeErrors msgs
@@ -103,18 +103,20 @@ multipleTests =
         let update1 =
               updateModule (ChangeCodeGeneration False)
               <> loadModule m1 "a = unknownX"
-        updateSessionD session update1
-        updateSessionD session mempty
+        updateSessionD session update1 1
+        updateSessionD session mempty 1  -- was an error, so trying again
+        msgs2 <- getSourceErrors session
+        assertSomeErrors msgs2
         -- Overwrite all files, many times, with correct modules.
-        let upd m = loadModule m "x = 1"
+        let upd m = loadModule m "x = unknownX"
                     <> loadModule m "y = 2"
                     <> updateModule (ChangeCodeGeneration True)
             update2 = mconcat $ map upd lm
-        updateSessionD session update2
+        updateSessionD session update2 (length lm)
         msgs4 <- getSourceErrors session
         assertNoErrors msgs4
         -- Overwrite again with the error.
-        updateSessionD session update1
+        updateSessionD session update1 1  -- drop bytecode, don't recompile
         msgs5 <- getSourceErrors session
         assertOneError msgs5
         assertRaises "runStmt session Main main"
@@ -123,8 +125,9 @@ multipleTests =
       )
     , ("Run the sample code; don't fail without an explanation"
       , \session -> do
+        (_, lm) <- getModules session
         let update = updateModule (ChangeCodeGeneration True)
-        updateSessionD session update
+        updateSessionD session update (length lm)  -- all recompiled
         (msgs, resOrEx) <- runStmt session "Main" "main"
         assertBool "No errors detected, but the run failed" $
           case resOrEx of
@@ -141,10 +144,12 @@ multipleTests =
                               (ModuleName "Main")
                               (pack "module Main where\nmain = print \"running automatically generated trivial code\""))
               <> mconcat (map upd lm)
-        updateSessionD session update
-        updateSessionD session mempty
-        updateSessionD session $ updateModule (ChangeCodeGeneration True)
+        updateSessionD session update (length lm + 1)
+        updateSessionD session mempty 0
+        let update2 = updateModule (ChangeCodeGeneration True)
+        updateSessionD session update2 (length lm + 1)
         (msgs, resOrEx) <- runStmt session "Main" "main"
+        assertNoErrors msgs
         assertBool ("Manually corrected code not run successfully: "
                     ++ List.intercalate "\n" (map formatSourceError msgs)) $
           case resOrEx of
@@ -156,7 +161,9 @@ multipleTests =
       , \session -> do
         (_, lm) <- getModules session
         let update = mconcat $ map (updateModule . ModuleDelete) lm
-        updateSessionD session update
+        updateSessionD session update 0
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
         shutdownSession session
         -- Start new session in the same directory; should not throw an error
         let config = getSessionConfig session
@@ -169,7 +176,7 @@ syntheticTests =
   [ ( "Maintain list of compiled modules"
     , withConfiguredSession defOpts $ \session -> do
         let m = ModuleName "A"
-        updateSessionD session (loadModule m "")
+        updateSessionD session (loadModule m "") 1
         assertEqual "" [m] =<< getLoadedModules session
     )
   , ( "Duplicate shutdown"
@@ -192,12 +199,12 @@ syntheticTests =
          withSession' (tweakConfig 3 config) $ \s3 -> do
           withSession' (tweakConfig 4 config) $ \_s4 -> do
            let update2 = loadModule (ModuleName "M") "a = unknownX"
-           updateSessionD s2 update2
+           updateSessionD s2 update2 1
            msgs2 <- getSourceErrors s2
            assertOneError msgs2
            withSession' (tweakConfig 5 config) $ \s5 -> do
             let update3 = loadModule (ModuleName "M") "a = 3"
-            updateSessionD s3 update3
+            updateSessionD s3 update3 1
             msgs3 <- getSourceErrors s3
             assertNoErrors msgs3
             shutdownSession s5 -- <-- duplicate "nested" shutdown
@@ -229,7 +236,8 @@ syntheticTests =
         assertSomeErrors msgs
         let punOpts = packageOpts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
             update2 = updateModule (ChangeOptions $ Just punOpts)
-        updateSessionD session update2
+        (_, lm) <- getModules session
+        updateSessionD session update2 (length lm)
         msgs2 <- getSourceErrors session
         assertNoErrors msgs2
     )
@@ -254,7 +262,7 @@ syntheticTests =
          shutdownSession session
          assertRaises "updateSessionD session mempty"
            (== userError "Session already shut down.")
-           (updateSessionD session mempty)
+           (updateSessionD session mempty 0)
      )
    , ("Reject getSourceErrors after shutdownSession"
      , withConfiguredSession defOpts $ \session -> do
@@ -322,12 +330,14 @@ main = do
 
 -- Extra debug facilities. Normally turned off.
 
-displayCounter :: PCounter -> IO ()
-displayCounter n = debug dVerbosity $ "PCounter: " ++ (show n) ++ ". "
+displayCounter :: Int -> PCounter -> Assertion
+displayCounter i n = do
+  debug dVerbosity $ "PCounter: " ++ (show n) ++ ". "
+  assertBool ("PCounter " ++ show n ++ " exceeds " ++ show i) (n <= i)
 
-updateSessionD :: IdeSession -> IdeSessionUpdate -> IO ()
-updateSessionD session update = do
-  updateSession session update (progressWaitConsume displayCounter)
+updateSessionD :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
+updateSessionD session update i = do
+  updateSession session update (progressWaitConsume $ displayCounter i)
   msgs <- getSourceErrors session
   debug dVerbosity $ "getSourceErrors after update: "
                      ++ List.intercalate "\n" (map formatSourceError msgs)
