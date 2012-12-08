@@ -70,6 +70,7 @@ runFromGhc a = do
   libdir <- getGhcLibdir
   runGhc (Just libdir) a
 
+#if __GLASGOW_HASKELL__ < 707
 invalidateModSummaryCache :: GhcMonad m => m ()
 invalidateModSummaryCache =
   modifySession $ \h -> h { hsc_mod_graph = map inval (hsc_mod_graph h) }
@@ -79,6 +80,7 @@ invalidateModSummaryCache =
 #else
   tdiff = TimeDiff 0 0 0 0 0 (-1) 0
   inval ms = ms { ms_hs_date = addToClockTime tdiff (ms_hs_date ms) }
+#endif
 #endif
 
 compileInGhc :: FilePath            -- ^ target directory
@@ -119,7 +121,9 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                          }
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
+#if __GLASGOW_HASKELL__ < 707
         invalidateModSummaryCache
+#endif
         setSessionDynFlags flags
         -- Set up targets.
         oldTargets <- getTargets
