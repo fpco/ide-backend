@@ -84,7 +84,7 @@ multipleTests =
         msgs <- getSourceErrors session
         assertSomeErrors msgs
     )
-  , ("Overwrite with module name not matching file name"
+  , ("Overwrite with the same module name in all files"
     , \session -> do
         (_, lm) <- getModules session
         let upd m =
@@ -92,7 +92,9 @@ multipleTests =
             update = mconcat $ map upd lm
         updateSessionD session update
         msgs <- getSourceErrors session
-        assertBool "Wrong module name not caught" $ length msgs >= 1
+        if length lm >= 2
+          then assertSomeErrors msgs
+          else assertNoErrors msgs
     )
   , ("Overwrite modules many times"
     , \session -> do
