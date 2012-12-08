@@ -107,8 +107,8 @@ multipleTests =
         updateSessionD session mempty
         -- Overwrite all files, many times, with correct modules.
         let upd m = loadModule m "x = 1"
-                    <> updateModule (ChangeCodeGeneration True)
                     <> loadModule m "y = 2"
+                    <> updateModule (ChangeCodeGeneration True)
             update2 = mconcat $ map upd lm
         updateSessionD session update2
         msgs4 <- getSourceErrors session
@@ -141,8 +141,9 @@ multipleTests =
                               (ModuleName "Main")
                               (pack "module Main where\nmain = print \"running automatically generated trivial code\""))
               <> mconcat (map upd lm)
-              <> updateModule (ChangeCodeGeneration True)
         updateSessionD session update
+        updateSessionD session mempty
+        updateSessionD session $ updateModule (ChangeCodeGeneration True)
         (msgs, resOrEx) <- runStmt session "Main" "main"
         assertBool ("Manually corrected code not run successfully: "
                     ++ List.intercalate "\n" (map formatSourceError msgs)) $
