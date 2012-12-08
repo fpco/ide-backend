@@ -20,7 +20,7 @@ module GhcRun
 
 import GHC hiding (flags, ModuleName, RunResult)
 import qualified Config as GHC
-import GhcMonad (liftIO)
+import GhcMonad (liftIO, modifySession)
 #if __GLASGOW_HASKELL__ >= 706
 import ErrUtils   ( MsgDoc )
 #else
@@ -29,6 +29,7 @@ import ErrUtils   ( Message )
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
 import FastString ( unpackFS )
+import HscTypes (HscEnv(hsc_mod_graph))
 
 import System.Process
 import Data.IORef
@@ -37,6 +38,11 @@ import qualified Control.Exception as Ex
 import System.Directory
 import System.FilePath ((</>), takeExtension)
 import Data.List ((\\))
+#if __GLASGOW_HASKELL__ >= 706
+import Data.Time
+#else
+import System.Time
+#endif
 
 import Common
 
@@ -63,6 +69,17 @@ runFromGhc :: Ghc a -> IO a
 runFromGhc a = do
   libdir <- getGhcLibdir
   runGhc (Just libdir) a
+
+invalidateModSummaryCache :: GhcMonad m => m ()
+invalidateModSummaryCache =
+  modifySession $ \h -> h { hsc_mod_graph = map inval (hsc_mod_graph h) }
+ where
+#if __GLASGOW_HASKELL__ >= 706
+  inval ms = ms { ms_hs_date = addUTCTime (-1) (ms_hs_date ms) }
+#else
+  tdiff = TimeDiff 0 0 0 0 0 (-1) 0
+  inval ms = ms { ms_hs_date = addToClockTime tdiff (ms_hs_date ms) }
+#endif
 
 compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this run of runGhc
@@ -102,6 +119,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                          }
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
+        invalidateModSummaryCache
         setSessionDynFlags flags
         -- Set up targets.
         oldTargets <- getTargets
