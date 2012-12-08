@@ -88,34 +88,30 @@ ghcServerEngine opts RpcServerActions{..} = do
           putResponse $ RespDone (errs ++ [exError], Nothing)
           -- Restart the Ghc session.
           startGhcSession
-      startGhcSession = do
-        counterIORef <- newIORef 1
-        handleOtherErrors $ runFromGhc $ dispatcher counterIORef GhcInitData{..}
+      startGhcSession =
+        handleOtherErrors $ runFromGhc $ dispatcher GhcInitData{..}
 
   startGhcSession
 
  where
-  dispatcher :: IORef Int -> GhcInitData -> Ghc ()
-  dispatcher counterIORef ghcInitData = do
+  dispatcher :: GhcInitData -> Ghc ()
+  dispatcher ghcInitData = do
     mReq <- liftIO $ getRequest
     case mReq of
       Just req -> do
-        resp <- ghcServerHandler ghcInitData putProgress counterIORef req
+        resp <- ghcServerHandler ghcInitData putProgress req
         liftIO $ putResponse resp
-        dispatcher counterIORef ghcInitData
+        dispatcher ghcInitData
       Nothing ->
         return () -- Terminate
 
-ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ())
-                 -> IORef Int
-                 -> GhcRequest
+ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ()) -> GhcRequest
                  -> Ghc GhcResponse
 ghcServerHandler GhcInitData{dOpts, errsRef}
                  reportProgress
-                 counterIORef
                  (ReqCompile ideNewOpts configSourcesDir ideGenerateCode) = do
   -- Setup progress counter. It goes from [1/n] onwards.
-  liftIO $ writeIORef counterIORef 1
+  counterIORef <- liftIO $ newIORef 1
   let dynOpts = maybe dOpts optsToDynFlags ideNewOpts
       -- Let GHC API print "compiling M ... done." for each module.
       verbosity = 1
@@ -131,7 +127,7 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
                          errsRef handlerOutput handlerRemaining
   liftIO $ debug dVerbosity "returned from compileInGhc"
   return (RespDone (errs, Nothing))
-ghcServerHandler GhcInitData{errsRef} _ _ (ReqRun funToRun) = do
+ghcServerHandler GhcInitData{errsRef} _ (ReqRun funToRun) = do
   runOutcome <- runInGhc funToRun errsRef
   liftIO $ debug dVerbosity "returned from runInGhc"
   return (RespDone runOutcome)
