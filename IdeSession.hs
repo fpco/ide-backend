@@ -305,15 +305,13 @@ updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, 
       Nothing -> fail "Session already shut down."
 
   -- Last, communicating with the GHC server.
-  let progress :: Progress GhcResponse GhcResponse -> Progress PCounter ()
+  let progress :: Progress PCounter RunOutcome -> Progress PCounter ()
       progress Progress{progressWait} = Progress $ do
         response <- progressWait
         case response of
-          Right (RespWorking c, p)     -> return (Right (c, progress p))
-          Right (RespDone _, _)        -> error "updateSession: unexpected RespDone"
-          Left (RespWorking _)         -> error "updateSession: unexpected RespWorking"
-          Left (RespDone (_, Just _))  -> error "updateSession: unexpected Just"
-          Left (RespDone (r, Nothing)) -> do
+          Right (c, p)      -> return (Right (c, progress p))
+          Left (_, Just _)  -> error "updateSession: unexpected Just"
+          Left (r, Nothing) -> do
             modifyMVar_ ideState $ \st ->
               case st of
                 Just state ->
@@ -477,12 +475,7 @@ runStmt IdeSession{ideGhcServer,ideState} m fun = do
     Just IdeSessionState{ideComputed,ideGenerateCode} ->
       case (ideComputed, ideGenerateCode) of
         (Just _, True) ->
-          let g :: GhcResponse -> RunOutcome
-              g (RespWorking _) = error "runStmt: unexpected RespWorking"
-              g (RespDone r)    = r
-
-              req = ReqRun (m, fun)
-
-          in rpcGhcServer ideGhcServer req (liftM g . progressWaitCompletion)
+          let req = ReqRun (m, fun)
+          in rpcGhcServer ideGhcServer req progressWaitCompletion
         _ -> fail "Cannot run before the code is generated."
     Nothing -> fail "Session already shut down."

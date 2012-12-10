@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, ExistentialQuantification #-}
 module Main where
 
 import System.Environment (getArgs)
@@ -7,17 +7,17 @@ import System.Posix.Signals (sigKILL)
 import Data.Function (on)
 import Data.Aeson (FromJSON(parseJSON), ToJSON(toJSON))
 import Data.Aeson.TH (deriveJSON, deriveToJSON, deriveFromJSON)
-import Control.Monad (forM_, void, forever)
+import Data.List (isPrefixOf)
+import Control.Monad (forM_, forever)
 import qualified Control.Exception as Ex
 import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.MVar (MVar, newMVar, modifyMVar_)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
-import Test.HUnit (Assertion, assertEqual, assertFailure)
+import Test.HUnit (Assertion, assertEqual)
 
 import RpcServer
-import Progress
 import TestTools
 
 --------------------------------------------------------------------------------
@@ -47,47 +47,28 @@ assertRpcEquals :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp)
                 -> [resp]              -- ^ Expected responses
                 -> Assertion
 assertRpcEquals server req resps =
-  assertRpc server req resps (Nothing :: Maybe (Ex.IOException -> Bool)) -- Random choice
+  assertRpc server (Put req $ foldr Get Done resps)
 
--- | Verify that the RPC call raises the given exception immediately
-assertRpcRaises :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp, Eq e, Ex.Exception e)
-                => RpcServer req resp  -- ^ RPC server
-                -> req                 -- ^ Request
-                -> (e -> Bool)         -- ^ Expected exception
-                -> Assertion
-assertRpcRaises server req checkEx =
-  assertRpc server req [] (Just checkEx)
+data Conversation req resp =
+    Put req  (Conversation req resp)
+  | Get resp (Conversation req resp)
+  | Done
 
--- | The most general form for checking an RPC response: send a request,
--- and verify the returned responses, possibly followed by an exception.
-assertRpc :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp, Eq e, Ex.Exception e)
-          => RpcServer req resp  -- ^ RPC server
-          -> req                 -- ^ Request
-          -> [resp]              -- ^ Expected responses
-          -> Maybe (e -> Bool)   -- ^ Exception after the responses
+assertRpc :: (ToJSON req, FromJSON resp, Eq resp, Show resp)
+          => RpcServer req resp
+          -> Conversation req resp
           -> Assertion
-assertRpc server req resps mCheckEx =
-    case mCheckEx of
-      Just checkEx -> assertRaises ("Request " ++ show req) checkEx $
-        -- assertRaises on the outside, because it the exception might be
-        -- raised before the first call to progressWait
-        rpcWithProgress server req (handler resps)
-      Nothing ->
-        rpcWithProgress server req (handler resps)
-  where
-    handler [] p =
-      case mCheckEx of
-        Just _  -> -- Do another call so that we can get the exception
-                   void $ progressWait p
-        Nothing -> assertFailure ("Request " ++ show req ++ ": Unexpected message")
-    handler (r:rs) p = do
-      resp <- progressWait p
-      case resp of
-        Left lastResponse ->
-          assertEqual ("Request " ++ show req) (r:rs) [lastResponse]
-        Right (intermediateResponse, p') -> do
-          assertEqual ("Request " ++ show req) r intermediateResponse
-          handler rs p'
+assertRpc server conversation = do
+  rpcConversation server $ \RpcConversation{..} ->
+    let checkConversation Done =
+          return ()
+        checkConversation (Put req conv) = do
+          put req
+          checkConversation conv
+        checkConversation (Get resp conv) = do
+          assertEqual "" resp =<< get
+          checkConversation conv
+    in checkConversation conversation
 
 isServerKilledException :: ExternalException -> Bool
 isServerKilledException =
@@ -97,6 +78,10 @@ isServerIOException :: Ex.IOException -> ExternalException -> Bool
 isServerIOException ex =
   (== show ex) . externalStdErr
 
+isPatternMatchException :: ExternalException -> Bool
+isPatternMatchException =
+  ("user error (Pattern match failure" `isPrefixOf`) . externalStdErr
+
 --------------------------------------------------------------------------------
 -- Feature tests                                                              --
 --------------------------------------------------------------------------------
@@ -105,25 +90,25 @@ isServerIOException ex =
 testEcho :: RpcServer String String -> Assertion
 testEcho server = assertRpcEqual server "ping" "ping"
 
-testEchoServer :: RpcServerActions String String String -> IO ()
-testEchoServer RpcServerActions{..} = forever $ do
-  Just req <- getRequest
-  putResponse req
+testEchoServer :: RpcConversation String String -> IO ()
+testEchoServer RpcConversation{..} = forever $ do
+  req <- get
+  put req
 
 -- | Test stateful server
 testState :: RpcServer () Int -> Assertion
 testState server = forM_ ([0 .. 9] :: [Int]) $ assertRpcEqual server ()
 
-testStateServer :: MVar Int -> RpcServerActions () Int Int -> IO ()
-testStateServer st RpcServerActions{..} = forever $ do
-  Just () <- getRequest
+testStateServer :: MVar Int -> RpcConversation () Int -> IO ()
+testStateServer st RpcConversation{..} = forever $ do
+  () <- get
   modifyMVar_ st $ \i -> do
-    putResponse i
+    put i
     return (i + 1)
 
 -- | Test with request and response custom data types
 data CountRequest  = Increment | GetCount deriving Show
-data CountResponse = Done | Count Int deriving (Eq, Show)
+data CountResponse = DoneCounting | Count Int deriving (Eq, Show)
 
 $(deriveJSON id ''CountRequest)
 $(deriveJSON id ''CountResponse)
@@ -131,20 +116,20 @@ $(deriveJSON id ''CountResponse)
 testCustom :: RpcServer CountRequest CountResponse -> Assertion
 testCustom server = do
   assertRpcEqual server GetCount (Count 0)
-  assertRpcEqual server Increment Done
+  assertRpcEqual server Increment DoneCounting
   assertRpcEqual server GetCount (Count 1)
 
 testCustomServer :: MVar Int
-                 -> RpcServerActions CountRequest CountResponse CountResponse
+                 -> RpcConversation CountRequest CountResponse
                  -> IO ()
-testCustomServer st RpcServerActions{..} = forever $ do
-  Just req <- getRequest
+testCustomServer st RpcConversation{..} = forever $ do
+  req <- get
   case req of
     Increment -> modifyMVar_ st $ \i -> do
-      putResponse Done
+      put DoneCounting
       return (i + 1)
     GetCount -> modifyMVar_ st $ \i -> do
-      putResponse (Count i)
+      put (Count i)
       return i
 
 -- | Test progress messages
@@ -152,31 +137,79 @@ testProgress :: RpcServer Int Int -> Assertion
 testProgress server =
   forM_ [0 .. 9] $ \i -> assertRpcEquals server i [i, i - 1 .. 0]
 
-testProgressServer :: RpcServerActions Int Int Int -> IO ()
-testProgressServer RpcServerActions{..} = forever $ do
-  Just req <- getRequest
-  forM_ [req, req - 1 .. 1] $ putProgress
-  putResponse 0
+testProgressServer :: RpcConversation Int Int -> IO ()
+testProgressServer RpcConversation{..} = forever $ do
+  req <- get
+  forM_ [req, req - 1 .. 1] $ put
+  put 0
 
 -- | Test shutdown
 testShutdown :: RpcServer String String -> Assertion
 testShutdown server = do
   assertRpcEqual server "ping" "ping"
   shutdown server
-  assertRpcRaises server "ping" (== (userError "Manual shutdown"))
+  assertRaises "" (== (userError "Manual shutdown")) $ rpc server "ping"
 
 -- | Test that stdout is available as usual on the server
 testStdout :: RpcServer String String -> Assertion
 testStdout server = do
   assertRpcEqual server "ping" "ping"
   shutdown server
-  assertRpcRaises server "ping" (== (userError "Manual shutdown"))
+  assertRaises "" (== (userError "Manual shutdown")) $ rpc server "ping"
 
-testStdoutServer :: RpcServerActions String String String -> IO ()
-testStdoutServer RpcServerActions{..} = forever $ do
-  Just req <- getRequest
+testStdoutServer :: RpcConversation String String -> IO ()
+testStdoutServer RpcConversation{..} = forever $ do
+  req <- get
   putStrLn "   vvvv    testStdout intentionally printing to stdout"
-  putResponse req
+  put req
+
+--------------------------------------------------------------------------------
+-- Test generalized conversations                                             --
+--------------------------------------------------------------------------------
+
+data GuessRequest  = StartGame Int Int | GuessCorrect | GuessIncorrect
+  deriving Show
+data GuessResponse = Guess Int | GiveUp | Yay
+  deriving (Show, Eq)
+
+$(deriveJSON id ''GuessRequest)
+$(deriveJSON id ''GuessResponse)
+
+testConversation :: RpcServer GuessRequest GuessResponse -> Assertion
+testConversation server = do
+  assertRpc server
+    $ Put (StartGame 1 10)
+    $ Get (Guess 1)
+    $ Put GuessIncorrect
+    $ Get (Guess 2)
+    $ Put GuessIncorrect
+    $ Get (Guess 3)
+    $ Put GuessCorrect
+    $ Get Yay
+    $ Done
+  assertRpc server
+    $ Put (StartGame 1 2)
+    $ Get (Guess 1)
+    $ Put GuessIncorrect
+    $ Get (Guess 2)
+    $ Put GuessIncorrect
+    $ Get GiveUp
+    $ Done
+  assertRaises "" isPatternMatchException $
+    assertRpcEqual server GuessCorrect GiveUp
+
+testConversationServer :: RpcConversation GuessRequest GuessResponse  -> IO ()
+testConversationServer RpcConversation{..} = forever $ do
+    StartGame n m <- get
+    go n m
+  where
+    go n m | n > m     = put GiveUp
+           | otherwise = do put (Guess n)
+                            answer <- get
+                            case answer of
+                              GuessCorrect   -> put Yay
+                              GuessIncorrect -> go (n + 1) m
+                              _              -> Ex.throwIO crash
 
 --------------------------------------------------------------------------------
 -- Error handling tests                                                       --
@@ -185,11 +218,12 @@ testStdoutServer RpcServerActions{..} = forever $ do
 -- | Test crashing server
 testCrash :: RpcServer () () -> Assertion
 testCrash server =
-  assertRpcRaises server () (isServerIOException crash)
+  assertRaises "" (isServerIOException crash) $
+    assertRpcEqual server () ()
 
-testCrashServer :: RpcServerActions () () () -> IO ()
-testCrashServer RpcServerActions{..} = do
-  Just () <- getRequest
+testCrashServer :: RpcConversation () () -> IO ()
+testCrashServer RpcConversation{..} = do
+  () <- get
   Ex.throwIO crash
 
 crash :: Ex.IOException
@@ -198,15 +232,16 @@ crash = userError "Intentional crash"
 -- | Test server which gets killed during a request
 testKill :: RpcServer String String -> Assertion
 testKill server = do
-  assertRpcEqual server "ping" "ping" -- First request goes through
-  assertRpcRaises server "ping" isServerKilledException
+  assertRpcEqual server "ping" "ping"   -- First request goes through
+  assertRaises "" isServerKilledException $
+    assertRpcEqual server "ping" "ping" -- Second does not
 
-testKillServer :: MVar Bool -> RpcServerActions String String String -> IO ()
-testKillServer firstRequest RpcServerActions{..} = forever $ do
-  Just req <- getRequest
+testKillServer :: MVar Bool -> RpcConversation String String -> IO ()
+testKillServer firstRequest RpcConversation{..} = forever $ do
+  req <- get
   modifyMVar_ firstRequest $ \isFirst -> do
     if isFirst
-      then putResponse req
+      then put req
       else throwSignal sigKILL
     return False
 
@@ -215,14 +250,15 @@ testKillAsync :: RpcServer String String -> Assertion
 testKillAsync server = do
   assertRpcEqual server "ping" "ping"
   threadDelay 500000 -- Wait for server to exit
-  assertRpcRaises server "ping" isServerKilledException
+  assertRaises "" isServerKilledException $
+    assertRpcEqual server "ping" "ping"
 
-testKillAsyncServer :: RpcServerActions String String String -> IO ()
-testKillAsyncServer RpcServerActions{..} = forever $ do
-  Just req <- getRequest
+testKillAsyncServer :: RpcConversation String String -> IO ()
+testKillAsyncServer RpcConversation{..} = forever $ do
+  req <- get
   -- Fork a thread which causes the server to crash 0.5 seconds after the request
   forkIO $ threadDelay 250000 >> throwSignal sigKILL
-  putResponse req
+  put req
 
 -- | Test crash during decoding
 data TypeWithFaultyDecoder = TypeWithFaultyDecoder deriving Show
@@ -234,12 +270,13 @@ $(deriveToJSON id ''TypeWithFaultyDecoder)
 
 testFaultyDecoder :: RpcServer TypeWithFaultyDecoder () -> Assertion
 testFaultyDecoder server =
-  assertRpcRaises server TypeWithFaultyDecoder $ isServerIOException (userError "Faulty decoder")
+  assertRaises "" (isServerIOException (userError "Faulty decoder")) $
+    assertRpcEqual server TypeWithFaultyDecoder ()
 
-testFaultyDecoderServer :: RpcServerActions TypeWithFaultyDecoder () () -> IO ()
-testFaultyDecoderServer RpcServerActions{..} = forever $ do
-  Just TypeWithFaultyDecoder <- getRequest
-  putResponse ()
+testFaultyDecoderServer :: RpcConversation TypeWithFaultyDecoder () -> IO ()
+testFaultyDecoderServer RpcConversation{..} = forever $ do
+  TypeWithFaultyDecoder <- get
+  put ()
 
 -- | Test crash during encoding
 data TypeWithFaultyEncoder = TypeWithFaultyEncoder deriving (Show, Eq)
@@ -251,12 +288,13 @@ instance ToJSON TypeWithFaultyEncoder where
 
 testFaultyEncoder :: RpcServer () TypeWithFaultyEncoder -> Assertion
 testFaultyEncoder server =
-  assertRpcRaises server () ((== "Faulty encoder") . externalStdErr)
+  assertRaises "" ((== "Faulty encoder") . externalStdErr) $
+    assertRpcEqual server () TypeWithFaultyEncoder
 
-testFaultyEncoderServer :: RpcServerActions () TypeWithFaultyEncoder TypeWithFaultyEncoder -> IO ()
-testFaultyEncoderServer RpcServerActions{..} = forever $ do
-  Just () <- getRequest
-  putResponse TypeWithFaultyEncoder
+testFaultyEncoderServer :: RpcConversation () TypeWithFaultyEncoder -> IO ()
+testFaultyEncoderServer RpcConversation{..} = forever $ do
+  () <- get
+  put TypeWithFaultyEncoder
 
 --------------------------------------------------------------------------------
 -- Test errors during RPC calls with multiple responses                       --
@@ -265,35 +303,38 @@ testFaultyEncoderServer RpcServerActions{..} = forever $ do
 -- | Test server which crashes after sending some intermediate responses
 testCrashMulti :: RpcServer Int Int -> Assertion
 testCrashMulti server =
-  assertRpc server 5 [5, 4 .. 1] (Just (isServerIOException crash))
+  assertRaises "" (isServerIOException crash) $
+    assertRpcEquals server 3 [3, 2, 1, 0]
 
-testCrashMultiServer :: RpcServerActions Int Int Int -> IO ()
-testCrashMultiServer RpcServerActions{..} = forever $ do
-  Just req <- getRequest
-  forM_ [req, req - 1 .. 1] $ putProgress
+testCrashMultiServer :: RpcConversation Int Int -> IO ()
+testCrashMultiServer RpcConversation{..} = forever $ do
+  req <- get
+  forM_ [req, req - 1 .. 1] $ put
   Ex.throwIO crash
 
 -- | Like 'CrashMulti', but killed rather than an exception
 testKillMulti :: RpcServer Int Int -> Assertion
 testKillMulti server =
-  assertRpc server 5 [5, 4 .. 1] (Just isServerKilledException)
+  assertRaises "" isServerKilledException $
+    assertRpcEquals server 3 [3, 2, 1, 0]
 
-testKillMultiServer :: RpcServerActions Int Int Int -> IO ()
-testKillMultiServer RpcServerActions{..} = forever $ do
-  Just req <- getRequest
-  forM_ [req, req - 1 .. 1] $ putProgress
+testKillMultiServer :: RpcConversation Int Int -> IO ()
+testKillMultiServer RpcConversation{..} = forever $ do
+  req <- get
+  forM_ [req, req - 1 .. 1] $ put
   throwSignal sigKILL
 
 -- | Like 'KillMulti', but now the server gets killed *between* messages
 testKillAsyncMulti :: RpcServer Int Int -> Assertion
 testKillAsyncMulti server =
-  assertRpc server 5 [5, 4 .. 1] (Just isServerKilledException)
+  assertRaises "" isServerKilledException $
+    assertRpcEquals server 3 [3, 2, 1, 0]
 
-testKillAsyncMultiServer :: RpcServerActions Int Int Int -> IO ()
-testKillAsyncMultiServer RpcServerActions{..} = forever $ do
-  Just req <- getRequest
+testKillAsyncMultiServer :: RpcConversation Int Int -> IO ()
+testKillAsyncMultiServer RpcConversation{..} = forever $ do
+  req <- get
   forkIO $ threadDelay (250000 + (req - 1) * 50000) >> throwSignal sigKILL
-  forM_ [req, req - 1 .. 1] $ \i -> threadDelay 50000 >> putProgress i
+  forM_ [req, req - 1 .. 1] $ \i -> threadDelay 50000 >> put i
 
 --------------------------------------------------------------------------------
 -- Tests for errors in client code                                            --
@@ -302,32 +343,17 @@ testKillAsyncMultiServer RpcServerActions{..} = forever $ do
 -- | Test letting the Progress object escape from the scope
 testIllscoped :: RpcServer String String -> Assertion
 testIllscoped server = do
-  progress <- rpcWithProgress server "ping" $ \p -> do
-    -- Consume the reply, then let the Progress object escape from the scope
-    progressWait p
-    return p
-  assertRaises "" (== overconsumptionException) $ progressWait progress
-
--- | Test consuming too few messages
-testUnderconsumption :: RpcServer String String -> Assertion
-testUnderconsumption server =
-  assertRaises "" (== underconsumptionException) $
-    rpcWithProgress server "ping" return
-
--- | Test consuming too many messages
-testOverconsumption :: RpcServer String String -> Assertion
-testOverconsumption server = do
-  assertRaises "" (== overconsumptionException) $
-    rpcWithProgress server "ping" $ \p -> do
-      progressWait p
-      progressWait p
+  conversation <- rpcConversation server $ return
+  assertRaises "" (== illscopedConversationException) (get conversation)
+  assertRaises "" (== illscopedConversationException) (put conversation "hi")
 
 -- | Test what happens if the client specifies the wrong request type
 --
 -- (The actual type is the type of the echo server: RpcServer String String)
 testInvalidReqType :: RpcServer () String -> Assertion
 testInvalidReqType server =
-    assertRpcRaises server () $ isServerIOException (userError parseEx)
+    assertRaises "" (isServerIOException (userError parseEx)) $
+      assertRpcEqual server () "ping"
   where
     -- TODO: do we want to insist on this particular parse error?
     parseEx = "when expecting a String, encountered Array instead"
@@ -340,7 +366,8 @@ testInvalidReqType server =
 -- (The actual type is the type of the echo server: RpcServer String String)
 testInvalidRespType :: RpcServer String () -> Assertion
 testInvalidRespType server =
-    assertRpcRaises server "hi" (== userError parseEx)
+    assertRaises "" (== userError parseEx) $
+      assertRpcEqual server "ping" ()
   where
     -- TODO: do we want to insist on this particular parse error?
     parseEx = "when expecting a (), encountered String instead"
@@ -358,6 +385,7 @@ tests = [
       , testRPC "progress"         testProgress
       , testRPC "shutdown"         testShutdown
       , testRPC "stdout"           testStdout
+      , testRPC "conversation"     testConversation
       ]
   , testGroup "Error handling" [
         testRPC "crash"            testCrash
@@ -366,18 +394,16 @@ tests = [
       , testRPC "faultyDecoder"    testFaultyDecoder
       , testRPC "faultyEncoder"    testFaultyEncoder
       ]
-  , testGroup "Error handling during RPC calls with multiple responses" [
-        testRPC "crashMulti"       testCrashMulti
-      , testRPC "killMulti"        testKillMulti
-      , testRPC "killAsyncMulti"   testKillAsyncMulti
-      ]
-  , testGroup "Client code errors" [
-        testRPC "illscoped"        testIllscoped
-      , testRPC "underconsumption" testUnderconsumption
-      , testRPC "overconsumption"  testOverconsumption
-      , testRPC "invalidReqType"   testInvalidReqType
-      , testRPC "invalidRespType"  testInvalidRespType
-      ]
+   , testGroup "Error handling during RPC calls with multiple responses" [
+         testRPC "crashMulti"       testCrashMulti
+       , testRPC "killMulti"        testKillMulti
+       , testRPC "killAsyncMulti"   testKillAsyncMulti
+       ]
+   , testGroup "Client code errors" [
+         testRPC "illscoped"        testIllscoped
+       , testRPC "invalidReqType"   testInvalidReqType
+       , testRPC "invalidRespType"  testInvalidRespType
+       ]
   ]
   where
     testRPC :: ToJSON req => String -> (RpcServer req resp -> Assertion) -> Test
@@ -399,6 +425,7 @@ main = do
       "progress"        -> rpcServer args' testProgressServer
       "shutdown"        -> rpcServer args' testEchoServer
       "stdout"          -> rpcServer args' testStdoutServer
+      "conversation"    -> rpcServer args' testConversationServer
       "crash"           -> rpcServer args' testCrashServer
       "kill"            -> do firstRequest <- newMVar True
                               rpcServer args' (testKillServer firstRequest)

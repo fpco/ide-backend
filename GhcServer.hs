@@ -71,23 +71,30 @@ ghcServer fdsAndOpts = do
 -- | This function runs in end endless loop, most of which takes place
 -- inside the @Ghc@ monad, making incremental compilation possible.
 ghcServerEngine :: [String]
-                -> RpcServerActions GhcRequest GhcResponse GhcResponse
+                -> RpcConversation GhcRequest GhcResponse
                 -> IO ()
-ghcServerEngine opts RpcServerActions{..} = do
+ghcServerEngine opts RpcConversation{..} = do
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts opts
   -- Init error collection and define the exception handler.
   errsRef <- newIORef []
   let handleOtherErrors =
+        -- ghc reports some errors as exceptions, so we catch those here
+        -- and report them.
+        -- TODO: We're currently catching ALL exceptions. We should only
+        -- catch exceptions of the right type. (If we do, the check for
+        -- ThreadKilled below can go.)
         Ex.handle $ \e -> do
           debug dVerbosity $ "handleOtherErrors: " ++ showExWithClass e
           let exError = OtherError (show (e :: Ex.SomeException))
           -- In case of an exception, don't lose saved errors.
           errs <- reverse <$> readIORef errsRef
           -- Don't disrupt the communication.
-          putResponse $ RespDone (errs ++ [exError], Nothing)
-          -- Restart the Ghc session.
-          startGhcSession
+          put $ RespDone (errs ++ [exError], Nothing)
+          -- Restart the Ghc session (unless it's an explicit thread kill).
+          case Ex.fromException e of
+            Just Ex.ThreadKilled -> return ()
+            _                    -> startGhcSession
       startGhcSession =
         handleOtherErrors $ runFromGhc $ dispatcher GhcInitData{..}
 
@@ -96,14 +103,10 @@ ghcServerEngine opts RpcServerActions{..} = do
  where
   dispatcher :: GhcInitData -> Ghc ()
   dispatcher ghcInitData = do
-    mReq <- liftIO $ getRequest
-    case mReq of
-      Just req -> do
-        resp <- ghcServerHandler ghcInitData putProgress req
-        liftIO $ putResponse resp
-        dispatcher ghcInitData
-      Nothing ->
-        return () -- Terminate
+    req <- liftIO $ get
+    resp <- ghcServerHandler ghcInitData put req
+    liftIO $ put resp
+    dispatcher ghcInitData
 
 ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ()) -> GhcRequest
                  -> Ghc GhcResponse
@@ -142,8 +145,18 @@ forkGhcServer opts = do
   forkRpcServer prog $ ["--server"] ++ opts ++ ["--ghc-opts-end"]
 
 rpcGhcServer :: GhcServer -> GhcRequest
-             -> (Progress GhcResponse GhcResponse -> IO a) -> IO a
-rpcGhcServer = rpcWithProgress
+             -> (Progress PCounter RunOutcome -> IO a) -> IO a
+rpcGhcServer server request handler =
+    rpcConversation server $ \RpcConversation{..} -> do
+      put request
+      handler (progress get)
+  where
+    progress :: IO GhcResponse -> Progress PCounter RunOutcome
+    progress get = Progress $ do
+      response <- get
+      case response of
+        RespWorking pcounter -> return (Right (pcounter, progress get))
+        RespDone runOutcome  -> return (Left runOutcome)
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs
