@@ -16,7 +16,6 @@ import Data.Aeson.TH (deriveJSON)
 import System.FilePath (takeFileName)
 import qualified Control.Exception as Ex
 import Data.Typeable (Typeable, typeOf)
-import Data.Maybe (catMaybes)
 import Control.Monad (when)
 import System.IO (hFlush, hPutStr, stderr)
 
@@ -70,35 +69,8 @@ type RunException = String
 type RunOutcome = ([SourceError], Maybe (Either RunResult RunException))
 
 -- | Show an exception together with its most precise type tag.
--- All exception classes defined in Control.Exception are handled
--- (there are a few more instances of Exception defined elsewhere).
 showExWithClass :: Ex.SomeException -> String
-showExWithClass ex =
-  let fr :: Ex.Exception e => Ex.SomeException -> Maybe e
-      fr = Ex.fromException
-      fshow :: (Show e, Typeable e) => Maybe e -> Maybe String
-      fshow = fmap $ \ e -> (show (typeOf e) ++ ": " ++ show e)
-      exs = catMaybes $
-        [ fshow (fr ex :: Maybe Ex.IOException)
-        , fshow (fr ex :: Maybe Ex.ErrorCall)
-        , fshow (fr ex :: Maybe Ex.ArithException)
-        , fshow (fr ex :: Maybe Ex.ArrayException)
-        , fshow (fr ex :: Maybe Ex.AssertionFailed)
-        , fshow (fr ex :: Maybe Ex.AsyncException)
-        , fshow (fr ex :: Maybe Ex.NonTermination)
-        , fshow (fr ex :: Maybe Ex.NestedAtomically)
-        , fshow (fr ex :: Maybe Ex.BlockedIndefinitelyOnMVar)
-        , fshow (fr ex :: Maybe Ex.BlockedIndefinitelyOnSTM)
-        , fshow (fr ex :: Maybe Ex.Deadlock)
-        , fshow (fr ex :: Maybe Ex.NoMethodError)
-        , fshow (fr ex :: Maybe Ex.PatternMatchFail)
-        , fshow (fr ex :: Maybe Ex.RecUpdError)
-        , fshow (fr ex :: Maybe Ex.RecConError)
-        , fshow (fr ex :: Maybe Ex.RecSelError)
-        , -- This one is always not Nothing.
-          fshow (fr ex :: Maybe Ex.SomeException)
-        ]
-  in head exs
+showExWithClass (Ex.SomeException ex) = show (typeOf ex) ++ ": " ++ show ex
 
 dVerbosity :: Int
 dVerbosity = 3

@@ -2,10 +2,10 @@
 module TestTools where
 
 import System.Posix.Signals (raiseSignal, Signal)
-import Data.Maybe (fromJust)
 import qualified Control.Exception as Ex
 import Control.Applicative ((<$>), (<|>))
 import Test.HUnit (Assertion, assertBool, assertFailure)
+import Data.Typeable (typeOf)
 
 import RpcServer
 
@@ -29,12 +29,7 @@ assertRaises msg checkEx p = do
 
 -- | Find the type of an exception (only a few kinds of exceptions are supported)
 exceptionType :: Ex.SomeException -> String
-exceptionType ex = fromJust $
-      ((\(_ :: Ex.IOException)    -> "IOException")       <$> Ex.fromException ex)
-  <|> ((\(_ :: Ex.AsyncException) -> "AsyncException")    <$> Ex.fromException ex)
-  <|> ((\(_ :: Ex.ErrorCall)      -> "ErrorCall")         <$> Ex.fromException ex)
-  <|> ((\(_ :: ExternalException) -> "ExternalException") <$> Ex.fromException ex)
-  <|> Just "Unknown type"
+exceptionType (Ex.SomeException ex) =  show (typeOf ex)
 
 -- | Like 'raiseSignal', but with a more general type
 throwSignal :: Signal -> IO a

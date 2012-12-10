@@ -256,27 +256,45 @@ syntheticTests =
             ("Directory " ++ configSourcesDir config ++ " is not empty."))
           (initSession config)
     )
-   , ("Reject updateSession after shutdownSession"
-     , withConfiguredSession defOpts $ \session -> do
-         shutdownSession session
-         assertRaises "updateSessionD session mempty"
-           (== userError "Session already shut down.")
-           (updateSessionD session mempty 0)
-     )
-   , ("Reject getSourceErrors after shutdownSession"
-     , withConfiguredSession defOpts $ \session -> do
-         shutdownSession session
-         assertRaises "getSourceErrors session"
-           (== userError "Session already shut down.")
-           (getSourceErrors session)
-     )
-   , ("Reject runStmt after shutdownSession"
-     , withConfiguredSession defOpts $ \session -> do
-         shutdownSession session
-         assertRaises "runStmt session Main main"
-           (== userError "Session already shut down.")
-           (runStmt session "Main" "main")
-     )
+  , ("Reject updateSession after shutdownSession"
+    , withConfiguredSession defOpts $ \session -> do
+        shutdownSession session
+        assertRaises "updateSessionD session mempty"
+          (== userError "Session already shut down.")
+          (updateSessionD session mempty 0)
+    )
+  , ("Reject getSourceErrors after shutdownSession"
+    , withConfiguredSession defOpts $ \session -> do
+        shutdownSession session
+        assertRaises "getSourceErrors session"
+          (== userError "Session already shut down.")
+          (getSourceErrors session)
+    )
+  , ("Reject runStmt after shutdownSession"
+    , withConfiguredSession defOpts $ \session -> do
+        shutdownSession session
+        assertRaises "runStmt session Main main"
+          (== userError "Session already shut down.")
+          (runStmt session "Main" "main")
+    )
+  , ( "Reject a wrong CPP directive"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-XCPP"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        let update = loadModule (ModuleName "M") "#ifdef"
+        updateSessionD session update 1
+        msgs <- getSourceErrors session
+        assertSomeErrors msgs
+    )
+  , ( "Reject a module with mangled header"
+    , withConfiguredSession defOpts $ \session -> do
+        let update = updateModule (ModulePut (ModuleName "M")
+                                   $ pack "module very-wrong where")
+        updateSessionD session update 1
+        msgs <- getSourceErrors session
+        assertOneError msgs
+    )
   ]
 
 defOpts :: [String]

@@ -101,6 +101,8 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     let targets = map (configSourcesDir </>)
                   $ filter ((`elem` hsExtentions) . takeExtension) cnts
     handleSourceError (\ e -> do
+                          liftIO $ debug dVerbosity
+                            $ "handleSourceError: " ++ show e
                           errs <- liftIO $ reverse <$> readIORef errsRef
                           return (errs ++ [OtherError (show e)])) $ do
       -- Compute new GHC flags.
