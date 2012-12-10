@@ -78,22 +78,18 @@ ghcServerEngine opts RpcConversation{..} = do
   -- Init error collection and define the exception handler.
   errsRef <- newIORef []
   let handleOtherErrors =
-        -- ghc reports some errors as exceptions, so we catch those here
-        -- and report them.
-        -- TODO: We're currently catching ALL exceptions. We should only
-        -- catch exceptions of the right type. (If we do, the check for
-        -- ThreadKilled below can go.)
+        -- GHC reports some errors as exceptions, so we catch those here
+        -- and report them. We assume catching type GhcException is enough.
         Ex.handle $ \e -> do
-          debug dVerbosity $ "handleOtherErrors: " ++ showExWithClass e
-          let exError = OtherError (show (e :: Ex.SomeException))
+          let eText = show (e :: GhcException)
+              exError = OtherError eText
+          debug dVerbosity $ "handleOtherErrors: " ++ eText
           -- In case of an exception, don't lose saved errors.
           errs <- reverse <$> readIORef errsRef
           -- Don't disrupt the communication.
           put $ RespDone (errs ++ [exError], Nothing)
           -- Restart the Ghc session (unless it's an explicit thread kill).
-          case Ex.fromException e of
-            Just Ex.ThreadKilled -> return ()
-            _                    -> startGhcSession
+          startGhcSession
       startGhcSession =
         handleOtherErrors $ runFromGhc $ dispatcher GhcInitData{..}
 

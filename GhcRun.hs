@@ -9,6 +9,7 @@
 module GhcRun
   ( Ghc
   , liftIO
+  , GhcException
   , DynamicOpts
   , submitStaticOpts
   , optsToDynFlags
