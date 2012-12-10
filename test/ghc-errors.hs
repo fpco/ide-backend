@@ -16,7 +16,6 @@ import Test.HUnit (Assertion, assertBool, assertEqual)
 
 import IdeSession
 import GhcServer
-import Progress
 import Common
 import TestTools
 
@@ -337,7 +336,7 @@ displayCounter i n = do
 
 updateSessionD :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
 updateSessionD session update i = do
-  updateSession session update (progressWaitConsume $ displayCounter i)
+  updateSession session update (displayCounter i)
   msgs <- getSourceErrors session
   debug dVerbosity $ "getSourceErrors after update: "
                      ++ List.intercalate "\n" (map formatSourceError msgs)

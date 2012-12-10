@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module IdeSession (
 
   -- | This module provides an interface to the IDE backend.
@@ -65,7 +66,6 @@ module IdeSession (
   -- 'Progress' type to represent the action in progress.
   updateSession,
   PCounter,
-  Progress,
 
   -- ** Modules
   updateModule,
@@ -163,7 +163,6 @@ import System.Posix.Files (setFileTimes)
 
 import Common
 import GhcServer
-import Progress
 
 -- | This is a state token for the current state of an IDE session. We can run
 -- queries in the current state, and from this state we can perform a batch
@@ -176,10 +175,15 @@ import Progress
 data IdeSession = IdeSession
   { ideConfig    :: SessionConfig
   , ideGhcServer :: GhcServer
-  , ideState     :: MVar (Maybe IdeSessionState)
+  , ideState     :: MVar IdeSessionState
   }
 
-data IdeSessionState = IdeSessionState {
+data IdeSessionState =
+    IdeSessionIdle IdeIdleState
+  | IdeSessionRunning IdeIdleState
+  | IdeSessionShutdown
+
+data IdeIdleState = IdeIdleState {
     -- Logical timestamps (used to force ghc to recompile files)
     ideLogicalTimestamp :: Int
     -- The result computed by the last 'updateSession' invocation.
@@ -243,7 +247,7 @@ initSession ideConfig@SessionConfig{..} = do
   ensureDirEmpty configWorkingDir
   ensureDirEmpty configDataDir
 
-  ideState <- newMVar $ Just IdeSessionState {
+  ideState <- newMVar $ IdeSessionIdle IdeIdleState {
                           ideLogicalTimestamp = 0
                         , ideComputed         = Nothing
                         , ideNewOpts          = Nothing
@@ -261,8 +265,8 @@ initSession ideConfig@SessionConfig{..} = do
 --
 shutdownSession :: IdeSession -> IO ()
 shutdownSession IdeSession{ideGhcServer, ideState} = do
-  -- We don't check that ideState is not @Nothing@.
-  modifyMVar_ ideState $ const $ return Nothing
+  -- TODO: we should check that the state is not IdeSessionRunning
+  modifyMVar_ ideState $ const $ return IdeSessionShutdown
   shutdownGhcServer ideGhcServer
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
@@ -271,7 +275,7 @@ shutdownSession IdeSession{ideGhcServer, ideState} = do
 -- In particular it is an instance of 'Monoid', so multiple primitive updates
 -- can be easily combined. Updates can override each other left to right.
 --
-data IdeSessionUpdate = IdeSessionUpdate (SessionConfig -> IdeSessionState -> IO IdeSessionState)
+newtype IdeSessionUpdate = IdeSessionUpdate (SessionConfig -> IdeIdleState -> IO IdeIdleState)
 
 -- We assume, if updates are combined within the monoid, they can all
 -- be applied in the context of the same session.
@@ -285,41 +289,21 @@ instance Monoid IdeSessionUpdate where
 -- update the session, eventually resulting in a new session state,
 -- with fully updated computed information (typing, etc.).
 --
--- The update can be a long running operation, so it returns a 'Progress'
--- which can be used to monitor and wait on the operation.
--- While the progress is in operation, session state tokens
--- remain valid as usual. If the progress fails or is canceled,
--- all it's observable internal state changes are rolled back
--- and another progress can be initiated. The semantics of @updateFiles@
--- and @updateSession@ is unspecified while any progress runs.
---
-updateSession :: IdeSession -> IdeSessionUpdate
-              -> (Progress PCounter () -> IO a) -> IO a
-updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, ideState, ideGhcServer} (IdeSessionUpdate update) handler = do
-  -- Update the session state
-  IdeSessionState{ideGenerateCode, ideNewOpts} <- modifyMVar ideState $ \st ->
-    case st of
-      Just state -> do
-        state' <- update ideConfig state
-        return (Just state', state')
-      Nothing -> fail "Session already shut down."
-
-  -- Last, communicating with the GHC server.
-  let progress :: Progress PCounter RunOutcome -> Progress PCounter ()
-      progress Progress{progressWait} = Progress $ do
-        response <- progressWait
-        case response of
-          Right (c, p)      -> return (Right (c, progress p))
-          Left (_, Just _)  -> error "updateSession: unexpected Just"
-          Left (r, Nothing) -> do
-            modifyMVar_ ideState $ \st ->
-              case st of
-                Just state ->
-                  return $ Just state {ideComputed = Just (Computed r [])}
-                Nothing -> fail "Session already shut down."
-            return (Left ())
-  let req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
-  rpcGhcServer ideGhcServer req (handler . progress)
+-- The update can be a long running operation, so we support a callback
+-- which can be used to monitor progress of the operation.
+updateSession ::  IdeSession -> IdeSessionUpdate -> (PCounter -> IO ()) -> IO ()
+updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, ideState, ideGhcServer} (IdeSessionUpdate update) callback = do
+  modifyMVar_ ideState $ \state ->
+    case state of
+      IdeSessionIdle idleState -> do
+        idleState'@IdeIdleState{ideNewOpts, ideGenerateCode} <- update ideConfig idleState
+        let req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
+        outcome <- rpcGhcServer ideGhcServer req callback
+        case outcome of
+          (_, Just _)  -> error "updateSession: unexpected Just"
+          (r, Nothing) -> return $ IdeSessionIdle idleState' {ideComputed = Just (Computed r [])}
+      IdeSessionShutdown ->
+        Ex.throwIO (userError "Session already shut down.")
 
 -- | Writes a file atomically.
 --
@@ -344,7 +328,7 @@ writeFileAtomic targetPath content = do
 -- updated or deleted.
 --
 updateModule :: ModuleChange -> IdeSessionUpdate
-updateModule mc = IdeSessionUpdate $ \ideConfig state@IdeSessionState{ideLogicalTimestamp} ->
+updateModule mc = IdeSessionUpdate $ \ideConfig state@IdeIdleState{ideLogicalTimestamp} ->
   case mc of
     ModulePut m bs -> do
       let internal = internalFile ideConfig m
@@ -432,24 +416,24 @@ getSourceErrors :: Query [SourceError]
 getSourceErrors IdeSession{ideState} =
   withMVar ideState $ \st ->
     case st of
-      Just IdeSessionState{ideComputed} ->
+      IdeSessionIdle IdeIdleState{ideComputed} ->
         case ideComputed of
           Just Computed{..} -> return computedErrors
 -- Optionally, this could give last reported errors, instead forcing
 -- IDE to wait for the next sessionUpdate to finish.
           Nothing -> fail "This session state does not admit queries."
-      Nothing -> fail "Session already shut down."
+      IdeSessionShutdown -> fail "Session already shut down."
 
 -- | Get the list of correctly compiled modules.
 getLoadedModules :: Query [ModuleName]
 getLoadedModules IdeSession{ideState} =
   withMVar ideState $ \st ->
     case st of
-      Just IdeSessionState{ideComputed} ->
+      IdeSessionIdle IdeIdleState{ideComputed} ->
         case ideComputed of
           Just Computed{..} -> return computedLoadedModules
           Nothing -> fail "This session state does not admit queries."
-      Nothing -> fail "Session already shut down."
+      IdeSessionShutdown -> fail "Session already shut down."
 
 -- | Get a mapping from where symbols are used to where they are defined.
 -- That is, given a symbol used at a particular location in a source module
@@ -472,10 +456,10 @@ runStmt :: IdeSession -> String -> String -> IO RunOutcome
 runStmt IdeSession{ideGhcServer,ideState} m fun = do
   st <- readMVar ideState
   case st of
-    Just IdeSessionState{ideComputed,ideGenerateCode} ->
+    IdeSessionIdle IdeIdleState{ideComputed,ideGenerateCode} ->
       case (ideComputed, ideGenerateCode) of
-        (Just _, True) ->
+        (Just _, True) -> do
           let req = ReqRun (m, fun)
-          in rpcGhcServer ideGhcServer req progressWaitCompletion
+          rpcGhcServer ideGhcServer req (\_ -> return ())
         _ -> fail "Cannot run before the code is generated."
-    Nothing -> fail "Session already shut down."
+    IdeSessionShutdown -> fail "Session already shut down."

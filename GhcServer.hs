@@ -34,7 +34,6 @@ import Data.ByteString.Char8 (pack)
 import RpcServer
 import Common
 import GhcRun
-import Progress
 
 data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
@@ -144,19 +143,17 @@ forkGhcServer opts = do
   prog <- getExecutablePath
   forkRpcServer prog $ ["--server"] ++ opts ++ ["--ghc-opts-end"]
 
-rpcGhcServer :: GhcServer -> GhcRequest
-             -> (Progress PCounter RunOutcome -> IO a) -> IO a
-rpcGhcServer server request handler =
+rpcGhcServer :: GhcServer -> GhcRequest -> (PCounter -> IO ()) -> IO RunOutcome
+rpcGhcServer server request callback =
     rpcConversation server $ \RpcConversation{..} -> do
       put request
-      handler (progress get)
-  where
-    progress :: IO GhcResponse -> Progress PCounter RunOutcome
-    progress get = Progress $ do
-      response <- get
-      case response of
-        RespWorking pcounter -> return (Right (pcounter, progress get))
-        RespDone runOutcome  -> return (Left runOutcome)
+
+      let go = do response <- get
+                  case response of
+                    RespWorking pcounter -> callback pcounter >> go
+                    RespDone runOutcome  -> return runOutcome
+
+      go
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs

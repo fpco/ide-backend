@@ -9,7 +9,6 @@ import Data.Monoid (mconcat)
 
 import IdeSession
 import GhcServer
-import Progress
 import Common
 
 --- A sample program using the library. It type-checks all files
@@ -71,7 +70,7 @@ check opts originalSourcesDir configSourcesDir = do
       len = show $ length originalFiles
       displayCounter :: PCounter -> IO ()
       displayCounter n = putStrLn ("[" ++ show n ++ "/" ++ len ++ "]")
-  updateSession session originalUpdate (progressWaitConsume displayCounter)
+  updateSession session originalUpdate displayCounter
   msgs0 <- getSourceErrors session
   putStrLn $ "\nErrors and warnings:\n" ++ List.intercalate "\n"
     (map formatSourceError msgs0) ++ "\n"
