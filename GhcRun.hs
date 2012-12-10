@@ -157,6 +157,8 @@ runInGhc (m, fun) errsRef = do
     -- of run failures, if any.
     liftIO $ writeIORef errsRef []
     handleSourceError (\ e -> do
+                          liftIO $ debug dVerbosity
+                            $ "handleSourceError: " ++ show e
                           errs <- liftIO $ reverse <$> readIORef errsRef
                           return (errs ++ [OtherError (show e)], Nothing)) $ do
       flags <- getSessionDynFlags

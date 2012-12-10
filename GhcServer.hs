@@ -125,11 +125,11 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
             compileInGhc configSourcesDir dynOpts
                          ideGenerateCode verbosity
                          errsRef handlerOutput handlerRemaining
-  liftIO $ debug dVerbosity "returned from compileInGhc"
+  liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
   return (RespDone (errs, Nothing))
 ghcServerHandler GhcInitData{errsRef} _ (ReqRun funToRun) = do
   runOutcome <- runInGhc funToRun errsRef
-  liftIO $ debug dVerbosity "returned from runInGhc"
+  liftIO $ debug dVerbosity $ "returned from runInGhc with " ++ show runOutcome
   return (RespDone runOutcome)
 
 
