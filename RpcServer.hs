@@ -164,6 +164,9 @@ rpcServer' hin hout herr server = do
     readMVar exception >>= tryShowException
     mapM_ (killThread . fst) [readerThread, writerThread, serverThread]
     mapM_ (takeMVar   . snd) [readerThread, writerThread, serverThread]
+    -- TODO: Without this threadDelay, many of the unit tests print
+    --   <stdout>: hPutChar: resource vanished (Broken pipe)
+    -- to stderr, but I don't know why.
     threadDelay 100000
   where
     tryShowException :: Maybe Ex.SomeException -> IO ()
