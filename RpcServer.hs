@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DeriveDataTypeable, TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DeriveDataTypeable, RankNTypes #-}
 {-# OPTIONS_GHC -Wall #-}
 module RpcServer
   ( -- * Server-side
@@ -34,11 +34,12 @@ import System.Posix.IO (createPipe, closeFd, fdToHandle)
 import Data.Typeable (Typeable)
 import Data.Aeson
   ( FromJSON
-  , ToJSON
+  , fromJSON
+  , ToJSON(toJSON)
   , encode
   , json'
-  , fromJSON
   , Result(Success, Error)
+  , Value
   )
 import Data.Aeson.TH (deriveJSON)
 import Control.Applicative ((<$>))
@@ -110,9 +111,8 @@ $(deriveJSON tail ''Response)
 
 -- Start the RPC server. For an explanation of the command line arguments, see
 -- 'forkRpcServer'. This function does not return unless there is an error.
-rpcServer :: (FromJSON req, ToJSON resp)
-          => [String]                             -- ^ Command line args
-          -> (RpcConversation req resp -> IO ())  -- ^ Request server
+rpcServer :: [String]                   -- ^ Command line args
+          -> (RpcConversation -> IO ()) -- ^ Request server
           -> IO ()
 rpcServer fds handler = do
   let readFd :: String -> Fd
@@ -129,21 +129,20 @@ rpcServer fds handler = do
 
   rpcServer' requestR' responseW' errorsW' handler
 
-data RpcConversation a b = RpcConversation {
-    get :: IO a
-  , put :: b -> IO ()
+data RpcConversation = RpcConversation {
+    get :: forall a. FromJSON a => IO a
+  , put :: forall a. ToJSON a => a -> IO ()
   }
 
 -- | Start the RPC server
-rpcServer' :: (FromJSON req, ToJSON resp)
-           => Handle                              -- ^ Input
-           -> Handle                              -- ^ Output
-           -> Handle                              -- ^ Errors
-           -> (RpcConversation req resp -> IO ()) -- ^ The request server
+rpcServer' :: Handle                     -- ^ Input
+           -> Handle                     -- ^ Output
+           -> Handle                     -- ^ Errors
+           -> (RpcConversation -> IO ()) -- ^ The request server
            -> IO ()
 rpcServer' hin hout herr server = do
-    requests  <- newChan
-    responses <- newChan
+    requests  <- newChan      :: IO (Chan Value)
+    responses <- newChan      :: IO (Chan Value)
     exception <- newEmptyMVar :: IO (MVar (Maybe Ex.SomeException))
 
     setBinaryBlockBuffered [hin, hout, herr]
@@ -182,7 +181,7 @@ rpcServer' hin hout herr server = do
 --------------------------------------------------------------------------------
 
 -- | Abstract data type representing RPC servers
-data RpcServer req resp = RpcServer {
+data RpcServer = RpcServer {
     -- | Handle to write requests to
     rpcRequestW  :: Handle
     -- | Handle to read server errors from
@@ -190,11 +189,11 @@ data RpcServer req resp = RpcServer {
     -- | Handle on the server process itself
   , rpcProc :: ProcessHandle
     -- | Server state
-  , rpcState :: MVar (RpcClientSideState req resp)
+  , rpcState :: MVar RpcClientSideState
   }
 
 -- | RPC server state
-data RpcClientSideState req resp =
+data RpcClientSideState =
     -- | The server is running. We record the server's unconsumed output.
     RpcRunning ByteString
     -- | The server was stopped, either manually or because of an exception
@@ -219,7 +218,7 @@ data RpcClientSideState req resp =
 -- >       <<deal with other cases>>
 forkRpcServer :: FilePath  -- ^ Filename of the executable
               -> [String]  -- ^ Arguments
-              -> IO (RpcServer req resp)
+              -> IO RpcServer
 forkRpcServer path args = do
   (requestR,  requestW)  <- createPipe
   (responseR, responseW) <- createPipe
@@ -256,18 +255,13 @@ forkRpcServer path args = do
 
 -- | Specialized form of 'rpcConversation' to do single request and wait for
 -- a single response.
-rpc :: (ToJSON req, FromJSON resp)
-    => RpcServer req resp  -- ^ RPC server
-    -> req                 -- ^ Request
-    -> IO resp             -- ^ Response
-rpc server req =
-  rpcConversation server $ \RpcConversation{..} -> put req >> get
+rpc :: (ToJSON req, FromJSON resp) => RpcServer -> req -> IO resp
+rpc server req = rpcConversation server $ \RpcConversation{..} -> put req >> get
 
 -- | Run an RPC conversation. If the handler throws an exception durin
 -- the conversation the server is terminated.
-rpcConversation :: forall req resp a. (ToJSON req, FromJSON resp)
-                => RpcServer req resp
-                -> (RpcConversation resp req -> IO a)
+rpcConversation :: RpcServer
+                -> (RpcConversation -> IO a)
                 -> IO a
 rpcConversation server handler = withRpcServer server $ \st ->
   case st of
@@ -301,7 +295,7 @@ rpcConversation server handler = withRpcServer server $ \st ->
     RpcStopped ex ->
       Ex.throwIO ex
   where
-    conversation :: MVar (Maybe ByteString) -> RpcConversation resp req
+    conversation :: MVar (Maybe ByteString) -> RpcConversation
     conversation convState = RpcConversation {
         put = \req -> withMVar convState $ \state -> case state of
                 Just _ ->
@@ -337,25 +331,24 @@ illscopedConversationException =
 -- This simply kills the remote process. If you want to shut down the remote
 -- process cleanly you must implement your own termination protocol before
 -- calling 'shutdown'.
-shutdown :: ToJSON req => RpcServer req resp -> IO ()
+shutdown :: RpcServer -> IO ()
 shutdown server = withRpcServer server $ \_ -> do
   terminate server
   let ex = Ex.toException (userError "Manual shutdown")
   return (RpcStopped ex, ())
 
 -- | Force-terminate the external process
-terminate :: forall req resp. ToJSON req => RpcServer req resp -> IO ()
+terminate :: RpcServer -> IO ()
 terminate server = do
     ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode requestShutdown)
     void $ waitForProcess (rpcProc server)
   where
-    requestShutdown :: Request req
+    requestShutdown :: Request ()
     requestShutdown = RequestShutdown
 
 -- | Like modifyMVar, but terminate the server on exceptions
-withRpcServer :: ToJSON req
-              => RpcServer req resp
-              -> (RpcClientSideState req resp -> IO (RpcClientSideState req resp, a))
+withRpcServer :: RpcServer
+              -> (RpcClientSideState -> IO (RpcClientSideState, a))
               -> IO a
 withRpcServer server io =
   Ex.mask $ \restore -> do
@@ -377,18 +370,16 @@ withRpcServer server io =
 --------------------------------------------------------------------------------
 
 -- | Decode messages from a handle and forward them to a channel
-readRequests :: forall req. FromJSON req => Handle -> Chan req -> IO ()
+readRequests :: Handle -> Chan Value -> IO ()
 readRequests h ch = hGetContents h >>= go
   where
     go :: ByteString -> IO ()
-    go contents =
+    go contents = do
       case parseJSON contents of
         Right (contents', req) ->
           case req of
-            Request req' ->
-              writeChan ch req' >> go contents'
-            RequestShutdown ->
-              return ()
+            Request req'    -> writeChan ch req' >> go contents'
+            RequestShutdown -> return ()
         Left err ->
           Ex.throwIO (userError err)
 
@@ -402,18 +393,21 @@ readRequests h ch = hGetContents h >>= go
             Error err   -> Left err
 
 -- | Encode messages from a channel and forward them on a handle
-writeResponses :: ToJSON resp => Chan resp -> Handle -> IO ()
+writeResponses :: Chan Value -> Handle -> IO ()
 writeResponses ch h = forever $ readChan ch >>= hPutFlush h . encode . Response
 
 -- | Run a handler repeatedly, given input and output channels
-channelHandler :: Chan req
-               -> Chan resp
-               -> (RpcConversation req resp -> IO ())
+channelHandler :: Chan Value
+               -> Chan Value
+               -> (RpcConversation -> IO ())
                -> IO ()
 channelHandler requests responses server =
   server RpcConversation {
-      get = readChan requests
-    , put = writeChan responses
+      get = do value <- readChan requests
+               case fromJSON value of
+                 Success req -> return req
+                 Error err   -> Ex.throwIO (userError err)
+    , put = writeChan responses . toJSON
     }
 
 -- | Set all the specified handles to binary mode and block buffering
@@ -424,7 +418,7 @@ setBinaryBlockBuffered =
 
 -- | Map IO exceptions to external exceptions, using the error written
 -- by the server (if any)
-mapIOToExternal :: RpcServer req resp -> IO a -> IO a
+mapIOToExternal :: RpcServer -> IO a -> IO a
 mapIOToExternal server p = Ex.catch p $ \ex -> do
   let _ = ex :: Ex.IOException
   merr <- unpack <$> hGetContents (rpcErrorsR server)

@@ -53,7 +53,7 @@ data GhcInitData = GhcInitData { dOpts :: DynamicOpts
                                , initialized :: Bool
                                }
 
-type GhcServer = RpcServer GhcRequest GhcResponse
+type GhcServer = RpcServer
 
 -- * Server-side operations
 
@@ -70,9 +70,7 @@ ghcServer fdsAndOpts = do
 -- as soon as they appear.
 -- | This function runs in end endless loop, most of which takes place
 -- inside the @Ghc@ monad, making incremental compilation possible.
-ghcServerEngine :: [String]
-                -> RpcConversation GhcRequest GhcResponse
-                -> IO ()
+ghcServerEngine :: [String] -> RpcConversation  -> IO ()
 ghcServerEngine opts RpcConversation{..} = do
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts opts
