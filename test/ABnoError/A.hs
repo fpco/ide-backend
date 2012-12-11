@@ -2,5 +2,5 @@ module Main where
 
 import B
 
-main :: IO ()
-main = print B.string
+notMain :: IO ()
+notMain = print B.string
