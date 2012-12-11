@@ -44,7 +44,7 @@ import Data.Aeson.TH (deriveJSON)
 import Control.Applicative ((<$>))
 import Control.Monad (void, forever)
 import qualified Control.Exception as Ex
-import Control.Concurrent (forkIO, killThread, ThreadId, threadDelay)
+import Control.Concurrent (forkIOWithUnmask, killThread, ThreadId, threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar
   ( MVar
@@ -151,9 +151,10 @@ rpcServer' hin hout herr server = do
     let forkCatch :: IO () -> IO (ThreadId, MVar ())
         forkCatch p = do
           terminated <- newEmptyMVar
-          tid <- forkIO $ Ex.catch (p >> putMVar terminated ()) $ \ex -> do
-                   void $ tryPutMVar terminated ()
-                   void $ tryPutMVar exception (Just ex)
+          tid <- Ex.mask_ $ forkIOWithUnmask $ \unmask ->
+            Ex.catch (unmask (p >> putMVar terminated ())) $ \ex -> do
+              void $ tryPutMVar terminated ()
+              void $ tryPutMVar exception (Just ex)
           return (tid, terminated)
 
     readerThread <- forkCatch $ do readRequests hin requests
