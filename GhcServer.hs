@@ -50,6 +50,7 @@ $(deriveJSON id ''GhcResponse)
 -- They are only fed to GHC if no options are set via a session update command.
 data GhcInitData = GhcInitData { dOpts :: DynamicOpts
                                , errsRef :: IORef [SourceError]
+                               , initialized :: Bool
                                }
 
 type GhcServer = RpcServer GhcRequest GhcResponse
@@ -91,7 +92,8 @@ ghcServerEngine opts RpcConversation{..} = do
           -- Restart the Ghc session (unless it's an explicit thread kill).
           startGhcSession
       startGhcSession =
-        handleOtherErrors $ runFromGhc $ dispatcher GhcInitData{..}
+        handleOtherErrors $ runFromGhc
+        $ dispatcher GhcInitData{initialized = False, ..}
 
   startGhcSession
 
@@ -101,11 +103,11 @@ ghcServerEngine opts RpcConversation{..} = do
     req <- liftIO $ get
     resp <- ghcServerHandler ghcInitData put req
     liftIO $ put resp
-    dispatcher ghcInitData
+    dispatcher ghcInitData {initialized = True}
 
 ghcServerHandler :: GhcInitData -> (GhcResponse -> IO ()) -> GhcRequest
                  -> Ghc GhcResponse
-ghcServerHandler GhcInitData{dOpts, errsRef}
+ghcServerHandler GhcInitData{dOpts, errsRef, initialized}
                  reportProgress
                  (ReqCompile ideNewOpts configSourcesDir ideGenerateCode) = do
   -- Setup progress counter. It goes from [1/n] onwards.
@@ -125,12 +127,13 @@ ghcServerHandler GhcInitData{dOpts, errsRef}
                          errsRef handlerOutput handlerRemaining
   liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
   return (RespDone (errs, Nothing))
+ghcServerHandler GhcInitData{initialized = False} _ (ReqRun _) =
+  return (RespDone
+            ([], Just $ Right "Cannot run before GHC session is initialized."))
 ghcServerHandler GhcInitData{errsRef} _ (ReqRun funToRun) = do
   runOutcome <- runInGhc funToRun errsRef
   liftIO $ debug dVerbosity $ "returned from runInGhc with " ++ show runOutcome
   return (RespDone runOutcome)
-
-
 
 -- * Client-side operations
 

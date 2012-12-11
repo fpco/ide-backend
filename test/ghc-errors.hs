@@ -283,9 +283,19 @@ syntheticTests =
                         ]
       in withConfiguredSession packageOpts $ \session -> do
         let update = loadModule (ModuleName "M") "#ifdef"
+                     <> updateModule (ChangeCodeGeneration True)
         updateSessionD session update 1
         msgs <- getSourceErrors session
         assertSomeErrors msgs
+        (msgs2, resOrEx) <- runStmt session "Main" "main"
+        assertNoErrors msgs2
+        assertBool "This run has to fail" $
+          case resOrEx of
+            Just (Left _ident) -> False
+            Just (Right ex)    ->
+              ex == "Cannot run before GHC session is initialized."
+            Nothing            -> False
+
     )
   , ( "Reject a module with mangled header"
     , withConfiguredSession defOpts $ \session -> do
