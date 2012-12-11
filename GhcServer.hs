@@ -88,7 +88,7 @@ ghcServerEngine opts RpcConversation{..} = do
           -- In case of an exception, don't lose saved errors.
           errs <- reverse <$> readIORef errsRef
           -- Don't disrupt the communication.
-          put $ RespDone (errs ++ [exError], Nothing)
+          put $ RespDone (Left (errs ++ [exError]))
           -- Restart the Ghc session (unless it's an explicit thread kill).
           startGhcSession
       startGhcSession =
@@ -126,10 +126,10 @@ ghcServerHandler GhcInitData{dOpts, errsRef, initialized}
                          ideGenerateCode verbosity
                          errsRef handlerOutput handlerRemaining
   liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
-  return (RespDone (errs, Nothing))
+  return (RespDone (Left errs))
 ghcServerHandler GhcInitData{initialized = False} _ (ReqRun _) =
   return (RespDone
-            ([], Just $ Right "Cannot run before GHC session is initialized."))
+            (Right (Just (RunException "Cannot run before GHC session is initialized."))))
 ghcServerHandler GhcInitData{errsRef} _ (ReqRun funToRun) = do
   runOutcome <- runInGhc funToRun errsRef
   liftIO $ debug dVerbosity $ "returned from runInGhc with " ++ show runOutcome

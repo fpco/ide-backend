@@ -127,12 +127,16 @@ multipleTests =
         (_, lm) <- getModules session
         let update = updateModule (ChangeCodeGeneration True)
         updateSessionD session update (length lm)  -- all recompiled
-        (msgs, resOrEx) <- runStmt session "Main" "main"
-        assertBool "No errors detected, but the run failed" $
-          case resOrEx of
-            Just (Left _ident) -> True
-            Just (Right _ex)   -> length msgs >= 1
-            Nothing            -> length msgs >= 1
+        mRunActions <- runStmt session "Main" "main"
+        case mRunActions of
+          Left errs -> assertBool "No errors detected, but the run failed" $ length errs >= 1
+          Right runActions -> do
+           resOrEx <- runWait runActions
+           assertBool "No errors detected, but the run failed" $
+             case resOrEx of
+               Right (RunOk _ident)     -> True
+               Right (RunException _ex) -> False
+               Left _                   -> False
       )
     , ("Run automatically corrected code; don't fail at all"
       , \session -> do
@@ -147,14 +151,13 @@ multipleTests =
         updateSessionD session mempty 0
         let update2 = updateModule (ChangeCodeGeneration True)
         updateSessionD session update2 (length lm + 1)
-        (msgs, resOrEx) <- runStmt session "Main" "main"
-        assertNoErrors msgs
-        assertBool ("Manually corrected code not run successfully: "
-                    ++ List.intercalate "\n" (map formatSourceError msgs)) $
+        Right runActions <- runStmt session "Main" "main"
+        resOrEx <- runWait runActions
+        assertBool ("Manually corrected code not run successfully") $
           case resOrEx of
-            Just (Left _ident) -> True
-            Just (Right _ex)   -> False
-            Nothing            -> False
+            Right (RunOk _ident)     -> True
+            Right (RunException _ex) -> False
+            Left _                   -> False
       )
     , ("Make sure deleting modules removes them from the directory"
       , \session -> do
@@ -287,15 +290,14 @@ syntheticTests =
         updateSessionD session update 1
         msgs <- getSourceErrors session
         assertSomeErrors msgs
-        (msgs2, resOrEx) <- runStmt session "Main" "main"
-        assertNoErrors msgs2
+        Right runActions <- runStmt session "Main" "main"
+        resOrEx <- runWait runActions
         assertBool "This run has to fail" $
           case resOrEx of
-            Just (Left _ident) -> False
-            Just (Right ex)    ->
+            Right (RunOk _ident)    -> False
+            Right (RunException ex) ->
               ex == "Cannot run before GHC session is initialized."
-            Nothing            -> False
-
+            Left _                  -> False
     )
   , ( "Reject a module with mangled header"
     , withConfiguredSession defOpts $ \session -> do

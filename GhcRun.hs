@@ -19,7 +19,8 @@ module GhcRun
   , checkModuleInProcess
   ) where
 
-import GHC hiding (flags, ModuleName, RunResult)
+import GHC hiding (flags, ModuleName, RunResult(..))
+import qualified GHC
 import qualified Config as GHC
 import GhcMonad (liftIO, modifySession)
 #if __GLASGOW_HASKELL__ >= 706
@@ -163,7 +164,7 @@ runInGhc (m, fun) errsRef = do
                           liftIO $ debug dVerbosity
                             $ "handleSourceError: " ++ show e
                           errs <- liftIO $ reverse <$> readIORef errsRef
-                          return (errs ++ [OtherError (show e)], Nothing)) $ do
+                          return (Left $ errs ++ [OtherError (show e)])) $ do
       flags <- getSessionDynFlags
       -- TODO: not sure if this cleanup handler is needed:
       defaultCleanupHandler flags $ do
@@ -178,17 +179,19 @@ runInGhc (m, fun) errsRef = do
                    ++ "; System.IO.hFlush System.IO.stderr"
         runRes <- runStmt expr RunToCompletion
         let resOrEx = case runRes of
-              RunOk [name] ->
+              GHC.RunOk [name] ->
                 let ident = showSDocDebug flags (GHC.ppr name)
-                in Just $ Left ident
-              RunOk _ -> error "checkModule: unexpected names in RunOk"
-              RunException ex ->
+                in RunOk ident
+              GHC.RunOk _ -> error "checkModule: unexpected names in RunOk"
+              GHC.RunException ex ->
                 let exDesc = showExWithClass ex
-                in Just $ Right exDesc
-              RunBreak{} -> error "checkModule: RunBreak"
+                in RunException exDesc
+              GHC.RunBreak{} -> error "checkModule: RunBreak"
         -- Recover all saved errors.
         errs <- liftIO $ reverse <$> readIORef errsRef
-        return (errs, resOrEx)
+        if null errs
+          then return (Right (Just resOrEx))
+          else error "The impossible happened"
 
 collectSrcError :: IORef [SourceError]
                 -> (String -> IO ())
@@ -302,7 +305,7 @@ checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
           let exError = OtherError (show (e :: Ex.SomeException))
           -- In case of an exception, don't lose saved errors.
           errs <- collectedErrors
-          return $ (errs ++ [exError], Nothing)
+          return $ Left (errs ++ [exError])
   -- Catch all errors.
   handleOtherErrors $ do
     libdir <- getGhcLibdir
@@ -313,4 +316,4 @@ checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
                              errsRef handlerOutput handlerRemaining
         case funToRun of
           Just mfun -> runInGhc mfun errsRef
-          Nothing -> return (errs, Nothing)
+          Nothing -> return (Left errs)

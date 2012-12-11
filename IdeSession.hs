@@ -98,7 +98,8 @@ module IdeSession (
 
   -- ** Run code
   runStmt,
-  RunOutcome
+  RunActions(..),
+  RunResult(..)
 
   -- * Additional notes
   -- ** Responsibility for managing and mutating files in the sources dir.
@@ -300,8 +301,12 @@ updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, 
         let req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
         outcome <- rpcGhcServer ideGhcServer req callback
         case outcome of
-          (_, Just _)  -> error "updateSession: unexpected Just"
-          (r, Nothing) -> return $ IdeSessionIdle idleState' {ideComputed = Just (Computed r [])}
+          Left errs ->
+            return $ IdeSessionIdle idleState' {ideComputed = Just (Computed errs [])}
+          Right Nothing ->
+            return $ IdeSessionIdle idleState' {ideComputed = Just (Computed [] [])}
+          Right (Just _) ->
+            error "updateSession: unexpected Just"
       IdeSessionShutdown ->
         Ex.throwIO (userError "Session already shut down.")
 
@@ -443,6 +448,10 @@ getLoadedModules IdeSession{ideState} =
 getSymbolDefinitionMap :: Query SymbolDefinitionMap
 getSymbolDefinitionMap = undefined
 
+data RunActions = RunActions {
+    runWait :: IO (Either ByteString RunResult)
+  }
+
 -- TODO: detect and fail if the last updateSession was not done
 -- with @setCodeGeneration@ turned on.
 -- | Run a given function in a given module and return all the compilation
@@ -452,14 +461,35 @@ getSymbolDefinitionMap = undefined
 -- and waits for the execution to finish. In particular, if the executed
 -- code loops, it waits forever.
 --
-runStmt :: IdeSession -> String -> String -> IO RunOutcome
+-- TODO: Should probably change this type to .. -> IO (Either String RunActions)
+-- to catch compiler errors when we start the code (or throw an exception?).
+runStmt :: IdeSession -> String -> String -> IO (Either [SourceError] RunActions)
 runStmt IdeSession{ideGhcServer,ideState} m fun = do
-  st <- readMVar ideState
-  case st of
-    IdeSessionIdle IdeIdleState{ideComputed,ideGenerateCode} ->
-      case (ideComputed, ideGenerateCode) of
-        (Just _, True) -> do
-          let req = ReqRun (m, fun)
-          rpcGhcServer ideGhcServer req (\_ -> return ())
-        _ -> fail "Cannot run before the code is generated."
-    IdeSessionShutdown -> fail "Session already shut down."
+  modifyMVar ideState $ \state -> case state of
+    -- TODO: rather than checking if "something" has been compiled, we should
+    -- check if the given module has been compiled.
+    IdeSessionIdle idleState@IdeIdleState{ideComputed=Just _,ideGenerateCode=True} -> do
+      resultMVar <- newEmptyMVar
+
+      -- This is only a baby-step towards the full API
+      forkIO $ do
+        let req = ReqRun (m, fun)
+        runOutcome <- rpcGhcServer ideGhcServer req (\_ -> return ())
+        case runOutcome of
+          Left errs -> putMVar resultMVar (Left errs)
+          Right (Just runResult) -> do
+            runWaitChannel <- newChan
+            writeChan runWaitChannel (Right runResult)
+            putMVar resultMVar . Right $ RunActions {
+                 runWait = readChan runWaitChannel
+               }
+          Right Nothing ->
+            error "Unexpected Nothing"
+
+      result <- readMVar resultMVar
+      return (IdeSessionRunning idleState, result)
+    IdeSessionIdle _ ->
+      fail "Cannot run before the code is generated."
+    IdeSessionShutdown ->
+      fail "Session already shut down."
+

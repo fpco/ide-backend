@@ -28,15 +28,18 @@ main = do
       _   -> fail "usage: in-process [dir]"
 
   putStrLn ""
-  (errs, resOrEx) <- checkModuleInProcess target (optsToDynFlags defOpts)
+  runOutcome <- checkModuleInProcess target (optsToDynFlags defOpts)
                                           True (Just ("Main", "main")) 2
                                           putStrLn putStrLn
-  putStrLn $ "\nErrors and warnings:\n"
-             ++ List.intercalate "\n" (map formatSourceError errs)
-             ++ "\n"
-  putStrLn $ "Run result: "
-             ++ case resOrEx of
-                  Just (Left ident) -> ident
-                  Just (Right ex)   -> ex
-                  Nothing           -> "Run failed."
-             ++ "\n"
+  case runOutcome of
+    Left errs -> do
+      putStrLn $ "\nErrors and warnings:\n"
+                 ++ List.intercalate "\n" (map formatSourceError errs)
+                 ++ "\n"
+    Right resOrEx ->
+      putStrLn $ "Run result: "
+                 ++ case resOrEx of
+                      Just (RunOk ident)     -> ident
+                      Just (RunException ex) -> ex
+                      Nothing                -> "Run failed."
+                 ++ "\n"
