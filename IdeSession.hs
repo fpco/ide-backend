@@ -298,15 +298,8 @@ updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, 
     case state of
       IdeSessionIdle idleState -> do
         idleState'@IdeIdleState{ideNewOpts, ideGenerateCode} <- update ideConfig idleState
-        let req = ReqCompile ideNewOpts configSourcesDir ideGenerateCode
-        outcome <- rpcGhcServer ideGhcServer req callback
-        case outcome of
-          Left errs ->
-            return $ IdeSessionIdle idleState' {ideComputed = Just (Computed errs [])}
-          Right Nothing ->
-            return $ IdeSessionIdle idleState' {ideComputed = Just (Computed [] [])}
-          Right (Just _) ->
-            error "updateSession: unexpected Just"
+        errs <- rpcCompile ideGhcServer ideNewOpts configSourcesDir ideGenerateCode callback
+        return $ IdeSessionIdle idleState' {ideComputed = Just (Computed errs [])}
       IdeSessionShutdown ->
         Ex.throwIO (userError "Session already shut down.")
 
@@ -460,34 +453,24 @@ data RunActions = RunActions {
 -- The function resembles a query, but it's not instantaneous. It blocks
 -- and waits for the execution to finish. In particular, if the executed
 -- code loops, it waits forever.
---
--- TODO: Should probably change this type to .. -> IO (Either String RunActions)
--- to catch compiler errors when we start the code (or throw an exception?).
-runStmt :: IdeSession -> String -> String -> IO (Either [SourceError] RunActions)
+runStmt :: IdeSession -> String -> String -> IO RunActions
 runStmt IdeSession{ideGhcServer,ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
     -- TODO: rather than checking if "something" has been compiled, we should
     -- check if the given module has been compiled.
     IdeSessionIdle idleState@IdeIdleState{ideComputed=Just _,ideGenerateCode=True} -> do
-      resultMVar <- newEmptyMVar
+      runWaitChannel <- newChan
 
       -- This is only a baby-step towards the full API
       forkIO $ do
-        let req = ReqRun (m, fun)
-        runOutcome <- rpcGhcServer ideGhcServer req (\_ -> return ())
-        case runOutcome of
-          Left errs -> putMVar resultMVar (Left errs)
-          Right (Just runResult) -> do
-            runWaitChannel <- newChan
-            writeChan runWaitChannel (Right runResult)
-            putMVar resultMVar . Right $ RunActions {
+        runResult <- rpcRun ideGhcServer m fun
+        writeChan runWaitChannel (Right runResult)
+
+      return ( IdeSessionRunning idleState
+             , RunActions {
                  runWait = readChan runWaitChannel
                }
-          Right Nothing ->
-            error "Unexpected Nothing"
-
-      result <- readMVar resultMVar
-      return (IdeSessionRunning idleState, result)
+             )
     IdeSessionIdle _ ->
       fail "Cannot run before the code is generated."
     IdeSessionShutdown ->

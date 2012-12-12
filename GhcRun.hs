@@ -9,6 +9,7 @@
 module GhcRun
   ( Ghc
   , liftIO
+  , ghandle
   , GhcException
   , DynamicOpts
   , submitStaticOpts
@@ -23,6 +24,7 @@ import GHC hiding (flags, ModuleName, RunResult(..))
 import qualified GHC
 import qualified Config as GHC
 import GhcMonad (liftIO, modifySession)
+import Exception (ghandle)
 #if __GLASGOW_HASKELL__ >= 706
 import ErrUtils   ( MsgDoc )
 #else
@@ -153,45 +155,42 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         liftIO $ reverse <$> readIORef errsRef
 
 runInGhc :: (String, String)    -- ^ module and function to run, if any
-         -> IORef [SourceError] -- ^ the IORef where GHC stores errors
-         -> Ghc RunOutcome
-runInGhc (m, fun) errsRef = do
-    -- Reset errors storage. TODO: optionally we refuse resetting the storage
-    -- and keep here errors from the last typechecking, as an explanation
-    -- of run failures, if any.
-    liftIO $ writeIORef errsRef []
-    handleSourceError (\ e -> do
-                          liftIO $ debug dVerbosity
-                            $ "handleSourceError: " ++ show e
-                          errs <- liftIO $ reverse <$> readIORef errsRef
-                          return (Left $ errs ++ [OtherError (show e)])) $ do
-      flags <- getSessionDynFlags
-      -- TODO: not sure if this cleanup handler is needed:
-      defaultCleanupHandler flags $ do
-        debugPpContext flags "context before setContext"
-        -- Run code.
-        setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName m
-                     , IIDecl $ simpleImportDecl $ mkModuleName "System.IO"
-                     ]
-        debugPpContext flags "context after setContext"
-        let expr = "do " ++ fun
-                   ++ "; System.IO.hFlush System.IO.stdout"
-                   ++ "; System.IO.hFlush System.IO.stderr"
-        runRes <- runStmt expr RunToCompletion
-        let resOrEx = case runRes of
-              GHC.RunOk [name] ->
-                let ident = showSDocDebug flags (GHC.ppr name)
-                in RunOk ident
-              GHC.RunOk _ -> error "checkModule: unexpected names in RunOk"
-              GHC.RunException ex ->
-                let exDesc = showExWithClass ex
-                in RunException exDesc
-              GHC.RunBreak{} -> error "checkModule: RunBreak"
-        -- Recover all saved errors.
-        errs <- liftIO $ reverse <$> readIORef errsRef
-        if null errs
-          then return (Right (Just resOrEx))
-          else error "The impossible happened"
+         -> Ghc RunResult
+runInGhc (m, fun) = do
+  flags <- getSessionDynFlags
+  -- TODO: not sure if this cleanup handler is needed:
+  defaultCleanupHandler flags . handleErrors $ do
+    debugPpContext flags "context before setContext"
+    setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName m
+                 , IIDecl $ simpleImportDecl $ mkModuleName "System.IO"
+                 ]
+    debugPpContext flags "context after setContext"
+    handleErrors $ do
+      runRes <- runStmt expr RunToCompletion
+      case runRes of
+        GHC.RunOk [name] ->
+          -- TODO: is it really useful to report these names as strings?
+          return $ RunOk $ showSDocDebug flags (GHC.ppr name)
+        GHC.RunOk _ ->
+          error "checkModule: unexpected names in RunOk"
+        GHC.RunException ex ->
+          return . RunProgException $ showExWithClass ex
+        GHC.RunBreak{} ->
+          error "checkModule: RunBreak"
+  where
+    expr :: String
+    expr = "do " ++ fun
+        ++ "; System.IO.hFlush System.IO.stdout"
+        ++ "; System.IO.hFlush System.IO.stderr"
+
+    handleError :: Show a => a -> Ghc RunResult
+    handleError = return . RunGhcException . show
+
+    -- "such-and-such not in scope" is reported as a source error
+    -- not sure when GhcExceptions are thrown (if at all)
+    handleErrors :: Ghc RunResult -> Ghc RunResult
+    handleErrors = handleSourceError handleError
+                 . ghandle (handleError :: GhcException -> Ghc RunResult)
 
 collectSrcError :: IORef [SourceError]
                 -> (String -> IO ())
@@ -293,7 +292,7 @@ checkModuleInProcess :: FilePath     -- ^ target directory
                                      -- ^ handler for each SevOutput message
                      -> (String -> IO ())
                                      -- ^ handler for remaining non-error msgs
-                     -> IO RunOutcome
+                     -> IO (Either [SourceError] RunResult)
                                      -- ^ errors, warnings and results, if any
 checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
                      verbosity handlerOutput handlerRemaining = do
@@ -315,5 +314,5 @@ checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
                              ideGenerateCode verbosity
                              errsRef handlerOutput handlerRemaining
         case funToRun of
-          Just mfun -> runInGhc mfun errsRef
+          Just mfun -> Right <$> runInGhc mfun
           Nothing -> return (Left errs)

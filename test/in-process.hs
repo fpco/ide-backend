@@ -39,7 +39,7 @@ main = do
     Right resOrEx ->
       putStrLn $ "Run result: "
                  ++ case resOrEx of
-                      Just (RunOk ident)     -> ident
-                      Just (RunException ex) -> ex
-                      Nothing                -> "Run failed."
+                      RunOk ident         -> ident
+                      RunProgException ex -> ex
+                      RunGhcException ex  -> ex
                  ++ "\n"

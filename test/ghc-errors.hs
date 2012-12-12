@@ -12,7 +12,7 @@ import Data.Char (toUpper)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
-import Test.HUnit (Assertion, assertBool, assertEqual)
+import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure)
 
 import IdeSession
 import GhcServer
@@ -127,16 +127,13 @@ multipleTests =
         (_, lm) <- getModules session
         let update = updateModule (ChangeCodeGeneration True)
         updateSessionD session update (length lm)  -- all recompiled
-        mRunActions <- runStmt session "Main" "main"
-        case mRunActions of
-          Left errs -> assertBool "No errors detected, but the run failed" $ length errs >= 1
-          Right runActions -> do
-           resOrEx <- runWait runActions
-           assertBool "No errors detected, but the run failed" $
-             case resOrEx of
-               Right (RunOk _ident)     -> True
-               Right (RunException _ex) -> False
-               Left _                   -> False
+        runActions <- runStmt session "Main" "main"
+        resOrEx <- runWait runActions
+        case resOrEx of
+          Right (RunOk _ident)       -> return ()
+          Right (RunProgException _) -> assertFailure "No errors detected, but the run failed"
+          Right (RunGhcException _)  -> return ()
+          Left _                     -> assertFailure "Unexpected program output"
       )
     , ("Run automatically corrected code; don't fail at all"
       , \session -> do
@@ -151,13 +148,13 @@ multipleTests =
         updateSessionD session mempty 0
         let update2 = updateModule (ChangeCodeGeneration True)
         updateSessionD session update2 (length lm + 1)
-        Right runActions <- runStmt session "Main" "main"
+        runActions <- runStmt session "Main" "main"
         resOrEx <- runWait runActions
-        assertBool ("Manually corrected code not run successfully") $
-          case resOrEx of
-            Right (RunOk _ident)     -> True
-            Right (RunException _ex) -> False
-            Left _                   -> False
+        case resOrEx of
+          Right (RunOk _ident)         -> return ()
+          Right (RunProgException _ex) -> assertFailure "Manually corrected code not run successfully"
+          Right (RunGhcException _ex)  -> assertFailure "Manually corrected code not run successfully"
+          Left _                       -> assertFailure "Unexpected output"
       )
     , ("Make sure deleting modules removes them from the directory"
       , \session -> do
@@ -290,14 +287,13 @@ syntheticTests =
         updateSessionD session update 1
         msgs <- getSourceErrors session
         assertSomeErrors msgs
-        Right runActions <- runStmt session "Main" "main"
+        runActions <- runStmt session "Main" "main"
         resOrEx <- runWait runActions
-        assertBool "This run has to fail" $
-          case resOrEx of
-            Right (RunOk _ident)    -> False
-            Right (RunException ex) ->
-              ex == "Cannot run before GHC session is initialized."
-            Left _                  -> False
+        case resOrEx of
+          Right (RunOk _ident)       -> assertFailure "This run has to fail"
+          Right (RunProgException _) -> assertFailure "This run has to fail"
+          Right (RunGhcException _)  -> return ()
+          Left _                     -> assertFailure "Unexpected output"
     )
   , ( "Reject a module with mangled header"
     , withConfiguredSession defOpts $ \session -> do

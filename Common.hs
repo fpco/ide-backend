@@ -7,7 +7,7 @@ module Common
   , SymbolDefinitionMap
   , hsExtentions, cpExtentions
   , PCounter
-  , RunOutcome, RunResult(..)
+  , RunResult(..)
   , showExWithClass
   , dVerbosity, debug
   ) where
@@ -58,20 +58,17 @@ cpExtentions = ".h" : hsExtentions
 
 type PCounter = Int
 
--- | Like GHC's 'RunResult' but serializable
+-- | The outcome of running code
 data RunResult =
+    -- | The code terminated okay
     RunOk String
-  | RunException String
+    -- | The code threw an exception
+  | RunProgException String
+    -- | GHC itself threw an exception when we tried to run the code
+  | RunGhcException String
   deriving Show
 
 $(deriveJSON id ''RunResult)
-
--- | The first component holds compilation warnings and errors
--- (including arbitrary compilation exceptions raised by the compiler API).
--- The second component, empty if no code execution was requested,
--- holds an identifier bound to the resulting value or a (pretty-printed)
--- exception thrown by the user code.
-type RunOutcome = Either [SourceError] (Maybe RunResult)
 
 -- | Show an exception together with its most precise type tag.
 showExWithClass :: Ex.SomeException -> String
