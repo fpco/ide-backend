@@ -68,13 +68,19 @@ module IdeSession (
   PCounter,
 
   -- ** Modules
-  updateModule,
-  ModuleChange(..),
   ModuleName(..),
+  updateModule,
+  updateModuleFromFile,
+  updateModuleDelete,
+
+  -- ** Flags and other settings
+  updateGhcOptions,
+  updateCodeGeneration,
 
   -- ** Data files
   updateDataFile,
-  DataFileChange(..),
+  updateDataFileFromFile,
+  updateDataFileDelete,
 
   -- * Queries
   Query,
@@ -322,38 +328,50 @@ writeFileAtomic targetPath content = do
         hClose handle
         renameFile tmpPath targetPath)
 
--- | A session update that changes a source module. Modules can be added,
--- updated or deleted.
+-- | A session update that changes a source module by giving a new value for
+-- the module source. This can be used to add a new module or update an
+-- existing one.
 --
-updateModule :: ModuleChange -> IdeSessionUpdate
-updateModule mc = IdeSessionUpdate $ \ideConfig state@IdeIdleState{ideLogicalTimestamp} ->
-  case mc of
-    ModulePut m bs -> do
+updateModule :: ModuleName -> ByteString -> IdeSessionUpdate
+updateModule m bs =
+    IdeSessionUpdate $ \ideConfig state@IdeIdleState{ideLogicalTimestamp} -> do
       let internal = internalFile ideConfig m
       writeFileAtomic internal bs
       setFileTimes internal (fromIntegral ideLogicalTimestamp) (fromIntegral ideLogicalTimestamp)
       return state {ideLogicalTimestamp = ideLogicalTimestamp + 1}
-    ModuleSource m p -> do
+
+-- | Like 'updateModule' except that instead of passing the module source by
+-- value, it's given by reference to an existing file, which will be copied.
+--
+updateModuleFromFile :: ModuleName -> FilePath -> IdeSessionUpdate
+updateModuleFromFile m p =
+    IdeSessionUpdate $ \ideConfig state@IdeIdleState{ideLogicalTimestamp} -> do
       let internal = internalFile ideConfig m
       copyFile p internal
       setFileTimes internal (fromIntegral ideLogicalTimestamp) (fromIntegral ideLogicalTimestamp)
       return state {ideLogicalTimestamp = ideLogicalTimestamp + 1}
-    ModuleDelete m -> do
+
+-- | A session update that deletes an existing module.
+--
+updateModuleDelete :: ModuleName -> IdeSessionUpdate
+updateModuleDelete m =
+    IdeSessionUpdate $ \ideConfig state -> do
       removeFile (internalFile ideConfig m)
       return state
-    ChangeOptions opts -> return $ state {ideNewOpts = opts}
-    ChangeCodeGeneration b -> return $ state {ideGenerateCode = b}
 
--- @OptionsSet@ affects only 'updateSession', not 'runStmt'.
-data ModuleChange = ModulePut    ModuleName ByteString
-                  | ModuleSource ModuleName FilePath
-                  | ModuleDelete ModuleName
-                    -- | Warning: only dynamic flags can be set here.
-                    -- Static flags need to be set at server startup.
-                  | ChangeOptions (Maybe [String])
-                    -- | Enable or disable code generation in addition
-                    -- to type-checking. Required by 'runStmt.
-                  | ChangeCodeGeneration Bool
+-- | Warning: only dynamic flags can be set here.
+-- Static flags need to be set at server startup.
+updateGhcOptions :: (Maybe [String]) -> IdeSessionUpdate
+updateGhcOptions opts =
+    IdeSessionUpdate $ \ideConfig state ->
+      return $ state {ideNewOpts = opts}
+
+-- | Enable or disable code generation in addition
+-- to type-checking. Required by 'runStmt.
+updateCodeGeneration :: Bool -> IdeSessionUpdate
+updateCodeGeneration b =
+    IdeSessionUpdate $ \ideConfig state ->
+      return $ state {ideGenerateCode = b}
 
 newtype ModuleName = ModuleName String
   deriving (Eq, Show)
@@ -365,21 +383,32 @@ internalFile SessionConfig{configSourcesDir} (ModuleName n) =
      then configSourcesDir </> n            -- assume full file name
      else configSourcesDir </> n <.> ".hs"  -- assume bare module name
 
--- | A session update that changes a data file. Data files can be added,
--- updated or deleted.
+-- | A session update that changes a data file by giving a new value for the
+-- file. This can be used to add a new file or update an existing one.
 --
-updateDataFile :: DataFileChange -> IdeSessionUpdate
-updateDataFile mc = IdeSessionUpdate $ \SessionConfig{configDataDir} state -> do
-  case mc of
-    DataFilePut n bs   -> writeFileAtomic (configDataDir </> n) bs
-    DataFileSource n p -> copyFile (configDataDir </> n)
-                                   (configDataDir </> p)
-    DataFileDelete n   -> removeFile (configDataDir </> n)
-  return state
+updateDataFile :: FilePath -> ByteString -> IdeSessionUpdate
+updateDataFile n bs =
+    IdeSessionUpdate $ \SessionConfig{configDataDir} state -> do
+      writeFileAtomic (configDataDir </> n) bs
+      return state
 
-data DataFileChange = DataFilePut    FilePath ByteString
-                    | DataFileSource FilePath FilePath
-                    | DataFileDelete FilePath
+-- | Like 'updateDataFile' except that instead of passing the file content by
+-- value, it's given by reference to an existing file, which will be copied.
+--
+updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate
+updateDataFileFromFile n p =
+    IdeSessionUpdate $ \SessionConfig{configDataDir} state -> do
+      copyFile (configDataDir </> n) (configDataDir </> p)
+      return state
+
+-- | A session update that deletes an existing data file.
+--
+updateDataFileDelete :: FilePath -> IdeSessionUpdate
+updateDataFileDelete n =
+    IdeSessionUpdate $ \SessionConfig{configDataDir} state -> do
+      removeFile (configDataDir </> n)
+      return state
+
 
 -- | The type of queries in a given session state.
 --
