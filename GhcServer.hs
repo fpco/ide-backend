@@ -24,7 +24,6 @@ module GhcServer
 import System.Environment.Executable (getExecutablePath)
 import Data.Aeson.TH (deriveJSON)
 import Data.IORef
-import Control.Applicative
 import Control.Monad (forever)
 
 import System.IO (stdout, hFlush)
@@ -54,7 +53,9 @@ $(deriveJSON id ''GhcRunResponse)
 
 type GhcServer = RpcServer
 
--- * Server-side operations
+--------------------------------------------------------------------------------
+-- Server-side operations                                                     --
+--------------------------------------------------------------------------------
 
 ghcServer :: [String] -> IO ()
 ghcServer fdsAndOpts = do
@@ -89,27 +90,16 @@ ghcHandleCompile :: RpcConversation
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts configSourcesDir ideGenerateCode = do
     errsRef <- liftIO $ newIORef []
     counter <- liftIO $ newIORef 1  -- Progress counter goes from 1..n
-    errs    <- surpressGhcStdout . ghandle (handleGhcException errsRef) $
-                 compileInGhc configSourcesDir
-                              dynOpts
-                              ideGenerateCode
-                              verbosity
-                              errsRef
-                              (progressCallback counter)
-                              (\_ -> return ()) -- TODO: log?
+    errs    <- surpressGhcStdout $ compileInGhc configSourcesDir
+                                                dynOpts
+                                                ideGenerateCode
+                                                verbosity
+                                                errsRef
+                                                (progressCallback counter)
+                                                (\_ -> return ()) -- TODO: log?
     liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
     liftIO $ put $ GhcCompileDone errs
   where
-    -- Some errors are reported as exceptions instead
-    handleGhcException :: IORef [SourceError] -> GhcException -> Ghc [SourceError]
-    handleGhcException errsRef e = liftIO $ do
-      let eText   = show (e :: GhcException)
-          exError = OtherError eText
-      debug dVerbosity $ "handleOtherErrors: " ++ eText
-      -- In case of an exception, don't lose saved errors.
-      errs <- reverse <$> readIORef errsRef
-      return (errs ++ [exError])
-
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
 
@@ -134,7 +124,9 @@ ghcHandleRun RpcConversation{..} m fun = do
   liftIO $ debug dVerbosity $ "returned from runInGhc with " ++ show runOutcome
   liftIO $ put $ GhcRunDone runOutcome
 
--- * Client-side operations
+--------------------------------------------------------------------------------
+-- Client-side operations                                                     --
+--------------------------------------------------------------------------------
 
 forkGhcServer :: [String] -> IO GhcServer
 forkGhcServer opts = do

@@ -104,11 +104,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     cnts <- liftIO $ getDirectoryContents configSourcesDir
     let targets = map (configSourcesDir </>)
                   $ filter ((`elem` hsExtentions) . takeExtension) cnts
-    handleSourceError (\ e -> do
-                          liftIO $ debug dVerbosity
-                            $ "handleSourceError: " ++ show e
-                          errs <- liftIO $ reverse <$> readIORef errsRef
-                          return (errs ++ [OtherError (show e)])) $ do
+    handleErrors $ do
       -- Compute new GHC flags.
       flags0 <- getSessionDynFlags
       (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
@@ -153,6 +149,27 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         -- TODO: record the boolean 'succeeded loadRes' below:
         -- Recover all saved errors.
         liftIO $ reverse <$> readIORef errsRef
+  where
+    handleError :: Show a => a -> Ghc [SourceError]
+    handleError e = liftIO $ do
+      debug dVerbosity $ "handleSourceError: " ++ show e
+      errs <- reverse <$> readIORef errsRef
+      return (errs ++ [OtherError (show e)])
+
+    -- Some errors are reported as exceptions instead
+    handleGhcException :: GhcException -> Ghc [SourceError]
+    handleGhcException e = liftIO $ do
+      let eText   = show e
+          exError = OtherError eText
+      debug dVerbosity $ "handleOtherErrors: " ++ eText
+      -- In case of an exception, don't lose saved errors.
+      errs <- reverse <$> readIORef errsRef
+      return (errs ++ [exError])
+
+    handleErrors :: Ghc [SourceError] -> Ghc [SourceError]
+    handleErrors = ghandle handleGhcException
+                 . handleSourceError handleError
+
 
 runInGhc :: (String, String)    -- ^ module and function to run, if any
          -> Ghc RunResult
