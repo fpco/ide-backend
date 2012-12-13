@@ -49,6 +49,7 @@ executable ide-backend-server
   hs-source-dirs:     server
   build-depends:      ide-backend, base
   default-language:   Haskell2010
+  ghc-options:        -threaded
 
 test-suite typecheck-dir
   type:               exitcode-stdio-1.0
