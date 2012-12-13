@@ -21,11 +21,11 @@ module GhcServer
   , shutdownGhcServer
   ) where
 
--- getExecutablePath is in base only for >= 4.6
-import System.Environment.Executable (getExecutablePath)
 import Data.Aeson.TH (deriveJSON)
 import Data.IORef
-import Control.Monad (forever)
+import Data.ByteString (ByteString)
+import Data.ByteString.Char8 (pack)
+import Control.Monad (forever, when)
 import Control.Concurrent (myThreadId, forkIO, throwTo, killThread, ThreadId)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, readMVar)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
@@ -34,12 +34,14 @@ import qualified Control.Exception as Ex
 import System.IO (stdout, hFlush)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
-import Data.ByteString (ByteString)
-import Data.ByteString.Char8 (pack)
+import System.Directory (doesFileExist)
+import System.FilePath ((</>))
 
 import RpcServer
 import Common
 import GhcRun
+
+import Paths_ide_backend
 
 data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
@@ -158,8 +160,15 @@ ghcHandleRun RpcConversation{..} m fun = do
 
 forkGhcServer :: [String] -> IO GhcServer
 forkGhcServer opts = do
-  prog <- getExecutablePath
-  forkRpcServer prog $ ["--server"] ++ opts ++ ["--ghc-opts-end"]
+  bindir <- getBinDir
+  let prog = bindir </> "ide-backend-server"
+
+  exists <- doesFileExist prog
+  when (not exists) $
+    fail $ "The 'ide-backend-server' program was expected to "
+        ++ "be at location " ++ prog ++ " but it is not."
+
+  forkRpcServer prog (opts ++ ["--ghc-opts-end"])
 
 -- | Compile or typecheck
 rpcCompile :: GhcServer           -- ^ GHC server
