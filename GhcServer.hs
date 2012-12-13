@@ -17,19 +17,19 @@ module GhcServer
   , forkGhcServer
   , rpcCompile
   , rpcRun
-  , RunActions(interrupt, runWait)
+  , RunActions(interrupt, runWait, supplyStdin)
   , runWaitAll
   , shutdownGhcServer
   ) where
 
 import Data.Aeson.TH (deriveJSON)
 import Data.IORef
-import qualified Data.ByteString as BSS (ByteString, hGetSome, null)
+import qualified Data.ByteString as BSS (ByteString, hGetSome, null, hPut)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Control.Monad (forever, when)
 import Control.Concurrent (myThreadId, forkIO, throwTo, killThread, ThreadId)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, readMVar)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import qualified Control.Exception as Ex
 
@@ -60,7 +60,8 @@ data GhcRunResponse =
   | GhcRunDone RunResult
   deriving Show
 data GhcRunRequest =
-    GhcRunInterrupt
+    GhcRunInput BSS.ByteString
+  | GhcRunInterrupt
   deriving Show
 
 $(deriveJSON id ''GhcRequest)
@@ -151,6 +152,19 @@ ghcHandleRun RpcConversation{..} m fun = do
       stdOutputRd' <- fdToHandle stdOutputRd
       return (stdOutputRd', stdOutputBackup)
 
+    -- Similar procedure for stdin
+    (stdInputWr, stdInputBackup) <- liftIO $ do
+      -- Create pipe
+      (stdInputRd, stdInputWr) <- liftIO createPipe
+
+      -- Swizzle stdin
+      stdInputBackup <- liftIO $ dup stdInput
+      dupTo stdInputRd stdInput >> closeFd stdInputRd
+
+      -- Convert the write end to a handle and return
+      stdInputWr' <- fdToHandle stdInputWr
+      return (stdInputWr', stdInputBackup)
+
     ghcThread    <- liftIO $ myThreadId
     stdoutThread <- liftIO $ newEmptyMVar
 
@@ -162,6 +176,10 @@ ghcHandleRun RpcConversation{..} m fun = do
                       GhcRunInterrupt -> do
                         -- We terminate after receiving GhcRunInterrupt
                         throwTo ghcThread Ex.UserInterrupt
+                      GhcRunInput bs -> do
+                        BSS.hPut stdInputWr bs
+                        hFlush stdInputWr
+                        go
         go
 
       -- Start thread to read runStmt's stdout
@@ -180,13 +198,17 @@ ghcHandleRun RpcConversation{..} m fun = do
       liftIO $ killThread reqThread
       return outcome
 
-    -- Close stdOutput (that is, the current write end of the loopback pipe)
-    -- This will cause thread that was listening on stdout to terminate
-    -- (once it has processed all remaining output). We wait for this to
-    -- terminate, then restore stdout and finally 'put' the run result.
     liftIO $ do
+      -- Restore stdin and stdout
       dupTo stdOutputBackup stdOutput >> closeFd stdOutputBackup
+      dupTo stdInputBackup  stdInput  >> closeFd stdInputBackup
+
+      -- Closing the write end of the stdout pipe will cause the stdout
+      -- thread to terminate after it processed all remaining output;
+      -- wait for this to happen
       readMVar stdoutThread
+
+      -- Report the final result
       put $ GhcRunDone runOutcome
   where
     isUserInterrupt :: Ex.AsyncException -> Maybe RunResult
@@ -234,8 +256,9 @@ rpcCompile server opts dir genCode callback =
     go
 
 data RunActions = RunActions {
-    runWait   :: IO (Either BSS.ByteString RunResult)
-  , interrupt :: IO ()
+    runWait     :: IO (Either BSS.ByteString RunResult)
+  , interrupt   :: IO ()
+  , supplyStdin :: BSS.ByteString -> IO ()
   }
 
 -- | Run code
@@ -244,7 +267,7 @@ rpcRun :: GhcServer       -- ^ GHC server
        -> String          -- ^ Function
        -> IO RunActions
 rpcRun server m fun = do
-  runWaitMVar   <- newEmptyMVar :: IO (MVar (Either BSS.ByteString RunResult))
+  runWaitChan   <- newChan      :: IO (Chan (Either BSS.ByteString RunResult))
   reqChan       <- newChan      :: IO (Chan GhcRunRequest)
   reqThreadMVar <- newEmptyMVar :: IO (MVar ThreadId)
 
@@ -253,21 +276,21 @@ rpcRun server m fun = do
     forkIO (forever $ readChan reqChan >>= put) >>= putMVar reqThreadMVar
     let go = do resp <- get
                 case resp of
-                  GhcRunDone runResult -> putMVar runWaitMVar (Right runResult)
-                  GhcRunOutp bs        -> putMVar runWaitMVar (Left bs) >> go
+                  GhcRunDone runResult -> writeChan runWaitChan (Right runResult)
+                  GhcRunOutp bs        -> writeChan runWaitChan (Left bs) >> go
     go
 
   reqThreadId <- readMVar reqThreadMVar
 
   return RunActions {
       runWait = do
-        outcome <- takeMVar runWaitMVar
+        outcome <- readChan runWaitChan
         case outcome of
           Left  _ -> return ()
           Right _ -> killThread reqThreadId
         return outcome
-    , interrupt =
-        writeChan reqChan GhcRunInterrupt
+    , interrupt   = writeChan reqChan GhcRunInterrupt
+    , supplyStdin = writeChan reqChan . GhcRunInput
     }
 
 runWaitAll :: RunActions -> IO (BSL.ByteString, RunResult)

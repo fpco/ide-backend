@@ -74,7 +74,7 @@ data RunResult =
   | RunProgException String
     -- | GHC itself threw an exception when we tried to run the code
   | RunGhcException String
-  deriving Show
+  deriving (Show, Eq)
 
 type LoadedModules = [ModuleName]
 
