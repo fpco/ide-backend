@@ -9,10 +9,10 @@ import Data.Monoid ((<>), mconcat, mempty)
 import Data.List (sort)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
 import qualified Data.ByteString.Char8 as BSSC (pack)
-import Control.Exception (bracket)
 import Data.Char (toUpper)
 import Control.Monad (liftM)
 import Control.Concurrent (threadDelay)
+import qualified Control.Exception as Ex
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -60,7 +60,7 @@ withConfiguredSession opts io =
 
 -- | Run the specified action with a new IDE session
 withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
-withSession config = bracket (initSession config) shutdownSession
+withSession config = Ex.bracket (initSession config) shutdownSession
 
 -- | Like 'withSession', but with a monadic configuration
 withSession' :: IO SessionConfig -> (IdeSession -> IO a) -> IO a
@@ -131,12 +131,19 @@ multipleTests =
         (_, lm) <- getModules session
         let update = updateCodeGeneration True
         updateSessionD session update (length lm)  -- all recompiled
-        runActions <- runStmt session "Main" "main"
-        (_, resOrEx) <- runWaitAll runActions
-        case resOrEx of
-          RunOk _ident       -> return ()
-          RunProgException _ -> assertFailure "No errors detected, but the run failed"
-          RunGhcException _  -> return ()
+        mex <- Ex.try $ runStmt session "Main" "main"
+        case mex of
+          Right runActions -> do
+            (_, resOrEx) <- runWaitAll runActions
+            case resOrEx of
+              RunOk _ident       -> return ()
+              RunProgException _ ->
+                assertFailure "No errors detected, but the run failed"
+              RunGhcException _  -> return ()
+          Left ex ->
+            assertRaises "runStmt session Main main"
+              (== userError "Module \"Main\" not successfully loaded, when trying to run code.")
+              (Ex.throw (ex :: Ex.SomeException))
       )
     , ("Run automatically corrected code; don't fail at all"
       , \session -> do

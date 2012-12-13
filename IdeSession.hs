@@ -501,23 +501,26 @@ getLoadedModules IdeSession{ideState} =
 getSymbolDefinitionMap :: Query SymbolDefinitionMap
 getSymbolDefinitionMap = undefined
 
--- TODO: detect and fail if the last updateSession was not done
--- with @setCodeGeneration@ turned on.
--- | Run a given function in a given module and return all the compilation
--- warnings and errors and (if there were only warnings) either an identifier
--- bound to the resulting value or an exception raised by the function).
--- The function resembles a query, but it's not instantaneous. It blocks
--- and waits for the execution to finish. In particular, if the executed
--- code loops, it waits forever.
+-- | Run a given function in a given module (the name of the module
+-- is the one between @module ... end@, which may differ from the file name).
+-- The function resembles a query, but it's not instantaneous
+-- and the running code can be interrupted or interacted with.
 runStmt :: IdeSession -> String -> String -> IO RunActions
 runStmt IdeSession{ideGhcServer,ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
     -- TODO: rather than checking if "something" has been compiled, we should
     -- check if the given module has been compiled.
-    IdeSessionIdle idleState@IdeIdleState{ideComputed=Just _,ideGenerateCode=True} -> do
-      -- TODO: we should put the state back into idle when done
-      runActions <- rpcRun ideGhcServer m fun
-      return (IdeSessionRunning idleState, runActions)
+    IdeSessionIdle idleState@IdeIdleState{ ideComputed=Just comp
+                                         , ideGenerateCode=True} ->
+      -- ideManagedFiles is irrelevant, because only the module name
+      -- inside 'module .. where' counts.
+      if ModuleName m `elem` computedLoadedModules comp
+      then do
+        -- TODO: we should put the state back into idle when done
+        runActions <- rpcRun ideGhcServer m fun
+        return (IdeSessionRunning idleState, runActions)
+      else fail $ "Module " ++ show m
+                  ++ " not successfully loaded, when trying to run code."
     IdeSessionIdle _ ->
       fail "Cannot run before the code is generated."
     IdeSessionShutdown ->
