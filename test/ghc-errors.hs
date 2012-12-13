@@ -131,12 +131,11 @@ multipleTests =
         let update = updateCodeGeneration True
         updateSessionD session update (length lm)  -- all recompiled
         runActions <- runStmt session "Main" "main"
-        resOrEx <- runWait runActions
+        (_, resOrEx) <- runWaitAll runActions
         case resOrEx of
-          Right (RunOk _ident)       -> return ()
-          Right (RunProgException _) -> assertFailure "No errors detected, but the run failed"
-          Right (RunGhcException _)  -> return ()
-          Left _                     -> assertFailure "Unexpected program output"
+          RunOk _ident       -> return ()
+          RunProgException _ -> assertFailure "No errors detected, but the run failed"
+          RunGhcException _  -> return ()
       )
     , ("Run automatically corrected code; don't fail at all"
       , \session -> do
@@ -151,12 +150,11 @@ multipleTests =
         let update2 = updateCodeGeneration True
         updateSessionD session update2 (length lm + 1)
         runActions <- runStmt session "Main" "main"
-        resOrEx <- runWait runActions
+        (_, resOrEx) <- runWaitAll runActions
         case resOrEx of
-          Right (RunOk _ident)         -> return ()
-          Right (RunProgException _ex) -> assertFailure "Manually corrected code not run successfully"
-          Right (RunGhcException _ex)  -> assertFailure "Manually corrected code not run successfully"
-          Left _                       -> assertFailure "Unexpected output"
+          RunOk _ident         -> return ()
+          RunProgException _ex -> assertFailure "Manually corrected code not run successfully"
+          RunGhcException _ex  -> assertFailure "Manually corrected code not run successfully"
       )
     , ("Make sure deleting modules removes them from the directory"
       , \session -> do
@@ -304,12 +302,11 @@ syntheticTests =
         msgs <- getSourceErrors session
         assertSomeErrors msgs
         runActions <- runStmt session "Main" "main"
-        resOrEx <- runWait runActions
+        (_, resOrEx) <- runWaitAll runActions
         case resOrEx of
-          Right (RunOk _ident)       -> assertFailure "This run has to fail"
-          Right (RunProgException _) -> assertFailure "This run has to fail"
-          Right (RunGhcException _)  -> return ()
-          Left _                     -> assertFailure "Unexpected output"
+          RunOk _ident       -> assertFailure "This run has to fail"
+          RunProgException _ -> assertFailure "This run has to fail"
+          RunGhcException _  -> return ()
     )
   , ( "Reject a module with mangled header"
     , withConfiguredSession defOpts $ \session -> do
@@ -376,6 +373,82 @@ syntheticTests =
         case resOrEx of
           Right (RunProgException "AsyncException: user interrupt") -> return ()
           _ -> assertFailure "Unexpected run result"
+    )
+  , ( "Capture stdout (single putStrLn)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (ModuleName "M") . pack . unlines $
+                    [ "module M where"
+                    , "hello :: IO ()"
+                    , "hello = putStrLn \"Hello World\""
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" msgs []
+        runActions <- runStmt session "M" "hello"
+        (output, result) <- runWaitAll runActions
+        assertEqual "" output (pack "Hello World\n")
+        case result of
+          RunOk _ -> return ()
+          _       -> assertFailure "Unexpected run result"
+    )
+  , ( "Capture stdout (single putStr)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (ModuleName "M") . pack . unlines $
+                    [ "module M where"
+                    , "hello :: IO ()"
+                    , "hello = putStr \"Hello World\""
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" msgs []
+        runActions <- runStmt session "M" "hello"
+        (output, result) <- runWaitAll runActions
+        assertEqual "" output (pack "Hello World")
+        case result of
+          RunOk _ -> return ()
+          _       -> assertFailure "Unexpected run result"
+    )
+  , ( "Capture stdout (multiple putStrLn)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (ModuleName "M") . pack . unlines $
+                    [ "module M where"
+                    , "hello :: IO ()"
+                    , "hello = do putStrLn \"Hello World 1\""
+                    , "           putStrLn \"Hello World 2\""
+                    , "           putStrLn \"Hello World 3\""
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" msgs []
+        runActions <- runStmt session "M" "hello"
+        (output, result) <- runWaitAll runActions
+        assertEqual "" output (pack "Hello World 1\nHello World 2\nHello World 3\n")
+        case result of
+          RunOk _ -> return ()
+          _       -> assertFailure "Unexpected run result"
+    )
+  , ( "Capture stdout (mixed putStr and putStrLn)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (ModuleName "M") . pack . unlines $
+                    [ "module M where"
+                    , "hello :: IO ()"
+                    , "hello = do putStrLn \"Hello World 1\""
+                    , "           putStr   \"Hello World 2\""
+                    , "           putStrLn \"Hello World 3\""
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" msgs []
+        runActions <- runStmt session "M" "hello"
+        (output, result) <- runWaitAll runActions
+        assertEqual "" output (pack "Hello World 1\nHello World 2Hello World 3\n")
+        case result of
+          RunOk _ -> return ()
+          _       -> assertFailure "Unexpected run result"
     )
   ]
 

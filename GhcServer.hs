@@ -17,14 +17,16 @@ module GhcServer
   , forkGhcServer
   , rpcCompile
   , rpcRun
-  , RunActions(..)
+  , RunActions(interrupt, runWait)
+  , runWaitAll
   , shutdownGhcServer
   ) where
 
 import Data.Aeson.TH (deriveJSON)
 import Data.IORef
-import Data.ByteString (ByteString)
-import Data.ByteString.Char8 (pack)
+import qualified Data.ByteString as BSS (ByteString, hGetSome, null)
+import qualified Data.ByteString.Char8 as BSSC (pack)
+import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Control.Monad (forever, when)
 import Control.Concurrent (myThreadId, forkIO, throwTo, killThread, ThreadId)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, readMVar)
@@ -54,7 +56,8 @@ data GhcCompileResponse =
   | GhcCompileDone ([SourceError], LoadedModules)
   deriving Show
 data GhcRunResponse =
-    GhcRunDone RunResult
+    GhcRunOutp BSS.ByteString
+  | GhcRunDone RunResult
   deriving Show
 data GhcRunRequest =
     GhcRunInterrupt
@@ -135,24 +138,65 @@ ghcHandleRun :: RpcConversation
              -> String            -- ^ Function
              -> Ghc ()
 ghcHandleRun RpcConversation{..} m fun = do
-    ghcThread <- liftIO $ myThreadId
+    -- Setup loopback pipe so we can capture runStmt's stdout
+    (stdOutputRd, stdOutputBackup) <- liftIO $ do
+      -- Create pipe
+      (stdOutputRd, stdOutputWr) <- liftIO createPipe
+
+      -- Backup stdout, then replace stdout with the pipe's write end
+      stdOutputBackup <- liftIO $ dup stdOutput
+      dupTo stdOutputWr stdOutput >> closeFd stdOutputWr
+
+      -- Convert to the read end to a handle and return
+      stdOutputRd' <- fdToHandle stdOutputRd
+      return (stdOutputRd', stdOutputBackup)
+
+    ghcThread    <- liftIO $ myThreadId
+    stdoutThread <- liftIO $ newEmptyMVar
+
+    -- TODO: this isn't quite right. The reqThread may never be terminated
     runOutcome <- ghandleJust isUserInterrupt return $ do
+      -- Start thread to read 'interrupt' requests from the client
       reqThread <- liftIO . forkIO . forever $ do
         request <- get
         case request of
           GhcRunInterrupt -> do
             throwTo ghcThread Ex.UserInterrupt
+
+      -- Start thread to read runStmt's stdout
+      liftIO . forkIO $ do
+        let go = do bs <- BSS.hGetSome stdOutputRd blockSize
+                    if BSS.null bs
+                      then putMVar stdoutThread ()
+                      else put (GhcRunOutp bs) >> go
+        go
+
+      -- Actually start the code
       outcome <- runInGhc (m, fun)
+      liftIO $ debug dVerbosity $ "returned from runInGhc with " ++ show outcome
+
+      -- Kill request thread and return the result
       liftIO $ killThread reqThread
       return outcome
-    liftIO $ debug dVerbosity $ "returned from runInGhc with " ++ show runOutcome
-    liftIO $ put $ GhcRunDone runOutcome
+
+    -- Close stdOutput (that is, the current write end of the loopback pipe)
+    -- This will cause thread that was listening on stdout to terminate
+    -- (once it has processed all remaining output). We wait for this to
+    -- terminate, then restore stdout and finally 'put' the run result.
+    liftIO $ do
+      dupTo stdOutputBackup stdOutput >> closeFd stdOutputBackup
+      readMVar stdoutThread
+      put $ GhcRunDone runOutcome
   where
     isUserInterrupt :: Ex.AsyncException -> Maybe RunResult
     isUserInterrupt ex@Ex.UserInterrupt =
       Just . RunProgException . showExWithClass . Ex.toException $ ex
     isUserInterrupt _ =
       Nothing
+
+    -- TODO: What is a good value here?
+    blockSize :: Int
+    blockSize = 4096
 
 --------------------------------------------------------------------------------
 -- Client-side operations                                                     --
@@ -189,7 +233,7 @@ rpcCompile server opts dir genCode callback =
     go
 
 data RunActions = RunActions {
-    runWait   :: IO (Either ByteString RunResult)
+    runWait   :: IO (Either BSS.ByteString RunResult)
   , interrupt :: IO ()
   }
 
@@ -199,15 +243,18 @@ rpcRun :: GhcServer       -- ^ GHC server
        -> String          -- ^ Function
        -> IO RunActions
 rpcRun server m fun = do
-  runWaitMVar   <- newEmptyMVar :: IO (MVar (Either ByteString RunResult))
+  runWaitMVar   <- newEmptyMVar :: IO (MVar (Either BSS.ByteString RunResult))
   reqChan       <- newChan      :: IO (Chan GhcRunRequest)
   reqThreadMVar <- newEmptyMVar :: IO (MVar ThreadId)
 
   forkIO $ rpcConversation server $ \RpcConversation{..} -> do
     put (ReqRun m fun)
     forkIO (forever $ readChan reqChan >>= put) >>= putMVar reqThreadMVar
-    runResult <- get
-    putMVar runWaitMVar (Right runResult)
+    let go = do resp <- get
+                case resp of
+                  GhcRunDone runResult -> putMVar runWaitMVar (Right runResult)
+                  GhcRunOutp bs        -> putMVar runWaitMVar (Left bs) >> go
+    go
 
   reqThreadId <- readMVar reqThreadMVar
 
@@ -222,6 +269,15 @@ rpcRun server m fun = do
         writeChan reqChan GhcRunInterrupt
     }
 
+runWaitAll :: RunActions -> IO (BSL.ByteString, RunResult)
+runWaitAll RunActions{runWait} = go []
+  where
+    go :: [BSS.ByteString] -> IO (BSL.ByteString, RunResult)
+    go acc = do
+      resp <- runWait
+      case resp of
+        Left  bs        -> go (bs : acc)
+        Right runResult -> return (BSL.fromChunks acc, runResult)
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs
@@ -245,7 +301,7 @@ surpressStdOutput = do
   stdOutputBackup <- dup stdOutput
   closeFd stdOutput
   -- Will use next available file descriptor: that is, stdout
-  _ <- openFd (pack "/dev/null") WriteOnly Nothing defaultFileFlags
+  _ <- openFd (BSSC.pack "/dev/null") WriteOnly Nothing defaultFileFlags
   return stdOutputBackup
 
 restoreStdOutput :: StdOutputBackup -> IO ()
