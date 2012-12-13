@@ -154,14 +154,15 @@ ghcHandleRun RpcConversation{..} m fun = do
     ghcThread    <- liftIO $ myThreadId
     stdoutThread <- liftIO $ newEmptyMVar
 
-    -- TODO: this isn't quite right. The reqThread may never be terminated
     runOutcome <- ghandleJust isUserInterrupt return $ do
       -- Start thread to read 'interrupt' requests from the client
-      reqThread <- liftIO . forkIO . forever $ do
-        request <- get
-        case request of
-          GhcRunInterrupt -> do
-            throwTo ghcThread Ex.UserInterrupt
+      reqThread <- liftIO . forkIO $ do
+        let go = do request <- get
+                    case request of
+                      GhcRunInterrupt -> do
+                        -- We terminate after receiving GhcRunInterrupt
+                        throwTo ghcThread Ex.UserInterrupt
+        go
 
       -- Start thread to read runStmt's stdout
       liftIO . forkIO $ do
