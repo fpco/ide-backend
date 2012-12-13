@@ -49,7 +49,7 @@ data GhcRequest
 --   deriving Show
 data GhcCompileResponse =
     GhcCompileProgress PCounter
-  | GhcCompileDone ([SourceError], LoadedContext)
+  | GhcCompileDone ([SourceError], LoadedModules)
   deriving Show
 data GhcRunResponse =
     GhcRunDone RunResult
@@ -159,7 +159,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (PCounter -> IO ()) -- ^ Progress callback
-           -> IO ([SourceError], LoadedContext)
+           -> IO ([SourceError], LoadedModules)
 rpcCompile server opts dir genCode callback =
   rpcConversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)

@@ -36,6 +36,7 @@ import qualified Outputable as GHC
 import FastString ( unpackFS )
 import HscTypes (HscEnv(hsc_mod_graph))
 
+import Control.Monad (filterM)
 import System.Process
 import Data.IORef
 import Control.Applicative
@@ -95,7 +96,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> IORef [SourceError] -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-             -> Ghc ([SourceError], LoadedContext)
+             -> Ghc ([SourceError], LoadedModules)
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
              errsRef handlerOutput handlerRemaining = do
@@ -151,14 +152,14 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         -- Recover all saved errors.
         prepareResult
   where
-    handleError :: Show a => a -> Ghc ([SourceError], LoadedContext)
+    handleError :: Show a => a -> Ghc ([SourceError], LoadedModules)
     handleError e = do
       liftIO $ debug dVerbosity $ "handleSourceError: " ++ show e
       (errs, context) <- prepareResult
       return (errs ++ [OtherError (show e)], context)
 
     -- Some errors are reported as exceptions instead
-    handleGhcException :: GhcException -> Ghc ([SourceError], LoadedContext)
+    handleGhcException :: GhcException -> Ghc ([SourceError], LoadedModules)
     handleGhcException e = do
       let eText   = show e
           exError = OtherError eText
@@ -167,17 +168,19 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
       (errs, context) <- prepareResult
       return (errs ++ [exError], context)
 
-    handleErrors :: Ghc ([SourceError], LoadedContext)
-                 -> Ghc ([SourceError], LoadedContext)
+    handleErrors :: Ghc ([SourceError], LoadedModules)
+                 -> Ghc ([SourceError], LoadedModules)
     handleErrors = ghandle handleGhcException
                  . handleSourceError handleError
 
-    prepareResult :: Ghc ([SourceError], LoadedContext)
+    prepareResult :: Ghc ([SourceError], LoadedModules)
     prepareResult = do
       errs <- liftIO $ readIORef errsRef
-      context <- getContext
-      flags <- getSessionDynFlags
-      return (reverse errs, showSDocDebug flags (GHC.ppr context))
+      graph <- getModuleGraph
+      let moduleNames = map ms_mod_name graph
+      loadedNames <- filterM isLoaded moduleNames
+      let loadedModules = map (ModuleName . moduleNameString) loadedNames
+      return (reverse errs, loadedModules)
 
 runInGhc :: (String, String)    -- ^ module and function to run, if any
          -> Ghc RunResult

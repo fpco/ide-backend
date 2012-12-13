@@ -8,7 +8,8 @@ module Common
   , hsExtentions, cpExtentions
   , PCounter
   , RunResult(..)
-  , LoadedContext
+  , ModuleName(..)
+  , LoadedModules
   , showExWithClass
   , dVerbosity, debug
   ) where
@@ -33,8 +34,12 @@ data SourceError =
 data SourceErrorKind = KindError | KindWarning
   deriving (Show, Eq)
 
+newtype ModuleName = ModuleName String
+  deriving (Eq, Ord, Show)
+
 $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)
+$(deriveJSON id ''ModuleName)
 
 formatSourceError :: SourceError -> String
 formatSourceError (SrcError kind path ii jj s) =
@@ -69,8 +74,7 @@ data RunResult =
   | RunGhcException String
   deriving Show
 
--- A mockup for now.
-type LoadedContext = String
+type LoadedModules = [ModuleName]
 
 $(deriveJSON id ''RunResult)
 

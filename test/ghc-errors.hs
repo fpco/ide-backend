@@ -6,9 +6,11 @@ import System.Directory
 import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
 import Data.Monoid ((<>), mconcat, mempty)
+import Data.List (sort)
 import Data.ByteString.Lazy.Char8 (pack)
 import Control.Exception (bracket)
 import Data.Char (toUpper)
+import Control.Monad (liftM)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -174,8 +176,22 @@ syntheticTests =
   [ ( "Maintain list of compiled modules"
     , withConfiguredSession defOpts $ \session -> do
         let m = ModuleName "A"
-        updateSessionD session (loadModule m "") 1
-        assertEqual "" [m] =<< getLoadedModules session
+        updateSessionD session (loadModule m "a = 5") 1
+        assertEqual "[m]" [m] =<< getLoadedModules session
+        let m2 = ModuleName "A2"
+        updateSessionD session (loadModule m2 "import A\na2 = A.a") 1
+        assertEqual "[m, m2]" (sort [m, m2])
+          =<< (liftM sort $ getLoadedModules session)
+        let m3 = ModuleName "A3"
+        updateSessionD session (loadModule m3 "") 1
+        assertEqual "[m, m2, m3]" (sort [m, m2, m3])
+          =<< (liftM sort $ getLoadedModules session)
+        let m4 = ModuleName "Wrong"
+        updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
+        assertEqual "Wrong" (sort [m, m2, m3])
+          =<< (liftM sort $ getLoadedModules session)
+        updateSessionD session (loadModule m "a = c") 1
+        assertEqual "[m3]" [m3] =<< getLoadedModules session
     )
   , ( "Duplicate shutdown"
     , withConfiguredSession defOpts $ \session ->
