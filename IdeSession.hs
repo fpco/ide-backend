@@ -95,8 +95,10 @@ module IdeSession (
   getSourceErrors,
   SourceError(..),
 
-  -- ** Loaded modules
+  -- ** Managed files and loaded modules
+  getManagedFiles,
   getLoadedModules,
+  ManagedFiles(..),
 
   -- ** Symbol definition maps
   getSymbolDefinitionMap,
@@ -163,6 +165,7 @@ import System.IO (openBinaryTempFile, hClose)
 import System.Directory
 import System.FilePath ((</>), (<.>), splitFileName, takeExtension)
 import qualified Control.Exception as Ex
+import Data.List (delete)
 import Data.Monoid (Monoid(..))
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
@@ -200,6 +203,13 @@ data IdeIdleState = IdeIdleState {
   , ideNewOpts   :: Maybe [String]
     -- Whether to generate code in addition to type-checking.
   , ideGenerateCode :: Bool
+    -- Files submitted by the user and not deleted yet.
+  , ideManagedFiles :: ManagedFiles
+  }
+
+data ManagedFiles = ManagedFiles
+  { sourceFiles :: [ModuleName]
+  , dataFiles   :: [FilePath]
   }
 
 -- | Recover the fixed config the session was initialized with.
@@ -259,6 +269,7 @@ initSession ideConfig@SessionConfig{..} = do
                         , ideComputed         = Nothing
                         , ideNewOpts          = Nothing
                         , ideGenerateCode     = False
+                        , ideManagedFiles     = ManagedFiles [] []
                         }
   ideGhcServer <- forkGhcServer configStaticOpts
   return IdeSession{..}
@@ -334,30 +345,37 @@ writeFileAtomic targetPath content = do
 --
 updateModule :: ModuleName -> ByteString -> IdeSessionUpdate
 updateModule m bs =
-    IdeSessionUpdate $ \ideConfig state@IdeIdleState{ideLogicalTimestamp} -> do
+    IdeSessionUpdate $ \ideConfig state@IdeIdleState{ ideLogicalTimestamp
+                                                    , ideManagedFiles } -> do
       let internal = internalFile ideConfig m
       writeFileAtomic internal bs
       setFileTimes internal (fromIntegral ideLogicalTimestamp) (fromIntegral ideLogicalTimestamp)
-      return state {ideLogicalTimestamp = ideLogicalTimestamp + 1}
+      let sF = m : sourceFiles ideManagedFiles
+      return state { ideLogicalTimestamp = ideLogicalTimestamp + 1
+                   , ideManagedFiles = ideManagedFiles {sourceFiles = sF} }
 
 -- | Like 'updateModule' except that instead of passing the module source by
 -- value, it's given by reference to an existing file, which will be copied.
 --
 updateModuleFromFile :: ModuleName -> FilePath -> IdeSessionUpdate
 updateModuleFromFile m p =
-    IdeSessionUpdate $ \ideConfig state@IdeIdleState{ideLogicalTimestamp} -> do
+    IdeSessionUpdate $ \ideConfig state@IdeIdleState{ ideLogicalTimestamp
+                                                    , ideManagedFiles } -> do
       let internal = internalFile ideConfig m
       copyFile p internal
       setFileTimes internal (fromIntegral ideLogicalTimestamp) (fromIntegral ideLogicalTimestamp)
-      return state {ideLogicalTimestamp = ideLogicalTimestamp + 1}
+      let sF = m : sourceFiles ideManagedFiles
+      return state { ideLogicalTimestamp = ideLogicalTimestamp + 1
+                   , ideManagedFiles = ideManagedFiles {sourceFiles = sF} }
 
 -- | A session update that deletes an existing module.
 --
 updateModuleDelete :: ModuleName -> IdeSessionUpdate
 updateModuleDelete m =
-    IdeSessionUpdate $ \ideConfig state -> do
+    IdeSessionUpdate $ \ideConfig state@IdeIdleState{ideManagedFiles} -> do
       removeFile (internalFile ideConfig m)
-      return state
+      let sF = delete m (sourceFiles ideManagedFiles)
+      return state {ideManagedFiles = ideManagedFiles {sourceFiles = sF}}
 
 -- | Warning: only dynamic flags can be set here.
 -- Static flags need to be set at server startup.
@@ -388,27 +406,32 @@ internalFile SessionConfig{configSourcesDir} (ModuleName n) =
 --
 updateDataFile :: FilePath -> ByteString -> IdeSessionUpdate
 updateDataFile n bs =
-    IdeSessionUpdate $ \SessionConfig{configDataDir} state -> do
+    IdeSessionUpdate $ \SessionConfig{configDataDir}
+                        state@IdeIdleState{ideManagedFiles} -> do
       writeFileAtomic (configDataDir </> n) bs
-      return state
+      let dF = n : dataFiles ideManagedFiles
+      return state {ideManagedFiles = ideManagedFiles {dataFiles = dF}}
 
 -- | Like 'updateDataFile' except that instead of passing the file content by
 -- value, it's given by reference to an existing file, which will be copied.
 --
 updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate
 updateDataFileFromFile n p =
-    IdeSessionUpdate $ \SessionConfig{configDataDir} state -> do
+    IdeSessionUpdate $ \SessionConfig{configDataDir}
+                        state@IdeIdleState{ideManagedFiles} -> do
       copyFile (configDataDir </> n) (configDataDir </> p)
-      return state
+      let dF = n : dataFiles ideManagedFiles
+      return state {ideManagedFiles = ideManagedFiles {dataFiles = dF}}
 
 -- | A session update that deletes an existing data file.
 --
 updateDataFileDelete :: FilePath -> IdeSessionUpdate
 updateDataFileDelete n =
-    IdeSessionUpdate $ \SessionConfig{configDataDir} state -> do
+    IdeSessionUpdate $ \SessionConfig{configDataDir}
+                        state@IdeIdleState{ideManagedFiles} -> do
       removeFile (configDataDir </> n)
-      return state
-
+      let dF = delete n (dataFiles ideManagedFiles)
+      return state {ideManagedFiles = ideManagedFiles {dataFiles = dF}}
 
 -- | The type of queries in a given session state.
 --
@@ -450,6 +473,17 @@ getSourceErrors IdeSession{ideState} =
 -- IDE to wait for the next sessionUpdate to finish.
           Nothing -> fail "This session state does not admit queries."
       IdeSessionShutdown -> fail "Session already shut down."
+
+-- | Get the list of files submitted by the user and not deleted yet.
+getManagedFiles :: Query ManagedFiles
+getManagedFiles IdeSession{ideState} =
+  withMVar ideState $ \st ->
+  case st of
+    IdeSessionIdle IdeIdleState{ideManagedFiles} ->
+      return ideManagedFiles
+    IdeSessionRunning IdeIdleState{ideManagedFiles} ->
+      return ideManagedFiles
+    IdeSessionShutdown -> fail "Session already shut down."
 
 -- | Get the list of correctly compiled modules.
 getLoadedModules :: Query [ModuleName]
@@ -504,4 +538,3 @@ runStmt IdeSession{ideGhcServer,ideState} m fun = do
       fail "Cannot run before the code is generated."
     IdeSessionShutdown ->
       fail "Session already shut down."
-
