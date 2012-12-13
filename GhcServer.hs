@@ -17,6 +17,7 @@ module GhcServer
   , forkGhcServer
   , rpcCompile
   , rpcRun
+  , RunActions(..)
   , shutdownGhcServer
   ) where
 
@@ -25,10 +26,15 @@ import System.Environment.Executable (getExecutablePath)
 import Data.Aeson.TH (deriveJSON)
 import Data.IORef
 import Control.Monad (forever)
+import Control.Concurrent (myThreadId, forkIO, throwTo, killThread, ThreadId)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, readMVar)
+import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
+import qualified Control.Exception as Ex (AsyncException(UserInterrupt))
 
 import System.IO (stdout, hFlush)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
+import Data.ByteString (ByteString)
 import Data.ByteString.Char8 (pack)
 
 import RpcServer
@@ -44,12 +50,18 @@ data GhcRequest
 data GhcCompileResponse =
     GhcCompileProgress PCounter
   | GhcCompileDone ([SourceError], LoadedContext)
+  deriving Show
 data GhcRunResponse =
     GhcRunDone RunResult
+  deriving Show
+data GhcRunRequest =
+    GhcRunInterrupt
+  deriving Show
 
 $(deriveJSON id ''GhcRequest)
 $(deriveJSON id ''GhcCompileResponse)
 $(deriveJSON id ''GhcRunResponse)
+$(deriveJSON id ''GhcRunRequest)
 
 type GhcServer = RpcServer
 
@@ -121,7 +133,14 @@ ghcHandleRun :: RpcConversation
              -> String            -- ^ Function
              -> Ghc ()
 ghcHandleRun RpcConversation{..} m fun = do
+  ghcThread <- liftIO $ myThreadId
+  reqThread <- liftIO . forkIO . forever $ do
+    request <- get
+    case request of
+      GhcRunInterrupt -> do
+        throwTo ghcThread Ex.UserInterrupt
   runOutcome <- runInGhc (m, fun)
+  liftIO $ killThread reqThread
   liftIO $ debug dVerbosity $ "returned from runInGhc with " ++ show runOutcome
   liftIO $ put $ GhcRunDone runOutcome
 
@@ -152,12 +171,40 @@ rpcCompile server opts dir genCode callback =
 
     go
 
+data RunActions = RunActions {
+    runWait   :: IO (Either ByteString RunResult)
+  , interrupt :: IO ()
+  }
+
 -- | Run code
 rpcRun :: GhcServer       -- ^ GHC server
        -> String          -- ^ Module
        -> String          -- ^ Function
-       -> IO RunResult
-rpcRun server m fun = rpc server (ReqRun m fun)
+       -> IO RunActions
+rpcRun server m fun = do
+  runWaitMVar   <- newEmptyMVar :: IO (MVar (Either ByteString RunResult))
+  reqChan       <- newChan      :: IO (Chan GhcRunRequest)
+  reqThreadMVar <- newEmptyMVar :: IO (MVar ThreadId)
+
+  forkIO $ rpcConversation server $ \RpcConversation{..} -> do
+    put (ReqRun m fun)
+    forkIO (forever $ readChan reqChan >>= put) >>= putMVar reqThreadMVar
+    runResult <- get
+    putMVar runWaitMVar (Right runResult)
+
+  reqThreadId <- readMVar reqThreadMVar
+
+  return RunActions {
+      runWait = do
+        outcome <- takeMVar runWaitMVar
+        case outcome of
+          Left  _ -> return ()
+          Right _ -> killThread reqThreadId
+        return outcome
+    , interrupt =
+        writeChan reqChan GhcRunInterrupt
+    }
+
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs

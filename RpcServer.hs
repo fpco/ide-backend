@@ -43,7 +43,7 @@ import Data.Aeson
   )
 import Data.Aeson.TH (deriveJSON)
 import Control.Applicative ((<$>))
-import Control.Monad (void, forever)
+import Control.Monad (void, forever, unless)
 import qualified Control.Exception as Ex
 import Control.Concurrent (forkIOWithUnmask, killThread, ThreadId, threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
@@ -53,14 +53,15 @@ import Control.Concurrent.MVar
   , newEmptyMVar
   , putMVar
   , readMVar
-  , modifyMVar
   , takeMVar
-  , withMVar
   , tryPutMVar
   )
-import Data.ByteString.Lazy (ByteString, hPut, hGetContents, take)
+import qualified Data.ByteString as BS
+import Data.ByteString.Lazy (ByteString, hPut, hGetContents)
 import Data.ByteString.Lazy.Char8 (pack, unpack)
-import Data.Attoparsec.ByteString.Lazy (parse, Result(Done, Fail))
+import Data.Attoparsec (parse, IResult(Fail, Partial, Done))
+import qualified Data.Attoparsec as Attoparsec
+import Data.IORef (IORef, writeIORef, readIORef, newIORef)
 
 --------------------------------------------------------------------------------
 -- Exceptions thrown by the RPC server are retrown locally as                 --
@@ -188,6 +189,8 @@ data RpcServer = RpcServer {
   , rpcErrorsR   :: Handle
     -- | Handle on the server process itself
   , rpcProc :: ProcessHandle
+    -- | Parser for the server input
+  , rpcParser :: StreamParser Value
     -- | Server state
   , rpcState :: MVar RpcClientSideState
   }
@@ -195,7 +198,7 @@ data RpcServer = RpcServer {
 -- | RPC server state
 data RpcClientSideState =
     -- | The server is running. We record the server's unconsumed output.
-    RpcRunning ByteString
+    RpcRunning
     -- | The server was stopped, either manually or because of an exception
   | RpcStopped Ex.SomeException
 
@@ -243,14 +246,14 @@ forkRpcServer path args = do
   responseR' <- fdToHandle responseR
   errorsR'   <- fdToHandle errorsR
 
-  requestStream <- hGetContents responseR'
-
-  st <- newMVar $ RpcRunning requestStream
+  st     <- newMVar RpcRunning
+  parser <- newStreamParser json' responseR'
   return RpcServer {
       rpcRequestW  = requestW'
     , rpcErrorsR   = errorsR'
     , rpcProc      = ph
     , rpcState     = st
+    , rpcParser    = parser
     }
 
 -- | Specialized form of 'rpcConversation' to do single request and wait for
@@ -265,62 +268,39 @@ rpcConversation :: RpcServer
                 -> IO a
 rpcConversation server handler = withRpcServer server $ \st ->
   case st of
-    RpcRunning out -> do
-      -- We maintain the state of the conversation in an MVar holding an 'Maybe
-      -- ByteString'. This ByteString is the parser state (unconsumed input).
-      -- When the handler returns, we change the state of the MVar to Nothing.
-      -- This way we can get the final state of the input after the handler
-      -- returns, and moreover avoid the handler calling into the conversation
-      -- after it's returned.
-      convState <- newMVar (Just out)
+    RpcRunning -> do
+      -- We want to be able to detect when a conversation is used out of scope
+      inScope <- newIORef True
 
       -- Call the handler, update the state, and return the result
-      a <- handler $ conversation convState
+      a <- handler . conversation $ do isInScope <- readIORef inScope
+                                       unless isInScope $
+                                         Ex.throwIO illscopedConversationException
 
-      -- At this point the handler has returned, but we have not yet changed
-      -- the 'progressState' to make sure it's Nothing. So potentially the
-      -- Progress object *might* escape from the handler, and then be invoked
-      -- until we change the state below. Although strange (and unlikely), it
-      -- won't cause any problems: we don't release the lock on the RPC server
-      -- state until we modify the 'progressState', below, and as soon as we do
-      -- change the 'progressState' the escaped 'Progress' object becomes
-      -- useless.
-      --
-      out' <- modifyMVar convState $ \mOut ->
-        case mOut of
-          Just out' -> return (Nothing, out')
-          Nothing   -> error "The impossible happened"
-
-      return (RpcRunning out', a)
+      -- Record that the conversation is no longer in scope and return
+      writeIORef inScope False
+      return (RpcRunning, a)
     RpcStopped ex ->
       Ex.throwIO ex
   where
-    conversation :: MVar (Maybe ByteString) -> RpcConversation
-    conversation convState = RpcConversation {
-        put = \req -> withMVar convState $ \state -> case state of
-                Just _ ->
-                  mapIOToExternal server $
-                    hPutFlush (rpcRequestW server) . encode . Request $ req
-                Nothing ->
-                  Ex.throwIO illscopedConversationException
-      , get = modifyMVar convState $ \state -> case state of
-                Just out -> do
-                  (out', value) <- mapIOToExternal server $
-                    case parse json' out of
-                      Fail _ _ err  -> Ex.throwIO $ parseError err out
-                      Done out' val -> return (out', val)
-                  case fromJSON value of
-                    Success (Response resp) ->
-                      return (Just out', resp)
-                    Error err ->
-                      Ex.throwIO (userError err)
-                Nothing ->
-                  Ex.throwIO illscopedConversationException
+    conversation :: IO () -> RpcConversation
+    conversation verifyScope = RpcConversation {
+        put = \req -> do
+                 verifyScope
+                 mapIOToExternal server $
+                   hPutFlush (rpcRequestW server) . encode . Request $ req
+      , get = do verifyScope
+                 value <- mapIOToExternal server $
+                            nextInStream (rpcParser server)
+                 case fromJSON <$> value of
+                   Just (Success (Response resp)) ->
+                     return resp
+                   Just (Error err) ->
+                     Ex.throwIO (userError err)
+                   Nothing ->
+                     mapIOToExternal server $
+                       Ex.throwIO (userError "Unexpected EOF")
       }
-
-    parseError :: String -> ByteString -> Ex.IOException
-    parseError err out = userError $
-      "Could not parse server response '" ++ unpack (take 80 out) ++ "': " ++ err
 
 illscopedConversationException :: Ex.IOException
 illscopedConversationException =
@@ -371,26 +351,20 @@ withRpcServer server io =
 
 -- | Decode messages from a handle and forward them to a channel
 readRequests :: Handle -> Chan Value -> IO ()
-readRequests h ch = hGetContents h >>= go
+readRequests h ch = newStreamParser json' h >>= go
   where
-    go :: ByteString -> IO ()
-    go contents = do
-      case parseJSON contents of
-        Right (contents', req) ->
+    go :: StreamParser Value -> IO ()
+    go parser = do
+      value <- nextInStream parser
+      case fromJSON <$> value of
+        Just (Success req) ->
           case req of
-            Request req'    -> writeChan ch req' >> go contents'
+            Request req'    -> writeChan ch req' >> go parser
             RequestShutdown -> return ()
-        Left err ->
+        Just (Error err) -> do
           Ex.throwIO (userError err)
-
-    parseJSON :: FromJSON a => ByteString -> Either String (ByteString, a)
-    parseJSON bs =
-      case parse json' bs of
-        Fail _ _ err -> Left err
-        Done bs' value ->
-          case fromJSON value of
-            Success req -> Right (bs', req)
-            Error err   -> Left err
+        Nothing ->
+          return () -- EOF
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: Chan Value -> Handle -> IO ()
@@ -436,3 +410,49 @@ ignoreIOExceptions = Ex.handle ignore
   where
     ignore :: Ex.IOException -> IO ()
     ignore _ = return ()
+
+--------------------------------------------------------------------------------
+-- Wrapper around Attoparsec                                                  --
+--------------------------------------------------------------------------------
+
+data StreamParser a = StreamParser {
+    streamParser    :: Attoparsec.Parser a
+  , streamHandle    :: Handle
+  , streamRemainder :: IORef BS.ByteString
+  }
+
+newStreamParser :: Attoparsec.Parser a -> Handle -> IO (StreamParser a)
+newStreamParser streamParser streamHandle = do
+  streamRemainder <- newIORef BS.empty
+  return StreamParser{..}
+
+nextInStream :: forall a. StreamParser a -> IO (Maybe a)
+nextInStream StreamParser{..} = do
+    bs <- readIORef streamRemainder
+    if BS.null bs
+      then do bs' <-  BS.hGetSome streamHandle blockSize
+              if BS.null bs' then return Nothing -- EOF
+                             else goResult (streamParser `parse` bs')
+      else goResult (streamParser `parse` bs)
+  where
+    -- hGetSome
+    --   1. will return the empty bytestring is EOF has been reached
+    --   2. may return a shorter ByteString is there are not enough bytes
+    --      immediately available to satisfy the whole request
+    --   3. only blocks if there is no data available, and EOF has not yet
+    --      been reached
+
+    goResult :: Attoparsec.Result a -> IO (Maybe a)
+    goResult (Fail _ _ err) = Ex.throwIO (userError err)
+    goResult (Partial k)    = goPartial k
+    goResult (Done bs r)    = writeIORef streamRemainder bs >> return (Just r)
+
+    goPartial :: (BS.ByteString -> Attoparsec.Result a) -> IO (Maybe a)
+    goPartial partial = do
+      bs <- BS.hGetSome streamHandle blockSize
+      if BS.null bs then Ex.throwIO (userError "Unexpected EOF")
+                    else goResult (partial bs)
+
+    -- TODO: What is a good value for this
+    blockSize :: Int
+    blockSize = 4096

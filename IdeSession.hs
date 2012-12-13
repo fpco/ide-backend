@@ -106,7 +106,6 @@ module IdeSession (
 
   -- ** Run code
   runStmt,
-  RunActions(..),
   RunResult(..)
 
   -- * Additional notes
@@ -505,10 +504,6 @@ getLoadedModules IdeSession{ideState} =
 getSymbolDefinitionMap :: Query SymbolDefinitionMap
 getSymbolDefinitionMap = undefined
 
-data RunActions = RunActions {
-    runWait :: IO (Either ByteString RunResult)
-  }
-
 -- TODO: detect and fail if the last updateSession was not done
 -- with @setCodeGeneration@ turned on.
 -- | Run a given function in a given module and return all the compilation
@@ -523,18 +518,9 @@ runStmt IdeSession{ideGhcServer,ideState} m fun = do
     -- TODO: rather than checking if "something" has been compiled, we should
     -- check if the given module has been compiled.
     IdeSessionIdle idleState@IdeIdleState{ideComputed=Just _,ideGenerateCode=True} -> do
-      runWaitChannel <- newChan
-
-      -- This is only a baby-step towards the full API
-      forkIO $ do
-        runResult <- rpcRun ideGhcServer m fun
-        writeChan runWaitChannel (Right runResult)
-
-      return ( IdeSessionRunning idleState
-             , RunActions {
-                 runWait = readChan runWaitChannel
-               }
-             )
+      -- TODO: we should put the state back into idle when done
+      runActions <- rpcRun ideGhcServer m fun
+      return (IdeSessionRunning idleState, runActions)
     IdeSessionIdle _ ->
       fail "Cannot run before the code is generated."
     IdeSessionShutdown ->

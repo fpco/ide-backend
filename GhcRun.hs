@@ -23,6 +23,7 @@ module GhcRun
 import GHC hiding (flags, ModuleName, RunResult(..))
 import qualified GHC
 import qualified Config as GHC
+import DynFlags (dopt_unset)
 import GhcMonad (liftIO, modifySession)
 import Exception (ghandle)
 #if __GLASGOW_HASKELL__ >= 706
@@ -121,6 +122,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                            log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
 #endif
                          }
+                   `dopt_unset` Opt_GhciSandbox
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
 #if __GLASGOW_HASKELL__ < 707

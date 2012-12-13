@@ -28,10 +28,10 @@ import System.IO (hFlush, hPutStr, stderr)
 data SourceError =
     SrcError SourceErrorKind FilePath (Int, Int) (Int, Int) String
   | OtherError String
-  deriving Show
+  deriving (Show, Eq)
 
 data SourceErrorKind = KindError | KindWarning
-  deriving Show
+  deriving (Show, Eq)
 
 $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)
@@ -82,7 +82,7 @@ dVerbosity :: Int
 dVerbosity = 3
 
 debugFile :: Maybe FilePath
-debugFile = Just "debug.log"
+debugFile = Nothing -- Just "debug.log"
 
 debug :: Int -> String -> IO ()
 debug verbosity msg =

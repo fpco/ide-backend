@@ -156,6 +156,18 @@ testStdoutServer RpcConversation{..} = forever $ do
   putStrLn "   vvvv    testStdout intentionally printing to stdout"
   put req
 
+-- | Test that we can do concurrent get and put
+testConcurrentGetPut :: RpcServer -> Assertion
+testConcurrentGetPut server =
+  rpcConversation server $ \RpcConversation{..} -> do
+    forkIO $ threadDelay 1000000 >> put ()
+    get
+
+testConcurrentGetPutServer :: RpcConversation -> IO ()
+testConcurrentGetPutServer RpcConversation{..} = do
+  () <- get
+  put ()
+
 --------------------------------------------------------------------------------
 -- Test generalized conversations                                             --
 --------------------------------------------------------------------------------
@@ -383,6 +395,7 @@ tests = [
       , testRPC "shutdown"         testShutdown
       , testRPC "stdout"           testStdout
       , testRPC "conversation"     testConversation
+      , testRPC "concurrentGetPut" testConcurrentGetPut
       ]
   , testGroup "Error handling" [
         testRPC "crash"            testCrash
@@ -414,28 +427,29 @@ main = do
   args <- getArgs
   case args of
     "--server" : test : args' -> case test of
-      "echo"            -> rpcServer args' testEchoServer
-      "state"           -> do st <- newMVar 0
-                              rpcServer args' (testStateServer st)
-      "custom"          -> do st <- newMVar 0
-                              rpcServer args' (testCustomServer st)
-      "progress"        -> rpcServer args' testProgressServer
-      "shutdown"        -> rpcServer args' testEchoServer
-      "stdout"          -> rpcServer args' testStdoutServer
-      "conversation"    -> rpcServer args' testConversationServer
-      "crash"           -> rpcServer args' testCrashServer
-      "kill"            -> do firstRequest <- newMVar True
-                              rpcServer args' (testKillServer firstRequest)
-      "killAsync"       -> rpcServer args' testKillAsyncServer
-      "faultyDecoder"   -> rpcServer args' testFaultyDecoderServer
-      "faultyEncoder"   -> rpcServer args' testFaultyEncoderServer
-      "illscoped"       -> rpcServer args' testEchoServer
-      "underconsumption"-> rpcServer args' testEchoServer
-      "overconsumption" -> rpcServer args' testEchoServer
-      "crashMulti"      -> rpcServer args' testCrashMultiServer
-      "killMulti"       -> rpcServer args' testKillMultiServer
-      "killAsyncMulti"  -> rpcServer args' testKillAsyncMultiServer
-      "invalidReqType"  -> rpcServer args' testEchoServer
-      "invalidRespType" -> rpcServer args' testEchoServer
+      "echo"             -> rpcServer args' testEchoServer
+      "state"            -> do st <- newMVar 0
+                               rpcServer args' (testStateServer st)
+      "custom"           -> do st <- newMVar 0
+                               rpcServer args' (testCustomServer st)
+      "progress"         -> rpcServer args' testProgressServer
+      "shutdown"         -> rpcServer args' testEchoServer
+      "stdout"           -> rpcServer args' testStdoutServer
+      "conversation"     -> rpcServer args' testConversationServer
+      "concurrentGetPut" -> rpcServer args' testConcurrentGetPutServer
+      "crash"            -> rpcServer args' testCrashServer
+      "kill"             -> do firstRequest <- newMVar True
+                               rpcServer args' (testKillServer firstRequest)
+      "killAsync"        -> rpcServer args' testKillAsyncServer
+      "faultyDecoder"    -> rpcServer args' testFaultyDecoderServer
+      "faultyEncoder"    -> rpcServer args' testFaultyEncoderServer
+      "illscoped"        -> rpcServer args' testEchoServer
+      "underconsumption" -> rpcServer args' testEchoServer
+      "overconsumption"  -> rpcServer args' testEchoServer
+      "crashMulti"       -> rpcServer args' testCrashMultiServer
+      "killMulti"        -> rpcServer args' testKillMultiServer
+      "killAsyncMulti"   -> rpcServer args' testKillAsyncMultiServer
+      "invalidReqType"   -> rpcServer args' testEchoServer
+      "invalidRespType"  -> rpcServer args' testEchoServer
       _ -> error $ "Invalid server " ++ show test
     _ -> defaultMain tests
