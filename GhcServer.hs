@@ -41,6 +41,7 @@ import System.FilePath ((</>))
 
 import RpcServer
 import Common
+import ModuleName (LoadedModules)
 import GhcRun
 
 import Paths_ide_backend

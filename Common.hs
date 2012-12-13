@@ -8,8 +8,6 @@ module Common
   , hsExtentions, cpExtentions
   , PCounter
   , RunResult(..)
-  , ModuleName(..)
-  , LoadedModules
   , showExWithClass
   , dVerbosity, debug
   ) where
@@ -36,12 +34,8 @@ data SourceError =
 data SourceErrorKind = KindError | KindWarning
   deriving (Show, Eq)
 
-newtype ModuleName = ModuleName String
-  deriving (Eq, Ord, Show)
-
 $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)
-$(deriveJSON id ''ModuleName)
 
 formatSourceError :: SourceError -> String
 formatSourceError (SrcError kind path ii jj s) =
@@ -75,8 +69,6 @@ data RunResult =
     -- | GHC itself threw an exception when we tried to run the code
   | RunGhcException String
   deriving (Show, Eq)
-
-type LoadedModules = [ModuleName]
 
 $(deriveJSON id ''RunResult)
 

@@ -21,6 +21,8 @@ import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure)
 import IdeSession
 import GhcServer
 import Common
+import ModuleName (ModuleName)
+import qualified ModuleName as MN
 import TestTools
 
 -- Tests using various functions of the IdeSession API
@@ -37,7 +39,7 @@ loadModulesFrom session originalSourcesDir = do
   let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
       -- HACK: here we fake module names, guessing them from file names.
       originalModules =
-        map (\ f -> (ModuleName f, f)) originalFiles
+        map (\ f -> (MN.fromString f, f)) originalFiles
       upd (m, f) = updateModuleFromFile m $ originalSourcesDir </> f
       -- Let's also disable ChangeCodeGeneration, to keep the test stable
       -- in case the default value of CodeGeneration changes.
@@ -150,7 +152,7 @@ multipleTests =
         (_, lm) <- getModules session
         let upd m = loadModule m "x = 1"
             update =
-              updateModule (ModuleName "Main")
+              updateModule (MN.fromString "Main")
                            (BSLC.pack "module Main where\nmain = print \"test run\"")
               <> mconcat (map upd lm)
         updateSessionD session update (length lm + 1)
@@ -184,18 +186,18 @@ syntheticTests :: [(String, Assertion)]
 syntheticTests =
   [ ( "Maintain list of compiled modules"
     , withConfiguredSession defOpts $ \session -> do
-        let m = ModuleName "A"
+        let m = MN.fromString "A"
         updateSessionD session (loadModule m "a = 5") 1
         assertEqual "[m]" [m] =<< getLoadedModules session
-        let m2 = ModuleName "A2"
+        let m2 = MN.fromString "A2"
         updateSessionD session (loadModule m2 "import A\na2 = A.a") 1
         assertEqual "[m, m2]" (sort [m, m2])
           =<< (liftM sort $ getLoadedModules session)
-        let m3 = ModuleName "A3"
+        let m3 = MN.fromString "A3"
         updateSessionD session (loadModule m3 "") 1
         assertEqual "[m, m2, m3]" (sort [m, m2, m3])
           =<< (liftM sort $ getLoadedModules session)
-        let m4 = ModuleName "Wrong"
+        let m4 = MN.fromString "Wrong"
         updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
         assertEqual "Wrong" (sort [m, m2, m3])
           =<< (liftM sort $ getLoadedModules session)
@@ -221,12 +223,12 @@ syntheticTests =
         withSession' (tweakConfig 2 config) $ \s2 -> do
          withSession' (tweakConfig 3 config) $ \s3 -> do
           withSession' (tweakConfig 4 config) $ \_s4 -> do
-           let update2 = loadModule (ModuleName "M") "a = unknownX"
+           let update2 = loadModule (MN.fromString "M") "a = unknownX"
            updateSessionD s2 update2 1
            msgs2 <- getSourceErrors s2
            assertOneError msgs2
            withSession' (tweakConfig 5 config) $ \s5 -> do
-            let update3 = loadModule (ModuleName "M") "a = 3"
+            let update3 = loadModule (MN.fromString "M") "a = 3"
             updateSessionD s3 update3 1
             msgs3 <- getSourceErrors s3
             assertNoErrors msgs3
@@ -306,7 +308,7 @@ syntheticTests =
                         , "-XCPP"
                         ]
       in withConfiguredSession packageOpts $ \session -> do
-        let update = loadModule (ModuleName "M") "#ifdef"
+        let update = loadModule (MN.fromString "M") "#ifdef"
                      <> updateCodeGeneration True
         updateSessionD session update 1
         msgs <- getSourceErrors session
@@ -321,7 +323,7 @@ syntheticTests =
     )
   , ( "Reject a module with mangled header"
     , withConfiguredSession defOpts $ \session -> do
-        let update = updateModule (ModuleName "M")
+        let update = updateModule (MN.fromString "M")
                                   (BSLC.pack "module very-wrong where")
         updateSessionD session update 1
         msgs <- getSourceErrors session
@@ -330,7 +332,7 @@ syntheticTests =
   , ( "Interrupt runStmt (after 1 sec)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (ModuleName "M") . BSLC.pack . unlines $
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent (threadDelay)"
                     , "loop :: IO ()"
@@ -350,7 +352,7 @@ syntheticTests =
   , ( "Interrupt runStmt (immediately)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (ModuleName "M") . BSLC.pack . unlines $
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent (threadDelay)"
                     , "loop :: IO ()"
@@ -369,7 +371,7 @@ syntheticTests =
   , ( "Interrupt runStmt (black hole; after 1 sec)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (ModuleName "M") . BSLC.pack . unlines $
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "loop :: IO ()"
                     , "loop = loop"
@@ -388,7 +390,7 @@ syntheticTests =
   , ( "Capture stdout (single putStrLn)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (ModuleName "M") . BSLC.pack . unlines $
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = putStrLn \"Hello World\""
@@ -405,7 +407,7 @@ syntheticTests =
   , ( "Capture stdout (single putStr)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (ModuleName "M") . BSLC.pack . unlines $
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = putStr \"Hello World\""
@@ -422,7 +424,7 @@ syntheticTests =
   , ( "Capture stdout (multiple putStrLn)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (ModuleName "M") . BSLC.pack . unlines $
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = do putStrLn \"Hello World 1\""
@@ -441,7 +443,7 @@ syntheticTests =
   , ( "Capture stdout (mixed putStr and putStrLn)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (ModuleName "M") . BSLC.pack . unlines $
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = do putStrLn \"Hello World 1\""
@@ -460,7 +462,7 @@ syntheticTests =
   , ( "Capture stdin (simple echo process)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (ModuleName "M") . BSLC.pack . unlines $
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "echo :: IO ()"
                     , "echo = getLine >>= putStrLn"
@@ -478,7 +480,7 @@ syntheticTests =
   , ( "Capture stdin (infinite echo process)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (ModuleName "M") . BSLC.pack . unlines $
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.IO"
                     , "echo :: IO ()"
@@ -577,15 +579,15 @@ getModules sess = do
   let SessionConfig{configSourcesDir} = getSessionConfig sess
   cnts <- getDirectoryContents configSourcesDir
   let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
-      originalModules = map (\ f -> (ModuleName f, f)) originalFiles
+      originalModules = map (\ f -> (MN.fromString f, f)) originalFiles
       m = case originalModules of
-        [] -> ModuleName "testDirIsEmpty"
+        [] -> MN.fromString "testDirIsEmpty"
         (x, _) : _ -> x
   return (m, map fst originalModules)
 
 loadModule :: ModuleName -> String -> IdeSessionUpdate
 loadModule m contents =
-  let ModuleName n = m
+  let n = MN.toString m
       -- Is there a ready function for that in GHC API?
       mFixed = capitalize $ map (\c -> if c == '-' then '_' else c) n
       name = dropExtension mFixed

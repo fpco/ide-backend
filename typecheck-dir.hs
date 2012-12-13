@@ -10,6 +10,7 @@ import Data.Monoid (mconcat)
 import IdeSession
 import GhcServer
 import Common
+import qualified ModuleName as MN
 
 --- A sample program using the library. It type-checks all files
 --- in the given directory and prints out the list of errors.
@@ -64,7 +65,7 @@ check opts originalSourcesDir configSourcesDir = do
   cnts <- getDirectoryContents originalSourcesDir
   let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
       originalModules =
-        map (\ f -> (ModuleName f, f)) originalFiles
+        map (\ f -> (MN.fromString f, f)) originalFiles
       upd (m, f) = updateModuleFromFile m $ originalSourcesDir </> f
       originalUpdate = mconcat $ map upd originalModules
       len = show $ length originalFiles

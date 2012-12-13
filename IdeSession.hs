@@ -68,7 +68,6 @@ module IdeSession (
   PCounter,
 
   -- ** Modules
-  ModuleName(..),
   updateModule,
   updateModuleFromFile,
   updateModuleDelete,
@@ -97,8 +96,9 @@ module IdeSession (
 
   -- ** Managed files and loaded modules
   getManagedFiles,
-  getLoadedModules,
   ManagedFiles(..),
+  getLoadedModules,
+  LoadedModules,
 
   -- ** Symbol definition maps
   getSymbolDefinitionMap,
@@ -171,6 +171,8 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 import System.Posix.Files (setFileTimes)
 
 import Common
+import ModuleName (LoadedModules, ModuleName)
+import qualified ModuleName as MN
 import GhcServer
 
 -- | This is a state token for the current state of an IDE session. We can run
@@ -246,7 +248,7 @@ data Computed = Computed {
     -- | last compilation and run errors
     computedErrors        :: [SourceError]
     -- | Modules that got loaded okay
-  , computedLoadedModules :: [ModuleName]
+  , computedLoadedModules :: LoadedModules
   }
 
 ensureDirEmpty :: FilePath -> IO ()
@@ -392,11 +394,11 @@ updateCodeGeneration b =
       return $ state {ideGenerateCode = b}
 
 internalFile :: SessionConfig -> ModuleName -> FilePath
-internalFile SessionConfig{configSourcesDir} (ModuleName n) =
-  let ext = takeExtension n
+internalFile SessionConfig{configSourcesDir} n =
+  let ext = takeExtension (MN.toString n)
   in if ext `elem` cpExtentions
-     then configSourcesDir </> n            -- assume full file name
-     else configSourcesDir </> n <.> ".hs"  -- assume bare module name
+     then configSourcesDir </> (MN.toString n)            -- assume full file name
+     else configSourcesDir </> (MN.toString n) <.> ".hs"  -- assume bare module name
 
 -- | A session update that changes a data file by giving a new value for the
 -- file. This can be used to add a new file or update an existing one.
@@ -483,7 +485,7 @@ getManagedFiles IdeSession{ideState} =
     IdeSessionShutdown -> fail "Session already shut down."
 
 -- | Get the list of correctly compiled modules.
-getLoadedModules :: Query [ModuleName]
+getLoadedModules :: Query LoadedModules
 getLoadedModules IdeSession{ideState} =
   withMVar ideState $ \st ->
     case st of
@@ -514,7 +516,7 @@ runStmt IdeSession{ideGhcServer,ideState} m fun = do
                                          , ideGenerateCode=True} ->
       -- ideManagedFiles is irrelevant, because only the module name
       -- inside 'module .. where' counts.
-      if ModuleName m `elem` computedLoadedModules comp
+      if MN.fromString m `elem` computedLoadedModules comp
       then do
         -- TODO: we should put the state back into idle when done
         runActions <- rpcRun ideGhcServer m fun

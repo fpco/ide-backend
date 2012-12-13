@@ -52,6 +52,8 @@ import System.Time
 #endif
 
 import Common
+import ModuleName (LoadedModules)
+import qualified ModuleName as MN
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -180,7 +182,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
       graph <- getModuleGraph
       let moduleNames = map ms_mod_name graph
       loadedNames <- filterM isLoaded moduleNames
-      let loadedModules = map (ModuleName . moduleNameString) loadedNames
+      let loadedModules = map (MN.fromString . moduleNameString) loadedNames
       return (reverse errs, loadedModules)
 
 runInGhc :: (String, String)    -- ^ module and function to run, if any
@@ -353,4 +355,3 @@ ghandleJust p handler a = ghandle handler' a
     handler' e = case p e of
                    Nothing -> liftIO $ Ex.throwIO e
                    Just b  -> handler b
-
