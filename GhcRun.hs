@@ -10,6 +10,7 @@ module GhcRun
   ( Ghc
   , liftIO
   , ghandle
+  , ghandleJust
   , GhcException
   , DynamicOpts
   , submitStaticOpts
@@ -344,3 +345,12 @@ checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
         case funToRun of
           Just mfun -> Right <$> runInGhc mfun
           Nothing -> return (Left errs)
+
+-- | Version of handleJust for use in the GHC monad
+ghandleJust :: Ex.Exception e => (e -> Maybe b) -> (b -> Ghc a) -> Ghc a -> Ghc a
+ghandleJust p handler a = ghandle handler' a
+  where
+    handler' e = case p e of
+                   Nothing -> liftIO $ Ex.throwIO e
+                   Just b  -> handler b
+

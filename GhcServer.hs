@@ -29,7 +29,7 @@ import Control.Monad (forever)
 import Control.Concurrent (myThreadId, forkIO, throwTo, killThread, ThreadId)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, readMVar)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import qualified Control.Exception as Ex (AsyncException(UserInterrupt))
+import qualified Control.Exception as Ex
 
 import System.IO (stdout, hFlush)
 import System.Posix (Fd)
@@ -133,16 +133,24 @@ ghcHandleRun :: RpcConversation
              -> String            -- ^ Function
              -> Ghc ()
 ghcHandleRun RpcConversation{..} m fun = do
-  ghcThread <- liftIO $ myThreadId
-  reqThread <- liftIO . forkIO . forever $ do
-    request <- get
-    case request of
-      GhcRunInterrupt -> do
-        throwTo ghcThread Ex.UserInterrupt
-  runOutcome <- runInGhc (m, fun)
-  liftIO $ killThread reqThread
-  liftIO $ debug dVerbosity $ "returned from runInGhc with " ++ show runOutcome
-  liftIO $ put $ GhcRunDone runOutcome
+    ghcThread <- liftIO $ myThreadId
+    runOutcome <- ghandleJust isUserInterrupt return $ do
+      reqThread <- liftIO . forkIO . forever $ do
+        request <- get
+        case request of
+          GhcRunInterrupt -> do
+            throwTo ghcThread Ex.UserInterrupt
+      outcome <- runInGhc (m, fun)
+      liftIO $ killThread reqThread
+      return outcome
+    liftIO $ debug dVerbosity $ "returned from runInGhc with " ++ show runOutcome
+    liftIO $ put $ GhcRunDone runOutcome
+  where
+    isUserInterrupt :: Ex.AsyncException -> Maybe RunResult
+    isUserInterrupt ex@Ex.UserInterrupt =
+      Just . RunProgException . showExWithClass . Ex.toException $ ex
+    isUserInterrupt _ =
+      Nothing
 
 --------------------------------------------------------------------------------
 -- Client-side operations                                                     --

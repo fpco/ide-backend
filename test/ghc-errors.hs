@@ -11,6 +11,7 @@ import Data.ByteString.Lazy.Char8 (pack)
 import Control.Exception (bracket)
 import Data.Char (toUpper)
 import Control.Monad (liftM)
+import Control.Concurrent (threadDelay)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -318,7 +319,27 @@ syntheticTests =
         msgs <- getSourceErrors session
         assertOneError msgs
     )
-  , ( "Interrupt runStmt"
+  , ( "Interrupt runStmt (after 1 sec)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (ModuleName "M") . pack . unlines $
+                    [ "module M where"
+                    , "import Control.Concurrent (threadDelay)"
+                    , "loop :: IO ()"
+                    , "loop = threadDelay 100000 >> loop"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" msgs []
+        runActions <- runStmt session "M" "loop"
+        threadDelay 1000000
+        interrupt runActions
+        resOrEx <- runWait runActions
+        case resOrEx of
+          Right (RunProgException "AsyncException: user interrupt") -> return ()
+          _ -> assertFailure "Unexpected run result"
+    )
+  , ( "Interrupt runStmt (immediately)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule (ModuleName "M") . pack . unlines $
@@ -333,7 +354,28 @@ syntheticTests =
         runActions <- runStmt session "M" "loop"
         interrupt runActions
         resOrEx <- runWait runActions
-        print resOrEx
+        case resOrEx of
+          Right (RunProgException "AsyncException: user interrupt") -> return ()
+          _ -> assertFailure "Unexpected run result"
+    )
+  , ( "Interrupt runStmt (black hole; after 1 sec)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (ModuleName "M") . pack . unlines $
+                    [ "module M where"
+                    , "loop :: IO ()"
+                    , "loop = loop"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" msgs []
+        runActions <- runStmt session "M" "loop"
+        threadDelay 1000000
+        interrupt runActions
+        resOrEx <- runWait runActions
+        case resOrEx of
+          Right (RunProgException "AsyncException: user interrupt") -> return ()
+          _ -> assertFailure "Unexpected run result"
     )
   ]
 
