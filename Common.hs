@@ -18,8 +18,10 @@ import Data.Aeson.TH (deriveJSON)
 import System.FilePath (takeFileName)
 import qualified Control.Exception as Ex
 import Data.Typeable (Typeable, typeOf)
+import qualified Data.ByteString.Char8 as BS
 import Control.Monad (when)
-import System.IO (hFlush, hPutStr, stderr)
+import Control.Monad.Trans (MonadIO, liftIO)
+import System.IO (hFlush, stderr)
 
 -- | An error or warning in a source module.
 --
@@ -88,13 +90,13 @@ dVerbosity = 3
 debugFile :: Maybe FilePath
 debugFile = Nothing -- Just "debug.log"
 
-debug :: Int -> String -> IO ()
+debug :: MonadIO m => Int -> String -> m ()
 debug verbosity msg =
   when (verbosity >= 3) $ do
     case debugFile of
       Nothing -> return ()
       Just logName ->
-        appendFile logName $ msg ++ "\n"
-    when (verbosity >= 4) $ do
-      hPutStr stderr $ "debug: " ++ msg ++ "\n"
+        liftIO $ appendFile logName $ msg ++ "\n"
+    when (verbosity >= 4) $ liftIO $ do
+      BS.hPutStrLn stderr $ BS.pack $ "debug: " ++ msg
       hFlush stderr
