@@ -138,7 +138,7 @@ multipleTests =
             case resOrEx of
               RunOk _ident       -> return ()
               RunProgException _ ->
-                assertFailure "No errors detected, but the run failed"
+                assertFailure "Unexpected exception raised by the running code."
               RunGhcException _  -> return ()
           Left ex ->
             assertRaises "runStmt session Main main"
@@ -151,18 +151,20 @@ multipleTests =
         let upd m = loadModule m "x = 1"
             update =
               updateModule (ModuleName "Main")
-                           (BSLC.pack "module Main where\nmain = print \"running automatically generated trivial code\"")
+                           (BSLC.pack "module Main where\nmain = print \"test run\"")
               <> mconcat (map upd lm)
         updateSessionD session update (length lm + 1)
         updateSessionD session mempty 0
         let update2 = updateCodeGeneration True
         updateSessionD session update2 (length lm + 1)
         runActions <- runStmt session "Main" "main"
-        (_, resOrEx) <- runWaitAll runActions
-        case resOrEx of
-          RunOk _ident         -> return ()
-          RunProgException _ex -> assertFailure "Manually corrected code not run successfully"
-          RunGhcException _ex  -> assertFailure "Manually corrected code not run successfully"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk _ -> assertEqual "" (BSLC.pack "\"test run\"\n") output
+          RunProgException _ex ->
+            assertFailure "Unexpected exception raised by the running code."
+          RunGhcException _ex  ->
+            assertFailure "Manually corrected code not run successfully"
       )
     , ("Make sure deleting modules removes them from the directory"
       , \session -> do
@@ -313,7 +315,8 @@ syntheticTests =
         (_, resOrEx) <- runWaitAll runActions
         case resOrEx of
           RunOk _ident       -> assertFailure "This run has to fail"
-          RunProgException _ -> assertFailure "This run has to fail"
+          RunProgException _ ->
+            assertFailure "This run has to fail, but it raises an exception."
           RunGhcException _  -> return ()
     )
   , ( "Reject a module with mangled header"
