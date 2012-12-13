@@ -5,7 +5,7 @@ module Common
   ( SourceError(..), SourceErrorKind(..)
   , formatSourceError
   , SymbolDefinitionMap
-  , hsExtentions, cpExtentions
+  , hsExtentions
   , PCounter
   , RunResult(..)
   , showExWithClass
@@ -52,11 +52,6 @@ data SymbolDefinitionMap
 -- | These source files are type-checked.
 hsExtentions:: [FilePath]
 hsExtentions = [".hs", ".lhs"]
-
--- | These source files are either type-checked or used
--- for type-checking others, so they are worth copying over.
-cpExtentions :: [FilePath]
-cpExtentions = ".h" : hsExtentions
 
 type PCounter = Int
 

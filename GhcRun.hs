@@ -37,13 +37,13 @@ import qualified Outputable as GHC
 import FastString ( unpackFS )
 import HscTypes (HscEnv(hsc_mod_graph))
 
-import Control.Monad (filterM)
+import Control.Monad (filterM, liftM)
 import System.Process
+import System.FilePath.Find (find, always, extension)
 import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
-import System.Directory
-import System.FilePath ((</>), takeExtension)
+import System.FilePath ((</>))
 import Data.List ((\\))
 #if __GLASGOW_HASKELL__ >= 706
 import Data.Time
@@ -106,9 +106,9 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     -- Reset errors storage.
     liftIO $ writeIORef errsRef []
     -- Determine files to process.
-    cnts <- liftIO $ getDirectoryContents configSourcesDir
-    let targets = map (configSourcesDir </>)
-                  $ filter ((`elem` hsExtentions) . takeExtension) cnts
+    files <- liftIO $ find always ((`elem` hsExtentions) `liftM` extension)
+                           configSourcesDir
+    let targets = map (configSourcesDir </>) files
     handleErrors $ do
       -- Compute new GHC flags.
       flags0 <- getSessionDynFlags

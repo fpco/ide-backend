@@ -36,10 +36,11 @@ loadModulesFrom session originalSourcesDir = do
   -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
   -- using the IdeSession's update mechanism.
   cnts <- getDirectoryContents originalSourcesDir
-  let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
+  let originalFiles = filter ((`elem` hsExtentions) . takeExtension) cnts
       -- HACK: here we fake module names, guessing them from file names.
       originalModules =
-        map (\ f -> (MN.fromString f, f)) originalFiles
+        map (\ f -> (MN.fromString $ fixName $ dropExtension f, f))
+            originalFiles
       upd (m, f) = updateModuleFromFile m $ originalSourcesDir </> f
       -- Let's also disable ChangeCodeGeneration, to keep the test stable
       -- in case the default value of CodeGeneration changes.
@@ -313,13 +314,9 @@ syntheticTests =
         updateSessionD session update 1
         msgs <- getSourceErrors session
         assertSomeErrors msgs
-        runActions <- runStmt session "Main" "main"
-        (_, resOrEx) <- runWaitAll runActions
-        case resOrEx of
-          RunOk _ident       -> assertFailure "This run has to fail"
-          RunProgException _ ->
-            assertFailure "This run has to fail, but it raises an exception."
-          RunGhcException _  -> return ()
+        assertRaises "runStmt session Main main"
+          (== userError "Module \"Main\" not successfully loaded, when trying to run code.")
+          (runStmt session "Main" "main")
     )
   , ( "Reject a module with mangled header"
     , withConfiguredSession defOpts $ \session -> do
@@ -578,19 +575,23 @@ getModules :: IdeSession -> IO (ModuleName, [ModuleName])
 getModules sess = do
   let SessionConfig{configSourcesDir} = getSessionConfig sess
   cnts <- getDirectoryContents configSourcesDir
-  let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
-      originalModules = map (\ f -> (MN.fromString f, f)) originalFiles
+  let originalFiles = filter ((`elem` hsExtentions) . takeExtension) cnts
+      originalModules =
+        map (\ f -> (MN.fromString $ fixName $ dropExtension f, f))
+            originalFiles
       m = case originalModules of
         [] -> MN.fromString "testDirIsEmpty"
         (x, _) : _ -> x
   return (m, map fst originalModules)
 
+-- Is there a ready function for that in GHC API?
+fixName :: String -> String
+fixName n = capitalize $ map (\c -> if c == '-' then '_' else c) n
+
 loadModule :: ModuleName -> String -> IdeSessionUpdate
 loadModule m contents =
   let n = MN.toString m
-      -- Is there a ready function for that in GHC API?
-      mFixed = capitalize $ map (\c -> if c == '-' then '_' else c) n
-      name = dropExtension mFixed
+      name = dropExtension n
   in updateModule m . BSLC.pack
      $ "module " ++ name ++ " where\n" ++ contents
 

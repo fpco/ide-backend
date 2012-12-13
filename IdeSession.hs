@@ -162,7 +162,7 @@ import Control.Monad
 import Control.Concurrent
 import System.IO (openBinaryTempFile, hClose)
 import System.Directory
-import System.FilePath ((</>), (<.>), splitFileName, takeExtension)
+import System.FilePath ((</>), (<.>), splitFileName)
 import qualified Control.Exception as Ex
 import Data.List (delete)
 import Data.Monoid (Monoid(..))
@@ -333,6 +333,7 @@ updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, 
 writeFileAtomic :: FilePath -> BS.ByteString -> IO ()
 writeFileAtomic targetPath content = do
   let (targetDir, targetFile) = splitFileName targetPath
+  createDirectoryIfMissing True targetDir
   Ex.bracketOnError
     (openBinaryTempFile targetDir $ targetFile <.> "tmp")
     (\(tmpPath, handle) -> hClose handle >> removeFile tmpPath)
@@ -343,7 +344,11 @@ writeFileAtomic targetPath content = do
 
 -- | A session update that changes a source module by giving a new value for
 -- the module source. This can be used to add a new module or update an
--- existing one.
+-- existing one. The ModuleName argument determines the directory
+-- and file where the module is located within the project. The actual
+-- internal compiler module name, such as the one given by the
+-- @getLoadedModules@ query, comes from within @module ... end@.
+-- Usually the two names are equal, but they neededn't be.
 --
 updateModule :: ModuleName -> ByteString -> IdeSessionUpdate
 updateModule m bs =
@@ -394,11 +399,8 @@ updateCodeGeneration b =
       return $ state {ideGenerateCode = b}
 
 internalFile :: SessionConfig -> ModuleName -> FilePath
-internalFile SessionConfig{configSourcesDir} n =
-  let ext = takeExtension (MN.toString n)
-  in if ext `elem` cpExtentions
-     then configSourcesDir </> (MN.toString n)            -- assume full file name
-     else configSourcesDir </> (MN.toString n) <.> ".hs"  -- assume bare module name
+internalFile SessionConfig{configSourcesDir} m =
+  configSourcesDir </> MN.toFilePath m <.> ".hs"
 
 -- | A session update that changes a data file by giving a new value for the
 -- file. This can be used to add a new file or update an existing one.
@@ -474,6 +476,10 @@ getSourceErrors IdeSession{ideState} =
       IdeSessionShutdown -> fail "Session already shut down."
 
 -- | Get the list of files submitted by the user and not deleted yet.
+-- The module names are those supplied by the user as the first
+-- arguments of the @updateModule@ and @updateModuleFromFile@ calls,
+-- as opposed to the compiler internal @module ... end@ module names.
+-- Usually the two names are equal, but they neededn't be.
 getManagedFiles :: Query ManagedFiles
 getManagedFiles IdeSession{ideState} =
   withMVar ideState $ \st ->
@@ -484,7 +490,7 @@ getManagedFiles IdeSession{ideState} =
       return ideManagedFiles
     IdeSessionShutdown -> fail "Session already shut down."
 
--- | Get the list of correctly compiled modules.
+-- | Get the list of correctly compiled modules, as reported by the compiler.
 getLoadedModules :: Query LoadedModules
 getLoadedModules IdeSession{ideState} =
   withMVar ideState $ \st ->
