@@ -43,7 +43,7 @@ data GhcRequest
 --   deriving Show
 data GhcCompileResponse =
     GhcCompileProgress PCounter
-  | GhcCompileDone [SourceError]
+  | GhcCompileDone ([SourceError], LoadedContext)
 data GhcRunResponse =
     GhcRunDone RunResult
 
@@ -90,15 +90,16 @@ ghcHandleCompile :: RpcConversation
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts configSourcesDir ideGenerateCode = do
     errsRef <- liftIO $ newIORef []
     counter <- liftIO $ newIORef 1  -- Progress counter goes from 1..n
-    errs    <- surpressGhcStdout $ compileInGhc configSourcesDir
-                                                dynOpts
-                                                ideGenerateCode
-                                                verbosity
-                                                errsRef
-                                                (progressCallback counter)
-                                                (\_ -> return ()) -- TODO: log?
+    (errs, context) <-
+      surpressGhcStdout $ compileInGhc configSourcesDir
+                                       dynOpts
+                                       ideGenerateCode
+                                       verbosity
+                                       errsRef
+                                       (progressCallback counter)
+                                       (\_ -> return ()) -- TODO: log?
     liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
-    liftIO $ put $ GhcCompileDone errs
+    liftIO $ put $ GhcCompileDone (errs, context)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -139,7 +140,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (PCounter -> IO ()) -- ^ Progress callback
-           -> IO [SourceError]
+           -> IO ([SourceError], LoadedContext)
 rpcCompile server opts dir genCode callback =
   rpcConversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
@@ -147,7 +148,7 @@ rpcCompile server opts dir genCode callback =
     let go = do response <- get
                 case response of
                   GhcCompileProgress pcounter -> callback pcounter >> go
-                  GhcCompileDone     errors   -> return errors
+                  GhcCompileDone     res      -> return res
 
     go
 

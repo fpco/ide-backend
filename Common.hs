@@ -8,6 +8,7 @@ module Common
   , hsExtentions, cpExtentions
   , PCounter
   , RunResult(..)
+  , LoadedContext
   , showExWithClass
   , dVerbosity, debug
   ) where
@@ -67,6 +68,9 @@ data RunResult =
     -- | GHC itself threw an exception when we tried to run the code
   | RunGhcException String
   deriving Show
+
+-- A mockup for now.
+type LoadedContext = String
 
 $(deriveJSON id ''RunResult)
 

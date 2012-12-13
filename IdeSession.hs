@@ -315,8 +315,9 @@ updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, 
     case state of
       IdeSessionIdle idleState -> do
         idleState'@IdeIdleState{ideNewOpts, ideGenerateCode} <- update ideConfig idleState
-        errs <- rpcCompile ideGhcServer ideNewOpts configSourcesDir ideGenerateCode callback
-        return $ IdeSessionIdle idleState' {ideComputed = Just (Computed errs [])}
+        (errs, context) <-
+          rpcCompile ideGhcServer ideNewOpts configSourcesDir ideGenerateCode callback
+        return $ IdeSessionIdle idleState' {ideComputed = Just (Computed errs (map ModuleName {-mockup-}$ lines context))}
       IdeSessionShutdown ->
         Ex.throwIO (userError "Session already shut down.")
 

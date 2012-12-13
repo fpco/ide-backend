@@ -94,7 +94,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> IORef [SourceError] -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-             -> Ghc [SourceError]
+             -> Ghc ([SourceError], LoadedContext)
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
              errsRef handlerOutput handlerRemaining = do
@@ -146,30 +146,36 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         -- Load modules to typecheck and perhaps generate code, too.
         _loadRes <- load LoadAllTargets
         debugPpContext flags "context after LoadAllTargets"
-        -- TODO: record the boolean 'succeeded loadRes' below:
         -- Recover all saved errors.
-        liftIO $ reverse <$> readIORef errsRef
+        prepareResult
   where
-    handleError :: Show a => a -> Ghc [SourceError]
-    handleError e = liftIO $ do
-      debug dVerbosity $ "handleSourceError: " ++ show e
-      errs <- reverse <$> readIORef errsRef
-      return (errs ++ [OtherError (show e)])
+    handleError :: Show a => a -> Ghc ([SourceError], LoadedContext)
+    handleError e = do
+      liftIO $ debug dVerbosity $ "handleSourceError: " ++ show e
+      (errs, context) <- prepareResult
+      return (errs ++ [OtherError (show e)], context)
 
     -- Some errors are reported as exceptions instead
-    handleGhcException :: GhcException -> Ghc [SourceError]
-    handleGhcException e = liftIO $ do
+    handleGhcException :: GhcException -> Ghc ([SourceError], LoadedContext)
+    handleGhcException e = do
       let eText   = show e
           exError = OtherError eText
-      debug dVerbosity $ "handleOtherErrors: " ++ eText
+      liftIO $ debug dVerbosity $ "handleOtherErrors: " ++ eText
       -- In case of an exception, don't lose saved errors.
-      errs <- reverse <$> readIORef errsRef
-      return (errs ++ [exError])
+      (errs, context) <- prepareResult
+      return (errs ++ [exError], context)
 
-    handleErrors :: Ghc [SourceError] -> Ghc [SourceError]
+    handleErrors :: Ghc ([SourceError], LoadedContext)
+                 -> Ghc ([SourceError], LoadedContext)
     handleErrors = ghandle handleGhcException
                  . handleSourceError handleError
 
+    prepareResult :: Ghc ([SourceError], LoadedContext)
+    prepareResult = do
+      errs <- liftIO $ readIORef errsRef
+      context <- getContext
+      flags <- getSessionDynFlags
+      return (reverse errs, showSDocDebug flags (GHC.ppr context))
 
 runInGhc :: (String, String)    -- ^ module and function to run, if any
          -> Ghc RunResult
@@ -327,9 +333,9 @@ checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
     libdir <- getGhcLibdir
     -- Call the GHC API.
     runGhc (Just libdir) $ do
-        errs <- compileInGhc configSourcesDir dynOpts
-                             ideGenerateCode verbosity
-                             errsRef handlerOutput handlerRemaining
+        (errs, _) <- compileInGhc configSourcesDir dynOpts
+                                  ideGenerateCode verbosity
+                                  errsRef handlerOutput handlerRemaining
         case funToRun of
           Just mfun -> Right <$> runInGhc mfun
           Nothing -> return (Left errs)
