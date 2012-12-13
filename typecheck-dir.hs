@@ -65,7 +65,7 @@ check opts originalSourcesDir configSourcesDir = do
   let originalFiles = filter ((`elem` cpExtentions) . takeExtension) cnts
       originalModules =
         map (\ f -> (ModuleName f, f)) originalFiles
-      upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
+      upd (m, f) = updateModuleFromFile m $ originalSourcesDir </> f
       originalUpdate = mconcat $ map upd originalModules
       len = show $ length originalFiles
       displayCounter :: PCounter -> IO ()

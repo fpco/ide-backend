@@ -34,10 +34,10 @@ loadModulesFrom session originalSourcesDir = do
       -- HACK: here we fake module names, guessing them from file names.
       originalModules =
         map (\ f -> (ModuleName f, f)) originalFiles
-      upd (m, f) = updateModule $ ModuleSource m $ originalSourcesDir </> f
+      upd (m, f) = updateModuleFromFile m $ originalSourcesDir </> f
       -- Let's also disable ChangeCodeGeneration, to keep the test stable
       -- in case the default value of CodeGeneration changes.
-      originalUpdate = updateModule (ChangeCodeGeneration False)
+      originalUpdate =updateCodeGeneration False
                        <> (mconcat $ map upd originalModules)
   updateSessionD session originalUpdate (length originalFiles)
 
@@ -87,7 +87,7 @@ multipleTests =
     , \session -> do
         (_, lm) <- getModules session
         let upd m =
-              updateModule (ModulePut m (pack "module Wrong where\na = 1"))
+              updateModule m (pack "module Wrong where\na = 1")
             update = mconcat $ map upd lm
         updateSessionD session update 2
         msgs <- getSourceErrors session
@@ -100,7 +100,7 @@ multipleTests =
         -- Overwrite one of the copied files with an error.
         (m1, lm) <- getModules session
         let update1 =
-              updateModule (ChangeCodeGeneration False)
+              updateCodeGeneration False
               <> loadModule m1 "a = unknownX"
         updateSessionD session update1 1
         updateSessionD session mempty 1  -- was an error, so trying again
@@ -109,7 +109,7 @@ multipleTests =
         -- Overwrite all files, many times, with correct modules.
         let upd m = loadModule m "x = unknownX"
                     <> loadModule m "y = 2"
-                    <> updateModule (ChangeCodeGeneration True)
+                    <> updateCodeGeneration True
             update2 = mconcat $ map upd lm
         updateSessionD session update2 (length lm)
         msgs4 <- getSourceErrors session
@@ -125,7 +125,7 @@ multipleTests =
     , ("Run the sample code; don't fail without an explanation"
       , \session -> do
         (_, lm) <- getModules session
-        let update = updateModule (ChangeCodeGeneration True)
+        let update = updateCodeGeneration True
         updateSessionD session update (length lm)  -- all recompiled
         runActions <- runStmt session "Main" "main"
         resOrEx <- runWait runActions
@@ -140,13 +140,12 @@ multipleTests =
         (_, lm) <- getModules session
         let upd m = loadModule m "x = 1"
             update =
-              updateModule (ModulePut
-                              (ModuleName "Main")
-                              (pack "module Main where\nmain = print \"running automatically generated trivial code\""))
+              updateModule (ModuleName "Main")
+                           (pack "module Main where\nmain = print \"running automatically generated trivial code\"")
               <> mconcat (map upd lm)
         updateSessionD session update (length lm + 1)
         updateSessionD session mempty 0
-        let update2 = updateModule (ChangeCodeGeneration True)
+        let update2 = updateCodeGeneration True
         updateSessionD session update2 (length lm + 1)
         runActions <- runStmt session "Main" "main"
         resOrEx <- runWait runActions
@@ -159,7 +158,7 @@ multipleTests =
     , ("Make sure deleting modules removes them from the directory"
       , \session -> do
         (_, lm) <- getModules session
-        let update = mconcat $ map (updateModule . ModuleDelete) lm
+        let update = mconcat $ map updateModuleDelete lm
         updateSessionD session update 0
         msgs <- getSourceErrors session
         assertNoErrors msgs
@@ -234,7 +233,7 @@ syntheticTests =
         msgs <- getSourceErrors session
         assertSomeErrors msgs
         let punOpts = packageOpts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
-            update2 = updateModule (ChangeOptions $ Just punOpts)
+            update2 = updateGhcOptions (Just punOpts)
         (_, lm) <- getModules session
         updateSessionD session update2 (length lm)
         msgs2 <- getSourceErrors session
@@ -283,7 +282,7 @@ syntheticTests =
                         ]
       in withConfiguredSession packageOpts $ \session -> do
         let update = loadModule (ModuleName "M") "#ifdef"
-                     <> updateModule (ChangeCodeGeneration True)
+                     <> updateCodeGeneration True
         updateSessionD session update 1
         msgs <- getSourceErrors session
         assertSomeErrors msgs
@@ -297,8 +296,8 @@ syntheticTests =
     )
   , ( "Reject a module with mangled header"
     , withConfiguredSession defOpts $ \session -> do
-        let update = updateModule (ModulePut (ModuleName "M")
-                                   $ pack "module very-wrong where")
+        let update = updateModule (ModuleName "M")
+                                  (pack "module very-wrong where")
         updateSessionD session update 1
         msgs <- getSourceErrors session
         assertOneError msgs
@@ -386,7 +385,7 @@ loadModule m contents =
       -- Is there a ready function for that in GHC API?
       mFixed = capitalize $ map (\c -> if c == '-' then '_' else c) n
       name = dropExtension mFixed
-  in updateModule . ModulePut m . pack
+  in updateModule m . pack
      $ "module " ++ name ++ " where\n" ++ contents
 
 capitalize :: String -> String
