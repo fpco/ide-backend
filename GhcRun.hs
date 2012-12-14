@@ -42,7 +42,6 @@ import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM)
 import Data.IORef
 import Data.List ((\\))
-import System.FilePath ((</>))
 import System.FilePath.Find (find, always, extension)
 import System.Process
 #if __GLASGOW_HASKELL__ >= 706
@@ -106,9 +105,9 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     -- Reset errors storage.
     liftIO $ writeIORef errsRef []
     -- Determine files to process.
-    files <- liftIO $ find always ((`elem` hsExtentions) `liftM` extension)
-                           configSourcesDir
-    let targets = map (configSourcesDir </>) files
+    targets <- liftIO $ find always
+                             ((`elem` hsExtentions) `liftM` extension)
+                             configSourcesDir
     handleErrors $ do
       -- Compute new GHC flags.
       flags0 <- getSessionDynFlags
