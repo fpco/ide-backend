@@ -303,7 +303,7 @@ runWaitAll RunActions{runWait} = go []
       resp <- runWait
       case resp of
         Left  bs        -> go (bs : acc)
-        Right runResult -> return (BSL.fromChunks acc, runResult)
+        Right runResult -> return (BSL.fromChunks (reverse acc), runResult)
 
 -- | Register a callback to be invoked when the program terminates
 afterRunActions :: RunActions -> (RunResult -> IO ()) -> RunActions
