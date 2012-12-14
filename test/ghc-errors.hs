@@ -1,26 +1,26 @@
 module Main (main) where
 
-import System.Environment (getArgs)
-import System.FilePath ((</>), takeExtension, dropExtension)
-import System.Directory
-import System.Unix.Directory (withTemporaryDirectory)
-import qualified Data.List as List
-import Data.Monoid ((<>), mconcat, mempty)
-import Data.List (sort)
-import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
-import qualified Data.ByteString.Char8 as BSSC (pack)
-import Data.Char (toUpper)
-import Control.Monad (liftM)
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
+import Control.Monad (liftM)
+import qualified Data.ByteString.Char8 as BSSC (pack)
+import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
+import Data.Char (toUpper)
+import Data.List (sort)
+import qualified Data.List as List
+import Data.Monoid (mconcat, mempty, (<>))
+import System.Directory
+import System.Environment (getArgs)
+import System.FilePath (dropExtension, takeExtension, (</>))
+import System.Unix.Directory (withTemporaryDirectory)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure)
 
-import IdeSession
-import GhcServer
 import Common
+import GhcServer
+import IdeSession
 import ModuleName (ModuleName)
 import qualified ModuleName as MN
 import TestTools

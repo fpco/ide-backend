@@ -1,10 +1,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module TestTools where
 
-import System.Posix.Signals (raiseSignal, Signal)
 import qualified Control.Exception as Ex
-import Test.HUnit (Assertion, assertBool, assertFailure)
 import Data.Typeable (typeOf)
+import System.Posix.Signals (Signal, raiseSignal)
+import Test.HUnit (Assertion, assertBool, assertFailure)
 
 -- | Check that the given IO action raises the specified exception
 assertRaises :: (Ex.Exception e, Eq e, Show e)

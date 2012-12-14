@@ -3,8 +3,8 @@
 -- process, without the RPC layer.
 module Main where
 
-import System.Environment
 import qualified Data.List as List
+import System.Environment
 
 import Common
 import GhcRun

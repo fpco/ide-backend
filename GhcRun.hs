@@ -21,30 +21,30 @@ module GhcRun
   , checkModuleInProcess
   ) where
 
-import GHC hiding (flags, ModuleName, RunResult(..))
-import qualified GHC
 import qualified Config as GHC
 import DynFlags (dopt_unset)
-import GhcMonad (liftIO, modifySession)
 import Exception (ghandle)
+import FastString ( unpackFS )
+import qualified GHC
+import GHC hiding (flags, ModuleName, RunResult(..))
+import GhcMonad (liftIO, modifySession)
+import HscTypes (HscEnv(hsc_mod_graph))
+import Outputable ( PprStyle, qualName, qualModule )
+import qualified Outputable as GHC
 #if __GLASGOW_HASKELL__ >= 706
 import ErrUtils   ( MsgDoc )
 #else
 import ErrUtils   ( Message )
 #endif
-import Outputable ( PprStyle, qualName, qualModule )
-import qualified Outputable as GHC
-import FastString ( unpackFS )
-import HscTypes (HscEnv(hsc_mod_graph))
 
-import Control.Monad (filterM, liftM)
-import System.Process
-import System.FilePath.Find (find, always, extension)
-import Data.IORef
 import Control.Applicative
 import qualified Control.Exception as Ex
-import System.FilePath ((</>))
+import Control.Monad (filterM, liftM)
+import Data.IORef
 import Data.List ((\\))
+import System.FilePath ((</>))
+import System.FilePath.Find (find, always, extension)
+import System.Process
 #if __GLASGOW_HASKELL__ >= 706
 import Data.Time
 #else

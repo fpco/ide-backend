@@ -158,22 +158,22 @@ module IdeSession (
   -- away all the transitory state and recovering.
 ) where
 
-import Control.Monad
 import Control.Concurrent
-import System.IO (openBinaryTempFile, hClose)
-import System.Directory
-import System.FilePath ((</>), (<.>), splitFileName)
 import qualified Control.Exception as Ex
-import Data.List (delete)
-import Data.Monoid (Monoid(..))
+import Control.Monad
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BS
+import Data.List (delete)
+import Data.Monoid (Monoid (..))
+import System.Directory
+import System.FilePath (splitFileName, (<.>), (</>))
+import System.IO (hClose, openBinaryTempFile)
 import System.Posix.Files (setFileTimes)
 
 import Common
+import GhcServer
 import ModuleName (LoadedModules, ModuleName)
 import qualified ModuleName as MN
-import GhcServer
 
 -- | This is a state token for the current state of an IDE session. We can run
 -- queries in the current state, and from this state we can perform a batch
@@ -198,14 +198,14 @@ data IdeIdleState = IdeIdleState {
     -- Logical timestamps (used to force ghc to recompile files)
     ideLogicalTimestamp :: Int
     -- The result computed by the last 'updateSession' invocation.
-  , ideComputed  :: Maybe Computed
+  , ideComputed         :: Maybe Computed
     -- Compiler dynamic options. If they are not set, the options from
     -- SessionConfig are used.
-  , ideNewOpts   :: Maybe [String]
+  , ideNewOpts          :: Maybe [String]
     -- Whether to generate code in addition to type-checking.
-  , ideGenerateCode :: Bool
+  , ideGenerateCode     :: Bool
     -- Files submitted by the user and not deleted yet.
-  , ideManagedFiles :: ManagedFiles
+  , ideManagedFiles     :: ManagedFiles
   }
 
 data ManagedFiles = ManagedFiles
@@ -230,10 +230,10 @@ data SessionConfig = SessionConfig {
 
        -- | The directory to use for data files that may be accessed by the
        -- running program. The running program will have this as its CWD.
-       configDataDir :: FilePath,
+       configDataDir    :: FilePath,
 
        -- | The directory to use for purely temporary files.
-       configTempDir :: FilePath,
+       configTempDir    :: FilePath,
 
        -- | GHC static options. Can also contain default dynamic options,
        -- that are overriden via session update.

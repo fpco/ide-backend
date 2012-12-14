@@ -12,13 +12,13 @@ module Common
   , dVerbosity, debug
   ) where
 
-import Data.Aeson.TH (deriveJSON)
-import System.FilePath (takeFileName)
 import qualified Control.Exception as Ex
-import Data.Typeable (Typeable, typeOf)
-import qualified Data.ByteString.Char8 as BS
 import Control.Monad (when)
 import Control.Monad.Trans (MonadIO, liftIO)
+import Data.Aeson.TH (deriveJSON)
+import qualified Data.ByteString.Char8 as BS
+import Data.Typeable (Typeable, typeOf)
+import System.FilePath (takeFileName)
 import System.IO (hFlush, stderr)
 
 -- | An error or warning in a source module.

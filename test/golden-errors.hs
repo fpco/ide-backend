@@ -3,15 +3,15 @@ module Main where
 -- Cabal
 import qualified Paths_ide_backend as Self (version)
 
-import System.FilePath
-import System.Directory
-import Data.Version
+import Control.Monad
 import Data.List
 import Data.Maybe
+import Data.Version
+import System.Directory
+import System.FilePath
 import Text.Printf
-import Control.Monad
 
-import Test.Framework (Test, defaultMain, testGroup, buildTest)
+import Test.Framework (Test, buildTest, defaultMain, testGroup)
 import Test.Golden
 
 -- Check the results of ghc-errors test against older logs, if any.

@@ -23,27 +23,27 @@ module GhcServer
   , shutdownGhcServer
   ) where
 
+import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId, throwTo)
+import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
+import qualified Control.Exception as Ex
+import Control.Monad (forever, when)
 import Data.Aeson.TH (deriveJSON)
-import Data.IORef
-import qualified Data.ByteString as BSS (ByteString, hGetSome, null, hPut)
+import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
-import Control.Monad (forever, when)
-import Control.Concurrent (myThreadId, forkIO, throwTo, killThread, ThreadId)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
-import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import qualified Control.Exception as Ex
+import Data.IORef
 
-import System.IO (stdout, hFlush)
-import System.Posix (Fd)
-import System.Posix.IO.ByteString
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
+import System.IO (hFlush, stdout)
+import System.Posix (Fd)
+import System.Posix.IO.ByteString
 
-import RpcServer
 import Common
-import ModuleName (ModuleName, LoadedModules)
 import GhcRun
+import ModuleName (LoadedModules, ModuleName)
+import RpcServer
 
 import Paths_ide_backend
 

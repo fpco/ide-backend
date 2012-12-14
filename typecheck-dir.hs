@@ -1,15 +1,15 @@
 module Main where
 
-import System.Environment
-import System.FilePath ((</>), takeExtension, dropExtension)
-import System.Directory
-import System.Unix.Directory (withTemporaryDirectory)
 import qualified Data.List as List
 import Data.Monoid (mconcat)
+import System.Directory
+import System.Environment
+import System.FilePath (dropExtension, takeExtension, (</>))
+import System.Unix.Directory (withTemporaryDirectory)
 
-import IdeSession
-import GhcServer
 import Common
+import GhcServer
+import IdeSession
 import qualified ModuleName as MN
 
 --- A sample program using the library. It type-checks all files

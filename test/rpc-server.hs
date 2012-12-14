@@ -1,17 +1,17 @@
 {-# LANGUAGE TemplateHaskell, ScopedTypeVariables, ExistentialQuantification #-}
 module Main where
 
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.MVar (MVar, modifyMVar_, newMVar)
+import qualified Control.Exception as Ex
+import Control.Monad (forM_, forever)
+import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON))
+import Data.Aeson.TH (deriveFromJSON, deriveJSON, deriveToJSON)
+import Data.Function (on)
+import Data.List (isInfixOf)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
 import System.Posix.Signals (sigKILL)
-import Data.Function (on)
-import Data.Aeson (FromJSON(parseJSON), ToJSON(toJSON))
-import Data.Aeson.TH (deriveJSON, deriveToJSON, deriveFromJSON)
-import Data.List (isInfixOf)
-import Control.Monad (forM_, forever)
-import qualified Control.Exception as Ex
-import Control.Concurrent (threadDelay, forkIO)
-import Control.Concurrent.MVar (MVar, newMVar, modifyMVar_)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)

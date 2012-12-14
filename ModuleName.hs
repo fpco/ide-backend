@@ -8,10 +8,10 @@ module ModuleName
   , LoadedModules
   ) where
 
-import qualified Data.Char as Char (isAlphaNum, isUpper)
-import System.FilePath (pathSeparator)
-import Data.List (intercalate)
 import Data.Aeson.TH (deriveJSON)
+import qualified Data.Char as Char (isAlphaNum, isUpper)
+import Data.List (intercalate)
+import System.FilePath (pathSeparator)
 
 newtype ModuleName = ModuleName [String]
   deriving (Eq, Ord, Read, Show)
