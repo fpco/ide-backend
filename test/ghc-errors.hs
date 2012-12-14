@@ -516,14 +516,14 @@ syntheticTests =
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
 
-        do runActions <- runStmt session "M" "echo"
+        do runActions <- runStmt session (MN.fromString "M") "echo"
            supplyStdin runActions (BSSC.pack "ECHO!\n")
            (output, result) <- runWaitAll runActions
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "ECHO!\n") output
              _       -> assertFailure $ "Unexpected run result: " ++ show result
 
-        do runActions <- runStmt session "M" "echoReverse"
+        do runActions <- runStmt session (MN.fromString "M") "echoReverse"
            supplyStdin runActions (BSSC.pack "!OHCE\n")
            (output, result) <- runWaitAll runActions
            case result of
