@@ -6,7 +6,6 @@ version:             0.1.0.0
 synopsis:            Testing UI for the ide-backend package
 -- description:         
 license:             AllRightsReserved
-license-file:        LICENSE
 author:              Duncan Coutts
 maintainer:          duncan@well-typed.com
 -- copyright:           
