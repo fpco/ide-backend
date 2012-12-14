@@ -513,7 +513,7 @@ getSymbolDefinitionMap = undefined
 -- is the one between @module ... end@, which may differ from the file name).
 -- The function resembles a query, but it's not instantaneous
 -- and the running code can be interrupted or interacted with.
-runStmt :: IdeSession -> String -> String -> IO RunActions
+runStmt :: IdeSession -> ModuleName -> String -> IO RunActions
 runStmt IdeSession{ideGhcServer,ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
     -- TODO: rather than checking if "something" has been compiled, we should
@@ -522,12 +522,12 @@ runStmt IdeSession{ideGhcServer,ideState} m fun = do
                                          , ideGenerateCode=True} ->
       -- ideManagedFiles is irrelevant, because only the module name
       -- inside 'module .. where' counts.
-      if MN.fromString m `elem` computedLoadedModules comp
+      if m `elem` computedLoadedModules comp
       then do
         -- TODO: we should put the state back into idle when done
         runActions <- rpcRun ideGhcServer m fun
         return (IdeSessionRunning idleState, runActions)
-      else fail $ "Module " ++ show m
+      else fail $ "Module " ++ show (MN.toString m)
                   ++ " not successfully loaded, when trying to run code."
     IdeSessionIdle _ ->
       fail "Cannot run before the code is generated."

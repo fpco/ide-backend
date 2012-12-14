@@ -127,14 +127,14 @@ multipleTests =
         assertOneError msgs5
         assertRaises "runStmt session Main main"
           (== userError "Cannot run before the code is generated.")
-          (runStmt session "Main" "main")
+          (runStmt session (MN.fromString "Main") "main")
       )
     , ("Run the sample code; don't fail without an explanation"
       , \session -> do
         (_, lm) <- getModules session
         let update = updateCodeGeneration True
         updateSessionD session update (length lm)  -- all recompiled
-        mex <- Ex.try $ runStmt session "Main" "main"
+        mex <- Ex.try $ runStmt session (MN.fromString "Main") "main"
         case mex of
           Right runActions -> do
             (_, resOrEx) <- runWaitAll runActions
@@ -143,10 +143,7 @@ multipleTests =
               RunProgException _ ->
                 assertFailure "Unexpected exception raised by the running code."
               RunGhcException _  -> return ()
-          Left ex ->
-            assertRaises "runStmt session Main main"
-              (== userError "Module \"Main\" not successfully loaded, when trying to run code.")
-              (Ex.throw (ex :: Ex.SomeException))
+          Left ex -> assertEqual "runStmt" ex (userError "Module \"Main\" not successfully loaded, when trying to run code.")
       )
     , ("Run automatically corrected code; don't fail at all"
       , \session -> do
@@ -160,7 +157,7 @@ multipleTests =
         updateSessionD session mempty 0
         let update2 = updateCodeGeneration True
         updateSessionD session update2 (length lm + 1)
-        runActions <- runStmt session "Main" "main"
+        runActions <- runStmt session (MN.fromString "Main") "main"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "\"test run\"\n") output
@@ -302,7 +299,7 @@ syntheticTests =
         shutdownSession session
         assertRaises "runStmt session Main main"
           (== userError "Session already shut down.")
-          (runStmt session "Main" "main")
+          (runStmt session (MN.fromString "Main") "main")
     )
   , ( "Reject a wrong CPP directive"
     , let packageOpts = [ "-hide-all-packages"
@@ -316,7 +313,7 @@ syntheticTests =
         assertSomeErrors msgs
         assertRaises "runStmt session Main main"
           (== userError "Module \"Main\" not successfully loaded, when trying to run code.")
-          (runStmt session "Main" "main")
+          (runStmt session (MN.fromString "Main") "main")
     )
   , ( "Reject a module with mangled header"
     , withConfiguredSession defOpts $ \session -> do
@@ -338,7 +335,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session "M" "loop"
+        runActions <- runStmt session (MN.fromString "M") "loop"
         threadDelay 1000000
         interrupt runActions
         resOrEx <- runWait runActions
@@ -358,7 +355,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session "M" "loop"
+        runActions <- runStmt session (MN.fromString "M") "loop"
         interrupt runActions
         resOrEx <- runWait runActions
         case resOrEx of
@@ -376,7 +373,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session "M" "loop"
+        runActions <- runStmt session (MN.fromString "M") "loop"
         threadDelay 1000000
         interrupt runActions
         resOrEx <- runWait runActions
@@ -395,7 +392,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session "M" "hello"
+        runActions <- runStmt session (MN.fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "Hello World\n") output
@@ -412,7 +409,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session "M" "hello"
+        runActions <- runStmt session (MN.fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "Hello World") output
@@ -431,7 +428,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session "M" "hello"
+        runActions <- runStmt session (MN.fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "Hello World 1\nHello World 2\nHello World 3\n") output
@@ -450,7 +447,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session "M" "hello"
+        runActions <- runStmt session (MN.fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "Hello World 1\nHello World 2Hello World 3\n") output
@@ -467,7 +464,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session "M" "echo"
+        runActions <- runStmt session (MN.fromString "M") "echo"
         supplyStdin runActions (BSSC.pack "ECHO!\n")
         (output, result) <- runWaitAll runActions
         case result of
@@ -489,7 +486,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session "M" "echo"
+        runActions <- runStmt session (MN.fromString "M") "echo"
 
         do supplyStdin runActions (BSSC.pack "ECHO 1!\n")
            result <- runWait runActions

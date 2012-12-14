@@ -41,14 +41,14 @@ import System.FilePath ((</>))
 
 import RpcServer
 import Common
-import ModuleName (LoadedModules)
+import ModuleName (ModuleName, LoadedModules)
 import GhcRun
 
 import Paths_ide_backend
 
 data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
-  | ReqRun     String String
+  | ReqRun     ModuleName String
   deriving Show
 -- data GhcResponse = RespWorking PCounter | RespDone RunOutcome
 --   deriving Show
@@ -101,8 +101,8 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 
 -- | Handle a compile or type check request
 ghcHandleCompile :: RpcConversation
-                 -> DynamicOpts        -- ^ "Old" dynamic flags
-                 -> Maybe [String]     -- ^ "New" dynamic flags
+                 -> DynamicOpts        -- ^ startup dynamic flags
+                 -> Maybe [String]     -- ^ new, user-submitted dynamic flags
                  -> FilePath           -- ^ Source directory
                  -> Bool               -- ^ Should we generate code
                  -> Ghc ()
@@ -136,7 +136,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts configSourcesDir ideGenera
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation
-             -> String            -- ^ Module
+             -> ModuleName        -- ^ Module
              -> String            -- ^ Function
              -> Ghc ()
 ghcHandleRun RpcConversation{..} m fun = do
@@ -264,7 +264,7 @@ data RunActions = RunActions {
 
 -- | Run code
 rpcRun :: GhcServer       -- ^ GHC server
-       -> String          -- ^ Module
+       -> ModuleName      -- ^ Module
        -> String          -- ^ Function
        -> IO RunActions
 rpcRun server m fun = do

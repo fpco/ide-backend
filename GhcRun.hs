@@ -52,7 +52,7 @@ import System.Time
 #endif
 
 import Common
-import ModuleName (LoadedModules)
+import ModuleName (ModuleName, LoadedModules)
 import qualified ModuleName as MN
 
 newtype DynamicOpts = DynamicOpts [Located String]
@@ -185,14 +185,14 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
       let loadedModules = map (MN.fromString . moduleNameString) loadedNames
       return (reverse errs, loadedModules)
 
-runInGhc :: (String, String)    -- ^ module and function to run, if any
+runInGhc :: (ModuleName, String)  -- ^ module and function to run, if any
          -> Ghc RunResult
 runInGhc (m, fun) = do
   flags <- getSessionDynFlags
   -- TODO: not sure if this cleanup handler is needed:
   defaultCleanupHandler flags . handleErrors $ do
     debugPpContext flags "context before setContext"
-    setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName m
+    setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName (MN.toString m)
                  , IIDecl $ simpleImportDecl $ mkModuleName "System.IO"
                  ]
     debugPpContext flags "context after setContext"
@@ -345,7 +345,7 @@ checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
                                   ideGenerateCode verbosity
                                   errsRef handlerOutput handlerRemaining
         case funToRun of
-          Just mfun -> Right <$> runInGhc mfun
+          Just (m, fun) -> Right <$> runInGhc (MN.fromString m, fun)
           Nothing -> return (Left errs)
 
 -- | Version of handleJust for use in the GHC monad
