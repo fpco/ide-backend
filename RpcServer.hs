@@ -45,23 +45,16 @@ import Data.Aeson.TH (deriveJSON)
 import Control.Applicative ((<$>))
 import Control.Monad (void, forever, unless)
 import qualified Control.Exception as Ex
-import Control.Concurrent (forkIOWithUnmask, killThread, ThreadId, threadDelay)
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import Control.Concurrent.MVar
-  ( MVar
-  , newMVar
-  , newEmptyMVar
-  , putMVar
-  , readMVar
-  , takeMVar
-  , tryPutMVar
-  )
+import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar)
 import qualified Data.ByteString as BS
 import Data.ByteString.Lazy (ByteString, hPut, hGetContents)
 import Data.ByteString.Lazy.Char8 (pack, unpack)
 import Data.Attoparsec (parse, IResult(Fail, Partial, Done))
 import qualified Data.Attoparsec as Attoparsec
 import Data.IORef (IORef, writeIORef, readIORef, newIORef)
+import Control.Concurrent.Async (async, waitAnyCatchCancel, waitCatch)
 
 --------------------------------------------------------------------------------
 -- Exceptions thrown by the RPC server are retrown locally as                 --
@@ -142,39 +135,24 @@ rpcServer' :: Handle                     -- ^ Input
            -> (RpcConversation -> IO ()) -- ^ The request server
            -> IO ()
 rpcServer' hin hout herr server = do
-    requests  <- newChan      :: IO (Chan Value)
-    responses <- newChan      :: IO (Chan Value)
-    exception <- newEmptyMVar :: IO (MVar (Maybe Ex.SomeException))
+    requests  <- newChan :: IO (Chan Value)
+    responses <- newChan :: IO (Chan Value)
 
     setBinaryBlockBuffered [hin, hout, herr]
 
-    let forkCatch :: IO () -> IO (ThreadId, MVar ())
-        forkCatch p = do
-          terminated <- newEmptyMVar
-          tid <- Ex.mask_ $ forkIOWithUnmask $ \unmask ->
-            Ex.catch (unmask (p >> putMVar terminated ())) $ \ex -> do
-              void $ tryPutMVar terminated ()
-              void $ tryPutMVar exception (Just ex)
-          return (tid, terminated)
+    reader <- async $ readRequests hin requests
+    writer <- async $ writeResponses responses hout
+    handler <- async $ channelHandler requests responses server
 
-    readerThread <- forkCatch $ do readRequests hin requests
-                                   putMVar exception Nothing
-    writerThread <- forkCatch $ writeResponses responses hout
-    serverThread <- forkCatch $ channelHandler requests responses server
-
-    readMVar exception >>= tryShowException
-    mapM_ (killThread . fst) [readerThread, writerThread, serverThread]
-    mapM_ (takeMVar   . snd) [readerThread, writerThread, serverThread]
-    -- TODO: Without this threadDelay, many of the unit tests print
-    --   <stdout>: hPutChar: resource vanished (Broken pipe)
-    -- to stderr, but I don't know why.
+    waitAnyCatchCancel [reader, writer, handler] >>= tryShowException . snd
+    mapM_ waitCatch [reader, writer, handler]
     threadDelay 100000
   where
-    tryShowException :: Maybe Ex.SomeException -> IO ()
-    tryShowException (Just ex) =
+    tryShowException :: Either Ex.SomeException () -> IO ()
+    tryShowException (Left ex) =
       -- We don't want to throw an exception showing the previous exception
       ignoreIOExceptions $ hPutFlush herr . pack . show $ ex
-    tryShowException Nothing =
+    tryShowException (Right ()) =
       return ()
 
 --------------------------------------------------------------------------------
