@@ -191,7 +191,7 @@ data IdeSession = IdeSession
 
 data IdeSessionState =
     IdeSessionIdle IdeIdleState
-  | IdeSessionRunning IdeIdleState
+  | IdeSessionRunning RunActions IdeIdleState
   | IdeSessionShutdown
 
 data IdeIdleState = IdeIdleState {
@@ -282,10 +282,19 @@ initSession ideConfig@SessionConfig{..} = do
 -- the @shutdownSession@ placed inside 'bracket' is triggered by a normal
 -- program control flow.
 --
+-- If code is still running, it will be interrupted.
 shutdownSession :: IdeSession -> IO ()
 shutdownSession IdeSession{ideGhcServer, ideState} = do
-  -- TODO: we should check that the state is not IdeSessionRunning
-  modifyMVar_ ideState $ const $ return IdeSessionShutdown
+  snapshot <- modifyMVar ideState $ \state -> return (IdeSessionShutdown, state)
+  case snapshot of
+    IdeSessionRunning runActions _ ->
+      -- We need to terminate the running program before we can shut down
+      -- the session, because the RPC layer will sequentialize all concurrent
+      -- calls (and if code is still running we still have an active
+      -- RPC conversation)
+      interrupt runActions
+    _ ->
+      return ()
   shutdownGhcServer ideGhcServer
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
@@ -486,7 +495,7 @@ getManagedFiles IdeSession{ideState} =
   case st of
     IdeSessionIdle IdeIdleState{ideManagedFiles} ->
       return ideManagedFiles
-    IdeSessionRunning IdeIdleState{ideManagedFiles} ->
+    IdeSessionRunning _ IdeIdleState{ideManagedFiles} ->
       return ideManagedFiles
     IdeSessionShutdown -> fail "Session already shut down."
 
@@ -524,12 +533,12 @@ runStmt IdeSession{ideGhcServer,ideState} m fun = do
       then do
         runActions <- rpcRun ideGhcServer m fun
         let runActions' = afterRunActions runActions restoreToIdle
-        return (IdeSessionRunning idleState, runActions')
+        return (IdeSessionRunning runActions' idleState, runActions')
       else fail $ "Module " ++ show (MN.toString m)
                   ++ " not successfully loaded, when trying to run code."
     IdeSessionIdle _ ->
       fail "Cannot run before the code is generated."
-    IdeSessionRunning _ ->
+    IdeSessionRunning _ _ ->
       fail "Cannot run code concurrently"
     IdeSessionShutdown ->
       fail "Session already shut down."
@@ -538,7 +547,7 @@ runStmt IdeSession{ideGhcServer,ideState} m fun = do
     restoreToIdle _ = modifyMVar_ ideState $ \state -> case state of
       IdeSessionIdle _ ->
         Ex.throwIO (userError "The impossible happened!")
-      IdeSessionRunning idleState -> do
+      IdeSessionRunning _ idleState -> do
         return $ IdeSessionIdle idleState
       IdeSessionShutdown ->
         return state

@@ -315,7 +315,7 @@ afterRunActions runActions callback = runActions {
   }
 
 shutdownGhcServer :: GhcServer -> IO ()
-shutdownGhcServer gs = shutdown gs
+shutdownGhcServer = shutdown
 
 --------------------------------------------------------------------------------
 -- Auxiliary                                                                  --

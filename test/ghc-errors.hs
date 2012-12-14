@@ -530,6 +530,24 @@ syntheticTests =
              RunOk _ -> assertEqual "" (BSLC.pack "ECHO!\n") output
              _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Make sure we can terminate the IDE session when code is running"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.IO"
+                    , "echo :: IO ()"
+                    , "echo = do line <- getLine"
+                    , "          putStrLn line"
+                    , "          hFlush stdout"
+                    , "          echo"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        _runActions <- runStmt session (MN.fromString "M") "echo"
+        return ()
+     )
   ]
 
 defOpts :: [String]
