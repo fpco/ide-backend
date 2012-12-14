@@ -415,6 +415,25 @@ syntheticTests =
           RunOk _ -> assertEqual "" (BSLC.pack "Hello World") output
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Capture stdout (single putStr with delay)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Control.Concurrent (threadDelay)"
+                    , "import System.IO"
+                    , "hello :: IO ()"
+                    , "hello = hSetBuffering stdout LineBuffering >> putStr \"hello\" >> threadDelay 1000000 >> putStr \"hi\""
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        runActions <- runStmt session (MN.fromString "M") "hello"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk _ -> assertEqual "" (BSLC.pack "hellohi") output
+          _       -> assertFailure $ "Unexpected run result: " ++ show result
+    )
   , ( "Capture stdout (multiple putStrLn)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)

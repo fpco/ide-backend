@@ -210,7 +210,10 @@ runInGhc (m, fun) = do
           error "checkModule: RunBreak"
   where
     expr :: String
-    expr = "do " ++ fun
+    expr = "do"
+        ++ " System.IO.hSetBuffering System.IO.stdout System.IO.NoBuffering"
+        ++ "; System.IO.hSetBuffering System.IO.stderr System.IO.NoBuffering"
+        ++ "; " ++ fun
         ++ "; System.IO.hFlush System.IO.stdout"
         ++ "; System.IO.hFlush System.IO.stderr"
 
