@@ -498,8 +498,11 @@ syntheticTests =
         let upd = (updateCodeGeneration True)
                <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
+                    , "import System.IO"
+                    , "import Control.Monad"
                     , "echo :: IO ()"
-                    , "echo = (getLine >>= putStrLn) >> echo"
+                    , "echo = do hSetBuffering stdout LineBuffering"
+                    , "          forever $ getLine >>= putStrLn"
                     ])
         updateSessionD session upd 1
         msgs <- getSourceErrors session
