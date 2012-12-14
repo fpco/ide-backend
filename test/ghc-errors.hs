@@ -2,7 +2,7 @@ module Main (main) where
 
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
-import Control.Monad (liftM)
+import Control.Monad (liftM, void)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
 import Data.Char (toUpper)
@@ -139,13 +139,7 @@ multipleTests =
         updateSessionD session update (length lm)  -- all recompiled
         mex <- Ex.try $ runStmt session (MN.fromString "Main") "main"
         case mex of
-          Right runActions -> do
-            (_, resOrEx) <- runWaitAll runActions
-            case resOrEx of
-              RunOk _ident       -> return ()
-              RunProgException _ ->
-                assertFailure "Unexpected exception raised by the running code."
-              RunGhcException _  -> return ()
+          Right runActions -> void $ runWaitAll runActions
           Left ex -> assertEqual "runStmt" ex (userError "Module \"Main\" not successfully loaded, when trying to run code.")
       )
     , ("Run automatically corrected code; don't fail at all"
@@ -624,7 +618,7 @@ defOpts = [ "-no-user-package-conf" ]
 -- Set of projects and options to use for them.
 projects :: [(String, FilePath, [String])]
 projects =
-  [ ("A depends on B, no errors", "test/ABnoError", defOpts)
+  [ ("A depends on B, throws exception", "test/ABnoError", defOpts)
   , ("Our own code, package 'ghc' missing", ".", [])
   , ( "A subdirectory of Cabal code"
     , "test/Cabal"

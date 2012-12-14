@@ -2,5 +2,7 @@ module Main where
 
 import B
 
-notMain :: IO ()
-notMain = print B.string
+main :: IO ()
+main = do
+  print B.string
+  error "A.hs throws exception"
