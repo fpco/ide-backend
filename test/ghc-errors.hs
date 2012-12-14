@@ -11,7 +11,8 @@ import qualified Data.List as List
 import Data.Monoid (mconcat, mempty, (<>))
 import System.Directory
 import System.Environment (getArgs)
-import System.FilePath (dropExtension, takeExtension, (</>))
+import System.FilePath (dropExtension, takeFileName, (</>))
+import System.FilePath.Find (always, extension, find)
 import System.Unix.Directory (withTemporaryDirectory)
 
 import Test.Framework (Test, defaultMain, testGroup)
@@ -35,13 +36,15 @@ loadModulesFrom session originalSourcesDir = do
                      ++ " to: " ++ configSourcesDir (getSessionConfig session)
   -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
   -- using the IdeSession's update mechanism.
-  cnts <- getDirectoryContents originalSourcesDir
-  let originalFiles = filter ((`elem` hsExtentions) . takeExtension) cnts
-      -- HACK: here we fake module names, guessing them from file names.
+  originalFiles <- find always
+                        ((`elem` hsExtentions) `liftM` extension)
+                        originalSourcesDir
+  let -- HACK: here we fake module names, guessing them from file names.
       originalModules =
-        map (\ f -> (MN.fromString $ fixName $ dropExtension f, f))
+        map (\ f -> (MN.fromString $ fixName
+                     $ dropExtension $ takeFileName f, f))
             originalFiles
-      upd (m, f) = updateModuleFromFile m $ originalSourcesDir </> f
+      upd (m, f) = updateModuleFromFile m f
       -- Let's also disable ChangeCodeGeneration, to keep the test stable
       -- in case the default value of CodeGeneration changes.
       originalUpdate =updateCodeGeneration False
@@ -150,14 +153,14 @@ multipleTests =
         (_, lm) <- getModules session
         let upd m = loadModule m "x = 1"
             update =
-              updateModule (MN.fromString "Main")
-                           (BSLC.pack "module Main where\nmain = print \"test run\"")
+              updateModule (MN.fromString "TotallyMain")
+                           (BSLC.pack "module TotallyMain where\nmain = print \"test run\"")
               <> mconcat (map upd lm)
         updateSessionD session update (length lm + 1)
         updateSessionD session mempty 0
         let update2 = updateCodeGeneration True
         updateSessionD session update2 (length lm + 1)
-        runActions <- runStmt session (MN.fromString "Main") "main"
+        runActions <- runStmt session (MN.fromString "TotallyMain") "main"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "\"test run\"\n") output
@@ -254,7 +257,7 @@ syntheticTests =
                         , "-package binary"
                         ]
       in withConfiguredSession packageOpts $ \session -> do
-        loadModulesFrom session "test/Puns"
+        loadModulesFrom session "test/GHC"
         msgs <- getSourceErrors session
         assertSomeErrors msgs
         let punOpts = packageOpts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
@@ -621,7 +624,7 @@ projects =
   [ ("A depends on B, no errors", "test/ABnoError", defOpts)
   , ("Our own code, package 'ghc' missing", ".", [])
   , ( "A subdirectory of Cabal code"
-    , "test/Cabal.Distribution.PackageDescription"
+    , "test/Cabal"
     , defOpts
     )
   , ("A single file with a code to run in parallel"
@@ -679,14 +682,21 @@ updateSessionD session update i = do
 getModules :: IdeSession -> IO (ModuleName, [ModuleName])
 getModules sess = do
   let SessionConfig{configSourcesDir} = getSessionConfig sess
-  cnts <- getDirectoryContents configSourcesDir
-  let originalFiles = filter ((`elem` hsExtentions) . takeExtension) cnts
-      originalModules =
-        map (\ f -> (MN.fromString $ fixName $ dropExtension f, f))
+  originalFiles <- find always
+                        ((`elem` hsExtentions) `liftM` extension)
+                        configSourcesDir
+  let originalModules =
+        map (\ f -> (MN.fromString $ fixName
+                     $ dropExtension $ takeFileName f, f))
             originalFiles
       m = case originalModules of
-        [] -> MN.fromString "testDirIsEmpty"
+        [] -> error "The test directory is empty."
         (x, _) : _ -> x
+      -- We need to evaluate the list of modules or they get updated
+      -- partway into the updateModule calls they are used in
+      -- and troubles ensue. This is the case, e.g.,
+      -- in "Run automatically corrected code; don't fail at all".
+      !_ = length originalModules
   return (m, map fst originalModules)
 
 -- Is there a ready function for that in GHC API?

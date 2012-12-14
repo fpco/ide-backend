@@ -150,7 +150,6 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         mapM_ removeTarget $ map targetIdFromFile $ oldFiles \\ targets
         -- Load modules to typecheck and perhaps generate code, too.
         _loadRes <- load LoadAllTargets
-        debugPpContext flags "context after LoadAllTargets"
         -- Recover all saved errors.
         prepareResult
   where
@@ -190,11 +189,12 @@ runInGhc (m, fun) = do
   flags <- getSessionDynFlags
   -- TODO: not sure if this cleanup handler is needed:
   defaultCleanupHandler flags . handleErrors $ do
-    debugPpContext flags "context before setContext"
+-- TODO: these debug statements break tests currently:
+--    _debugPpContext flags "context before setContext"
     setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName (MN.toString m)
                  , IIDecl $ simpleImportDecl $ mkModuleName "System.IO"
                  ]
-    debugPpContext flags "context after setContext"
+--    _debugPpContext flags "context after setContext"
     handleErrors $ do
       runRes <- runStmt expr RunToCompletion
       case runRes of
@@ -212,7 +212,7 @@ runInGhc (m, fun) = do
     expr = "do"
         ++ " System.IO.hSetBuffering System.IO.stdout System.IO.NoBuffering"
         ++ "; System.IO.hSetBuffering System.IO.stderr System.IO.NoBuffering"
-        ++ "; " ++ fun
+        ++ "; " ++ MN.toString m ++ "." ++ fun
         ++ "; System.IO.hFlush System.IO.stdout"
         ++ "; System.IO.hFlush System.IO.stderr"
 
@@ -308,8 +308,8 @@ extractErrSpan (RealSrcSpan srcspan) =
        ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
 extractErrSpan _ = Nothing
 
-debugPpContext :: DynFlags -> String -> Ghc ()
-debugPpContext flags msg = do
+_debugPpContext :: DynFlags -> String -> Ghc ()
+_debugPpContext flags msg = do
   context <- getContext
   liftIO $ debug dVerbosity
     $ msg ++ ": " ++ showSDocDebug flags (GHC.ppr context)

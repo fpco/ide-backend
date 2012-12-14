@@ -44,7 +44,7 @@ main = do
               error "usage: typecheck-dir [source-dir [ghc-options]]"
             [dir] -> (dir, defOpts)
             dir : optsArg -> (dir, optsArg)
-            [] -> ("test/Cabal.Distribution.PackageDescription",
+            [] -> ("test/Cabal",
                    defOpts)
       withTemporaryDirectory "typecheck-dir" $ check opts originalSourcesDir
 

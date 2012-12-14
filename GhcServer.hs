@@ -196,7 +196,6 @@ ghcHandleRun RpcConversation{..} m fun = do
 
       -- Actually start the code
       outcome <- runInGhc (m, fun)
-      liftIO $ debug dVerbosity $ "returned from runInGhc with " ++ show outcome
 
       -- Kill request thread and return the result
       liftIO $ killThread reqThread
@@ -214,6 +213,8 @@ ghcHandleRun RpcConversation{..} m fun = do
       readMVar stdoutThread
 
       -- Report the final result
+      liftIO $ debug dVerbosity $ "returned from ghcHandleRun with "
+                                  ++ show runOutcome
       put $ GhcRunDone runOutcome
   where
     isUserInterrupt :: Ex.AsyncException -> Maybe RunResult
