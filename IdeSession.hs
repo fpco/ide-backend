@@ -423,13 +423,14 @@ updateDataFile n bs =
       return state {ideManagedFiles = ideManagedFiles {dataFiles = dF}}
 
 -- | Like 'updateDataFile' except that instead of passing the file content by
--- value, it's given by reference to an existing file, which will be copied.
+-- value, it's given by reference to an existing file (the second argument),
+-- which will be copied.
 --
 updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate
 updateDataFileFromFile n p =
     IdeSessionUpdate $ \SessionConfig{configDataDir}
                         state@IdeIdleState{ideManagedFiles} -> do
-      copyFile (configDataDir </> n) (configDataDir </> p)
+      copyFile p (configDataDir </> n)
       let dF = n : dataFiles ideManagedFiles
       return state {ideManagedFiles = ideManagedFiles {dataFiles = dF}}
 

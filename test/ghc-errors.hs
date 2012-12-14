@@ -251,6 +251,9 @@ syntheticTests =
                         , "-package binary"
                         ]
       in withConfiguredSession packageOpts $ \session -> do
+        let update = updateDataFileFromFile "EventLogFormat.h"
+                                            "test/GHC/RTS/EventLogFormat.h"
+        updateSessionD session update 0
         loadModulesFrom session "test/GHC"
         msgs <- getSourceErrors session
         assertSomeErrors msgs
