@@ -139,18 +139,21 @@ ghcHandleRun :: RpcConversation
              -> String            -- ^ Function
              -> Ghc ()
 ghcHandleRun RpcConversation{..} m fun = do
-    -- Setup loopback pipe so we can capture runStmt's stdout
-    (stdOutputRd, stdOutputBackup) <- liftIO $ do
+    -- Setup loopback pipe so we can capture runStmt's stdout/stderr
+    (stdOutputRd, stdOutputBackup, stdErrorBackup) <- liftIO $ do
       -- Create pipe
       (stdOutputRd, stdOutputWr) <- liftIO createPipe
 
-      -- Backup stdout, then replace stdout with the pipe's write end
+      -- Backup stdout, then replace stdout and stderr with the pipe's write end
       stdOutputBackup <- liftIO $ dup stdOutput
-      dupTo stdOutputWr stdOutput >> closeFd stdOutputWr
+      stdErrorBackup  <- liftIO $ dup stdError
+      dupTo stdOutputWr stdOutput
+      dupTo stdOutputWr stdError
+      closeFd stdOutputWr
 
       -- Convert to the read end to a handle and return
       stdOutputRd' <- fdToHandle stdOutputRd
-      return (stdOutputRd', stdOutputBackup)
+      return (stdOutputRd', stdOutputBackup, stdErrorBackup)
 
     -- Similar procedure for stdin
     (stdInputWr, stdInputBackup) <- liftIO $ do
@@ -159,7 +162,8 @@ ghcHandleRun RpcConversation{..} m fun = do
 
       -- Swizzle stdin
       stdInputBackup <- liftIO $ dup stdInput
-      dupTo stdInputRd stdInput >> closeFd stdInputRd
+      dupTo stdInputRd stdInput
+      closeFd stdInputRd
 
       -- Convert the write end to a handle and return
       stdInputWr' <- fdToHandle stdInputWr
@@ -201,6 +205,7 @@ ghcHandleRun RpcConversation{..} m fun = do
     liftIO $ do
       -- Restore stdin and stdout
       dupTo stdOutputBackup stdOutput >> closeFd stdOutputBackup
+      dupTo stdErrorBackup  stdError  >> closeFd stdErrorBackup
       dupTo stdInputBackup  stdInput  >> closeFd stdInputBackup
 
       -- Closing the write end of the stdout pipe will cause the stdout

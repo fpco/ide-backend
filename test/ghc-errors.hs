@@ -495,12 +495,8 @@ syntheticTests =
         let upd = (updateCodeGeneration True)
                <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
-                    , "import System.IO"
                     , "echo :: IO ()"
-                    , "echo = do line <- getLine"
-                    , "          putStrLn line"
-                    , "          hFlush stdout"
-                    , "          echo"
+                    , "echo = (getLine >>= putStrLn) >> echo"
                     ])
         updateSessionD session upd 1
         msgs <- getSourceErrors session
@@ -554,12 +550,8 @@ syntheticTests =
         let upd = (updateCodeGeneration True)
                <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
-                    , "import System.IO"
                     , "echo :: IO ()"
-                    , "echo = do line <- getLine"
-                    , "          putStrLn line"
-                    , "          hFlush stdout"
-                    , "          echo"
+                    , "echo = (getLine >>= putStrLn) >> echo"
                     ])
         updateSessionD session upd 1
         msgs <- getSourceErrors session
@@ -567,6 +559,57 @@ syntheticTests =
         _runActions <- runStmt session (MN.fromString "M") "echo"
         return ()
      )
+  , ( "Capture stderr"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.IO"
+                    , "hello :: IO ()"
+                    , "hello = hPutStrLn stderr \"Hello World\""
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        runActions <- runStmt session (MN.fromString "M") "hello"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk _ -> assertEqual "" (BSLC.pack "Hello World\n") output
+          _       -> assertFailure $ "Unexpected run result: " ++ show result
+    )
+  , ( "Merge stdout and stderr"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.IO"
+                    , "hello :: IO ()"
+                    , "hello = do hPutStrLn stderr \"Hello World 1\""
+                    , "           hPutStrLn stdout \"Hello World 2\""
+                    , "           hPutStr   stderr \"Hello World 3\""
+                    , "           hPutStr   stdout \"Hello World 4\""
+                    , "           hPutStrLn stderr \"Hello World 5\""
+                    , "           hPutStrLn stdout \"Hello World 6\""
+                    , "           hPutStr   stderr \"Hello World 7\""
+                    , "           hPutStr   stdout \"Hello World 8\""
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        runActions <- runStmt session (MN.fromString "M") "hello"
+        (output, result) <- runWaitAll runActions
+        let expectedOutput = "Hello World 1\n"
+                          ++ "Hello World 2\n"
+                          ++ "Hello World 3"
+                          ++ "Hello World 4"
+                          ++ "Hello World 5\n"
+                          ++ "Hello World 6\n"
+                          ++ "Hello World 7"
+                          ++ "Hello World 8"
+        case result of
+          RunOk _ -> assertEqual "" (BSLC.pack expectedOutput) output
+          _       -> assertFailure $ "Unexpected run result: " ++ show result
+    )
   ]
 
 defOpts :: [String]
