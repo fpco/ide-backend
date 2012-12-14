@@ -19,6 +19,7 @@ module GhcServer
   , rpcRun
   , RunActions(interrupt, runWait, supplyStdin)
   , runWaitAll
+  , afterRunActions
   , shutdownGhcServer
   ) where
 
@@ -50,8 +51,6 @@ data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
   | ReqRun     ModuleName String
   deriving Show
--- data GhcResponse = RespWorking PCounter | RespDone RunOutcome
---   deriving Show
 data GhcCompileResponse =
     GhcCompileProgress PCounter
   | GhcCompileDone ([SourceError], LoadedModules)
@@ -294,6 +293,8 @@ rpcRun server m fun = do
     , supplyStdin = writeChan reqChan . GhcRunInput
     }
 
+-- | Repeatedly call 'runWait' until we receive a 'Right' result, while
+-- collecting all 'Left' results
 runWaitAll :: RunActions -> IO (BSL.ByteString, RunResult)
 runWaitAll RunActions{runWait} = go []
   where
@@ -303,6 +304,15 @@ runWaitAll RunActions{runWait} = go []
       case resp of
         Left  bs        -> go (bs : acc)
         Right runResult -> return (BSL.fromChunks acc, runResult)
+
+-- | Register a callback to be invoked when the program terminates
+afterRunActions :: RunActions -> (RunResult -> IO ()) -> RunActions
+afterRunActions runActions callback = runActions {
+    runWait = do result <- runWait runActions
+                 case result of
+                   Left bs -> return (Left bs)
+                   Right r -> callback r >> return (Right r)
+  }
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer gs = shutdown gs

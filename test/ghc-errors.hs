@@ -502,6 +502,34 @@ syntheticTests =
              Right (RunProgException "AsyncException: user interrupt") -> return ()
              _ -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Two calls to runStmt"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "echo :: IO ()"
+                    , "echo = getLine >>= putStrLn"
+                    , "echoReverse :: IO ()"
+                    , "echoReverse = getLine >>= putStrLn . reverse"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+
+        do runActions <- runStmt session "M" "echo"
+           supplyStdin runActions (BSSC.pack "ECHO!\n")
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "ECHO!\n") output
+             _       -> assertFailure $ "Unexpected run result: " ++ show result
+
+        do runActions <- runStmt session "M" "echoReverse"
+           supplyStdin runActions (BSSC.pack "!OHCE\n")
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "ECHO!\n") output
+             _       -> assertFailure $ "Unexpected run result: " ++ show result
+    )
   ]
 
 defOpts :: [String]

@@ -388,14 +388,14 @@ updateModuleDelete m =
 -- Static flags need to be set at server startup.
 updateGhcOptions :: (Maybe [String]) -> IdeSessionUpdate
 updateGhcOptions opts =
-    IdeSessionUpdate $ \ideConfig state ->
+    IdeSessionUpdate $ \_ideConfig state ->
       return $ state {ideNewOpts = opts}
 
 -- | Enable or disable code generation in addition
 -- to type-checking. Required by 'runStmt.
 updateCodeGeneration :: Bool -> IdeSessionUpdate
 updateCodeGeneration b =
-    IdeSessionUpdate $ \ideConfig state ->
+    IdeSessionUpdate $ \_ideConfig state ->
       return $ state {ideGenerateCode = b}
 
 internalFile :: SessionConfig -> ModuleName -> FilePath
@@ -516,20 +516,29 @@ getSymbolDefinitionMap = undefined
 runStmt :: IdeSession -> ModuleName -> String -> IO RunActions
 runStmt IdeSession{ideGhcServer,ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
-    -- TODO: rather than checking if "something" has been compiled, we should
-    -- check if the given module has been compiled.
     IdeSessionIdle idleState@IdeIdleState{ ideComputed=Just comp
                                          , ideGenerateCode=True} ->
       -- ideManagedFiles is irrelevant, because only the module name
       -- inside 'module .. where' counts.
       if m `elem` computedLoadedModules comp
       then do
-        -- TODO: we should put the state back into idle when done
         runActions <- rpcRun ideGhcServer m fun
-        return (IdeSessionRunning idleState, runActions)
+        let runActions' = afterRunActions runActions restoreToIdle
+        return (IdeSessionRunning idleState, runActions')
       else fail $ "Module " ++ show (MN.toString m)
                   ++ " not successfully loaded, when trying to run code."
     IdeSessionIdle _ ->
       fail "Cannot run before the code is generated."
+    IdeSessionRunning _ ->
+      fail "Cannot run code concurrently"
     IdeSessionShutdown ->
       fail "Session already shut down."
+  where
+    restoreToIdle :: RunResult -> IO ()
+    restoreToIdle _ = modifyMVar_ ideState $ \state -> case state of
+      IdeSessionIdle _ ->
+        Ex.throwIO (userError "The impossible happened!")
+      IdeSessionRunning idleState -> do
+        return $ IdeSessionIdle idleState
+      IdeSessionShutdown ->
+        return state
