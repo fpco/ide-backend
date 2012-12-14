@@ -8,15 +8,17 @@ import qualified ModuleName
 
 import Graphics.UI.Gtk as Gtk
 import Graphics.UI.Gtk.SourceView
+
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
-
 import Data.IORef
 import Data.Monoid
+import Control.Monad
 
 import System.Environment
 import System.Directory
+import System.FilePath
 
 main :: IO ()
 main = do
@@ -25,13 +27,18 @@ main = do
 
 guiMain :: [String] -> IO ()
 guiMain args = do
-    let configSourcesDir  = "./ide-session/src"
-        configWorkingDir  = "./ide-session/build"
-        configDataDir     = "./ide-session/run"
-        configTempDir     = "./ide-session/tmp"
+
+    let sessionDir        = "./ide-session"
+        configSourcesDir  = sessionDir </> "src"
+        configWorkingDir  = sessionDir </> "build"
+        configDataDir     = sessionDir </> "run"
+        configTempDir     = sessionDir </> "tmp"
         configStaticOpts  = args
+
+    exists <- doesDirectoryExist sessionDir
+    when exists (removeDirectoryRecursive sessionDir)
     mapM_ (createDirectoryIfMissing False)
-          ["./ide-session", configSourcesDir, configWorkingDir
+          [sessionDir, configSourcesDir, configWorkingDir
           ,configDataDir, configTempDir]
 
     ide <- initSession SessionConfig{..}
@@ -53,7 +60,6 @@ guiMain args = do
 
             onModuleAdd :: ModuleName -> FilePath -> IO ()
             onModuleAdd mn fp = do
-              print ("onModuleAdd", mn, fp)
               addUpdate ("updateModuleFromFile (" ++ show mn ++ ") " ++ show fp)
                         (updateModuleFromFile mn fp)
                         (do content <- BS.readFile fp
@@ -61,32 +67,29 @@ guiMain args = do
 
             onModuleDelete :: ModuleName -> IO ()
             onModuleDelete mn = do
-              print ("onModuleDelete",mn)
               addUpdate ("updateModuleDelete (" ++ show mn ++ ")")
                         (updateModuleDelete mn)
                         (deleteModuleBuffer gui mn)
 
             onBufferUpdate :: ModuleName -> SourceBuffer -> ByteString -> IO ()
             onBufferUpdate mn buffer content = do
-              print ("onBufferUpdate", mn)
               addUpdate ("updateModule (" ++ show mn ++ ") (data)")
                         (updateModule mn (LBS.fromChunks [content]))
                         (textBufferSetModified buffer False)
 
             onUpdateSession :: IO ()
             onUpdateSession = do
-              print ("onUpdateSession")
               updates <- readIORef updatesRef
               clearUpdates
               sequence [ act | (_,act) <- updates ]
               let sessionUpdates = mconcat [ upd | (upd,_) <- updates ]
-                  handleProgress p = appendOutputLog gui (show p)
+                  handleProgress p = appendOutputLog gui ("Progress: " ++ show p)
               appendOutputLog gui "updateSession"
               updateSession ide sessionUpdates handleProgress
               errs <- getSourceErrors ide
-              appendOutputLog gui (show errs)
+              appendOutputLog gui ("Errors: " ++ show errs)
               ms <- getLoadedModules ide
-              appendOutputLog gui (show ms)
+              appendOutputLog gui ("Loaded:" ++ show ms)
 
               return ()
 
@@ -123,14 +126,10 @@ makeGUI GuiActions{..} = do
     onDestroy mainWindow mainQuit
 
     -- buttons etc
+    updateSessionButton <- getWidget castToButton "update_session_button"
     addModuleButton     <- getWidget castToButton "add_module_button"
-    moduleNameEntry     <- getWidget castToEntry  "module_name_entry"
-    fileChooserButton   <- getWidget castToFileChooser "filechooserbutton"
     deleteModuleButton  <- getWidget castToButton "delete_module_button"
     updateBufferButton  <- getWidget castToButton "update_buffer_button"
-    updateSessionButton <- getWidget castToButton "update_session_button"
-
-    fileChooserSetCurrentFolder fileChooserButton "."
 
     -- the module list
     moduleListView   <- getWidget castToTreeView "module_list"
@@ -175,6 +174,8 @@ makeGUI GuiActions{..} = do
     scrolledWindowSetShadowType scrollWin ShadowIn
     containerAdd scrollWin moduleEditor
     containerAdd panedView scrollWin
+    dummybuffer  <- textViewGetBuffer moduleEditor
+    textBufferSetText dummybuffer "(no module selected)"
 
     -- create the appropriate language
     languageManager <- sourceLanguageManagerNew
@@ -186,10 +187,7 @@ makeGUI GuiActions{..} = do
 
     -- events
     on addModuleButton buttonActivated $ do
-      modname <- get moduleNameEntry entryText
-      mfilename <- fileChooserGetFilename fileChooserButton
-      --TODO: validate module name string
-      maybe (return ()) (onModuleAdd (ModuleName.fromString modname)) mfilename
+        chooseModuleFile mainWindow onModuleAdd
 
     on deleteModuleButton buttonActivated $ do
       miter <- treeSelectionGetSelected moduleListSelect
@@ -215,7 +213,8 @@ makeGUI GuiActions{..} = do
     on moduleListSelect treeSelectionSelectionChanged $ do
       miter <- treeSelectionGetSelected moduleListSelect
       case miter of
-        Nothing   -> return ()
+        Nothing   -> do
+           textViewSetBuffer moduleEditor dummybuffer
         Just iter -> do
            let modIndex = listStoreIterToIndex iter
            (_, buffer) <- listStoreGetValue moduleListStore modIndex
@@ -256,4 +255,46 @@ appendOutputLog GUI{..} str = do
 clearUpdateLog :: GUI -> IO ()
 clearUpdateLog GUI{..} =
     listStoreClear updatesListStore
+
+chooseModuleFile :: WindowClass win => win
+                 -> (ModuleName -> FilePath -> IO ())
+                 -> IO ()
+chooseModuleFile parent onAddModule = do
+  dialog <- fileChooserDialogNew
+    (Just "Add a Haskell module")
+    (Just (toWindow parent))
+    FileChooserActionOpen
+    [ ("Cancel",        ResponseCancel)
+    , ("Add module", ResponseAccept) ]
+
+  filt <- fileFilterNew
+  fileFilterAddPattern filt "*.hs"
+
+  hbox <- hBoxNew False 0
+  lab  <- labelNew (Just "Module name:")
+  mentry <- entryNew
+  set lab [ miscYalign := 0, miscXpad := 10 ]
+  
+  boxPackStart hbox lab PackNatural 0
+  boxPackStart hbox mentry PackGrow 0
+
+  set dialog [
+      fileChooserFilter := filt,
+      windowModal := True,
+      fileChooserExtraWidget := hbox
+    ]
+  fileChooserSetCurrentFolder dialog "."
+
+  onResponse dialog $ \resp -> do
+    case resp of
+      ResponseAccept -> do
+        inp   <- fileChooserGetFilename dialog
+        mname <- get mentry entryText
+        case inp of
+          Just file -> onAddModule (ModuleName.fromString mname) file
+          Nothing   -> return ()
+      _             -> return ()
+    widgetDestroy dialog
+
+  widgetShowAll dialog
 
