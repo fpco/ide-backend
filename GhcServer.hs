@@ -17,6 +17,7 @@ module GhcServer
   , forkGhcServer
   , rpcCompile
   , rpcRun
+  , rpcSetEnv
   , RunActions(..)
 -- TODO: a bug in haddock ignores the 3 ops:  , RunActions(interrupt, runWait, supplyStdin)
   , runWaitAll
@@ -28,7 +29,7 @@ import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId, throwTo)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import qualified Control.Exception as Ex
-import Control.Monad (forever, when)
+import Control.Monad (forever, when, forM)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
@@ -40,6 +41,7 @@ import System.FilePath ((</>))
 import System.IO (hFlush, stdout)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
+import System.Posix.Env (setEnv, unsetEnv)
 
 import Common
 import GhcRun
@@ -51,6 +53,7 @@ import Paths_ide_backend
 data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
   | ReqRun     ModuleName String
+  | ReqSetEnv  [(String, Maybe String)]
   deriving Show
 data GhcCompileResponse =
     GhcCompileProgress PCounter
@@ -98,6 +101,8 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
         ghcHandleCompile conv dOpts opts dir genCode
       ReqRun m fun ->
         ghcHandleRun conv m fun
+      ReqSetEnv env ->
+        ghcHandleSetEnv conv env
 
 -- | Handle a compile or type check request
 ghcHandleCompile :: RpcConversation
@@ -228,6 +233,13 @@ ghcHandleRun RpcConversation{..} m fun = do
     blockSize :: Int
     blockSize = 4096
 
+-- | Handle a set-environment request
+ghcHandleSetEnv :: RpcConversation -> [(String, Maybe String)] -> Ghc ()
+ghcHandleSetEnv RpcConversation{put} env = liftIO $ do
+  forM env $ \(var, mVal) -> case mVal of Just val -> setEnv var val True
+                                          Nothing  -> unsetEnv var
+  put ()
+
 --------------------------------------------------------------------------------
 -- Client-side operations                                                     --
 --------------------------------------------------------------------------------
@@ -302,6 +314,10 @@ rpcRun server m fun = do
     , interrupt   = writeChan reqChan GhcRunInterrupt
     , supplyStdin = writeChan reqChan . GhcRunInput
     }
+
+-- | Set the environment
+rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()
+rpcSetEnv server env = rpc server (ReqSetEnv env)
 
 -- | Repeatedly call 'runWait' until we receive a 'Right' result, while
 -- collecting all 'Left' results

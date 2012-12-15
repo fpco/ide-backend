@@ -615,6 +615,72 @@ syntheticTests =
           RunOk _ -> assertEqual "" (BSLC.pack expectedOutput) output
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Set environment variables"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.Environment (getEnv)"
+                    , "printFoo :: IO ()"
+                    , "printFoo = getEnv \"Foo\" >>= putStr"
+                    , "printBar :: IO ()"
+                    , "printBar = getEnv \"Bar\" >>= putStr"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+
+        -- At the start, both Foo and Bar are undefined
+        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+           (_, result) <- runWaitAll runActions
+           case result of
+             RunProgException ex -> assertEqual "" ex "IOException: Foo: getEnv: does not exist (no environment variable)"
+             _ -> assertFailure $ "Unexpected result " ++ show result
+        do runActions <- runStmt session (MN.fromString "M") "printBar"
+           (_, result) <- runWaitAll runActions
+           case result of
+             RunProgException ex -> assertEqual "" ex "IOException: Bar: getEnv: does not exist (no environment variable)"
+             _ -> assertFailure $ "Unexpected result " ++ show result
+
+        -- Update Foo, leave Bar undefined
+        updateSession session (updateEnv "Foo" (Just "Value1")) (\_ -> return ())
+        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
+             _       -> assertFailure $ "Unexpected result " ++ show result
+        do runActions <- runStmt session (MN.fromString "M") "printBar"
+           (_, result) <- runWaitAll runActions
+           case result of
+             RunProgException ex -> assertEqual "" ex "IOException: Bar: getEnv: does not exist (no environment variable)"
+             _ -> assertFailure $ "Unexpected result " ++ show result
+
+        -- Update Bar, leave Foo defined
+        updateSession session (updateEnv "Bar" (Just "Value2")) (\_ -> return ())
+        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
+             _       -> assertFailure $ "Unexpected result " ++ show result
+        do runActions <- runStmt session (MN.fromString "M") "printBar"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
+             _       -> assertFailure $ "Unexpected result " ++ show result
+
+        -- Unset Foo, leave Bar defined
+        updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
+        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+           (_, result) <- runWaitAll runActions
+           case result of
+             RunProgException ex -> assertEqual "" ex "IOException: Foo: getEnv: does not exist (no environment variable)"
+             _ -> assertFailure $ "Unexpected result " ++ show result
+        do runActions <- runStmt session (MN.fromString "M") "printBar"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
+             _       -> assertFailure $ "Unexpected result " ++ show result
+    )
   ]
 
 defOpts :: [String]

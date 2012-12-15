@@ -83,6 +83,9 @@ module IdeSession (
   updateDataFileFromFile,
   updateDataFileDelete,
 
+  -- ** Environment variables
+  updateEnv,
+
   -- ** Performing the update
   -- | Once we have accumulated a batch of updates we can perform them all
   -- giving us a new session state. Since performing a bunch of updates can
@@ -108,6 +111,9 @@ module IdeSession (
   getManagedFiles,
   ManagedFiles(..),
   getLoadedModules,
+
+  -- ** Environment variables
+  getEnv,
 
   -- ** Symbol definition maps
   getSymbolDefinitionMap,
@@ -254,6 +260,8 @@ data IdeIdleState = IdeIdleState {
   , _ideGenerateCode     :: Bool
     -- Files submitted by the user and not deleted yet.
   , _ideManagedFiles     :: ManagedFiles
+    -- Environment overrides
+  , _ideEnv              :: [(String, Maybe String)]
   }
 
 -- | The collection of source and data files submitted by the user.
@@ -289,6 +297,7 @@ initSession ideConfig@SessionConfig{..} = do
                         , _ideNewOpts          = Nothing
                         , _ideGenerateCode     = False
                         , _ideManagedFiles     = ManagedFiles [] []
+                        , _ideEnv              = []
                         }
   ideGhcServer <- forkGhcServer configStaticOpts
   return IdeSession{..}
@@ -324,8 +333,14 @@ newtype IdeSessionUpdate = IdeSessionUpdate {
     runSessionUpdate :: SessionConfig -> StateT IdeUpdateResult IO ()
   }
 
+-- | Result of running a session update
+--
+-- TODO: add _updatedCode
 data IdeUpdateResult = IdeUpdateResult {
+     -- The new state
      _updatedState :: IdeIdleState
+   , -- Was the environment updated?
+     _updatedEnv   :: Bool
    }
 
 $(nameDeriveAccessors ''IdeUpdateResult accessorName)
@@ -350,14 +365,23 @@ updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, 
       IdeSessionIdle idleState -> do
         updateResult <- execStateT (runSessionUpdate update ideConfig) IdeUpdateResult {
                             _updatedState = idleState
+                          , _updatedEnv   = False
                           }
         let idleState' = updateResult ^. updatedState
+
+        -- Update environment (if necessary)
+        when (updateResult ^. updatedEnv) $
+          rpcSetEnv ideGhcServer (idleState' ^. ideEnv)
+
+        -- Update code (TODO: skip this RPC call if not necessary)
         (computedErrors, computedLoadedModules) <-
           rpcCompile ideGhcServer
                      (idleState' ^. ideNewOpts)
                      configSourcesDir
                      (idleState' ^. ideGenerateCode)
                      callback
+
+        -- Update state
         return . IdeSessionIdle
                . (ideComputed ^= Just Computed{..})
                $ idleState'
@@ -468,6 +492,14 @@ updateDataFileDelete n = IdeSessionUpdate $ \SessionConfig{configDataDir} -> do
   liftIO $ removeFile (configDataDir </> n)
   modify (updatedState .> ideManagedFiles .> dataFiles) $ delete n
 
+-- | Set an environment variable
+--
+-- Use @updateEnv var Nothing@ to unset @var@.
+updateEnv :: String -> Maybe String -> IdeSessionUpdate
+updateEnv var val = IdeSessionUpdate $ \_ideConfig -> do
+  modify (updatedState .> ideEnv) (override var val)
+  set updatedEnv True
+
 -- | The type of queries in a given session state.
 --
 -- Queries are in IO because they depend on the current state of the session
@@ -545,6 +577,18 @@ getLoadedModules IdeSession{ideState} =
 getSymbolDefinitionMap :: Query SymbolDefinitionMap
 getSymbolDefinitionMap = undefined
 
+-- | Get all current environment overrides
+getEnv :: Query [(String, Maybe String)]
+getEnv IdeSession{ideState} =
+  withMVar ideState $ \st ->
+    case st of
+      IdeSessionIdle idleState ->
+        return $ idleState ^. ideEnv
+      IdeSessionRunning _ idleState ->
+        return $ idleState ^. ideEnv
+      IdeSessionShutdown ->
+        fail "Session already shut down."
+
 -- | Run a given function in a given module (the name of the module
 -- is the one between @module ... end@, which may differ from the file name).
 -- The function resembles a query, but it's not instantaneous
@@ -579,3 +623,4 @@ runStmt IdeSession{ideGhcServer,ideState} m fun = do
         return $ IdeSessionIdle idleState
       IdeSessionShutdown ->
         return state
+

@@ -11,6 +11,7 @@ module Common
   , showExWithClass
   , dVerbosity, debug
   , accessorName
+  , override
   ) where
 
 import qualified Control.Exception as Ex
@@ -94,3 +95,10 @@ debug verbosity msg =
 accessorName :: String -> Maybe String
 accessorName ('_' : str) = Just str
 accessorName _           = Nothing
+
+-- | Update a value in a list-as-map
+override :: Eq a => a -> b -> [(a, b)] -> [(a, b)]
+override a b [] = [(a, b)]
+override a b ((a', b') : xs)
+  | a == a'   = (a, b) : xs
+  | otherwise = (a', b') : override a b xs
