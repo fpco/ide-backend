@@ -441,7 +441,10 @@ updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate
 updateDataFileFromFile n p =
     IdeSessionUpdate $ \SessionConfig{configDataDir}
                         state@IdeIdleState{ideManagedFiles} -> do
-      copyFile p (configDataDir </> n)
+      let targetPath = configDataDir </> n
+          targetDir  = takeDirectory targetPath
+      createDirectoryIfMissing True targetDir
+      copyFile p targetPath
       let dF = n : dataFiles ideManagedFiles
       return state {ideManagedFiles = ideManagedFiles {dataFiles = dF}}
 
