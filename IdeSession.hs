@@ -20,11 +20,18 @@ module IdeSession (
   -- * update phase: we have a batch of updates, e.g. changes in module contents.
   --   This part is declarative, we just describe what changes we want to make.
   --
-  -- * compile phase: we apply the updates and run the compiler. This may be a
-  --   relatively long running operation and we may want progress info.
+  -- * compile phase: we apply the updates and invoke the compiler, which
+  --   incrementally recompiles some modules. This may be a relatively
+  --   long running operation and we may want progress info.
   --
-  -- * query phase: after compiling we can collect information like source errors
+  -- * query phase: after compiling we can collect information like
+  --   source errors, the list of successfully loaded modules
   --   or symbol maps.
+  --
+  -- * run phase: regardless of compilation results, we may want to run some
+  --   code from a module (compiled recently or compiled many updates ago),
+  --   interact with the running code's input and output, interrupt
+  --   its execution.
   --
   -- Then the whole process can repeat.
   --
@@ -33,9 +40,12 @@ module IdeSession (
   -- * 'IdeSession' for the query mode. This is in a sense also the default
   --   mode.
   --
-  -- * 'IdeSessionUpdate' is the type we use to accumulate updates.
+  -- * 'IdeSessionUpdate' for accumulating updates.
   --
-  -- * 'Progress' 'IdeSession' is the type for the compile mode.
+  -- * 'PCounter' for the progress information in the compile mode.
+  --
+  -- * 'RunActions' for handles on the running code, through which
+  --   one can interact with the code.
 
   -- * Sessions
   IdeSession,
@@ -59,14 +69,6 @@ module IdeSession (
   -- sub-sections below describe the various updates that are available.
   IdeSessionUpdate,
 
-  -- ** Performing the update
-  -- | Once we have accumulated a batch of updates we can perform them all
-  -- giving us a new session state. Since performing a bunch of updates can
-  -- involve compiling modules and can take some time, the update uses the
-  -- 'Progress' type to represent the action in progress.
-  updateSession,
-  PCounter,
-
   -- ** Modules
   updateModule,
   updateModuleFromFile,
@@ -80,6 +82,14 @@ module IdeSession (
   updateDataFile,
   updateDataFileFromFile,
   updateDataFileDelete,
+
+  -- ** Performing the update
+  -- | Once we have accumulated a batch of updates we can perform them all
+  -- giving us a new session state. Since performing a bunch of updates can
+  -- involve compiling modules and can take some time, the update uses the
+  -- 'PCounter' type to represent intermediate progress information.
+  updateSession,
+  PCounter,
 
   -- * Queries
   Query,
@@ -98,7 +108,6 @@ module IdeSession (
   getManagedFiles,
   ManagedFiles(..),
   getLoadedModules,
-  LoadedModules,
 
   -- ** Symbol definition maps
   getSymbolDefinitionMap,
@@ -106,7 +115,6 @@ module IdeSession (
 
   -- ** Run code
   runStmt,
-  RunResult(..)
 
   -- * Additional notes
   -- ** Responsibility for managing and mutating files in the sources dir.
@@ -133,16 +141,17 @@ module IdeSession (
   -- value of an 'IdeSession' represents the state of the files\/modules and
   -- the result of the pure compilation function. It should always be the case
   -- that we can throw away the session and recover it just from the persistent
-  -- state in the files.
+  -- state in the files (except for the compiler flags and setting
+  -- if the user modified them during the session).
   --
   -- One example where this notion makes a difference is with warnings.
   -- Traditionally, compilers just return the warnings for the modules they
   -- compiled, skipping warnings for the modules they didn't need to recompile.
-  -- But this doesn't match the pure function idea, because now the compilation
+  -- But this doesn't match the pure function idea, because the compilation
   -- result now depends on which steps we took to get there, rather than just
   -- on the current value of the files. So one of the things this wrapper can
   -- do is to restore the purity in these corner cases, (which otherwise the
-  -- client of this API would probably have to do).
+  -- client of this API would probably have to do). [Not done yet.]
 
   -- ** Persistent and transitory state
   -- | The persistent state is obviously the files: source files and data
@@ -151,7 +160,8 @@ module IdeSession (
   -- in memory).
   --
   -- It should always be possible to drop all the transitory state and recover,
-  -- just at the cost of some extra work.
+  -- just at the cost of some extra work. [Again, except for the compiler flags
+  -- modified by the user.]
   --
   -- This property is a useful correctness property for internal testing: the
   -- results of all the queries should be the same before and after blowing
@@ -176,13 +186,13 @@ import GhcServer
 import ModuleName (LoadedModules, ModuleName)
 import qualified ModuleName as MN
 
--- | This is a state token for the current state of an IDE session. We can run
--- queries in the current state, and from this state we can perform a batch
--- of updates, ultimately leading to a new 'IdeSession'.
---
--- Note that these state tokens are not persistent, once we perform an update
--- and get a new 'IdeSession', the old one is no longer valid. (And if you do
--- accidentally use an old invalid one, then it's a dynamically checked error.)
+-- | This type is a handle to a session state. Values of this type
+-- point to the non-persistent parts of the session state in memory
+-- and to directories containing source and data file that form
+-- the persistent part of the session state. Whenever we perform updates
+-- or run queries, it's always in the context of a particular handle,
+-- representing the session we want to work within. Many sessions
+-- can be active at once, but in normal applications this shouldn't be needed.
 --
 data IdeSession = IdeSession
   { ideConfig    :: SessionConfig
@@ -209,6 +219,7 @@ data IdeIdleState = IdeIdleState {
   , ideManagedFiles     :: ManagedFiles
   }
 
+-- | The collection of source and data files submitted by the user.
 data ManagedFiles = ManagedFiles
   { sourceFiles :: [ModuleName]
   , dataFiles   :: [FilePath]
@@ -241,12 +252,8 @@ data SessionConfig = SessionConfig {
        configStaticOpts :: [String]
      }
 
--- In this implementation, it's fully applicative, and so invalid sessions
--- can be queried at will. Note that there may be some working files
--- produced by GHC while obtaining these values. They are not captured here,
--- so queries are not allowed to read them.
 data Computed = Computed {
-    -- | last compilation and run errors
+    -- | Last compilation and run errors
     computedErrors        :: [SourceError]
     -- | Modules that got loaded okay
   , computedLoadedModules :: LoadedModules
@@ -396,7 +403,8 @@ updateModuleDelete m =
       let sF = delete m (sourceFiles ideManagedFiles)
       return state {ideManagedFiles = ideManagedFiles {sourceFiles = sF}}
 
--- | Warning: only dynamic flags can be set here.
+-- | Update dynamic compiler flags, including pragmas and packages to use.
+-- Warning: only dynamic flags can be set here.
 -- Static flags need to be set at server startup.
 updateGhcOptions :: (Maybe [String]) -> IdeSessionUpdate
 updateGhcOptions opts =
@@ -404,7 +412,7 @@ updateGhcOptions opts =
       return $ state {ideNewOpts = opts}
 
 -- | Enable or disable code generation in addition
--- to type-checking. Required by 'runStmt.
+-- to type-checking. Required by 'runStmt'.
 updateCodeGeneration :: Bool -> IdeSessionUpdate
 updateCodeGeneration b =
     IdeSessionUpdate $ \_ideConfig state ->
@@ -451,7 +459,7 @@ updateDataFileDelete n =
 --
 -- Queries are in IO because they depend on the current state of the session
 -- but they promise not to alter the session state (at least not in any visible
--- way, they might update caches etc).
+-- way; they might update caches, etc.).
 --
 type Query a = IdeSession -> IO a
 
@@ -465,7 +473,7 @@ getSourceModule m IdeSession{ideConfig} =
 --
 getDataFile :: FilePath -> Query ByteString
 getDataFile n IdeSession{ideConfig=SessionConfig{configDataDir}} =
-  BS.readFile $  configDataDir </> n
+  BS.readFile $ configDataDir </> n
 
 -- | Get any compilation errors or warnings in the current state of the
 -- session, meaning errors that GHC reports for the current state of all the
@@ -488,7 +496,7 @@ getSourceErrors IdeSession{ideState} =
           Nothing -> fail "This session state does not admit queries."
       IdeSessionShutdown -> fail "Session already shut down."
 
--- | Get the list of files submitted by the user and not deleted yet.
+-- | Get the collection of files submitted by the user and not deleted yet.
 -- The module names are those supplied by the user as the first
 -- arguments of the @updateModule@ and @updateModuleFromFile@ calls,
 -- as opposed to the compiler internal @module ... end@ module names.

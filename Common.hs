@@ -53,6 +53,7 @@ data SymbolDefinitionMap
 hsExtentions:: [FilePath]
 hsExtentions = [".hs", ".lhs"]
 
+-- | This type represents intermediate progress information during compilation.
 type PCounter = Int
 
 -- | The outcome of running code

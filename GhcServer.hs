@@ -17,7 +17,8 @@ module GhcServer
   , forkGhcServer
   , rpcCompile
   , rpcRun
-  , RunActions(interrupt, runWait, supplyStdin)
+  , RunActions(..)
+-- TODO: a bug in haddock ignores the 3 ops:  , RunActions(interrupt, runWait, supplyStdin)
   , runWaitAll
   , afterRunActions
   , shutdownGhcServer
@@ -261,6 +262,9 @@ rpcCompile server opts dir genCode callback =
 
     go
 
+-- TODO: move this and a few other operations to a separate module.
+-- Then do not expose GhcServer module in cabal.
+-- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {
     runWait     :: IO (Either BSS.ByteString RunResult)
   , interrupt   :: IO ()

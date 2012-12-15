@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
--- | Valid Haskell module names.
+-- | Valid Haskell qualified module names.
 module ModuleName
   ( ModuleName(..)
   , toString
@@ -14,32 +14,32 @@ import qualified Data.Char as Char (isAlphaNum, isUpper)
 import Data.List (intercalate)
 import System.FilePath (pathSeparator, splitDirectories)
 
+-- | The type of qualified module names.
 newtype ModuleName = ModuleName [String]
   deriving (Eq, Ord, Read, Show)
 
+-- | The type of the list of qualified names of modules, as maintained
+-- by the compiler.
 type LoadedModules = [ModuleName]
 
+-- | Pretty-print a qualified module name.
 toString :: ModuleName -> String
 toString (ModuleName ms) = intercalate "." ms
 
 -- | Construct a 'ModuleName' from a valid module name 'String'.
---
--- This is just a convenience function intended for valid module strings. It is
--- an error if it is used with a string that is not a valid module name. If you
--- are parsing user input then use 'Distribution.Text.simpleParse' instead.
+-- It results in an error when used with a string that is not
+-- a valid module name (wrong case of any name part, wrong symbols used).
 --
 fromString :: String -> ModuleName
 fromString string
   | all validModuleComponent components' = ModuleName components'
   | otherwise                            = error badName
-
-  where
-    components' = split string
-    badName     = "ModuleName.fromString: invalid module name " ++ show string
-
-    split cs = case break (=='.') cs of
-      (chunk,[])     -> chunk : []
-      (chunk,_:rest) -> chunk : split rest
+ where
+  components' = split string
+  badName     = "ModuleName.fromString: invalid module name " ++ show string
+  split cs = case break (=='.') cs of
+    (chunk,[])     -> chunk : []
+    (chunk,_:rest) -> chunk : split rest
 
 validModuleChar :: Char -> Bool
 validModuleChar c = Char.isAlphaNum c || c == '_' || c == '\''
@@ -47,7 +47,7 @@ validModuleChar c = Char.isAlphaNum c || c == '_' || c == '\''
 validModuleComponent :: String -> Bool
 validModuleComponent []     = False
 validModuleComponent (c:cs) = Char.isUpper c
-                           && all validModuleChar cs
+                              && all validModuleChar cs
 
 -- | Convert a module name to a file path, but without any file extension.
 -- For example:
@@ -57,6 +57,7 @@ validModuleComponent (c:cs) = Char.isUpper c
 toFilePath :: ModuleName -> FilePath
 toFilePath (ModuleName ms) = intercalate [pathSeparator] ms
 
+-- | An auxiliary function for tests. Guesses a module name from a file path.
 fromFilePath :: FilePath -> ModuleName
 fromFilePath path = ModuleName $ splitDirectories path
 
