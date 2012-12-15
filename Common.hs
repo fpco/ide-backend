@@ -10,6 +10,7 @@ module Common
   , RunResult(..)
   , showExWithClass
   , dVerbosity, debug
+  , accessorName
   ) where
 
 import qualified Control.Exception as Ex
@@ -88,3 +89,8 @@ debug verbosity msg =
     when (verbosity >= 4) $ liftIO $ do
       BS.hPutStrLn stderr $ BS.pack $ "debug: " ++ msg
       hFlush stderr
+
+-- | Translate record field '_name' to the accessor 'name'
+accessorName :: String -> Maybe String
+accessorName ('_' : str) = Just str
+accessorName _           = Nothing

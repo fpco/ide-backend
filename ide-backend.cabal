@@ -32,7 +32,11 @@ library
                       aeson                >= 0.6 && < 0.7,
                       executable-path      >= 0.0 && < 0.1,
                       unix >= 2.5 && < 2.7,
-                      template-haskell
+                      template-haskell,
+                      data-accessor,
+                      data-accessor-template,
+                      data-accessor-mtl,
+                      transformers
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else
@@ -74,7 +78,11 @@ test-suite typecheck-dir
                       unix >= 2.5 && < 2.7,
 -- pretty beastly deps:
                       Unixutils >= 1.50,
-                      template-haskell
+                      template-haskell,
+                      data-accessor,
+                      data-accessor-template,
+                      data-accessor-mtl,
+                      transformers
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else
@@ -129,7 +137,11 @@ test-suite ghc-errors
                       executable-path      >= 0.0 && < 0.1,
                       unix                 >= 2.5 && < 2.7,
 -- pretty beastly deps:
-                      Unixutils >= 1.50
+                      Unixutils >= 1.50,
+                      data-accessor,
+                      data-accessor-template,
+                      data-accessor-mtl,
+                      transformers
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else
