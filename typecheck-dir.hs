@@ -1,10 +1,11 @@
 module Main where
 
+import Control.Monad (liftM)
 import qualified Data.List as List
 import Data.Monoid (mconcat)
-import System.Directory
 import System.Environment
-import System.FilePath (dropExtension, takeExtension, (</>))
+import System.FilePath (dropExtension, makeRelative)
+import System.FilePath.Find (always, extension, find)
 import System.Unix.Directory (withTemporaryDirectory)
 
 import Common
@@ -61,12 +62,15 @@ check opts originalSourcesDir configSourcesDir = do
                                    }
   session <- initSession sessionConfig
   -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
+  originalFiles <- find always
+                        ((`elem` hsExtentions) `liftM` extension)
+                        originalSourcesDir
   -- HACK: here we fake module names, guessing them from file names.
-  cnts <- getDirectoryContents originalSourcesDir
-  let originalFiles = filter ((`elem` hsExtentions) . takeExtension) cnts
-      originalModules =
-        map (\ f -> (MN.fromString $ dropExtension f, f)) originalFiles
-      upd (m, f) = updateModuleFromFile m $ originalSourcesDir </> f
+  let originalModules =
+        map (\ f -> (MN.fromFilePath
+                     $ dropExtension $ makeRelative originalSourcesDir f, f))
+        originalFiles
+      upd (m, f) = updateModuleFromFile m f
       originalUpdate = mconcat $ map upd originalModules
       len = show $ length originalFiles
       displayCounter :: PCounter -> IO ()

@@ -11,7 +11,8 @@ import qualified Data.List as List
 import Data.Monoid (mconcat, mempty, (<>))
 import System.Directory
 import System.Environment (getArgs)
-import System.FilePath (dropExtension, takeFileName, (</>))
+import System.FilePath (dropExtension, joinPath, makeRelative, splitDirectories,
+                        (</>))
 import System.FilePath.Find (always, extension, find)
 import System.Unix.Directory (withTemporaryDirectory)
 
@@ -39,15 +40,16 @@ loadModulesFrom session originalSourcesDir = do
   originalFiles <- find always
                         ((`elem` hsExtentions) `liftM` extension)
                         originalSourcesDir
-  let -- HACK: here we fake module names, guessing them from file names.
-      originalModules =
-        map (\ f -> (MN.fromString $ fixName
-                     $ dropExtension $ takeFileName f, f))
-            originalFiles
+  -- HACK: here we fake module names, guessing them from file names.
+  let originalModules =
+        map (\ f -> (MN.fromFilePath
+                     $ joinPath $ map fixName $ splitDirectories
+                     $ dropExtension $ makeRelative originalSourcesDir f, f))
+        originalFiles
       upd (m, f) = updateModuleFromFile m f
       -- Let's also disable ChangeCodeGeneration, to keep the test stable
       -- in case the default value of CodeGeneration changes.
-      originalUpdate =updateCodeGeneration False
+      originalUpdate = updateCodeGeneration False
                        <> (mconcat $ map upd originalModules)
   updateSessionD session originalUpdate (length originalFiles)
 
@@ -252,9 +254,9 @@ syntheticTests =
                         ]
       in withConfiguredSession packageOpts $ \session -> do
         let update = updateDataFileFromFile "EventLogFormat.h"
-                                            "test/GHC/RTS/EventLogFormat.h"
+                                            "test/Puns/EventLogFormat.h"
         updateSessionD session update 0
-        loadModulesFrom session "test/GHC"
+        loadModulesFrom session "test/Puns"
         msgs <- getSourceErrors session
         assertSomeErrors msgs
         let punOpts = packageOpts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
@@ -686,9 +688,9 @@ getModules sess = do
                         ((`elem` hsExtentions) `liftM` extension)
                         configSourcesDir
   let originalModules =
-        map (\ f -> (MN.fromString $ fixName
-                     $ dropExtension $ takeFileName f, f))
-            originalFiles
+        map (\ f -> (MN.fromFilePath
+                     $ dropExtension $ makeRelative configSourcesDir f, f))
+        originalFiles
       m = case originalModules of
         [] -> error "The test directory is empty."
         (x, _) : _ -> x
@@ -705,8 +707,7 @@ fixName n = capitalize $ map (\c -> if c == '-' then '_' else c) n
 
 loadModule :: ModuleName -> String -> IdeSessionUpdate
 loadModule m contents =
-  let n = MN.toString m
-      name = dropExtension n
+  let name = MN.toString m
   in updateModule m . BSLC.pack
      $ "module " ++ name ++ " where\n" ++ contents
 

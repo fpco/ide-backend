@@ -166,7 +166,8 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.List (delete)
 import Data.Monoid (Monoid (..))
 import System.Directory
-import System.FilePath (splitFileName, (<.>), (</>))
+import System.FilePath (splitFileName, takeDirectory, (<.>), (</>))
+import qualified System.FilePath.Find as Find
 import System.IO (hClose, openBinaryTempFile)
 import System.Posix.Files (setFileTimes)
 
@@ -253,8 +254,8 @@ data Computed = Computed {
 
 ensureDirEmpty :: FilePath -> IO ()
 ensureDirEmpty dir = do
-  cnts <- getDirectoryContents dir
-  when (any (`notElem` [".", ".."]) cnts)
+  cnts <- Find.find Find.always (Find.fileType Find./=? Find.Directory) dir
+  when (not (null cnts))
     $ fail $ "Directory " ++ dir ++ " is not empty."
 
 -- | Create a fresh session, using some initial configuration.
@@ -378,6 +379,8 @@ updateModuleFromFile m p =
     IdeSessionUpdate $ \ideConfig state@IdeIdleState{ ideLogicalTimestamp
                                                     , ideManagedFiles } -> do
       let internal = internalFile ideConfig m
+          targetDir = takeDirectory internal
+      createDirectoryIfMissing True targetDir
       copyFile p internal
       setFileTimes internal (fromIntegral ideLogicalTimestamp) (fromIntegral ideLogicalTimestamp)
       let sF = m : sourceFiles ideManagedFiles

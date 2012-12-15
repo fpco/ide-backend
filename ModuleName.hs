@@ -5,13 +5,14 @@ module ModuleName
   , toString
   , fromString
   , toFilePath
+  , fromFilePath
   , LoadedModules
   ) where
 
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.Char as Char (isAlphaNum, isUpper)
 import Data.List (intercalate)
-import System.FilePath (pathSeparator)
+import System.FilePath (pathSeparator, splitDirectories)
 
 newtype ModuleName = ModuleName [String]
   deriving (Eq, Ord, Read, Show)
@@ -55,5 +56,8 @@ validModuleComponent (c:cs) = Char.isUpper c
 --
 toFilePath :: ModuleName -> FilePath
 toFilePath (ModuleName ms) = intercalate [pathSeparator] ms
+
+fromFilePath :: FilePath -> ModuleName
+fromFilePath path = ModuleName $ splitDirectories path
 
 $(deriveJSON id ''ModuleName)
