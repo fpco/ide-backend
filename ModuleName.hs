@@ -59,6 +59,10 @@ toFilePath (ModuleName ms) = intercalate [pathSeparator] ms
 
 -- | An auxiliary function for tests. Guesses a module name from a file path.
 fromFilePath :: FilePath -> ModuleName
-fromFilePath path = ModuleName $ splitDirectories path
+fromFilePath path = ModuleName $
+  case splitDirectories path of
+    "." : l -> l
+    "/" : l -> l
+    l -> l
 
 $(deriveJSON id ''ModuleName)
