@@ -681,6 +681,55 @@ syntheticTests =
              RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
              _       -> assertFailure $ "Unexpected result " ++ show result
     )
+  , ( "Update during run"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "loop :: IO ()"
+                    , "loop = loop"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        _runActions <- runStmt session (MN.fromString "M") "loop"
+        assertRaises ""
+          (== userError "Cannot update session in running mode")
+          (updateSessionD session upd 1)
+    )
+  , ( "getSourceErrors during run"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "{-# OPTIONS_GHC -Wall #-}"
+                    , "module M where"
+                    , "loop = loop"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        case msgs of
+          -- We expect a 'top-level identifier without type' warning
+          [SrcError KindWarning _ _ _ _] -> return ()
+          _ -> assertFailure "Unexpected source errors"
+        _runActions <- runStmt session (MN.fromString "M") "loop"
+        msgs' <- getSourceErrors session
+        assertEqual "Running code does not affect getSourceErrors" msgs msgs'
+    )
+  , ( "getLoadedModules during run"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "{-# OPTIONS_GHC -Wall #-}"
+                    , "module M where"
+                    , "loop = loop"
+                    ])
+        updateSessionD session upd 1
+        mods <- getLoadedModules session
+        assertEqual "" [MN.fromString "M"] mods
+        _runActions <- runStmt session (MN.fromString "M") "loop"
+        mods' <- getLoadedModules session
+        assertEqual "Running code does not affect getLoadedModules" mods mods'
+    )
   ]
 
 defOpts :: [String]

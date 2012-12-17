@@ -386,6 +386,8 @@ updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, 
         return . IdeSessionIdle
                . (ideComputed ^= Just Computed{..})
                $ idleState'
+      IdeSessionRunning _ _ ->
+        Ex.throwIO (userError "Cannot update session in running mode")
       IdeSessionShutdown ->
         Ex.throwIO (userError "Session already shut down.")
 
@@ -534,13 +536,17 @@ getSourceErrors :: Query [SourceError]
 getSourceErrors IdeSession{ideState} =
   withMVar ideState $ \st ->
     case st of
-      IdeSessionIdle idleState ->
-        case idleState ^. ideComputed of
-          Just Computed{..} -> return computedErrors
+      IdeSessionIdle      idleState -> aux idleState
+      IdeSessionRunning _ idleState -> aux idleState
+      IdeSessionShutdown            -> fail "Session already shut down."
+  where
+    aux :: IdeIdleState -> IO [SourceError]
+    aux idleState = case idleState ^. ideComputed of
+      Just Computed{..} -> return computedErrors
 -- Optionally, this could give last reported errors, instead forcing
 -- IDE to wait for the next sessionUpdate to finish.
-          Nothing -> fail "This session state does not admit queries."
-      IdeSessionShutdown -> fail "Session already shut down."
+      Nothing -> fail "This session state does not admit queries."
+
 
 -- | Get the collection of files submitted by the user and not deleted yet.
 -- The module names are those supplied by the user as the first
@@ -563,12 +569,14 @@ getLoadedModules :: Query LoadedModules
 getLoadedModules IdeSession{ideState} =
   withMVar ideState $ \st ->
     case st of
-      IdeSessionIdle idleState ->
-        case idleState ^. ideComputed of
-          Just Computed{..} -> return computedLoadedModules
-          Nothing -> fail "This session state does not admit queries."
-      IdeSessionShutdown ->
-        fail "Session already shut down."
+      IdeSessionIdle      idleState -> aux idleState
+      IdeSessionRunning _ idleState -> aux idleState
+      IdeSessionShutdown            -> fail "Session already shut down."
+  where
+    aux :: IdeIdleState -> IO LoadedModules
+    aux idleState = case idleState ^. ideComputed of
+      Just Computed{..} -> return computedLoadedModules
+      Nothing -> fail "This session state does not admit queries."
 
 -- | Get a mapping from where symbols are used to where they are defined.
 -- That is, given a symbol used at a particular location in a source module
