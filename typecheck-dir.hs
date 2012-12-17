@@ -1,7 +1,9 @@
 module Main where
 
+import qualified Control.Exception as Ex
 import Control.Monad (liftM)
 import qualified Data.List as List
+import Data.Maybe (catMaybes)
 import Data.Monoid (mconcat)
 import System.Environment
 import System.FilePath (dropExtension, makeRelative)
@@ -66,10 +68,16 @@ check opts originalSourcesDir configSourcesDir = do
                         ((`elem` hsExtentions) `liftM` extension)
                         originalSourcesDir
   -- HACK: here we fake module names, guessing them from file names.
-  let originalModules =
-        map (\ f -> (MN.fromFilePath
-                     $ dropExtension $ makeRelative originalSourcesDir f, f))
-        originalFiles
+  let tryFromPath f p = do
+        mex <- Ex.try $ Ex.evaluate $ MN.fromFilePath p
+        return $ case mex of
+          Right n  -> Just (n, f)
+          Left _ex -> let _ = _ex :: Ex.ErrorCall in Nothing
+  triedModules <-
+     mapM (\ f -> tryFromPath f
+                  $ dropExtension $ makeRelative originalSourcesDir f)
+          originalFiles
+  let originalModules = catMaybes triedModules
       upd (m, f) = updateModuleFromFile m f
       originalUpdate = mconcat $ map upd originalModules
       len = show $ length originalFiles

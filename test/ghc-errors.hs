@@ -5,14 +5,13 @@ import qualified Control.Exception as Ex
 import Control.Monad (liftM, void)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
-import Data.Char (toUpper)
 import Data.List (sort)
 import qualified Data.List as List
+import Data.Maybe (catMaybes)
 import Data.Monoid (mconcat, mempty, (<>))
 import System.Directory
 import System.Environment (getArgs)
-import System.FilePath (dropExtension, joinPath, makeRelative, splitDirectories,
-                        (</>))
+import System.FilePath (dropExtension, makeRelative, (</>))
 import System.FilePath.Find (always, extension, find)
 import System.Unix.Directory (withTemporaryDirectory)
 
@@ -41,11 +40,16 @@ loadModulesFrom session originalSourcesDir = do
                         ((`elem` hsExtentions) `liftM` extension)
                         originalSourcesDir
   -- HACK: here we fake module names, guessing them from file names.
-  let originalModules =
-        map (\ f -> (MN.fromFilePath
-                     $ joinPath $ map fixName $ splitDirectories
-                     $ dropExtension $ makeRelative originalSourcesDir f, f))
-        originalFiles
+  let tryFromPath f p = do
+        mex <- Ex.try $ Ex.evaluate $ MN.fromFilePath p
+        return $ case mex of
+          Right n  -> Just (n, f)
+          Left _ex -> let _ = _ex :: Ex.ErrorCall in Nothing
+  triedModules <-
+     mapM (\ f -> tryFromPath f
+                  $ dropExtension $ makeRelative originalSourcesDir f)
+          originalFiles
+  let originalModules = catMaybes triedModules
       upd (m, f) = updateModuleFromFile m f
       -- Let's also disable ChangeCodeGeneration, to keep the test stable
       -- in case the default value of CodeGeneration changes.
@@ -349,6 +353,26 @@ syntheticTests =
         updateSessionD session update 1
         msgs <- getSourceErrors session
         assertOneError msgs
+        let update2 = updateModule (MN.fromString "M")
+                                   (BSLC.pack "module M.1.2.3.8.T where")
+        updateSessionD session update2 1
+        msgs2 <- getSourceErrors session
+        assertOneError msgs2
+        let update3 = updateModuleDelete (MN.fromString "M")
+                      <> updateModule (MN.ModuleName ["M.1.2.3.8.T"])
+                                      (BSLC.pack "module M.1.2.3.8.T where")
+        updateSessionD session update3 1
+        msgs3 <- getSourceErrors session
+        assertOneError msgs3
+        let update4 =
+              updateModule (MN.ModuleName ["M", "1", "2", "3", "8", "T"])
+                           (BSLC.pack "module M.1.2.3.8.T where")
+        updateSessionD session update4 1
+        msgs4 <- getSourceErrors session
+        assertOneError msgs4
+        assertRaises "MN.fromString M.1.2.3.8.T"
+          (\e -> show (e :: Ex.ErrorCall) == "ModuleName.fromString: invalid module name \"M.1.2.3.8.T\"")
+          (return $! MN.toString $ MN.fromString "M.1.2.3.8.T")
     )
   , ( "Interrupt runStmt (after 1 sec)"
     , withConfiguredSession defOpts $ \session -> do
@@ -827,10 +851,16 @@ getModules sess = do
   originalFiles <- find always
                         ((`elem` hsExtentions) `liftM` extension)
                         configSourcesDir
-  let originalModules =
-        map (\ f -> (MN.fromFilePath
-                     $ dropExtension $ makeRelative configSourcesDir f, f))
-        originalFiles
+  let tryFromPath f p = do
+        mex <- Ex.try $ Ex.evaluate $ MN.fromFilePath p
+        return $ case mex of
+          Right n  -> Just (n, f)
+          Left _ex -> let _ = _ex :: Ex.ErrorCall in Nothing
+  triedModules <-
+     mapM (\ f -> tryFromPath f
+                  $ dropExtension $ makeRelative configSourcesDir f)
+          originalFiles
+  let originalModules = catMaybes triedModules
       m = case originalModules of
         [] -> error "The test directory is empty."
         (x, _) : _ -> x
@@ -841,20 +871,11 @@ getModules sess = do
       !_ = length originalModules
   return (m, map fst originalModules)
 
--- Is there a ready function for that in GHC API?
-fixName :: String -> String
-fixName n = capitalize $ map (\c -> if c == '-' then '_' else c) n
-
 loadModule :: ModuleName -> String -> IdeSessionUpdate
 loadModule m contents =
   let name = MN.toString m
   in updateModule m . BSLC.pack
      $ "module " ++ name ++ " where\n" ++ contents
-
-capitalize :: String -> String
-capitalize s = case s of
-  []       -> []
-  c : rest -> toUpper c : rest
 
 assertNoErrors :: [SourceError] -> Assertion
 assertNoErrors msgs =

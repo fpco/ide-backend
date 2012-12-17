@@ -7,7 +7,7 @@ import System.Posix.Signals (Signal, raiseSignal)
 import Test.HUnit (Assertion, assertBool, assertFailure)
 
 -- | Check that the given IO action raises the specified exception
-assertRaises :: (Ex.Exception e, Eq e, Show e)
+assertRaises :: (Ex.Exception e, Show e)
              => String      -- ^ Message displayed if assertion fails
              -> (e -> Bool) -- ^ Expected exception
              -> IO a        -- ^ Action to run
