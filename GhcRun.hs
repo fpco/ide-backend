@@ -29,6 +29,7 @@ import qualified GHC
 import GHC hiding (flags, ModuleName, RunResult(..))
 import GhcMonad (liftIO, modifySession)
 import HscTypes (HscEnv(hsc_mod_graph))
+import qualified HscTypes
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
 #if __GLASGOW_HASKELL__ >= 706
@@ -53,6 +54,10 @@ import System.Time
 import Common
 import ModuleName (ModuleName, LoadedModules)
 import qualified ModuleName as MN
+
+import Bag (bagToList)
+import qualified ErrUtils
+import qualified SrcLoc
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -153,16 +158,16 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         -- Recover all saved errors.
         prepareResult
   where
-    handleError :: Show a => a -> Ghc ([SourceError], LoadedModules)
-    handleError e = do
+    sourceErrorHandler :: HscTypes.SourceError -> Ghc ([SourceError], LoadedModules)
+    sourceErrorHandler e = do
       liftIO $ debug dVerbosity $ "handleSourceError: " ++ show e
       (errs, context) <- prepareResult
-      return (errs ++ [OtherError (show e)], context)
+      return (errs ++ [fromHscSourceError e], context)
 
     -- Some errors are reported as exceptions instead
-    handleGhcException :: GhcException -> Ghc ([SourceError], LoadedModules)
-    handleGhcException e = do
-      let eText   = show e
+    ghcExceptionHandler :: GhcException -> Ghc ([SourceError], LoadedModules)
+    ghcExceptionHandler e = do
+      let eText   = "Bar: " ++ show e
           exError = OtherError eText
       liftIO $ debug dVerbosity $ "handleOtherErrors: " ++ eText
       -- In case of an exception, don't lose saved errors.
@@ -171,8 +176,8 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 
     handleErrors :: Ghc ([SourceError], LoadedModules)
                  -> Ghc ([SourceError], LoadedModules)
-    handleErrors = ghandle handleGhcException
-                 . handleSourceError handleError
+    handleErrors = ghandle ghcExceptionHandler
+                 . handleSourceError sourceErrorHandler
 
     prepareResult :: Ghc ([SourceError], LoadedModules)
     prepareResult = do
@@ -357,3 +362,16 @@ ghandleJust p handler a = ghandle handler' a
     handler' e = case p e of
                    Nothing -> liftIO $ Ex.throwIO e
                    Just b  -> handler b
+
+-- | Convert GHC's SourceError type into our
+fromHscSourceError :: HscTypes.SourceError -> SourceError
+fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
+  [errMsg] -> case ErrUtils.errMsgSpans errMsg of
+    [RealSrcSpan sp] ->
+      SrcError KindError
+               (unpackFS (SrcLoc.srcSpanFile sp))
+               (srcSpanStartLine sp, srcSpanStartCol sp)
+               (srcSpanEndLine sp, srcSpanEndCol sp)
+               (show e)
+    _ -> OtherError (show e)
+  _ -> OtherError (show e)
