@@ -245,8 +245,8 @@ ghcHandleSetEnv RpcConversation{put} env = liftIO $ do
 -- Client-side operations                                                     --
 --------------------------------------------------------------------------------
 
-forkGhcServer :: [String] -> IO GhcServer
-forkGhcServer opts = do
+forkGhcServer :: [String] -> Maybe String -> IO GhcServer
+forkGhcServer opts workingDir = do
   bindir <- getBinDir
   let prog = bindir </> "ide-backend-server"
 
@@ -255,7 +255,7 @@ forkGhcServer opts = do
     fail $ "The 'ide-backend-server' program was expected to "
         ++ "be at location " ++ prog ++ " but it is not."
 
-  forkRpcServer prog (opts ++ ["--ghc-opts-end"])
+  forkRpcServer prog (opts ++ ["--ghc-opts-end"]) workingDir
 
 -- | Compile or typecheck
 rpcCompile :: GhcServer           -- ^ GHC server

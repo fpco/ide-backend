@@ -28,6 +28,7 @@ import System.Process
   , proc
   , ProcessHandle
   , waitForProcess
+  , CreateProcess(cwd)
   )
 import System.Posix.Types (Fd)
 import System.Posix.IO (createPipe, closeFd, fdToHandle)
@@ -197,10 +198,11 @@ data RpcClientSideState =
 -- >       rpcServer args' <<your request handler>>
 -- >     _ ->
 -- >       <<deal with other cases>>
-forkRpcServer :: FilePath  -- ^ Filename of the executable
-              -> [String]  -- ^ Arguments
+forkRpcServer :: FilePath        -- ^ Filename of the executable
+              -> [String]        -- ^ Arguments
+              -> Maybe FilePath  -- ^ Working directory
               -> IO RpcServer
-forkRpcServer path args = do
+forkRpcServer path args workingDir = do
   (requestR,  requestW)  <- createPipe
   (responseR, responseW) <- createPipe
   (errorsR,   errorsW)   <- createPipe
@@ -213,7 +215,9 @@ forkRpcServer path args = do
                                  , responseR, responseW
                                  , errorsR,   errorsW
                                  ]
-  (Nothing, Nothing, Nothing, ph) <- createProcess $ proc path args'
+  (Nothing, Nothing, Nothing, ph) <- createProcess (proc path args') {
+                                         cwd = workingDir
+                                       }
 
   -- Close the ends of the pipes that we're not using, and convert the rest
   -- to handles

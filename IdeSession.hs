@@ -280,9 +280,14 @@ getSessionConfig = ideConfig
 
 ensureDirEmpty :: FilePath -> IO ()
 ensureDirEmpty dir = do
-  cnts <- Find.find Find.always (Find.fileType Find./=? Find.Directory) dir
-  when (not (null cnts))
-    $ fail $ "Directory " ++ dir ++ " is not empty."
+    dirExists <- doesDirectoryExist dir
+    if dirExists then checkEmpty
+                 else fail $ "Directory " ++ dir ++ " does not exist"
+  where
+    checkEmpty = do
+      cnts <- Find.find Find.always (Find.fileType Find./=? Find.Directory) dir
+      when (not (null cnts))
+        $ fail $ "Directory " ++ dir ++ " is not empty."
 
 -- | Create a fresh session, using some initial configuration.
 --
@@ -300,7 +305,7 @@ initSession ideConfig@SessionConfig{..} = do
                         , _ideManagedFiles     = ManagedFiles [] []
                         , _ideEnv              = []
                         }
-  ideGhcServer <- forkGhcServer configStaticOpts
+  ideGhcServer <- forkGhcServer configStaticOpts (Just configDataDir)
   return IdeSession{..}
 
 -- | Close a session down, releasing the resources.

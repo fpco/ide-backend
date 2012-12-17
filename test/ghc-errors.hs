@@ -267,15 +267,7 @@ syntheticTests =
         assertNoErrors msgs2
     )
   , ( "Test CWD by reading a data file"
-    , withTemporaryDirectory "ide-backend-test" $ \configSourcesDir -> do
-      let sessionConfig =
-            SessionConfig{ configSourcesDir
-                         , configWorkingDir = configSourcesDir
-                         , configDataDir    = configSourcesDir </> "data"
-                         , configTempDir    = "."
-                         , configStaticOpts = defOpts
-                         }
-      withSession sessionConfig $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let update = updateDataFile "datafile.dat"
                                     (BSLC.pack "test data content")
         updateSessionD session update 0

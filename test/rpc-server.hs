@@ -28,7 +28,7 @@ import TestTools
 forkTestServer :: String -> IO RpcServer
 forkTestServer test = do
   prog <- getExecutablePath
-  forkRpcServer prog ["--server", test]
+  forkRpcServer prog ["--server", test] Nothing
 
 -- | Do an RPC call and verify the result
 assertRpcEqual :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp)
