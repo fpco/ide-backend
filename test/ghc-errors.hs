@@ -266,6 +266,39 @@ syntheticTests =
         msgs2 <- getSourceErrors session
         assertNoErrors msgs2
     )
+  , ( "Test CWD by reading a data file"
+    , withTemporaryDirectory "ide-backend-test" $ \configSourcesDir -> do
+      let sessionConfig =
+            SessionConfig{ configSourcesDir
+                         , configWorkingDir = configSourcesDir
+                         , configDataDir    = configSourcesDir </> "data"
+                         , configTempDir    = "."
+                         , configStaticOpts = defOpts
+                         }
+      withSession sessionConfig $ \session -> do
+        let update = updateDataFile "datafile.dat"
+                                    (BSLC.pack "test data content")
+        updateSessionD session update 0
+        let update2 = loadModule (MN.fromString "Main")
+              "main = readFile \"datafile.dat\" >>= putStrLn"
+        updateSessionD session update2 1
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
+        let update3 = updateCodeGeneration True
+        updateSessionD session update3 1
+        runActions <- runStmt session (MN.fromString "Main") "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "compare test data content"
+          (BSLC.pack "test data content\n") output
+        let update4 = updateDataFile "datafile.dat"
+                                     (BSLC.pack "new content")
+                      <> update2
+        updateSessionD session update4 1
+        runActions2 <- runStmt session (MN.fromString "Main") "main"
+        (output2, _) <- runWaitAll runActions2
+        assertEqual "compare new content"
+          (BSLC.pack "new content\n") output2
+    )
   , ("Reject getSourceErrors without updateSession"
     , withConfiguredSession defOpts $ \session ->
         assertRaises "getSourceErrors session"

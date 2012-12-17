@@ -92,7 +92,7 @@ invalidateModSummaryCache =
 #endif
 
 compileInGhc :: FilePath            -- ^ target directory
-             -> DynamicOpts         -- ^ dynamic flags for this run of runGhc
+             -> DynamicOpts         -- ^ dynamic flags for this call
              -> Bool                -- ^ whether to generate code
              -> Int                 -- ^ verbosity level
              -> IORef [SourceError] -- ^ the IORef where GHC stores errors
