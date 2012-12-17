@@ -33,6 +33,7 @@ data SourceError =
   | OtherError String
   deriving (Show, Eq)
 
+-- | Severity of an error.
 data SourceErrorKind = KindError | KindWarning
   deriving (Show, Eq)
 

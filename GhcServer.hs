@@ -20,6 +20,7 @@ module GhcServer
   , rpcSetEnv
   , RunActions(..)
 -- TODO: a bug in haddock ignores the 3 ops:  , RunActions(interrupt, runWait, supplyStdin)
+  , RunResult(..)
   , runWaitAll
   , afterRunActions
   , shutdownGhcServer

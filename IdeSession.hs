@@ -106,6 +106,7 @@ module IdeSession (
   -- ** Source errors
   getSourceErrors,
   SourceError(..),
+  SourceErrorKind(..),
 
   -- ** Managed files and loaded modules
   getManagedFiles,
@@ -623,4 +624,3 @@ runStmt IdeSession{ideGhcServer,ideState} m fun = do
         return $ IdeSessionIdle idleState
       IdeSessionShutdown ->
         return state
-
