@@ -18,11 +18,6 @@ module GhcServer
   , rpcCompile
   , rpcRun
   , rpcSetEnv
-  , RunActions(..)
--- TODO: a bug in haddock ignores the 3 ops:  , RunActions(interrupt, runWait, supplyStdin)
-  , RunResult(..)
-  , runWaitAll
-  , afterRunActions
   , shutdownGhcServer
   ) where
 
@@ -34,7 +29,6 @@ import Control.Monad (forM, forever, when)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
-import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
 
 import System.Directory (doesFileExist)
@@ -48,6 +42,7 @@ import Common
 import GhcRun
 import ModuleName (LoadedModules, ModuleName)
 import RpcServer
+import RunAPI
 
 import Paths_ide_backend
 
@@ -275,15 +270,6 @@ rpcCompile server opts dir genCode callback =
 
     go
 
--- TODO: move this and a few other operations to a separate module.
--- Then do not expose GhcServer module in cabal.
--- | Handles to the running code, through which one can interact with the code.
-data RunActions = RunActions {
-    runWait     :: IO (Either BSS.ByteString RunResult)
-  , interrupt   :: IO ()
-  , supplyStdin :: BSS.ByteString -> IO ()
-  }
-
 -- | Run code
 rpcRun :: GhcServer       -- ^ GHC server
        -> ModuleName      -- ^ Module
@@ -319,27 +305,6 @@ rpcRun server m fun = do
 -- | Set the environment
 rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()
 rpcSetEnv server env = rpc server (ReqSetEnv env)
-
--- | Repeatedly call 'runWait' until we receive a 'Right' result, while
--- collecting all 'Left' results
-runWaitAll :: RunActions -> IO (BSL.ByteString, RunResult)
-runWaitAll RunActions{runWait} = go []
-  where
-    go :: [BSS.ByteString] -> IO (BSL.ByteString, RunResult)
-    go acc = do
-      resp <- runWait
-      case resp of
-        Left  bs        -> go (bs : acc)
-        Right runResult -> return (BSL.fromChunks (reverse acc), runResult)
-
--- | Register a callback to be invoked when the program terminates
-afterRunActions :: RunActions -> (RunResult -> IO ()) -> RunActions
-afterRunActions runActions callback = runActions {
-    runWait = do result <- runWait runActions
-                 case result of
-                   Left bs -> return (Left bs)
-                   Right r -> callback r >> return (Right r)
-  }
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer = shutdown

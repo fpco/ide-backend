@@ -10,7 +10,6 @@ module Common
   , initialProgress
   , updateProgress
   , progressStep
-  , RunResult(..)
   , showExWithClass
   , dVerbosity, debug
   , accessorName
@@ -72,18 +71,7 @@ updateProgress _msg (Progress n) = Progress (n + 1)
 progressStep :: Progress -> Int
 progressStep (Progress n) = n
 
--- | The outcome of running code
-data RunResult =
-    -- | The code terminated okay
-    RunOk String
-    -- | The code threw an exception
-  | RunProgException String
-    -- | GHC itself threw an exception when we tried to run the code
-  | RunGhcException String
-  deriving (Show, Eq)
-
 $(deriveJSON id ''Progress)
-$(deriveJSON id ''RunResult)
 
 -- | Show an exception together with its most precise type tag.
 showExWithClass :: Ex.SomeException -> String

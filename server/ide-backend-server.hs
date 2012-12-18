@@ -1,6 +1,6 @@
 module Main where
 
-import GhcServer
+import IdeSession
 import System.Environment
 
 main = do

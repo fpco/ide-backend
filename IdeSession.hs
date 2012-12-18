@@ -101,16 +101,16 @@ module IdeSession (
   -- * Queries
   Query,
 
+  -- ** Source errors
+  getSourceErrors,
+  SourceError(..),
+  SourceErrorKind(..),
+
   -- ** Files
   -- | Simply getting the current state of the persistent files fits the
   -- queries pattern.
   getSourceModule,
   getDataFile,
-
-  -- ** Source errors
-  getSourceErrors,
-  SourceError(..),
-  SourceErrorKind(..),
 
   -- ** The list of managed files, loaded modules and all data files
   getManagedFiles,
@@ -127,6 +127,9 @@ module IdeSession (
 
   -- ** Run code
   runStmt,
+
+  -- ** Start the server
+  ghcServer,
 
   -- * Additional notes
   -- ** Responsibility for managing and mutating files in the sources dir.
@@ -198,6 +201,7 @@ import Common
 import GhcServer
 import ModuleName (LoadedModules, ModuleName)
 import qualified ModuleName as MN
+import RunAPI
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT, execStateT)

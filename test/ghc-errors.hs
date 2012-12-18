@@ -21,6 +21,7 @@ import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure)
 
 import Common
+import RunAPI
 import GhcServer
 import IdeSession
 import ModuleName (ModuleName)
