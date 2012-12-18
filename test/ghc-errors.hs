@@ -14,6 +14,7 @@ import System.Environment (getArgs)
 import System.FilePath (dropExtension, makeRelative, (</>))
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
+import System.Random (randomIO)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -779,29 +780,8 @@ syntheticTests =
         do updateSessionD session upd1 1
            runActions <- runStmt session (MN.fromString "Main") "main"
            interrupt runActions
-           void $ runWaitAll runActions
-
-        do updateSessionD session upd2 1
-           runActions <- runStmt session (MN.fromString "Main") "main"
-           (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "1234\n") output
-             _       -> assertFailure $ "Unexpected result: " ++ show result
-    )
-  , ( "Interrupt, wait 1 sec, then capture stdout"
-    , withConfiguredSession defOpts $ \session -> do
-        updateSession session (updateCodeGeneration True) (\_ -> return ())
-        let upd1 = updateModule (MN.fromString "Main") . BSLC.pack . unlines $
-                     [ "import Control.Monad"
-                     , "main = forever $ print 1"
-                     ]
-            upd2 = updateModule (MN.fromString "Main") . BSLC.pack . unlines $
-                     [ "main = print 1234" ]
-
-        do updateSessionD session upd1 1
-           runActions <- runStmt session (MN.fromString "Main") "main"
-           threadDelay 1000000
-           interrupt runActions
+           delay <- randomIO :: IO Int
+           threadDelay (delay `mod` 1000000) -- Between 0 and 1 sec
            void $ runWaitAll runActions
 
         do updateSessionD session upd2 1
