@@ -68,6 +68,8 @@ initialProgress = Progress 1  -- the progress indicates a start of a step
 updateProgress :: String -> Progress -> Progress
 updateProgress _msg (Progress n) = Progress (n + 1)
 
+-- | The step number of the progress. Usually corresponds to the number
+-- of files already processed.
 progressStep :: Progress -> Int
 progressStep (Progress n) = n
 

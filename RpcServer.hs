@@ -13,6 +13,7 @@ module RpcServer
   , ExternalException(..)
   , illscopedConversationException
   , serverKilledException
+  , getRpcExitCode
   ) where
 
 import Prelude hiding (take)
@@ -29,7 +30,9 @@ import System.Process
   , ProcessHandle
   , waitForProcess
   , CreateProcess(cwd)
+  , getProcessExitCode
   )
+import System.Exit (ExitCode)
 import System.Posix.Types (Fd)
 import System.Posix.IO (createPipe, closeFd, fdToHandle)
 import System.Directory (canonicalizePath, getPermissions, executable)
@@ -255,7 +258,7 @@ forkRpcServer path args workingDir = do
 rpc :: (ToJSON req, FromJSON resp) => RpcServer -> req -> IO resp
 rpc server req = rpcConversation server $ \RpcConversation{..} -> put req >> get
 
--- | Run an RPC conversation. If the handler throws an exception durin
+-- | Run an RPC conversation. If the handler throws an exception during
 -- the conversation the server is terminated.
 rpcConversation :: RpcServer
                 -> (RpcConversation -> IO a)
@@ -338,6 +341,10 @@ withRpcServer server io =
         terminate server
         putMVar (rpcState server) (RpcStopped ex)
         Ex.throwIO ex
+
+-- | Get the exit code of the RPC server, unless still running.
+getRpcExitCode :: RpcServer -> IO (Maybe ExitCode)
+getRpcExitCode RpcServer{rpcProc} = getProcessExitCode rpcProc
 
 --------------------------------------------------------------------------------
 -- Internal                                                                   --

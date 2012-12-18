@@ -19,6 +19,7 @@ module GhcServer
   , rpcRun
   , rpcSetEnv
   , shutdownGhcServer
+  , getRpcExitCode
   ) where
 
 import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId, throwTo)
@@ -75,6 +76,7 @@ type GhcServer = RpcServer
 -- Server-side operations                                                     --
 --------------------------------------------------------------------------------
 
+-- | Start the RPC server. Used from within the server executable.
 ghcServer :: [String] -> IO ()
 ghcServer fdsAndOpts = do
   let (opts, markerAndFds) = span (/= "--ghc-opts-end") fdsAndOpts

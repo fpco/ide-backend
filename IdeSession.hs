@@ -128,8 +128,10 @@ module IdeSession (
   -- ** Run code
   runStmt,
 
-  -- ** Start the server
+  -- ** Start and diagnose the server (probably only for debugging)
   ghcServer,
+  getGhcServer,
+  getRpcExitCode,
 
   -- * Additional notes
   -- ** Responsibility for managing and mutating files in the sources dir.
@@ -156,8 +158,7 @@ module IdeSession (
   -- value of an 'IdeSession' represents the state of the files\/modules and
   -- the result of the pure compilation function. It should always be the case
   -- that we can throw away the session and recover it just from the persistent
-  -- state in the files (except for the compiler flags and setting
-  -- if the user modified them during the session).
+  -- state in the files.
   --
   -- One example where this notion makes a difference is with warnings.
   -- Traditionally, compilers just return the warnings for the modules they
@@ -175,8 +176,7 @@ module IdeSession (
   -- in memory).
   --
   -- It should always be possible to drop all the transitory state and recover,
-  -- just at the cost of some extra work. [Again, except for the compiler flags
-  -- modified by the user.]
+  -- just at the cost of some extra work.
   --
   -- This property is a useful correctness property for internal testing: the
   -- results of all the queries should be the same before and after blowing
@@ -618,6 +618,8 @@ getLoadedModules IdeSession{ideState} =
       Just Computed{..} -> return computedLoadedModules
       Nothing -> fail "This session state does not admit queries."
 
+-- | Get the list of all data files currently available to the session:
+-- both the files copied via an update and files created by user code.
 getAllDataFiles :: Query [FilePath]
 getAllDataFiles IdeSession{ideDataDir} =
   Find.find Find.always (Find.fileType Find.==? Find.RegularFile) ideDataDir
@@ -676,3 +678,15 @@ runStmt IdeSession{ideState} m fun = do
         return $ IdeSessionIdle idleState
       IdeSessionShutdown ->
         return state
+
+-- | Get the RPC server used by the session.
+getGhcServer :: IdeSession -> IO GhcServer
+getGhcServer IdeSession{ideState} =
+  withMVar ideState $ \st ->
+  case st of
+    IdeSessionIdle idleState ->
+      return $ idleState ^. ideGhcServer
+    IdeSessionRunning _ idleState ->
+      return $ idleState ^. ideGhcServer
+    IdeSessionShutdown ->
+      fail "Session already shut down."

@@ -21,17 +21,17 @@ import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure)
 
 import Common
-import RunAPI
 import GhcServer
 import IdeSession
 import ModuleName (ModuleName)
 import qualified ModuleName as MN
+import RunAPI
 import TestTools
 
 -- Tests using various functions of the IdeSession API
 -- and a variety of small test Haskell projects.
 
--- | Update the session with all modules the given directory
+-- | Update the session with all modules of the given directory.
 loadModulesFrom :: IdeSession -> FilePath -> IO ()
 loadModulesFrom session originalSourcesDir = do
   debug dVerbosity $ "\nCopying files from: " ++ originalSourcesDir
