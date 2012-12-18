@@ -6,7 +6,10 @@ module Common
   , formatSourceError
   , SymbolDefinitionMap
   , hsExtentions
-  , PCounter
+  , Progress
+  , initialProgress
+  , updateProgress
+  , progressStep
   , RunResult(..)
   , showExWithClass
   , dVerbosity, debug
@@ -57,7 +60,17 @@ hsExtentions:: [FilePath]
 hsExtentions = [".hs", ".lhs"]
 
 -- | This type represents intermediate progress information during compilation.
-type PCounter = Int
+newtype Progress = Progress Int
+  deriving (Show, Eq, Ord)
+
+initialProgress :: Progress
+initialProgress = Progress 1  -- the progress indicates a start of a step
+
+updateProgress :: String -> Progress -> Progress
+updateProgress _msg (Progress n) = Progress (n + 1)
+
+progressStep :: Progress -> Int
+progressStep (Progress n) = n
 
 -- | The outcome of running code
 data RunResult =
@@ -69,6 +82,7 @@ data RunResult =
   | RunGhcException String
   deriving (Show, Eq)
 
+$(deriveJSON id ''Progress)
 $(deriveJSON id ''RunResult)
 
 -- | Show an exception together with its most precise type tag.

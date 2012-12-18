@@ -83,7 +83,7 @@ withSession' config' io = do
 --
 -- TODO: we need much more tests to recover the functionality of the old,
 -- undreadable set, and then we need to much more to test all API functions.
--- E.g., check that the values of PCounter do not exceeed the number of files.
+-- E.g., check that the values of Progress do not exceeed the number of files.
 -- Also, check ModuleDelete and all the DataFileChange constructors,
 -- getSourceModule an getDataFile.
 multipleTests :: [(String, IdeSession -> Assertion)]
@@ -843,10 +843,10 @@ main = do
 
 -- Extra debug facilities. Normally turned off.
 
-displayCounter :: Int -> PCounter -> Assertion
-displayCounter i n = do
-  debug dVerbosity $ "PCounter: " ++ (show n) ++ ". "
-  assertBool ("PCounter " ++ show n ++ " exceeds " ++ show i) (n <= i)
+displayCounter :: Int -> Progress -> Assertion
+displayCounter i p = do
+  debug dVerbosity $ show p
+  assertBool (show p ++ " exceeds " ++ show i) (progressStep p <= i)
 
 updateSessionD :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
 updateSessionD session update i = do

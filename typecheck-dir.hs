@@ -81,7 +81,7 @@ check opts originalSourcesDir configDir = do
       upd (m, f) = updateModuleFromFile m f
       originalUpdate = mconcat $ map upd originalModules
       len = show $ length originalFiles
-      displayCounter :: PCounter -> IO ()
+      displayCounter :: Progress -> IO ()
       displayCounter n = putStrLn ("[" ++ show n ++ "/" ++ len ++ "]")
   updateSession session originalUpdate displayCounter
   msgs0 <- getSourceErrors session

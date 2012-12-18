@@ -8,7 +8,7 @@
 -- of the program only indirectly, through the @GhcServer@ module.
 module GhcServer
   ( -- * Types involved in the communication
-    PCounter
+    Progress
     -- * A handle to the server
   , GhcServer
     -- * Server-side operations
@@ -30,7 +30,7 @@ import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId, throwTo)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
 import qualified Control.Exception as Ex
-import Control.Monad (forever, when, forM)
+import Control.Monad (forM, forever, when)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
@@ -41,8 +41,8 @@ import System.Directory (doesFileExist)
 import System.FilePath ((</>))
 import System.IO (hFlush, stdout)
 import System.Posix (Fd)
-import System.Posix.IO.ByteString
 import System.Posix.Env (setEnv, unsetEnv)
+import System.Posix.IO.ByteString
 
 import Common
 import GhcRun
@@ -57,7 +57,7 @@ data GhcRequest
   | ReqSetEnv  [(String, Maybe String)]
   deriving Show
 data GhcCompileResponse =
-    GhcCompileProgress PCounter
+    GhcCompileProgress Progress
   | GhcCompileDone ([SourceError], LoadedModules)
   deriving Show
 data GhcRunResponse =
@@ -114,7 +114,7 @@ ghcHandleCompile :: RpcConversation
                  -> Ghc ()
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts configSourcesDir ideGenerateCode = do
     errsRef <- liftIO $ newIORef []
-    counter <- liftIO $ newIORef 1  -- Progress counter goes from 1..n
+    counter <- liftIO $ newIORef initialProgress
     (errs, context) <-
       surpressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
@@ -134,10 +134,10 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts configSourcesDir ideGenera
     verbosity = 1
 
     -- TODO: verify that _ is the "compiling M" message
-    progressCallback :: IORef Int -> String -> IO ()
-    progressCallback counter _ghcMsg = do
+    progressCallback :: IORef Progress -> String -> IO ()
+    progressCallback counter ghcMsg = do
       oldCounter <- readIORef counter
-      modifyIORef counter (+1)
+      modifyIORef counter (updateProgress ghcMsg)
       put $ GhcCompileProgress oldCounter
 
 -- | Handle a run request
@@ -262,7 +262,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> Maybe [String]      -- ^ Options
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
-           -> (PCounter -> IO ()) -- ^ Progress callback
+           -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ([SourceError], LoadedModules)
 rpcCompile server opts dir genCode callback =
   rpcConversation server $ \RpcConversation{..} -> do

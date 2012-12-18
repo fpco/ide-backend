@@ -42,7 +42,7 @@ module IdeSession (
   --
   -- * 'IdeSessionUpdate' for accumulating updates.
   --
-  -- * 'PCounter' for the progress information in the compile mode.
+  -- * 'Progress' for the progress information in the compile mode.
   --
   -- * 'RunActions' for handles on the running code, through which
   --   one can interact with the code.
@@ -93,9 +93,10 @@ module IdeSession (
   -- | Once we have accumulated a batch of updates we can perform them all
   -- giving us a new session state. Since performing a bunch of updates can
   -- involve compiling modules and can take some time, the update uses the
-  -- 'PCounter' type to represent intermediate progress information.
+  -- 'Progress' type to represent intermediate progress information.
   updateSession,
-  PCounter,
+  Progress,
+  progressStep,
 
   -- * Queries
   Query,
@@ -392,7 +393,7 @@ instance Monoid IdeSessionUpdate where
 --
 -- The update can be a long running operation, so we support a callback
 -- which can be used to monitor progress of the operation.
-updateSession ::  IdeSession -> IdeSessionUpdate -> (PCounter -> IO ()) -> IO ()
+updateSession :: IdeSession -> IdeSessionUpdate -> (Progress -> IO ()) -> IO ()
 updateSession session@IdeSession{ideSourcesDir, ideState}
               update
               callback = do
