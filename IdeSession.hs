@@ -59,6 +59,7 @@ module IdeSession (
   getSessionConfig,
   getSourcesDir,
   getDataDir,
+  restartSession,
 
   -- * Updates
   -- | Updates are done in batches: we collect together all of the updates we
@@ -236,7 +237,6 @@ data IdeSession = IdeSession
     -- | The directory to use for data files that may be accessed by the
     -- running program. The running program will have this as its CWD.
   , ideDataDir    :: FilePath
-  , ideGhcServer  :: GhcServer
   , ideState      :: MVar IdeSessionState
   }
 
@@ -259,6 +259,7 @@ data IdeIdleState = IdeIdleState {
   , _ideManagedFiles     :: ManagedFiles
     -- Environment overrides
   , _ideEnv              :: [(String, Maybe String)]
+  , _ideGhcServer        :: GhcServer
   }
 
 -- | The collection of source and data files submitted by the user.
@@ -288,6 +289,7 @@ initSession :: SessionConfig -> IO IdeSession
 initSession ideConfig@SessionConfig{..} = do
   ideSourcesDir <- createTempDirectory configDir "src."
   ideDataDir    <- createTempDirectory configDir "data."
+  _ideGhcServer <- forkGhcServer configStaticOpts (Just ideDataDir)
   ideState <- newMVar $ IdeSessionIdle IdeIdleState {
                           _ideLogicalTimestamp = 0
                         , _ideComputed         = Nothing
@@ -295,8 +297,8 @@ initSession ideConfig@SessionConfig{..} = do
                         , _ideGenerateCode     = False
                         , _ideManagedFiles     = ManagedFiles [] []
                         , _ideEnv              = []
+                        , _ideGhcServer
                         }
-  ideGhcServer <- forkGhcServer configStaticOpts (Just ideDataDir)
   return IdeSession{..}
 
 -- | Close a session down, releasing the resources.
@@ -311,20 +313,50 @@ shutdownSession :: IdeSession -> IO ()
 shutdownSession IdeSession{..} = do
   snapshot <- modifyMVar ideState $ \state -> return (IdeSessionShutdown, state)
   case snapshot of
-    IdeSessionRunning runActions _ -> do
+    IdeSessionRunning runActions idleState -> do
       -- We need to terminate the running program before we can shut down
       -- the session, because the RPC layer will sequentialize all concurrent
       -- calls (and if code is still running we still have an active
       -- RPC conversation)
       interrupt runActions
-      cleanup
-    IdeSessionIdle _ -> cleanup
+      shutdownGhcServer $ _ideGhcServer idleState
+      cleanupDirs
+    IdeSessionIdle idleState -> do
+      shutdownGhcServer $ _ideGhcServer idleState
+      cleanupDirs
     IdeSessionShutdown -> return ()
  where
-  cleanup = do
-    shutdownGhcServer ideGhcServer
+  cleanupDirs = do
     removeDirectoryRecursive ideSourcesDir
     removeDirectoryRecursive ideDataDir
+
+-- | Restarts a session. Techically, a new session is created under the old
+-- @IdeSession@ handle, with a state cloned from the old session,
+-- which is then shut down. The only behavioural difference between
+-- the restarted session and the old one is that any running code is stopped
+-- (even if it was stuck and didn't repond to interrupt requests)
+-- and that no modules are loaded, though all old modules and data files
+-- are still contained in the new session and ready to be compiled with
+-- the same flags and evironment variables as before.
+restartSession :: IdeSession -> IO ()
+restartSession IdeSession{ideConfig, ideDataDir, ideState} =
+  let restart idleState = do
+        shutdownGhcServer $ _ideGhcServer idleState
+        _ideGhcServer <-
+          forkGhcServer (configStaticOpts ideConfig) (Just ideDataDir)
+        let newIdleState = idleState { _ideComputed  = Nothing
+                                     , _ideGhcServer
+                                     }
+        return $ IdeSessionIdle newIdleState
+  in modifyMVar_ ideState $ \state ->
+    case state of
+      IdeSessionIdle idleState ->
+        restart idleState
+      IdeSessionRunning runActions idleState -> do
+        interrupt runActions
+        restart idleState
+      IdeSessionShutdown ->
+        fail "Shutdown session cannot be restarted."
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
 -- bunch of updates.
@@ -361,7 +393,7 @@ instance Monoid IdeSessionUpdate where
 -- The update can be a long running operation, so we support a callback
 -- which can be used to monitor progress of the operation.
 updateSession ::  IdeSession -> IdeSessionUpdate -> (PCounter -> IO ()) -> IO ()
-updateSession session@IdeSession{ideSourcesDir, ideState, ideGhcServer}
+updateSession session@IdeSession{ideSourcesDir, ideState}
               update
               callback = do
   modifyMVar_ ideState $ \state ->
@@ -375,11 +407,11 @@ updateSession session@IdeSession{ideSourcesDir, ideState, ideGhcServer}
 
         -- Update environment (if necessary)
         when (updateResult ^. updatedEnv) $
-          rpcSetEnv ideGhcServer (idleState' ^. ideEnv)
+          rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
 
         -- Update code (TODO: skip this RPC call if not necessary)
         (computedErrors, computedLoadedModules) <-
-          rpcCompile ideGhcServer
+          rpcCompile (idleState ^. ideGhcServer)
                      (idleState' ^. ideNewOpts)
                      ideSourcesDir
                      (idleState' ^. ideGenerateCode)
@@ -610,7 +642,7 @@ getEnv IdeSession{ideState} =
 -- The function resembles a query, but it's not instantaneous
 -- and the running code can be interrupted or interacted with.
 runStmt :: IdeSession -> ModuleName -> String -> IO RunActions
-runStmt IdeSession{ideGhcServer,ideState} m fun = do
+runStmt IdeSession{ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
     IdeSessionIdle idleState ->
      case (idleState ^. ideComputed, idleState ^. ideGenerateCode) of
@@ -619,7 +651,7 @@ runStmt IdeSession{ideGhcServer,ideState} m fun = do
           -- inside 'module .. where' counts.
           if m `elem` computedLoadedModules comp
           then do
-            runActions <- rpcRun ideGhcServer m fun
+            runActions <- rpcRun (idleState ^. ideGhcServer) m fun
             let runActions' = afterRunActions runActions restoreToIdle
             return (IdeSessionRunning runActions' idleState, runActions')
           else fail $ "Module " ++ show (MN.toString m)
