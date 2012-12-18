@@ -110,10 +110,11 @@ module IdeSession (
   SourceError(..),
   SourceErrorKind(..),
 
-  -- ** Managed files and loaded modules
+  -- ** The list of managed files, loaded modules and all data files
   getManagedFiles,
   ManagedFiles(..),
   getLoadedModules,
+  getAllDataFiles,
 
   -- ** Environment variables
   getEnv,
@@ -186,6 +187,7 @@ import Data.List (delete)
 import Data.Monoid (Monoid (..))
 import System.Directory
 import System.FilePath (splitFileName, takeDirectory, (<.>), (</>))
+import qualified System.FilePath.Find as Find
 import System.IO (hClose, openBinaryTempFile)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (setFileTimes)
@@ -573,6 +575,10 @@ getLoadedModules IdeSession{ideState} =
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} -> return computedLoadedModules
       Nothing -> fail "This session state does not admit queries."
+
+getAllDataFiles :: Query [FilePath]
+getAllDataFiles IdeSession{ideDataDir} =
+  Find.find Find.always (Find.fileType Find.==? Find.RegularFile) ideDataDir
 
 -- | Get a mapping from where symbols are used to where they are defined.
 -- That is, given a symbol used at a particular location in a source module
