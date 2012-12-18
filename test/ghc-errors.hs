@@ -766,6 +766,51 @@ syntheticTests =
         mods' <- getLoadedModules session
         assertEqual "Running code does not affect getLoadedModules" mods mods'
     )
+  , ( "Interrupt, then capture stdout"
+    , withConfiguredSession defOpts $ \session -> do
+        updateSession session (updateCodeGeneration True) (\_ -> return ())
+        let upd1 = updateModule (MN.fromString "Main") . BSLC.pack . unlines $
+                     [ "import Control.Monad"
+                     , "main = forever $ print 1"
+                     ]
+            upd2 = updateModule (MN.fromString "Main") . BSLC.pack . unlines $
+                     [ "main = print 1234" ]
+
+        do updateSessionD session upd1 1
+           runActions <- runStmt session (MN.fromString "Main") "main"
+           interrupt runActions
+           void $ runWaitAll runActions
+
+        do updateSessionD session upd2 1
+           runActions <- runStmt session (MN.fromString "Main") "main"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "1234\n") output
+             _       -> assertFailure $ "Unexpected result: " ++ show result
+    )
+  , ( "Interrupt, wait 1 sec, then capture stdout"
+    , withConfiguredSession defOpts $ \session -> do
+        updateSession session (updateCodeGeneration True) (\_ -> return ())
+        let upd1 = updateModule (MN.fromString "Main") . BSLC.pack . unlines $
+                     [ "import Control.Monad"
+                     , "main = forever $ print 1"
+                     ]
+            upd2 = updateModule (MN.fromString "Main") . BSLC.pack . unlines $
+                     [ "main = print 1234" ]
+
+        do updateSessionD session upd1 1
+           runActions <- runStmt session (MN.fromString "Main") "main"
+           threadDelay 1000000
+           interrupt runActions
+           void $ runWaitAll runActions
+
+        do updateSessionD session upd2 1
+           runActions <- runStmt session (MN.fromString "Main") "main"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "1234\n") output
+             _       -> assertFailure $ "Unexpected result: " ++ show result
+    )
   ]
 
 defOpts :: [String]
