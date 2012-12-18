@@ -32,6 +32,7 @@ import System.Process
   )
 import System.Posix.Types (Fd)
 import System.Posix.IO (createPipe, closeFd, fdToHandle)
+import System.Directory (canonicalizePath, getPermissions, executable)
 import Data.Typeable (Typeable)
 import Data.Aeson
   ( FromJSON
@@ -215,7 +216,10 @@ forkRpcServer path args workingDir = do
                                  , responseR, responseW
                                  , errorsR,   errorsW
                                  ]
-  (Nothing, Nothing, Nothing, ph) <- createProcess (proc path args') {
+
+
+  fullPath <- pathToExecutable path
+  (Nothing, Nothing, Nothing, ph) <- createProcess (proc fullPath args') {
                                          cwd = workingDir
                                        }
 
@@ -237,6 +241,14 @@ forkRpcServer path args workingDir = do
     , rpcState     = st
     , rpcParser    = parser
     }
+  where
+    pathToExecutable :: FilePath -> IO FilePath
+    pathToExecutable relPath = do
+      fullPath    <- canonicalizePath relPath
+      permissions <- getPermissions fullPath
+      if executable permissions
+        then return fullPath
+        else Ex.throwIO . userError $ relPath ++ " not executable"
 
 -- | Specialized form of 'rpcConversation' to do single request and wait for
 -- a single response.
