@@ -8,7 +8,8 @@ import Data.Monoid (mconcat)
 import System.Environment
 import System.FilePath (dropExtension, makeRelative)
 import System.FilePath.Find (always, extension, find)
-import System.Unix.Directory (withTemporaryDirectory)
+import System.IO.Temp (withTempDirectory)
+import System.Directory
 
 import Common
 import GhcServer
@@ -49,7 +50,9 @@ main = do
             dir : optsArg -> (dir, optsArg)
             [] -> ("test/Cabal",
                    defOpts)
-      withTemporaryDirectory "typecheck-dir" $ check opts originalSourcesDir
+      slashTmp <- getTemporaryDirectory
+      withTempDirectory slashTmp "typecheck-dir."
+        $ check opts originalSourcesDir
 
 check :: [String] -> FilePath -> FilePath -> IO ()
 check opts originalSourcesDir configSourcesDir = do

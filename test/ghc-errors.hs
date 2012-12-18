@@ -13,7 +13,7 @@ import System.Directory
 import System.Environment (getArgs)
 import System.FilePath (dropExtension, makeRelative, (</>))
 import System.FilePath.Find (always, extension, find)
-import System.Unix.Directory (withTemporaryDirectory)
+import System.IO.Temp (withTempDirectory)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -60,8 +60,9 @@ loadModulesFrom session originalSourcesDir = do
 -- | Run the specified action with a new IDE session, configured to use a
 -- temporary directory
 withConfiguredSession :: [String] -> (IdeSession -> IO a) -> IO a
-withConfiguredSession opts io =
-  withTemporaryDirectory "ide-backend-test" $ \configSourcesDir -> do
+withConfiguredSession opts io = do
+  slashTmp <- getTemporaryDirectory
+  withTempDirectory slashTmp "ide-backend-test." $ \configSourcesDir -> do
     let sessionConfig = SessionConfig{ configSourcesDir
                                      , configWorkingDir = configSourcesDir
                                      , configDataDir    = configSourcesDir
