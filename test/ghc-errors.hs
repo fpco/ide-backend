@@ -174,10 +174,8 @@ multipleTests =
         updateSessionD session update 0
         msgs <- getSourceErrors session
         assertNoErrors msgs
-        shutdownSession session
-        -- Start new session in the same directory; should not throw an error
-        let config = getSessionConfig session
-        withSession config $ \_ -> return ()
+        let update2 = updateCodeGeneration True
+        updateSessionD session update2 0  -- 0: nothing to generate code from
       )
   ]
 

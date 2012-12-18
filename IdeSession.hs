@@ -308,18 +308,23 @@ initSession ideConfig@SessionConfig{..} = do
 --
 -- If code is still running, it will be interrupted.
 shutdownSession :: IdeSession -> IO ()
-shutdownSession IdeSession{ideGhcServer, ideState} = do
+shutdownSession IdeSession{..} = do
   snapshot <- modifyMVar ideState $ \state -> return (IdeSessionShutdown, state)
   case snapshot of
-    IdeSessionRunning runActions _ ->
+    IdeSessionRunning runActions _ -> do
       -- We need to terminate the running program before we can shut down
       -- the session, because the RPC layer will sequentialize all concurrent
       -- calls (and if code is still running we still have an active
       -- RPC conversation)
       interrupt runActions
-    _ ->
-      return ()
-  shutdownGhcServer ideGhcServer
+      cleanup
+    IdeSessionIdle _ -> cleanup
+    IdeSessionShutdown -> return ()
+ where
+  cleanup = do
+    shutdownGhcServer ideGhcServer
+    removeDirectoryRecursive ideSourcesDir
+    removeDirectoryRecursive ideDataDir
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
 -- bunch of updates.
