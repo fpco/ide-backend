@@ -55,14 +55,11 @@ main = do
         $ check opts originalSourcesDir
 
 check :: [String] -> FilePath -> FilePath -> IO ()
-check opts originalSourcesDir configSourcesDir = do
+check opts originalSourcesDir configDir = do
   putStrLn $ "Copying files from: " ++ originalSourcesDir ++ "\n"
-          ++ "to a temporary directory at: " ++ configSourcesDir ++ "\n"
+          ++ "to a temporary directory at: " ++ configDir ++ "\n"
   -- Init session.
-  let sessionConfig = SessionConfig{ configSourcesDir
-                                   , configWorkingDir = configSourcesDir
-                                   , configDataDir    = configSourcesDir
-                                   , configTempDir    = "."
+  let sessionConfig = SessionConfig{ configDir
                                    , configStaticOpts = opts
                                    }
   session <- initSession sessionConfig

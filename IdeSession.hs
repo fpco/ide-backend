@@ -57,6 +57,8 @@ module IdeSession (
   shutdownSession,
   SessionConfig(..),
   getSessionConfig,
+  getSourcesDir,
+  getDataDir,
 
   -- * Updates
   -- | Updates are done in batches: we collect together all of the updates we
@@ -184,8 +186,8 @@ import Data.List (delete)
 import Data.Monoid (Monoid (..))
 import System.Directory
 import System.FilePath (splitFileName, takeDirectory, (<.>), (</>))
-import qualified System.FilePath.Find as Find
 import System.IO (hClose, openBinaryTempFile)
+import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (setFileTimes)
 
 import Common
@@ -193,34 +195,22 @@ import GhcServer
 import ModuleName (LoadedModules, ModuleName)
 import qualified ModuleName as MN
 
-import Control.Monad.State (StateT, execStateT)
 import Control.Monad.IO.Class (liftIO)
-import Data.Accessor ((^.), (^=), (.>))
+import Control.Monad.State (StateT, execStateT)
+import Data.Accessor ((.>), (^.), (^=))
+import Data.Accessor.Monad.MTL.State (get, modify, set)
 import Data.Accessor.Template (nameDeriveAccessors)
-import Data.Accessor.Monad.MTL.State (modify, set, get)
 
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.
 --
 data SessionConfig = SessionConfig {
-
-       -- | The directory to use for managing source files.
-       configSourcesDir :: FilePath,
-
-       -- | The directory to use for session state, such as @.hi@ files.
-       configWorkingDir :: FilePath,
-
-       -- | The directory to use for data files that may be accessed by the
-       -- running program. The running program will have this as its CWD.
-       configDataDir    :: FilePath,
-
-       -- | The directory to use for purely temporary files.
-       configTempDir    :: FilePath,
-
-       -- | GHC static options. Can also contain default dynamic options,
-       -- that are overriden via session update.
-       configStaticOpts :: [String]
-     }
+    -- | The directory to use for all session files.
+    configDir        :: FilePath
+    -- | GHC static options. Can also contain default dynamic options,
+    -- that are overriden via session update.
+  , configStaticOpts :: [String]
+  }
 
 data Computed = Computed {
     -- | Last compilation and run errors
@@ -228,7 +218,6 @@ data Computed = Computed {
     -- | Modules that got loaded okay
   , computedLoadedModules :: LoadedModules
   }
-
 
 -- | This type is a handle to a session state. Values of this type
 -- point to the non-persistent parts of the session state in memory
@@ -239,9 +228,14 @@ data Computed = Computed {
 -- can be active at once, but in normal applications this shouldn't be needed.
 --
 data IdeSession = IdeSession
-  { ideConfig    :: SessionConfig
-  , ideGhcServer :: GhcServer
-  , ideState     :: MVar IdeSessionState
+  { ideConfig     :: SessionConfig
+    -- | The directory to use for managing source files.
+  , ideSourcesDir :: FilePath
+    -- | The directory to use for data files that may be accessed by the
+    -- running program. The running program will have this as its CWD.
+  , ideDataDir    :: FilePath
+  , ideGhcServer  :: GhcServer
+  , ideState      :: MVar IdeSessionState
   }
 
 data IdeSessionState =
@@ -278,25 +272,20 @@ $(nameDeriveAccessors ''ManagedFiles accessorName)
 getSessionConfig :: IdeSession -> SessionConfig
 getSessionConfig = ideConfig
 
-ensureDirEmpty :: FilePath -> IO ()
-ensureDirEmpty dir = do
-    dirExists <- doesDirectoryExist dir
-    if dirExists then checkEmpty
-                 else fail $ "Directory " ++ dir ++ " does not exist"
-  where
-    checkEmpty = do
-      cnts <- Find.find Find.always (Find.fileType Find./=? Find.Directory) dir
-      when (not (null cnts))
-        $ fail $ "Directory " ++ dir ++ " is not empty."
+-- | Obtain the source files directory for this session.
+getSourcesDir :: IdeSession -> FilePath
+getSourcesDir IdeSession{ideSourcesDir} = ideSourcesDir
+
+-- | Obtain the data files directory for this session.
+getDataDir :: IdeSession -> FilePath
+getDataDir IdeSession{ideDataDir} = ideDataDir
 
 -- | Create a fresh session, using some initial configuration.
 --
 initSession :: SessionConfig -> IO IdeSession
 initSession ideConfig@SessionConfig{..} = do
-  ensureDirEmpty configSourcesDir
-  ensureDirEmpty configWorkingDir
-  ensureDirEmpty configDataDir
-
+  ideSourcesDir <- createTempDirectory configDir "src."
+  ideDataDir    <- createTempDirectory configDir "data."
   ideState <- newMVar $ IdeSessionIdle IdeIdleState {
                           _ideLogicalTimestamp = 0
                         , _ideComputed         = Nothing
@@ -305,7 +294,7 @@ initSession ideConfig@SessionConfig{..} = do
                         , _ideManagedFiles     = ManagedFiles [] []
                         , _ideEnv              = []
                         }
-  ideGhcServer <- forkGhcServer configStaticOpts (Just configDataDir)
+  ideGhcServer <- forkGhcServer configStaticOpts (Just ideDataDir)
   return IdeSession{..}
 
 -- | Close a session down, releasing the resources.
@@ -336,7 +325,7 @@ shutdownSession IdeSession{ideGhcServer, ideState} = do
 -- In particular it is an instance of 'Monoid', so multiple primitive updates
 -- can be easily combined. Updates can override each other left to right.
 newtype IdeSessionUpdate = IdeSessionUpdate {
-    runSessionUpdate :: SessionConfig -> StateT IdeUpdateResult IO ()
+    runSessionUpdate :: IdeSession -> StateT IdeUpdateResult IO ()
   }
 
 -- | Result of running a session update
@@ -365,11 +354,13 @@ instance Monoid IdeSessionUpdate where
 -- The update can be a long running operation, so we support a callback
 -- which can be used to monitor progress of the operation.
 updateSession ::  IdeSession -> IdeSessionUpdate -> (PCounter -> IO ()) -> IO ()
-updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, ideState, ideGhcServer} update callback = do
+updateSession session@IdeSession{ideSourcesDir, ideState, ideGhcServer}
+              update
+              callback = do
   modifyMVar_ ideState $ \state ->
     case state of
       IdeSessionIdle idleState -> do
-        updateResult <- execStateT (runSessionUpdate update ideConfig) IdeUpdateResult {
+        updateResult <- execStateT (runSessionUpdate update session) IdeUpdateResult {
                             _updatedState = idleState
                           , _updatedEnv   = False
                           }
@@ -383,7 +374,7 @@ updateSession IdeSession{ideConfig = ideConfig@SessionConfig{configSourcesDir}, 
         (computedErrors, computedLoadedModules) <-
           rpcCompile ideGhcServer
                      (idleState' ^. ideNewOpts)
-                     configSourcesDir
+                     ideSourcesDir
                      (idleState' ^. ideGenerateCode)
                      callback
 
@@ -425,9 +416,9 @@ writeFileAtomic targetPath content = do
 -- Usually the two names are equal, but they neededn't be.
 --
 updateModule :: ModuleName -> ByteString -> IdeSessionUpdate
-updateModule m bs = IdeSessionUpdate $ \ideConfig -> do
+updateModule m bs = IdeSessionUpdate $ \IdeSession{ideSourcesDir} -> do
   timestamp <- get (updatedState .> ideLogicalTimestamp)
-  let internal = internalFile ideConfig m
+  let internal = internalFile ideSourcesDir m
   liftIO $ do
     writeFileAtomic internal bs
     setFileTimes internal (fromIntegral timestamp) (fromIntegral timestamp)
@@ -438,9 +429,9 @@ updateModule m bs = IdeSessionUpdate $ \ideConfig -> do
 -- value, it's given by reference to an existing file, which will be copied.
 --
 updateModuleFromFile :: ModuleName -> FilePath -> IdeSessionUpdate
-updateModuleFromFile m p = IdeSessionUpdate $ \ideConfig -> do
+updateModuleFromFile m p = IdeSessionUpdate $ \IdeSession{ideSourcesDir} -> do
   timestamp <- get (updatedState .> ideLogicalTimestamp)
-  let internal = internalFile ideConfig m
+  let internal = internalFile ideSourcesDir m
       targetDir = takeDirectory internal
   liftIO $ do
     createDirectoryIfMissing True targetDir
@@ -452,33 +443,33 @@ updateModuleFromFile m p = IdeSessionUpdate $ \ideConfig -> do
 -- | A session update that deletes an existing module.
 --
 updateModuleDelete :: ModuleName -> IdeSessionUpdate
-updateModuleDelete m = IdeSessionUpdate $ \ideConfig -> do
-  liftIO $ removeFile (internalFile ideConfig m)
+updateModuleDelete m = IdeSessionUpdate $ \IdeSession{ideSourcesDir} -> do
+  liftIO $ removeFile (internalFile ideSourcesDir m)
   modify (updatedState .> ideManagedFiles .> sourceFiles) (delete m)
 
 -- | Update dynamic compiler flags, including pragmas and packages to use.
 -- Warning: only dynamic flags can be set here.
 -- Static flags need to be set at server startup.
 updateGhcOptions :: (Maybe [String]) -> IdeSessionUpdate
-updateGhcOptions opts = IdeSessionUpdate $ \_ideConfig ->
+updateGhcOptions opts = IdeSessionUpdate $ \_ ->
   set (updatedState .> ideNewOpts) opts
 
 -- | Enable or disable code generation in addition
 -- to type-checking. Required by 'runStmt'.
 updateCodeGeneration :: Bool -> IdeSessionUpdate
-updateCodeGeneration b = IdeSessionUpdate $ \_ideConfig ->
+updateCodeGeneration b = IdeSessionUpdate $ \_ ->
   set (updatedState .> ideGenerateCode) b
 
-internalFile :: SessionConfig -> ModuleName -> FilePath
-internalFile SessionConfig{configSourcesDir} m =
-  configSourcesDir </> MN.toFilePath m <.> ".hs"
+internalFile :: FilePath -> ModuleName -> FilePath
+internalFile ideSourcesDir m =
+  ideSourcesDir </> MN.toFilePath m <.> ".hs"
 
 -- | A session update that changes a data file by giving a new value for the
 -- file. This can be used to add a new file or update an existing one.
 --
 updateDataFile :: FilePath -> ByteString -> IdeSessionUpdate
-updateDataFile n bs = IdeSessionUpdate $ \SessionConfig{configDataDir} -> do
-  liftIO $ writeFileAtomic (configDataDir </> n) bs
+updateDataFile n bs = IdeSessionUpdate $ \IdeSession{ideDataDir} -> do
+  liftIO $ writeFileAtomic (ideDataDir </> n) bs
   modify (updatedState .> ideManagedFiles .> dataFiles) (n :)
 
 -- | Like 'updateDataFile' except that instead of passing the file content by
@@ -486,8 +477,8 @@ updateDataFile n bs = IdeSessionUpdate $ \SessionConfig{configDataDir} -> do
 -- which will be copied.
 --
 updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate
-updateDataFileFromFile n p = IdeSessionUpdate $ \SessionConfig{configDataDir} -> do
-  let targetPath = configDataDir </> n
+updateDataFileFromFile n p = IdeSessionUpdate $ \IdeSession{ideDataDir} -> do
+  let targetPath = ideDataDir </> n
       targetDir  = takeDirectory targetPath
   liftIO $ createDirectoryIfMissing True targetDir
   liftIO $ copyFile p targetPath
@@ -496,15 +487,15 @@ updateDataFileFromFile n p = IdeSessionUpdate $ \SessionConfig{configDataDir} ->
 -- | A session update that deletes an existing data file.
 --
 updateDataFileDelete :: FilePath -> IdeSessionUpdate
-updateDataFileDelete n = IdeSessionUpdate $ \SessionConfig{configDataDir} -> do
-  liftIO $ removeFile (configDataDir </> n)
+updateDataFileDelete n = IdeSessionUpdate $ \IdeSession{ideDataDir} -> do
+  liftIO $ removeFile (ideDataDir </> n)
   modify (updatedState .> ideManagedFiles .> dataFiles) $ delete n
 
 -- | Set an environment variable
 --
 -- Use @updateEnv var Nothing@ to unset @var@.
 updateEnv :: String -> Maybe String -> IdeSessionUpdate
-updateEnv var val = IdeSessionUpdate $ \_ideConfig -> do
+updateEnv var val = IdeSessionUpdate $ \_ -> do
   modify (updatedState .> ideEnv) (override var val)
   set updatedEnv True
 
@@ -519,14 +510,14 @@ type Query a = IdeSession -> IO a
 -- | Read the current value of one of the source modules.
 --
 getSourceModule :: ModuleName -> Query ByteString
-getSourceModule m IdeSession{ideConfig} =
-  BS.readFile $ internalFile ideConfig m
+getSourceModule m IdeSession{ideSourcesDir} =
+  BS.readFile $ internalFile ideSourcesDir m
 
 -- | Read the current value of one of the data files.
 --
 getDataFile :: FilePath -> Query ByteString
-getDataFile n IdeSession{ideConfig=SessionConfig{configDataDir}} =
-  BS.readFile $ configDataDir </> n
+getDataFile n IdeSession{ideDataDir} =
+  BS.readFile $ ideDataDir </> n
 
 -- | Get any compilation errors or warnings in the current state of the
 -- session, meaning errors that GHC reports for the current state of all the
