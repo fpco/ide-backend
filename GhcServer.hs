@@ -22,11 +22,11 @@ module GhcServer
   , getRpcExitCode
   ) where
 
-import Control.Concurrent (ThreadId, forkIO, killThread, myThreadId, throwTo)
+import Control.Concurrent (ThreadId, forkIO, myThreadId, throwTo)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar, modifyMVar)
 import qualified Control.Exception as Ex
-import Control.Monad (forM, forever, when)
+import Control.Monad (forM, forever, when, void)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
@@ -34,7 +34,7 @@ import Data.IORef
 
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
-import System.IO (hFlush, stdout)
+import System.IO (hFlush, stdout, Handle)
 import System.Posix (Fd)
 import System.Posix.Env (setEnv, unsetEnv)
 import System.Posix.IO.ByteString
@@ -63,6 +63,7 @@ data GhcRunResponse =
 data GhcRunRequest =
     GhcRunInput BSS.ByteString
   | GhcRunInterrupt
+  | GhcRunAckDone
   deriving Show
 
 $(deriveJSON id ''GhcRequest)
@@ -143,67 +144,37 @@ ghcHandleRun :: RpcConversation
              -> String            -- ^ Function
              -> Ghc ()
 ghcHandleRun RpcConversation{..} m fun = do
-    -- Setup loopback pipe so we can capture runStmt's stdout/stderr
-    (stdOutputRd, stdOutputBackup, stdErrorBackup) <- liftIO $ do
-      -- Create pipe
-      (stdOutputRd, stdOutputWr) <- liftIO createPipe
+    (stdOutputRd, stdOutputBackup, stdErrorBackup) <- redirectStdout 
+    (stdInputWr,  stdInputBackup)                  <- redirectStdin
 
-      -- Backup stdout, then replace stdout and stderr with the pipe's write end
-      stdOutputBackup <- liftIO $ dup stdOutput
-      stdErrorBackup  <- liftIO $ dup stdError
-      dupTo stdOutputWr stdOutput
-      dupTo stdOutputWr stdError
-      closeFd stdOutputWr
+    ghcThread    <- liftIO $ newEmptyMVar :: Ghc (MVar (Maybe ThreadId))
+    stdoutThread <- liftIO $ newEmptyMVar :: Ghc (MVar ())
+    reqThread    <- liftIO $ newEmptyMVar :: Ghc (MVar ())
 
-      -- Convert to the read end to a handle and return
-      stdOutputRd' <- fdToHandle stdOutputRd
-      return (stdOutputRd', stdOutputBackup, stdErrorBackup)
+    liftIO . forkIO $ readRunRequests ghcThread stdInputWr reqThread
+    liftIO . forkIO $ readStdout stdOutputRd stdoutThread
 
-    -- Similar procedure for stdin
-    (stdInputWr, stdInputBackup) <- liftIO $ do
-      -- Create pipe
-      (stdInputRd, stdInputWr) <- liftIO createPipe
-
-      -- Swizzle stdin
-      stdInputBackup <- liftIO $ dup stdInput
-      dupTo stdInputRd stdInput
-      closeFd stdInputRd
-
-      -- Convert the write end to a handle and return
-      stdInputWr' <- fdToHandle stdInputWr
-      return (stdInputWr', stdInputBackup)
-
-    ghcThread    <- liftIO $ myThreadId
-    stdoutThread <- liftIO $ newEmptyMVar
+    -- This is a little tricky. We only want to deliver the UserInterrupt
+    -- exceptions when we are running 'runInGhc'. If the UserInterrupt arrives
+    -- before we even get a chance to call 'runInGhc' the exception should not
+    -- be delivered until we are in a position to catch it; after 'runInGhc'
+    -- completes we should just ignore any further 'GhcRunInterrupt' requests.
+    --
+    -- We achieve this by
+    --
+    -- 1. The thread ID is stored in an MVar ('ghcThread'). Initially this
+    --    MVar is empty, so if a 'GhcRunInterrupt' arrives before we are ready
+    --    to deal with it the 'reqThread' will block
+    -- 2. We install an exception handler before putting the thread ID into
+    --    the MVar
+    -- 3. We override the MVar with Nothing before leaving the exception handler
+    -- 4. In the 'reqThread' we ignore GhcRunInterrupts once the 'MVar' is
+    --    'Nothing'
 
     runOutcome <- ghandleJust isUserInterrupt return $ do
-      -- Start thread to read 'interrupt' requests from the client
-      reqThread <- liftIO . forkIO $ do
-        let go = do request <- get
-                    case request of
-                      GhcRunInterrupt -> do
-                        -- We terminate after receiving GhcRunInterrupt
-                        throwTo ghcThread Ex.UserInterrupt
-                      GhcRunInput bs -> do
-                        BSS.hPut stdInputWr bs
-                        hFlush stdInputWr
-                        go
-        go
-
-      -- Start thread to read runStmt's stdout
-      liftIO . forkIO $ do
-        let go = do bs <- BSS.hGetSome stdOutputRd blockSize
-                    if BSS.null bs
-                      then putMVar stdoutThread ()
-                      else put (GhcRunOutp bs) >> go
-        go
-
-      -- Actually start the code
+      liftIO $ myThreadId >>= putMVar ghcThread . Just
       outcome <- runInGhc (m, fun)
-
-      -- Kill request thread and return the result
-      liftIO $ killThread reqThread
-      return outcome
+      liftIO $ modifyMVar ghcThread $ \_ -> return (Nothing, outcome)
 
     liftIO $ do
       -- Restore stdin and stdout
@@ -220,7 +191,39 @@ ghcHandleRun RpcConversation{..} m fun = do
       liftIO $ debug dVerbosity $ "returned from ghcHandleRun with "
                                   ++ show runOutcome
       put $ GhcRunDone runOutcome
+
+      -- Wait for the client to acknowledge the done
+      -- (this avoids race conditions)
+      readMVar reqThread
   where
+    -- Wait for and execute run requests from the client
+    readRunRequests :: MVar (Maybe ThreadId) -> Handle -> MVar () -> IO ()
+    readRunRequests ghcThread stdInputWr done = 
+      let go = do request <- get
+                  case request of
+                    GhcRunInterrupt -> do
+                      mTid <- readMVar ghcThread
+                      case mTid of
+                        Just tid -> throwTo tid Ex.UserInterrupt
+                        Nothing  -> return () -- See above
+                      go
+                    GhcRunInput bs -> do
+                      BSS.hPut stdInputWr bs
+                      hFlush stdInputWr
+                      go
+                    GhcRunAckDone -> 
+                      putMVar done () 
+      in go
+
+    -- Wait for the process to output something or terminate
+    readStdout :: Handle -> MVar () -> IO ()
+    readStdout stdOutputRd done = 
+      let go = do bs <- BSS.hGetSome stdOutputRd blockSize
+                  if BSS.null bs
+                    then putMVar done ()
+                    else put (GhcRunOutp bs) >> go
+      in go
+
     isUserInterrupt :: Ex.AsyncException -> Maybe RunResult
     isUserInterrupt ex@Ex.UserInterrupt =
       Just . RunProgException . showExWithClass . Ex.toException $ ex
@@ -230,6 +233,38 @@ ghcHandleRun RpcConversation{..} m fun = do
     -- TODO: What is a good value here?
     blockSize :: Int
     blockSize = 4096
+     
+    -- Setup loopback pipe so we can capture runStmt's stdout/stderr
+    redirectStdout :: Ghc (Handle, Fd, Fd)
+    redirectStdout = liftIO $ do
+      -- Create pipe
+      (stdOutputRd, stdOutputWr) <- liftIO createPipe
+
+      -- Backup stdout, then replace stdout and stderr with the pipe's write end
+      stdOutputBackup <- liftIO $ dup stdOutput
+      stdErrorBackup  <- liftIO $ dup stdError
+      dupTo stdOutputWr stdOutput
+      dupTo stdOutputWr stdError
+      closeFd stdOutputWr
+
+      -- Convert to the read end to a handle and return
+      stdOutputRd' <- fdToHandle stdOutputRd
+      return (stdOutputRd', stdOutputBackup, stdErrorBackup)
+      
+    -- Setup loopback pipe so we can write to runStmt's stdin 
+    redirectStdin :: Ghc (Handle, Fd)
+    redirectStdin = liftIO $ do
+      -- Create pipe
+      (stdInputRd, stdInputWr) <- liftIO createPipe
+
+      -- Swizzle stdin
+      stdInputBackup <- liftIO $ dup stdInput
+      dupTo stdInputRd stdInput
+      closeFd stdInputRd
+
+      -- Convert the write end to a handle and return
+      stdInputWr' <- fdToHandle stdInputWr
+      return (stdInputWr', stdInputBackup)
 
 -- | Handle a set-environment request
 ghcHandleSetEnv :: RpcConversation -> [(String, Maybe String)] -> Ghc ()
@@ -278,31 +313,41 @@ rpcRun :: GhcServer       -- ^ GHC server
        -> String          -- ^ Function
        -> IO RunActions
 rpcRun server m fun = do
-  runWaitChan   <- newChan      :: IO (Chan (Either BSS.ByteString RunResult))
-  reqChan       <- newChan      :: IO (Chan GhcRunRequest)
-  reqThreadMVar <- newEmptyMVar :: IO (MVar ThreadId)
+  runWaitChan <- newChan :: IO (Chan (Either BSS.ByteString RunResult))
+  reqChan     <- newChan :: IO (Chan GhcRunRequest)
+  sentAck     <- newEmptyMVar :: IO (MVar ())
 
   forkIO $ rpcConversation server $ \RpcConversation{..} -> do
     put (ReqRun m fun)
-    forkIO (forever $ readChan reqChan >>= put) >>= putMVar reqThreadMVar
+    void $ forkIO (sendRequests put reqChan sentAck)
     let go = do resp <- get
                 case resp of
                   GhcRunDone runResult -> writeChan runWaitChan (Right runResult)
                   GhcRunOutp bs        -> writeChan runWaitChan (Left bs) >> go
     go
-
-  reqThreadId <- readMVar reqThreadMVar
+    -- Don't leave RPC conversation scope until ack is sent 
+    readMVar sentAck
 
   return RunActions {
       runWait = do
         outcome <- readChan runWaitChan
         case outcome of
           Left  _ -> return ()
-          Right _ -> killThread reqThreadId
+          Right _ -> do writeChan reqChan GhcRunAckDone 
+                        readMVar sentAck
         return outcome
     , interrupt   = writeChan reqChan GhcRunInterrupt
     , supplyStdin = writeChan reqChan . GhcRunInput
     }
+  where
+    sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> MVar () -> IO ()
+    sendRequests put reqChan done = 
+      let go = do req <- readChan reqChan
+                  put req
+                  case req of
+                    GhcRunAckDone -> putMVar done () 
+                    _             -> go
+      in go
 
 -- | Set the environment
 rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()

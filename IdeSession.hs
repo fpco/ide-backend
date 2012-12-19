@@ -324,6 +324,7 @@ shutdownSession IdeSession{..} = do
       -- calls (and if code is still running we still have an active
       -- RPC conversation)
       interrupt runActions
+      void $ runWaitAll runActions
       shutdownGhcServer $ _ideGhcServer idleState
       cleanupDirs
     IdeSessionIdle idleState -> do
