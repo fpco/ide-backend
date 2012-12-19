@@ -994,5 +994,6 @@ restartRun code exitCode =
         assertEqual "exitCodeAfter" Nothing exitCodeAfter
         -- Just one more extra perverse test, since we have the setup ready.
         assertRaises "runWait runActionsBefore after restartSession"
-          (\e -> let _ = e :: Ex.BlockedIndefinitelyOnMVar in True)
+-- sometimes: (\e -> let _ = e :: Ex.BlockedIndefinitelyOnMVar in True)
+          (== userError "The impossible happened!")
           (runWait runActionsBefore)
