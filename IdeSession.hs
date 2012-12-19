@@ -685,8 +685,8 @@ getGhcServer IdeSession{ideState} =
   withMVar ideState $ \st ->
   case st of
     IdeSessionIdle idleState ->
-      return $ idleState ^. ideGhcServer
+      return $! idleState ^. ideGhcServer
     IdeSessionRunning _ idleState ->
-      return $ idleState ^. ideGhcServer
+      return $! idleState ^. ideGhcServer
     IdeSessionShutdown ->
       fail "Session already shut down."

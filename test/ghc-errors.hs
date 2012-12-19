@@ -11,6 +11,7 @@ import Data.Maybe (catMaybes)
 import Data.Monoid (mconcat, mempty, (<>))
 import System.Directory
 import System.Environment (getArgs)
+import System.Exit (ExitCode (..))
 import System.FilePath (dropExtension, makeRelative, (</>))
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
@@ -146,7 +147,7 @@ multipleTests =
         mex <- Ex.try $ runStmt session (MN.fromString "Main") "main"
         case mex of
           Right runActions -> void $ runWaitAll runActions
-          Left ex -> assertEqual "runStmt" ex (userError "Module \"Main\" not successfully loaded, when trying to run code.")
+          Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
       )
     , ("Run automatically corrected code; don't fail at all"
       , \session -> do
@@ -163,7 +164,7 @@ multipleTests =
         runActions <- runStmt session (MN.fromString "TotallyMain") "main"
         (output, result) <- runWaitAll runActions
         case result of
-          RunOk _ -> assertEqual "" (BSLC.pack "\"test run\"\n") output
+          RunOk _ -> assertEqual "" output (BSLC.pack "\"test run\"\n")
           RunProgException _ex ->
             assertFailure "Unexpected exception raised by the running code."
           RunGhcException _ex  ->
@@ -178,6 +179,32 @@ multipleTests =
         assertNoErrors msgs
         let update2 = updateCodeGeneration True
         updateSessionD session update2 0  -- 0: nothing to generate code from
+      )
+    , ("Make sure restartSession does not lose source files"
+      , \session -> do
+        (_, lm) <- getModules session
+        serverBefore <- getGhcServer session
+        let update = updateCodeGeneration True
+        updateSessionD session update (length lm)  -- all recompiled
+        mex <- Ex.try $ runStmt session (MN.fromString "Main") "main"
+        case mex of
+          Right _runActions -> return ()  -- don't runWaitAll
+          Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
+        restartSession session
+        updateSessionD session mempty (length lm)  -- all compiled anew
+        mex2 <- Ex.try $ runStmt session (MN.fromString "Main") "main"
+        case mex2 of
+          Right runActions -> void $ runWaitAll runActions  -- now runWaitAll
+          Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
+        restartSession session
+        let update2 = mconcat $ map updateModuleDelete lm
+        updateSessionD session update2 0  -- if any file missing, would yell
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
+        let update3 = updateCodeGeneration True
+        updateSessionD session update3 0  -- 0: nothing to generate code from
+        exitCodeBefore <- getRpcExitCode serverBefore
+        assertEqual "exitCodeBefore" (Just ExitSuccess) exitCodeBefore  -- TODO: should probably be ExitSuccess
       )
   ]
 
@@ -791,6 +818,36 @@ syntheticTests =
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "1234\n") output
              _       -> assertFailure $ "Unexpected result: " ++ show result
+    )
+  , ( "Restart session (snippet swallows all exceptions; after .1 sec)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import qualified Control.Exception as Ex"
+                    , "swallow l ex = let _ = (ex :: Ex.SomeException) in l"
+                    , "loop :: IO ()"
+                    , "loop = let l = Ex.catch l (swallow l) in l"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
+        runActionsBefore <- runStmt session (MN.fromString "M") "loop"
+        threadDelay 100000
+        serverBefore <- getGhcServer session
+        restartSession session
+        updateSessionD session upd 1
+        msgs2 <- getSourceErrors session
+        assertNoErrors msgs2
+        exitCodeBefore <- getRpcExitCode serverBefore
+        assertEqual "exitCodeBefore" (Just (ExitFailure 1)) exitCodeBefore  -- TODO: should probably be ExitSuccess
+        serverAfter <- getGhcServer session
+        exitCodeAfter <- getRpcExitCode serverAfter
+        assertEqual "exitCodeAfter" Nothing exitCodeAfter
+        -- Just one more extra perverse test, since we have the setup ready.
+        assertRaises "runWait runActionsBefore after restartSession"
+          (\e -> let _ = e :: Ex.BlockedIndefinitelyOnMVar in True)
+          (runWait runActionsBefore)
     )
   ]
 
