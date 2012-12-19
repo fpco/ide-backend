@@ -819,36 +819,38 @@ syntheticTests =
              RunOk _ -> assertEqual "" (BSLC.pack "1234\n") output
              _       -> assertFailure $ "Unexpected result: " ++ show result
     )
-  , ( "Restart session (snippet swallows all exceptions; after .1 sec)"
-    , withConfiguredSession defOpts $ \session -> do
-        let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
-                    [ "module M where"
-                    , "import qualified Control.Exception as Ex"
-                    , "swallow l ex = let _ = (ex :: Ex.SomeException) in l"
+  , ( "Restart session (snippet doesn't swallow exceptions; after .1 sec)"
+    , restartRun    [ "module M where"
                     , "loop :: IO ()"
-                    , "loop = let l = Ex.catch l (swallow l) in l"
-                    ])
-        updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
-        runActionsBefore <- runStmt session (MN.fromString "M") "loop"
-        threadDelay 100000
-        serverBefore <- getGhcServer session
-        restartSession session
-        updateSessionD session upd 1
-        msgs2 <- getSourceErrors session
-        assertNoErrors msgs2
-        exitCodeBefore <- getRpcExitCode serverBefore
-        assertEqual "exitCodeBefore" (Just (ExitFailure 1)) exitCodeBefore  -- TODO: should probably be ExitSuccess
-        serverAfter <- getGhcServer session
-        exitCodeAfter <- getRpcExitCode serverAfter
-        assertEqual "exitCodeAfter" Nothing exitCodeAfter
-        -- Just one more extra perverse test, since we have the setup ready.
-        assertRaises "runWait runActionsBefore after restartSession"
-          (\e -> let _ = e :: Ex.BlockedIndefinitelyOnMVar in True)
-          (runWait runActionsBefore)
+                    , "loop = loop"
+                    ] ExitSuccess
     )
+  -- , ( "Restart session (snippet swallow some exceptions; after .1 sec)"
+  --   , restartRun    [ "module M where"
+  --                   , "import qualified Control.Exception as Ex"
+  --                   , "swallow a ex = let _ = (ex :: Ex.SomeException) in a"
+  --                   , "loop :: IO ()"
+  --                   , "loop = let l = Ex.catch l (swallow l) in l"
+  --                   ] (ExitFailure 1)  -- TODO: should probably be ExitSuccess
+  --   )
+  -- , ( "Restart session (snippet swallows all exceptions; after .1 sec)"
+  --   , restartRun    [ "module M where"
+  --                   , "import qualified Control.Exception as Ex"
+  --                   , "swallow a ex = let _ = (ex :: Ex.SomeException) in a"
+  --                   , "l x = if length x > 999 then l [] else l (1 : x)"
+  --                   , "loop :: IO ()"
+  --                   , "loop = Ex.catch (l []) (swallow loop)"
+  --                   ] (ExitFailure 1)  -- TODO: should probably be ExitSuccess
+  --   )
+  -- , ( "Restart session (snippet swallows all and no allocation; after .1 sec)"
+  --   , restartRun    [ "module M where"
+  --                   , "import qualified Control.Exception as Ex"
+  --                   , "swallow a ex = let _ = (ex :: Ex.SomeException) in a"
+  --                   , "l = l"
+  --                   , "loop :: IO ()"
+  --                   , "loop = Ex.catch l (swallow loop)"
+  --                   ] (ExitFailure 1)  -- TODO: should probably be ExitSuccess
+  --   )
   ]
 
 defOpts :: [String]
@@ -968,3 +970,29 @@ show3errors msgs =
       more | length msgs > 3 = "\n... and more ..."
            | otherwise       = ""
   in shown ++ more
+
+restartRun :: [String] -> ExitCode -> Assertion
+restartRun code exitCode =
+      withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                     code)
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
+        runActionsBefore <- runStmt session (MN.fromString "M") "loop"
+        threadDelay 100000
+        serverBefore <- getGhcServer session
+        restartSession session
+        updateSessionD session upd 1
+        msgs2 <- getSourceErrors session
+        assertNoErrors msgs2
+        exitCodeBefore <- getRpcExitCode serverBefore
+        assertEqual "exitCodeBefore" (Just exitCode) exitCodeBefore
+        serverAfter <- getGhcServer session
+        exitCodeAfter <- getRpcExitCode serverAfter
+        assertEqual "exitCodeAfter" Nothing exitCodeAfter
+        -- Just one more extra perverse test, since we have the setup ready.
+        assertRaises "runWait runActionsBefore after restartSession"
+          (\e -> let _ = e :: Ex.BlockedIndefinitelyOnMVar in True)
+          (runWait runActionsBefore)
