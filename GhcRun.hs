@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP, TemplateHaskell #-}
 -- Copyright   : (c) JP Moresmau 2011,
 --                   Well-Typed 2012
 -- (JP Moresmau's buildwrapper package used as template for GHC API use)
@@ -8,6 +8,7 @@
 -- Only this file should import the GHC-internals modules.
 module GhcRun
   ( Ghc
+  , RunResult(..)
   , liftIO
   , ghandle
   , ghandleJust
@@ -57,9 +58,21 @@ import System.Time
 import Common
 import ModuleName (ModuleName, LoadedModules)
 import qualified ModuleName as MN
-import RunAPI
+import Data.Aeson.TH (deriveJSON)
 
 newtype DynamicOpts = DynamicOpts [Located String]
+
+-- | The outcome of running code
+data RunResult =
+    -- | The code terminated okay
+    RunOk String
+    -- | The code threw an exception
+  | RunProgException String
+    -- | GHC itself threw an exception when we tried to run the code
+  | RunGhcException String
+  deriving (Show, Eq)
+
+$(deriveJSON id ''RunResult)
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
@@ -188,6 +201,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
       let loadedModules = map (MN.fromString . moduleNameString) loadedNames
       return (reverse errs, loadedModules)
 
+-- | Run a snippet
 runInGhc :: (ModuleName, String)  -- ^ module and function to run, if any
          -> Ghc RunResult
 runInGhc (m, fun) = do

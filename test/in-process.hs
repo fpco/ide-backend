@@ -8,7 +8,6 @@ import System.Environment
 
 import Common
 import GhcRun
-import RunAPI
 
 -- A program, for debugging and experiments, that type-checks
 -- a file and runs its main function.

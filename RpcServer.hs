@@ -52,8 +52,8 @@ import Control.Applicative ((<$>))
 import Control.Monad (void, forever, unless)
 import qualified Control.Exception as Ex
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar)
+import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
+import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
 import qualified Data.ByteString as BS
 import Data.ByteString.Lazy (ByteString, hPut, hGetContents)
 import Data.ByteString.Lazy.Char8 (pack, unpack)
@@ -361,7 +361,7 @@ withRpcServer server io =
         putMVar (rpcState server) st'
         return a
       Left ex -> do
-        terminate server
+   --     terminate server
         putMVar (rpcState server) (RpcStopped ex)
         Ex.throwIO ex
 

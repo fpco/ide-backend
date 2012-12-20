@@ -16,6 +16,9 @@ module GhcServer
     -- * Client-side operations
   , forkGhcServer
   , rpcCompile
+  , RunActions(..)
+  , runWaitAll
+  , afterRunActions
   , rpcRun
   , rpcSetEnv
   , shutdownGhcServer
@@ -24,13 +27,20 @@ module GhcServer
   ) where
 
 import Control.Concurrent (ThreadId, forkIO, myThreadId, throwTo)
-import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
+import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent.MVar
-  (MVar, newEmptyMVar, putMVar, readMVar, modifyMVar)
+  ( MVar
+  , newEmptyMVar
+  , putMVar
+  , readMVar
+  , modifyMVar
+  )
+import Control.Concurrent.Async (async, withAsync, cancel, wait)
 import qualified Control.Exception as Ex
-import Control.Monad (forM, forever, when, void)
+import Control.Monad (forM, forever, when)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
+import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import Data.IORef
 import System.Exit (ExitCode)
@@ -46,7 +56,6 @@ import Common
 import GhcRun
 import ModuleName (LoadedModules, ModuleName)
 import RpcServer
-import RunAPI
 
 import Paths_ide_backend
 
@@ -310,6 +319,40 @@ rpcCompile server opts dir genCode callback =
 
     go
 
+-- | Handles to the running code, through which one can interact with the code.
+data RunActions = RunActions {
+    -- Wait for the code to output something or terminate
+    runWait     :: IO (Either BSS.ByteString RunResult)
+    -- Send a UserInterrupt exception to the code
+  , interrupt   :: IO ()
+    -- Make data available on the code's stdin
+  , supplyStdin :: BSS.ByteString -> IO ()
+    -- Force terminate the runaction
+    -- (The server will be useless after this)
+  , forceCancel :: IO ()
+  }
+
+-- | Repeatedly call 'runWait' until we receive a 'Right' result, while
+-- collecting all 'Left' results
+runWaitAll :: RunActions -> IO (BSL.ByteString, RunResult)
+runWaitAll RunActions{runWait} = go []
+  where
+    go :: [BSS.ByteString] -> IO (BSL.ByteString, RunResult)
+    go acc = do
+      resp <- runWait
+      case resp of
+        Left  bs        -> go (bs : acc)
+        Right runResult -> return (BSL.fromChunks (reverse acc), runResult)
+
+-- | Register a callback to be invoked when the program terminates
+afterRunActions :: RunActions -> (RunResult -> IO ()) -> RunActions
+afterRunActions runActions callback = runActions {
+    runWait = do result <- runWait runActions
+                 case result of
+                   Left bs -> return (Left bs)
+                   Right r -> callback r >> return (Right r)
+  }
+
 -- | Run code
 rpcRun :: GhcServer       -- ^ GHC server
        -> ModuleName      -- ^ Module
@@ -318,37 +361,37 @@ rpcRun :: GhcServer       -- ^ GHC server
 rpcRun server m fun = do
   runWaitChan <- newChan :: IO (Chan (Either BSS.ByteString RunResult))
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
-  sentAck     <- newEmptyMVar :: IO (MVar ())
 
-  forkIO $ rpcConversation server $ \RpcConversation{..} -> do
+  conv <- async $ rpcConversation server $ \RpcConversation{..} -> do
     put (ReqRun m fun)
-    void $ forkIO (sendRequests put reqChan sentAck)
-    let go = do resp <- get
-                case resp of
-                  GhcRunDone runResult -> writeChan runWaitChan (Right runResult)
-                  GhcRunOutp bs        -> writeChan runWaitChan (Left bs) >> go
-    go
-    -- Don't leave RPC conversation scope until ack is sent
-    readMVar sentAck
+    withAsync (sendRequests put reqChan) $ \sentAck -> do
+      let go = do resp <- get
+                  case resp of
+                    GhcRunDone result -> writeChan runWaitChan (Right result)
+                    GhcRunOutp bs     -> writeChan runWaitChan (Left bs) >> go
+      go
+      wait sentAck
 
   return RunActions {
       runWait = do
         outcome <- readChan runWaitChan
         case outcome of
           Left  _ -> return ()
-          Right _ -> do writeChan reqChan GhcRunAckDone
-                        readMVar sentAck
+          Right _ -> writeChan reqChan GhcRunAckDone >> wait conv
         return outcome
     , interrupt   = writeChan reqChan GhcRunInterrupt
     , supplyStdin = writeChan reqChan . GhcRunInput
+    , forceCancel = do
+        cancel conv
+        writeChan runWaitChan (error "runWait force-cancelled")
     }
   where
-    sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> MVar () -> IO ()
-    sendRequests put reqChan done =
+    sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> IO ()
+    sendRequests put reqChan =
       let go = do req <- readChan reqChan
                   put req
                   case req of
-                    GhcRunAckDone -> putMVar done ()
+                    GhcRunAckDone -> return ()
                     _             -> go
       in go
 

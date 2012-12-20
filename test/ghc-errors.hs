@@ -26,7 +26,6 @@ import GhcServer
 import IdeSession
 import ModuleName (ModuleName)
 import qualified ModuleName as MN
-import RunAPI
 import TestTools
 
 -- Tests using various functions of the IdeSession API
@@ -977,23 +976,33 @@ restartRun code exitCode =
         let upd = (updateCodeGeneration True)
                <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
                      code)
+
+        -- Compile and run the code on the first server
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertNoErrors msgs
         runActionsBefore <- runStmt session (MN.fromString "M") "loop"
+
+        -- Start a new server
         threadDelay 100000
         serverBefore <- getGhcServer session
         restartSession session
+
+        -- Compile the code on the new server
         updateSessionD session upd 1
         msgs2 <- getSourceErrors session
         assertNoErrors msgs2
+
+        -- Make sure the old server exited
         exitCodeBefore <- getGhcExitCode serverBefore
         assertEqual "exitCodeBefore" (Just exitCode) exitCodeBefore
+
+        -- Make sure the new server is still alive
         serverAfter <- getGhcServer session
         exitCodeAfter <- getGhcExitCode serverAfter
         assertEqual "exitCodeAfter" Nothing exitCodeAfter
+
         -- Just one more extra perverse test, since we have the setup ready.
         assertRaises "runWait runActionsBefore after restartSession"
--- sometimes: (\e -> let _ = e :: Ex.BlockedIndefinitelyOnMVar in True)
-          (== userError "The impossible happened!")
+          (\(Ex.ErrorCall str) -> str == "runWait force-cancelled")
           (runWait runActionsBefore)

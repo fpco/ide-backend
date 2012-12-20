@@ -127,6 +127,13 @@ module IdeSession (
 
   -- ** Run code
   runStmt,
+  RunResult(..),
+  RunActions, -- We don't export the constructor nor all accessors
+  interrupt,
+  runWait,
+  supplyStdin,
+  runWaitAll,
+  afterRunActions,
 
   -- ** Start and diagnose the server (probably only for debugging)
   ghcServer,
@@ -183,7 +190,7 @@ module IdeSession (
   -- away all the transitory state and recovering.
 ) where
 
-import Control.Concurrent
+import Control.Concurrent (MVar, newMVar, modifyMVar, modifyMVar_, withMVar)
 import qualified Control.Exception as Ex
 import Control.Monad
 import Data.ByteString.Lazy (ByteString)
@@ -199,9 +206,9 @@ import System.Posix.Files (setFileTimes)
 
 import Common
 import GhcServer
+import GhcRun (RunResult(..))
 import ModuleName (LoadedModules, ModuleName)
 import qualified ModuleName as MN
-import RunAPI
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT, execStateT)
@@ -348,23 +355,25 @@ shutdownSession IdeSession{..} = do
 -- the same flags and evironment variables as before.
 restartSession :: IdeSession -> IO ()
 restartSession IdeSession{ideConfig, ideDataDir, ideState} =
-  let restart idleState = do
-        forceShutdownGhcServer $ _ideGhcServer idleState
-        _ideGhcServer <-
-          forkGhcServer (configStaticOpts ideConfig) (Just ideDataDir)
-        let newIdleState = idleState { _ideComputed  = Nothing
-                                     , _ideGhcServer
-                                     }
-        return $ IdeSessionIdle newIdleState
-  in modifyMVar_ ideState $ \state ->
+  modifyMVar_ ideState $ \state ->
     case state of
       IdeSessionIdle idleState ->
         restart idleState
       IdeSessionRunning runActions idleState -> do
-        interrupt runActions
+        forceCancel runActions
         restart idleState
       IdeSessionShutdown ->
         fail "Shutdown session cannot be restarted."
+  where
+    restart :: IdeIdleState -> IO IdeSessionState
+    restart idleState = do
+      forceShutdownGhcServer $ _ideGhcServer idleState
+      _ideGhcServer <-
+        forkGhcServer (configStaticOpts ideConfig) (Just ideDataDir)
+      let newIdleState = idleState { _ideComputed  = Nothing
+                                   , _ideGhcServer
+                                   }
+      return $ IdeSessionIdle newIdleState
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
 -- bunch of updates.
