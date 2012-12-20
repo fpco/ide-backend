@@ -333,8 +333,10 @@ shutdownSession IdeSession{..} = do
     IdeSessionShutdown -> return ()
  where
   cleanupDirs = do
-    removeDirectoryRecursive ideSourcesDir
-    removeDirectoryRecursive ideDataDir
+    dataExists <- doesDirectoryExist ideDataDir
+    when dataExists $ removeDirectoryRecursive ideDataDir
+    sourceExists <- doesDirectoryExist ideSourcesDir
+    when sourceExists $ removeDirectoryRecursive ideSourcesDir
 
 -- | Restarts a session. Techically, a new session is created under the old
 -- @IdeSession@ handle, with a state cloned from the old session,
