@@ -26,7 +26,7 @@ module GhcServer
   , getGhcExitCode
   ) where
 
-import Control.Concurrent (ThreadId, forkIO, myThreadId, throwTo)
+import Control.Concurrent (ThreadId, myThreadId, throwTo)
 import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent.MVar
   ( MVar
@@ -37,7 +37,7 @@ import Control.Concurrent.MVar
   )
 import Control.Concurrent.Async (async, withAsync, cancel, wait)
 import qualified Control.Exception as Ex
-import Control.Monad (forM, forever, when)
+import Control.Monad (forM_, forever, unless)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
@@ -106,7 +106,7 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc . forever $ do
-    req <- liftIO $ get
+    req <- liftIO get
     case req of
       ReqCompile opts dir genCode ->
         ghcHandleCompile conv dOpts opts dir genCode
@@ -159,12 +159,9 @@ ghcHandleRun RpcConversation{..} m fun = do
     (stdOutputRd, stdOutputBackup, stdErrorBackup) <- redirectStdout
     (stdInputWr,  stdInputBackup)                  <- redirectStdin
 
-    ghcThread    <- liftIO $ newEmptyMVar :: Ghc (MVar (Maybe ThreadId))
-    stdoutThread <- liftIO $ newEmptyMVar :: Ghc (MVar ())
-    reqThread    <- liftIO $ newEmptyMVar :: Ghc (MVar ())
-
-    liftIO . forkIO $ readRunRequests ghcThread stdInputWr reqThread
-    liftIO . forkIO $ readStdout stdOutputRd stdoutThread
+    ghcThread    <- liftIO newEmptyMVar :: Ghc (MVar (Maybe ThreadId))
+    reqThread    <- liftIO . async $ readRunRequests ghcThread stdInputWr
+    stdoutThread <- liftIO . async $ readStdout stdOutputRd
 
     -- This is a little tricky. We only want to deliver the UserInterrupt
     -- exceptions when we are running 'runInGhc'. If the UserInterrupt arrives
@@ -197,7 +194,7 @@ ghcHandleRun RpcConversation{..} m fun = do
       -- Closing the write end of the stdout pipe will cause the stdout
       -- thread to terminate after it processed all remaining output;
       -- wait for this to happen
-      readMVar stdoutThread
+      wait stdoutThread
 
       -- Report the final result
       liftIO $ debug dVerbosity $ "returned from ghcHandleRun with "
@@ -206,11 +203,11 @@ ghcHandleRun RpcConversation{..} m fun = do
 
       -- Wait for the client to acknowledge the done
       -- (this avoids race conditions)
-      readMVar reqThread
+      wait reqThread
   where
     -- Wait for and execute run requests from the client
-    readRunRequests :: MVar (Maybe ThreadId) -> Handle -> MVar () -> IO ()
-    readRunRequests ghcThread stdInputWr done =
+    readRunRequests :: MVar (Maybe ThreadId) -> Handle -> IO ()
+    readRunRequests ghcThread stdInputWr =
       let go = do request <- get
                   case request of
                     GhcRunInterrupt -> do
@@ -224,16 +221,14 @@ ghcHandleRun RpcConversation{..} m fun = do
                       hFlush stdInputWr
                       go
                     GhcRunAckDone ->
-                      putMVar done ()
+                      return ()
       in go
 
     -- Wait for the process to output something or terminate
-    readStdout :: Handle -> MVar () -> IO ()
-    readStdout stdOutputRd done =
+    readStdout :: Handle -> IO ()
+    readStdout stdOutputRd =
       let go = do bs <- BSS.hGetSome stdOutputRd blockSize
-                  if BSS.null bs
-                    then putMVar done ()
-                    else put (GhcRunOutp bs) >> go
+                  unless (BSS.null bs) $ put (GhcRunOutp bs) >> go
       in go
 
     isUserInterrupt :: Ex.AsyncException -> Maybe RunResult
@@ -281,8 +276,8 @@ ghcHandleRun RpcConversation{..} m fun = do
 -- | Handle a set-environment request
 ghcHandleSetEnv :: RpcConversation -> [(String, Maybe String)] -> Ghc ()
 ghcHandleSetEnv RpcConversation{put} env = liftIO $ do
-  forM env $ \(var, mVal) -> case mVal of Just val -> setEnv var val True
-                                          Nothing  -> unsetEnv var
+  forM_ env $ \(var, mVal) -> case mVal of Just val -> setEnv var val True
+                                           Nothing  -> unsetEnv var
   put ()
 
 --------------------------------------------------------------------------------
@@ -295,7 +290,7 @@ forkGhcServer opts workingDir = do
   let prog = bindir </> "ide-backend-server"
 
   exists <- doesFileExist prog
-  when (not exists) $
+  unless exists $
     fail $ "The 'ide-backend-server' program was expected to "
         ++ "be at location " ++ prog ++ " but it is not."
 
@@ -414,7 +409,7 @@ getGhcExitCode = getRpcExitCode
 
 surpressGhcStdout :: Ghc a -> Ghc a
 surpressGhcStdout p = do
-  stdOutputBackup <- liftIO $ surpressStdOutput
+  stdOutputBackup <- liftIO surpressStdOutput
   x <- p
   liftIO $ restoreStdOutput stdOutputBackup
   return x
