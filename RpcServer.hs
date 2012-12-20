@@ -10,6 +10,7 @@ module RpcServer
   , rpc
   , rpcConversation
   , shutdown
+  , forceShutdown
   , ExternalException(..)
   , illscopedConversationException
   , serverKilledException
@@ -98,6 +99,7 @@ serverKilledException ex = ExternalException "Server killed" ex
 --------------------------------------------------------------------------------
 
 data Request  a = Request { _request :: a }
+                | RequestForceShutdown
                 | RequestShutdown
 data Response a = Response { _response :: a }
 
@@ -146,18 +148,23 @@ rpcServer' hin hout herr server = do
     setBinaryBlockBuffered [hin, hout, herr]
 
     reader <- async $ readRequests hin requests
-    writer <- async $ writeResponses responses hout
-    handler <- async $ channelHandler requests responses server
+    writer <- async $ writeResponses responses hout >> return False
+    handler <- async $ channelHandler requests responses server >> return False
 
-    waitAnyCatchCancel [reader, writer, handler] >>= tryShowException . snd
-    mapM_ waitCatch [reader, writer, handler]
-    threadDelay 100000
+    (asn, exOrValue) <- waitAnyCatchCancel [reader, writer, handler]
+    if asn == reader && either (const False) id exOrValue
+      then  -- forced shutdown
+        threadDelay 100000
+      else do
+        tryShowException exOrValue
+        mapM_ waitCatch [reader, writer, handler]
+        threadDelay 100000
   where
-    tryShowException :: Either Ex.SomeException () -> IO ()
+    tryShowException :: Either Ex.SomeException Bool -> IO ()
     tryShowException (Left ex) =
       -- We don't want to throw an exception showing the previous exception
       ignoreIOExceptions $ hPutFlush herr . pack . show $ ex
-    tryShowException (Right ()) =
+    tryShowException (Right _) =
       return ()
 
 --------------------------------------------------------------------------------
@@ -314,7 +321,14 @@ shutdown server = withRpcServer server $ \_ -> do
   let ex = Ex.toException (userError "Manual shutdown")
   return (RpcStopped ex, ())
 
--- | Force-terminate the external process
+-- | Force shutdown. Don't let any thread wait until other threads terminate.
+forceShutdown :: RpcServer -> IO ()
+forceShutdown server = withRpcServer server $ \_ -> do
+  forceTerminate server
+  let ex = Ex.toException (userError "Forced manual shutdown")
+  return (RpcStopped ex, ())
+
+-- | Terminate the external process
 terminate :: RpcServer -> IO ()
 terminate server = do
     ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode requestShutdown)
@@ -322,6 +336,15 @@ terminate server = do
   where
     requestShutdown :: Request ()
     requestShutdown = RequestShutdown
+
+-- | Force-terminate the external process
+forceTerminate :: RpcServer -> IO ()
+forceTerminate server = do
+    ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode requestForceShutdown)
+    void $ waitForProcess (rpcProc server)
+  where
+    requestForceShutdown :: Request ()
+    requestForceShutdown = RequestForceShutdown
 
 -- | Like modifyMVar, but terminate the server on exceptions
 withRpcServer :: RpcServer
@@ -350,22 +373,24 @@ getRpcExitCode RpcServer{rpcProc} = getProcessExitCode rpcProc
 -- Internal                                                                   --
 --------------------------------------------------------------------------------
 
--- | Decode messages from a handle and forward them to a channel
-readRequests :: Handle -> Chan Value -> IO ()
+-- | Decode messages from a handle and forward them to a channel.
+-- The boolean result indicates whether the shutdown is forced.
+readRequests :: Handle -> Chan Value -> IO Bool
 readRequests h ch = newStreamParser json' h >>= go
   where
-    go :: StreamParser Value -> IO ()
+    go :: StreamParser Value -> IO Bool
     go parser = do
       value <- nextInStream parser
       case fromJSON <$> value of
         Just (Success req) ->
           case req of
             Request req'    -> writeChan ch req' >> go parser
-            RequestShutdown -> return ()
+            RequestShutdown -> return False
+            RequestForceShutdown -> return True
         Just (Error err) -> do
           Ex.throwIO (userError err)
         Nothing ->
-          return () -- EOF
+          return False -- EOF
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: Chan Value -> Handle -> IO ()

@@ -19,18 +19,21 @@ module GhcServer
   , rpcRun
   , rpcSetEnv
   , shutdownGhcServer
-  , getRpcExitCode
+  , forceShutdownGhcServer
+  , getGhcExitCode
   ) where
 
 import Control.Concurrent (ThreadId, forkIO, myThreadId, throwTo)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar, modifyMVar)
+import Control.Concurrent.MVar
+  (MVar, newEmptyMVar, putMVar, readMVar, modifyMVar)
 import qualified Control.Exception as Ex
 import Control.Monad (forM, forever, when, void)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import Data.IORef
+import System.Exit (ExitCode)
 
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -144,7 +147,7 @@ ghcHandleRun :: RpcConversation
              -> String            -- ^ Function
              -> Ghc ()
 ghcHandleRun RpcConversation{..} m fun = do
-    (stdOutputRd, stdOutputBackup, stdErrorBackup) <- redirectStdout 
+    (stdOutputRd, stdOutputBackup, stdErrorBackup) <- redirectStdout
     (stdInputWr,  stdInputBackup)                  <- redirectStdin
 
     ghcThread    <- liftIO $ newEmptyMVar :: Ghc (MVar (Maybe ThreadId))
@@ -198,7 +201,7 @@ ghcHandleRun RpcConversation{..} m fun = do
   where
     -- Wait for and execute run requests from the client
     readRunRequests :: MVar (Maybe ThreadId) -> Handle -> MVar () -> IO ()
-    readRunRequests ghcThread stdInputWr done = 
+    readRunRequests ghcThread stdInputWr done =
       let go = do request <- get
                   case request of
                     GhcRunInterrupt -> do
@@ -211,13 +214,13 @@ ghcHandleRun RpcConversation{..} m fun = do
                       BSS.hPut stdInputWr bs
                       hFlush stdInputWr
                       go
-                    GhcRunAckDone -> 
-                      putMVar done () 
+                    GhcRunAckDone ->
+                      putMVar done ()
       in go
 
     -- Wait for the process to output something or terminate
     readStdout :: Handle -> MVar () -> IO ()
-    readStdout stdOutputRd done = 
+    readStdout stdOutputRd done =
       let go = do bs <- BSS.hGetSome stdOutputRd blockSize
                   if BSS.null bs
                     then putMVar done ()
@@ -233,7 +236,7 @@ ghcHandleRun RpcConversation{..} m fun = do
     -- TODO: What is a good value here?
     blockSize :: Int
     blockSize = 4096
-     
+
     -- Setup loopback pipe so we can capture runStmt's stdout/stderr
     redirectStdout :: Ghc (Handle, Fd, Fd)
     redirectStdout = liftIO $ do
@@ -250,8 +253,8 @@ ghcHandleRun RpcConversation{..} m fun = do
       -- Convert to the read end to a handle and return
       stdOutputRd' <- fdToHandle stdOutputRd
       return (stdOutputRd', stdOutputBackup, stdErrorBackup)
-      
-    -- Setup loopback pipe so we can write to runStmt's stdin 
+
+    -- Setup loopback pipe so we can write to runStmt's stdin
     redirectStdin :: Ghc (Handle, Fd)
     redirectStdin = liftIO $ do
       -- Create pipe
@@ -325,7 +328,7 @@ rpcRun server m fun = do
                   GhcRunDone runResult -> writeChan runWaitChan (Right runResult)
                   GhcRunOutp bs        -> writeChan runWaitChan (Left bs) >> go
     go
-    -- Don't leave RPC conversation scope until ack is sent 
+    -- Don't leave RPC conversation scope until ack is sent
     readMVar sentAck
 
   return RunActions {
@@ -333,7 +336,7 @@ rpcRun server m fun = do
         outcome <- readChan runWaitChan
         case outcome of
           Left  _ -> return ()
-          Right _ -> do writeChan reqChan GhcRunAckDone 
+          Right _ -> do writeChan reqChan GhcRunAckDone
                         readMVar sentAck
         return outcome
     , interrupt   = writeChan reqChan GhcRunInterrupt
@@ -341,11 +344,11 @@ rpcRun server m fun = do
     }
   where
     sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> MVar () -> IO ()
-    sendRequests put reqChan done = 
+    sendRequests put reqChan done =
       let go = do req <- readChan reqChan
                   put req
                   case req of
-                    GhcRunAckDone -> putMVar done () 
+                    GhcRunAckDone -> putMVar done ()
                     _             -> go
       in go
 
@@ -355,6 +358,12 @@ rpcSetEnv server env = rpc server (ReqSetEnv env)
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer = shutdown
+
+forceShutdownGhcServer :: GhcServer -> IO ()
+forceShutdownGhcServer = forceShutdown
+
+getGhcExitCode :: GhcServer -> IO (Maybe ExitCode)
+getGhcExitCode = getRpcExitCode
 
 --------------------------------------------------------------------------------
 -- Auxiliary                                                                  --

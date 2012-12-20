@@ -131,7 +131,7 @@ module IdeSession (
   -- ** Start and diagnose the server (probably only for debugging)
   ghcServer,
   getGhcServer,
-  getRpcExitCode,
+  getGhcExitCode,
 
   -- * Additional notes
   -- ** Responsibility for managing and mutating files in the sources dir.
@@ -347,7 +347,7 @@ shutdownSession IdeSession{..} = do
 restartSession :: IdeSession -> IO ()
 restartSession IdeSession{ideConfig, ideDataDir, ideState} =
   let restart idleState = do
-        shutdownGhcServer $ _ideGhcServer idleState
+        forceShutdownGhcServer $ _ideGhcServer idleState
         _ideGhcServer <-
           forkGhcServer (configStaticOpts ideConfig) (Just ideDataDir)
         let newIdleState = idleState { _ideComputed  = Nothing

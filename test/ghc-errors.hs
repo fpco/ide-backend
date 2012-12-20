@@ -203,7 +203,7 @@ multipleTests =
         assertNoErrors msgs
         let update3 = updateCodeGeneration True
         updateSessionD session update3 0  -- 0: nothing to generate code from
-        exitCodeBefore <- getRpcExitCode serverBefore
+        exitCodeBefore <- getGhcExitCode serverBefore
         assertEqual "exitCodeBefore" (Just ExitSuccess) exitCodeBefore  -- TODO: should probably be ExitSuccess
       )
   ]
@@ -987,10 +987,10 @@ restartRun code exitCode =
         updateSessionD session upd 1
         msgs2 <- getSourceErrors session
         assertNoErrors msgs2
-        exitCodeBefore <- getRpcExitCode serverBefore
+        exitCodeBefore <- getGhcExitCode serverBefore
         assertEqual "exitCodeBefore" (Just exitCode) exitCodeBefore
         serverAfter <- getGhcServer session
-        exitCodeAfter <- getRpcExitCode serverAfter
+        exitCodeAfter <- getGhcExitCode serverAfter
         assertEqual "exitCodeAfter" Nothing exitCodeAfter
         -- Just one more extra perverse test, since we have the setup ready.
         assertRaises "runWait runActionsBefore after restartSession"
