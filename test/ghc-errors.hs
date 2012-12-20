@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 module Main (main) where
 
 import Control.Concurrent (threadDelay)
@@ -203,7 +204,7 @@ multipleTests =
         let update3 = updateCodeGeneration True
         updateSessionD session update3 0  -- 0: nothing to generate code from
         exitCodeBefore <- getGhcExitCode serverBefore
-        assertEqual "exitCodeBefore" (Just ExitSuccess) exitCodeBefore  -- TODO: should probably be ExitSuccess
+        assertEqual "exitCodeBefore" (Just (ExitFailure 1)) exitCodeBefore
       )
   ]
 
@@ -819,37 +820,46 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected result: " ++ show result
     )
   , ( "Restart session (snippet doesn't swallow exceptions; after .1 sec)"
-    , restartRun    [ "module M where"
-                    , "loop :: IO ()"
-                    , "loop = loop"
-                    ] ExitSuccess
+    , restartRun [ "module M where"
+                 , "loop :: IO ()"
+                 , "loop = loop"
+                 ] (ExitFailure 1)
     )
-  -- , ( "Restart session (snippet swallow some exceptions; after .1 sec)"
-  --   , restartRun    [ "module M where"
-  --                   , "import qualified Control.Exception as Ex"
-  --                   , "swallow a ex = let _ = (ex :: Ex.SomeException) in a"
-  --                   , "loop :: IO ()"
-  --                   , "loop = let l = Ex.catch l (swallow l) in l"
-  --                   ] (ExitFailure 1)  -- TODO: should probably be ExitSuccess
-  --   )
-  -- , ( "Restart session (snippet swallows all exceptions; after .1 sec)"
-  --   , restartRun    [ "module M where"
-  --                   , "import qualified Control.Exception as Ex"
-  --                   , "swallow a ex = let _ = (ex :: Ex.SomeException) in a"
-  --                   , "l x = if length x > 999 then l [] else l (1 : x)"
-  --                   , "loop :: IO ()"
-  --                   , "loop = Ex.catch (l []) (swallow loop)"
-  --                   ] (ExitFailure 1)  -- TODO: should probably be ExitSuccess
-  --   )
-  -- , ( "Restart session (snippet swallows all and no allocation; after .1 sec)"
-  --   , restartRun    [ "module M where"
-  --                   , "import qualified Control.Exception as Ex"
-  --                   , "swallow a ex = let _ = (ex :: Ex.SomeException) in a"
-  --                   , "l = l"
-  --                   , "loop :: IO ()"
-  --                   , "loop = Ex.catch l (swallow loop)"
-  --                   ] (ExitFailure 1)  -- TODO: should probably be ExitSuccess
-  --   )
+  , ( "Restart session (snippet swallows all exceptions; after .1 sec)"
+    , restartRun [ "module M where"
+                 , ""
+                 , "import qualified Control.Exception as Ex"
+                 , "import Control.Concurrent (threadDelay)"
+                 , ""
+                 , "innerLoop :: IO ()"
+                 , "innerLoop = threadDelay 10000 >> innerLoop"
+                 , ""
+                 , "loop :: IO ()"
+                 , "loop = Ex.catch innerLoop $ \\e -> let _ = e :: Ex.SomeException in loop"
+                 ] (ExitFailure 1)
+    )
+  , ( "Restart session (black hole, swallow all exceptions; after .1 sec)"
+    , restartRun [ "module M where"
+                 , ""
+                 , "import qualified Control.Exception as Ex"
+                 , "import Control.Concurrent (threadDelay)"
+                 , ""
+                 , "innerLoop :: IO ()"
+                 , "innerLoop = innerLoop"
+                 , ""
+                 , "loop :: IO ()"
+                 , "loop = Ex.catch innerLoop $ \\e -> let _ = e :: Ex.SomeException in loop"
+                 ] (ExitFailure 1)
+    )
+  , ( "Restart session (evil snippet with infinite stack of exception handlers; after .1 sec)"
+    , restartRun [ "module M where"
+                 , ""
+                 , "import qualified Control.Exception as Ex"
+                 , ""
+                 , "loop :: IO ()"
+                 , "loop = Ex.catch loop $ \\e -> let _ = e :: Ex.SomeException in loop"
+                 ] (ExitFailure 1)
+    )
   ]
 
 defOpts :: [String]

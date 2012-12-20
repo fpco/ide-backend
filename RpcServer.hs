@@ -36,6 +36,8 @@ import System.Process
 import System.Exit (ExitCode)
 import System.Posix.Types (Fd)
 import System.Posix.IO (createPipe, closeFd, fdToHandle)
+import System.Posix.Process (exitImmediately)
+import System.Exit (ExitCode(ExitFailure))
 import System.Directory (canonicalizePath, getPermissions, executable)
 import Data.Typeable (Typeable)
 import Data.Aeson
@@ -142,29 +144,24 @@ rpcServer' :: Handle                     -- ^ Input
            -> (RpcConversation -> IO ()) -- ^ The request server
            -> IO ()
 rpcServer' hin hout herr server = do
-    requests  <- newChan :: IO (Chan Value)
-    responses <- newChan :: IO (Chan Value)
+    requests   <- newChan :: IO (Chan Value)
+    responses  <- newChan :: IO (Chan Value)
 
     setBinaryBlockBuffered [hin, hout, herr]
 
-    reader <- async $ readRequests hin requests
-    writer <- async $ writeResponses responses hout >> return False
-    handler <- async $ channelHandler requests responses server >> return False
+    reader  <- async $ readRequests hin requests
+    writer  <- async $ writeResponses responses hout
+    handler <- async $ channelHandler requests responses server
 
-    (asn, exOrValue) <- waitAnyCatchCancel [reader, writer, handler]
-    if asn == reader && either (const False) id exOrValue
-      then  -- forced shutdown
-        threadDelay 100000
-      else do
-        tryShowException exOrValue
-        mapM_ waitCatch [reader, writer, handler]
-        threadDelay 100000
+    waitAnyCatchCancel [reader, writer, handler] >>= tryShowException . snd
+    mapM_ waitCatch [reader, writer, handler]
+    threadDelay 100000
   where
-    tryShowException :: Either Ex.SomeException Bool -> IO ()
+    tryShowException :: Either Ex.SomeException () -> IO ()
     tryShowException (Left ex) =
       -- We don't want to throw an exception showing the previous exception
       ignoreIOExceptions $ hPutFlush herr . pack . show $ ex
-    tryShowException (Right _) =
+    tryShowException (Right ()) =
       return ()
 
 --------------------------------------------------------------------------------
@@ -375,22 +372,22 @@ getRpcExitCode RpcServer{rpcProc} = getProcessExitCode rpcProc
 
 -- | Decode messages from a handle and forward them to a channel.
 -- The boolean result indicates whether the shutdown is forced.
-readRequests :: Handle -> Chan Value -> IO Bool
+readRequests :: Handle -> Chan Value -> IO ()
 readRequests h ch = newStreamParser json' h >>= go
   where
-    go :: StreamParser Value -> IO Bool
+    go :: StreamParser Value -> IO ()
     go parser = do
       value <- nextInStream parser
       case fromJSON <$> value of
         Just (Success req) ->
           case req of
-            Request req'    -> writeChan ch req' >> go parser
-            RequestShutdown -> return False
-            RequestForceShutdown -> return True
-        Just (Error err) -> do
+            Request req'         -> writeChan ch req' >> go parser
+            RequestShutdown      -> return ()
+            RequestForceShutdown -> exitImmediately (ExitFailure 1)
+        Just (Error err) ->
           Ex.throwIO (userError err)
         Nothing ->
-          return False -- EOF
+          return () -- EOF
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: Chan Value -> Handle -> IO ()
