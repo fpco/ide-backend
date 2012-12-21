@@ -17,6 +17,7 @@ module GhcRun
   , submitStaticOpts
   , optsToDynFlags
   , runFromGhc
+  , RunBufferMode(..)
   , compileInGhc
   , runInGhc
   , checkModuleInProcess
@@ -72,7 +73,27 @@ data RunResult =
   | RunGhcException String
   deriving (Show, Eq)
 
+-- | Buffer modes for running code
+--
+-- Note that 'NoBuffering' means that something like 'putStrLn' will do a
+-- syscall per character, and each of these characters will be read and sent
+-- back to the client. This results in a large overhead.
+--
+-- When using 'LineBuffering' or 'BlockBuffering', 'runWait' will not report
+-- any output from the snippet until it outputs a linebreak/fills the buffer,
+-- respectively (or does an explicit flush). However, you can specify a timeout
+-- in addition to the buffering mode; if you set this to @Just n@, the buffer
+-- will be flushed every @n@ msec.
+data RunBufferMode =
+    RunNoBuffering
+  | RunLineBuffering  { runBufferTimeout :: Maybe Int }
+  | RunBlockBuffering { runBufferBlockSize :: Maybe Int
+                      , runBufferTimeout   :: Maybe Int
+                      }
+  deriving Show
+
 $(deriveJSON id ''RunResult)
+$(deriveJSON id ''RunBufferMode)
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
@@ -203,8 +224,10 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 
 -- | Run a snippet
 runInGhc :: (ModuleName, String)  -- ^ module and function to run, if any
+         -> RunBufferMode         -- ^ Buffer mode for stdout
+         -> RunBufferMode         -- ^ Buffer mode for stderr
          -> Ghc RunResult
-runInGhc (m, fun) = do
+runInGhc (m, fun) outBMode errBMode = do
   flags <- getSessionDynFlags
   -- TODO: not sure if this cleanup handler is needed:
   defaultCleanupHandler flags . handleErrors $ do
@@ -212,8 +235,11 @@ runInGhc (m, fun) = do
 --    _debugPpContext flags "context before setContext"
     setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName (MN.toString m)
                  , IIDecl $ simpleImportDecl $ mkModuleName "System.IO"
+                 , IIDecl $ simpleImportDecl $ mkModuleName "Data.Maybe"
+                 , IIDecl $ simpleImportDecl $ mkModuleName "Control.Concurrent"
                  ]
 --    _debugPpContext flags "context after setContext"
+    liftIO $ writeFile "/Users/edsko/wt/fpco/ide-backend/RunStmt.hs" expr
     handleErrors $ do
       runRes <- runStmt expr RunToCompletion
       case runRes of
@@ -228,12 +254,40 @@ runInGhc (m, fun) = do
           error "checkModule: RunBreak"
   where
     expr :: String
-    expr = "do"
-        ++ " System.IO.hSetBuffering System.IO.stdout System.IO.NoBuffering"
-        ++ "; System.IO.hSetBuffering System.IO.stderr System.IO.NoBuffering"
-        ++ "; " ++ MN.toString m ++ "." ++ fun
-        ++ "; System.IO.hFlush System.IO.stdout"
-        ++ "; System.IO.hFlush System.IO.stderr"
+    expr = unlines [
+        "do {"
+      , "System.IO.hSetBuffering System.IO.stdout " ++ fqnBMode outBMode ++ ";"
+      , "System.IO.hSetBuffering System.IO.stderr " ++ fqnBMode errBMode ++ ";"
+      , setBufferTimeout "System.IO.stdout" outBMode
+      , setBufferTimeout "System.IO.stderr" errBMode
+      , "" ++ MN.toString m ++ "." ++ fun ++ ";"
+      , "System.IO.hFlush System.IO.stdout;"
+      , "System.IO.hFlush System.IO.stderr"
+      , "}"
+      ]
+
+    fqnBMode :: RunBufferMode -> String
+    fqnBMode RunNoBuffering =
+      "System.IO.NoBuffering"
+    fqnBMode (RunLineBuffering _) =
+      "System.IO.LineBuffering"
+    fqnBMode (RunBlockBuffering Nothing _) =
+      "(System.IO.BlockBuffering Data.Maybe.Nothing)"
+    fqnBMode (RunBlockBuffering (Just i) _) =
+      "(System.IO.BlockBuffering (Data.Maybe.Just " ++ show i ++ "))"
+
+    setBufferTimeout :: String -> RunBufferMode -> String
+    setBufferTimeout h (RunLineBuffering    (Just n)) = bufferTimeout h n
+    setBufferTimeout h (RunBlockBuffering _ (Just n)) = bufferTimeout h n
+    setBufferTimeout _ _                              = ""
+
+    bufferTimeout :: String -> Int -> String
+    bufferTimeout h n =
+      "let go = do {"
+            ++ "Control.Concurrent.threadDelay " ++ show n ++ "; "
+            ++ "System.IO.hFlush " ++ h ++ "; "
+            ++ "go } "
+            ++ "in Control.Concurrent.forkIO go;"
 
     handleError :: Show a => a -> Ghc RunResult
     handleError = return . RunGhcException . show
@@ -367,6 +421,8 @@ checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
                                   errsRef handlerOutput handlerRemaining
         case funToRun of
           Just (m, fun) -> Right <$> runInGhc (MN.fromString m, fun)
+                                              RunNoBuffering
+                                              RunNoBuffering
           Nothing -> return (Left errs)
 
 -- | Version of handleJust for use in the GHC monad

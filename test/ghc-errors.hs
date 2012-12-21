@@ -4,6 +4,7 @@ module Main (main) where
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad (liftM, void)
+import qualified Data.ByteString as BSS (ByteString)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
 import Data.List (sort)
@@ -908,6 +909,51 @@ syntheticTests =
              RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
              _       -> assertFailure $ "Unexpected result " ++ show result
     )
+  , ( "Buffer modes: RunNoBuffering"
+    , testBufferMode RunNoBuffering $ map (BSSC.pack . return) "123\n456\n789\n"
+    )
+  , ( "Buffer modes: RunLineBuffering, no timeout"
+    , testBufferMode (RunLineBuffering Nothing) $ map BSSC.pack [
+          "123\n"
+        , "456\n"
+        , "789\n"
+        ]
+    )
+  , ( "Buffer modes: RunBlockBuffering, no timeout"
+    , testBufferMode (RunBlockBuffering (Just 5) Nothing) $ map BSSC.pack [
+          "123\n4"
+        , "56\n78"
+        , "9\n"
+        ]
+    )
+  , ( "Buffer modes: RunLineBuffering, with timeout"
+    , testBufferMode (RunLineBuffering (Just (5 * 200000))) $ map BSSC.pack [
+          "123\n"
+        , "4"
+        , "56\n"
+        , "78"
+        , "9\n"
+        ]
+    )
+  , ( "Buffer modes: RunBlockBuffering, with timeout"
+    , testBufferMode (RunBlockBuffering (Just 2) (Just (3 * 200000))) $ map BSSC.pack [
+         "12"
+       , "3"
+       , "\n4"
+       , "5"
+       , "6\n"
+       , "7"
+       , "89"
+       , "\n"
+       ]
+    )
+  , ( "Buffer modes: RunBlockBuffering, buffer never fills, with timeout"
+    , testBufferMode (RunBlockBuffering (Just 4096) (Just (5 * 200000))) $ map BSSC.pack [
+         "123\n4"
+       , "56\n78"
+       , "9\n"
+       ]
+    )
   ]
 
 defOpts :: [String]
@@ -1064,3 +1110,54 @@ restartRun code exitCode =
         assertRaises "runWait runActionsBefore after restartSession"
           (\(Ex.ErrorCall str) -> str == "runWait force-cancelled")
           (runWait runActionsBefore)
+
+testBufferMode :: RunBufferMode -> [BSS.ByteString] -> Assertion
+testBufferMode bufferMode expected =
+  withConfiguredSession defOpts $ \session -> do
+    let upd = (updateCodeGeneration True)
+           <> (updateStdoutBufferMode bufferMode)
+           <> (updateStderrBufferMode bufferMode)
+           <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                [ "module M where"
+                , "import Control.Concurrent"
+                , "import Control.Monad"
+                , "printCs :: IO ()"
+                , "printCs = do"
+                , "  threadDelay 100000 >> putChar '1'"
+                , "  threadDelay 200000 >> putChar '2'"
+                , "  threadDelay 200000 >> putChar '3'"
+
+                , "  threadDelay 200000 >> putChar '\\n'"
+                , ""
+                , "  threadDelay 200000 >> putChar '4'"
+                , "  threadDelay 200000 >> putChar '5'"
+
+                , "  threadDelay 200000 >> putChar '6'"
+                , "  threadDelay 200000 >> putChar '\\n'"
+                , ""
+                , "  threadDelay 200000 >> putChar '7'"
+
+                , "  threadDelay 200000 >> putChar '8'"
+                , "  threadDelay 200000 >> putChar '9'"
+                , "  threadDelay 200000 >> putChar '\\n'"
+                ])
+
+    updateSessionD session upd 1
+    msgs <- getSourceErrors session
+    assertNoErrors msgs
+
+    runActions <- runStmt session (MN.fromString "M") "printCs"
+    let go es = do ret <- runWait runActions
+                   case (es, ret) of
+                     (e : es', Left b) -> do
+                       assertEqual "" e b
+                       go es'
+                     ([], Right (RunOk _)) ->
+                       return ()
+                     (e : _, Right result) ->
+                       assertFailure $ "Program terminated with " ++ show result ++ " but expected " ++ show e
+                     ([], Left b) ->
+                       assertFailure $ "Expected program termination, but got " ++ show b
+                     ([], Right res) ->
+                       assertFailure $ "Program terminated abnormally: " ++ show res
+    go expected

@@ -61,7 +61,7 @@ import Paths_ide_backend
 
 data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
-  | ReqRun     ModuleName String
+  | ReqRun     ModuleName String RunBufferMode RunBufferMode
   | ReqSetEnv  [(String, Maybe String)]
   deriving Show
 data GhcCompileResponse =
@@ -110,8 +110,8 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
     case req of
       ReqCompile opts dir genCode ->
         ghcHandleCompile conv dOpts opts dir genCode
-      ReqRun m fun ->
-        ghcHandleRun conv m fun
+      ReqRun m fun outBMode errBMode ->
+        ghcHandleRun conv m fun outBMode errBMode
       ReqSetEnv env ->
         ghcHandleSetEnv conv env
 
@@ -150,12 +150,16 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts configSourcesDir ideGenera
       modifyIORef counter (updateProgress ghcMsg)
       put $ GhcCompileProgress oldCounter
 
+
+
 -- | Handle a run request
 ghcHandleRun :: RpcConversation
              -> ModuleName        -- ^ Module
              -> String            -- ^ Function
+             -> RunBufferMode     -- ^ Buffer mode for stdout
+             -> RunBufferMode     -- ^ Buffer mode for stderr
              -> Ghc ()
-ghcHandleRun RpcConversation{..} m fun = do
+ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
     (stdOutputRd, stdOutputBackup, stdErrorBackup) <- redirectStdout
     (stdInputWr,  stdInputBackup)                  <- redirectStdin
 
@@ -182,7 +186,7 @@ ghcHandleRun RpcConversation{..} m fun = do
 
     runOutcome <- ghandleJust isUserInterrupt return $ do
       liftIO $ myThreadId >>= putMVar ghcThread . Just
-      outcome <- runInGhc (m, fun)
+      outcome <- runInGhc (m, fun) outBMode errBMode
       liftIO $ modifyMVar ghcThread $ \_ -> return (Nothing, outcome)
 
     liftIO $ do
@@ -352,13 +356,15 @@ afterRunActions runActions callback = runActions {
 rpcRun :: GhcServer       -- ^ GHC server
        -> ModuleName      -- ^ Module
        -> String          -- ^ Function
+       -> RunBufferMode   -- ^ Buffer mode for stdout
+       -> RunBufferMode   -- ^ Buffer mode for stderr
        -> IO RunActions
-rpcRun server m fun = do
+rpcRun server m fun outBMode errBMode = do
   runWaitChan <- newChan :: IO (Chan (Either BSS.ByteString RunResult))
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
   conv <- async $ rpcConversation server $ \RpcConversation{..} -> do
-    put (ReqRun m fun)
+    put (ReqRun m fun outBMode errBMode)
     withAsync (sendRequests put reqChan) $ \sentAck -> do
       let go = do resp <- get
                   case resp of

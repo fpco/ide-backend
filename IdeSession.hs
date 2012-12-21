@@ -89,6 +89,10 @@ module IdeSession (
   -- ** Environment variables
   updateEnv,
 
+  -- ** Buffer mode
+  updateStdoutBufferMode,
+  updateStderrBufferMode,
+
   -- ** Performing the update
   -- | Once we have accumulated a batch of updates we can perform them all
   -- giving us a new session state. Since performing a bunch of updates can
@@ -128,6 +132,7 @@ module IdeSession (
   -- ** Run code
   runStmt,
   RunResult(..),
+  RunBufferMode(..),
   RunActions, -- We don't export the constructor nor all accessors
   interrupt,
   runWait,
@@ -206,7 +211,7 @@ import System.Posix.Files (setFileTimes)
 
 import Common
 import GhcServer
-import GhcRun (RunResult(..))
+import GhcRun (RunResult(..), RunBufferMode(..))
 import ModuleName (LoadedModules, ModuleName)
 import qualified ModuleName as MN
 
@@ -278,6 +283,10 @@ data IdeIdleState = IdeIdleState {
   , _ideEnv              :: [(String, Maybe String)]
     -- The GHC server (this is replaced in 'restartSession')
   , _ideGhcServer        :: GhcServer
+    -- Buffer mode for standard output for 'runStmt'
+  , _ideStdoutBufferMode    :: RunBufferMode
+    -- Buffer mode for standard error for 'runStmt'
+  , _ideStderrBufferMode    :: RunBufferMode
     -- Has the environment (as recorded in this state) diverged from the
     -- environment on the server?
   , _ideUpdatedEnv       :: Bool
@@ -320,6 +329,8 @@ initSession ideConfig@SessionConfig{..} = do
                         , _ideManagedFiles     = ManagedFiles [] []
                         , _ideEnv              = []
                         , _ideUpdatedEnv       = False
+                        , _ideStdoutBufferMode = RunNoBuffering
+                        , _ideStderrBufferMode = RunNoBuffering
                         , _ideGhcServer
                         }
   let ideStaticInfo = IdeStaticInfo{..}
@@ -558,6 +569,16 @@ updateEnv var val = IdeSessionUpdate $ \_ -> do
   modify ideEnv (override var val)
   set ideUpdatedEnv True
 
+-- | Set buffering mode for snippets' stdout
+updateStdoutBufferMode :: RunBufferMode -> IdeSessionUpdate
+updateStdoutBufferMode bufferMode = IdeSessionUpdate $ \_ ->
+  set ideStdoutBufferMode bufferMode
+
+-- | Set buffering mode for snippets' stderr
+updateStderrBufferMode :: RunBufferMode -> IdeSessionUpdate
+updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ ->
+  set ideStderrBufferMode bufferMode
+
 -- | The type of queries in a given session state.
 --
 -- Queries are in IO because they depend on the current state of the session
@@ -675,7 +696,10 @@ runStmt IdeSession{ideState} m fun = do
           -- inside 'module .. where' counts.
           if m `elem` computedLoadedModules comp
           then do
-            runActions <- rpcRun (idleState ^. ideGhcServer) m fun
+            runActions <- rpcRun (idleState ^. ideGhcServer)
+                                 m fun
+                                 (idleState ^. ideStdoutBufferMode)
+                                 (idleState ^. ideStderrBufferMode)
             let runActions' = afterRunActions runActions restoreToIdle
             return (IdeSessionRunning runActions' idleState, runActions')
           else fail $ "Module " ++ show (MN.toString m)
