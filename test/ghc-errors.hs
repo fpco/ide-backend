@@ -860,6 +860,54 @@ syntheticTests =
                  , "loop = Ex.catch loop $ \\e -> let _ = e :: Ex.SomeException in loop"
                  ] (ExitFailure 1)
     )
+  , ( "Make sure environment is restored after session restart"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.Environment (getEnv)"
+                    , "printFoo :: IO ()"
+                    , "printFoo = getEnv \"Foo\" >>= putStr"
+                    ])
+
+        -- Set environment
+        updateSession session (updateEnv "Foo" (Just "Value1")) (\_ -> return ())
+
+        -- Compile and run the code on the first server
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
+        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
+             _       -> assertFailure $ "Unexpected result " ++ show result
+
+        -- Start a new server
+        serverBefore <- getGhcServer session
+        restartSession session
+
+        -- Compile the code on the new server
+        updateSessionD session upd 1
+        msgs2 <- getSourceErrors session
+        assertNoErrors msgs2
+
+        -- Make sure the old server exited
+        exitCodeBefore <- getGhcExitCode serverBefore
+        assertEqual "exitCodeBefore" (Just (ExitFailure 1)) exitCodeBefore
+
+        -- Make sure the new server is still alive
+        serverAfter <- getGhcServer session
+        exitCodeAfter <- getGhcExitCode serverAfter
+        assertEqual "exitCodeAfter" Nothing exitCodeAfter
+
+        -- Make sure environment is restored
+        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
+             _       -> assertFailure $ "Unexpected result " ++ show result
+    )
   ]
 
 defOpts :: [String]
