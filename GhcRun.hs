@@ -239,7 +239,7 @@ runInGhc (m, fun) outBMode errBMode = do
                  , IIDecl $ simpleImportDecl $ mkModuleName "Control.Concurrent"
                  ]
 --    _debugPpContext flags "context after setContext"
-    liftIO $ writeFile "/Users/edsko/wt/fpco/ide-backend/RunStmt.hs" expr
+--    liftIO $ writeFile "/Users/edsko/wt/fpco/ide-backend/RunStmt.hs" expr
     handleErrors $ do
       runRes <- runStmt expr RunToCompletion
       case runRes of
