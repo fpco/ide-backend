@@ -83,7 +83,7 @@ data RunResult =
 -- any output from the snippet until it outputs a linebreak/fills the buffer,
 -- respectively (or does an explicit flush). However, you can specify a timeout
 -- in addition to the buffering mode; if you set this to @Just n@, the buffer
--- will be flushed every @n@ msec.
+-- will be flushed every @n@ microseconds.
 data RunBufferMode =
     RunNoBuffering
   | RunLineBuffering  { runBufferTimeout :: Maybe Int }
@@ -239,7 +239,7 @@ runInGhc (m, fun) outBMode errBMode = do
                  , IIDecl $ simpleImportDecl $ mkModuleName "Control.Concurrent"
                  ]
 --    _debugPpContext flags "context after setContext"
---    liftIO $ writeFile "/Users/edsko/wt/fpco/ide-backend/RunStmt.hs" expr
+--    liftIO $ writeFile "/Users/fpco/fpco/ide-backend/RunStmt.hs" expr
     handleErrors $ do
       runRes <- runStmt expr RunToCompletion
       case runRes of
@@ -254,17 +254,28 @@ runInGhc (m, fun) outBMode errBMode = do
           error "checkModule: RunBreak"
   where
     expr :: String
-    expr = unlines [
+    expr = setBuffering     "System.IO.stdout" outBMode
+         . setBuffering     "System.IO.stderr" errBMode
+         . setBufferTimeout "System.IO.stdout" outBMode
+         . setBufferTimeout "System.IO.stderr" errBMode
+         $ MN.toString m ++ "." ++ fun
+
+    setBuffering :: String -> RunBufferMode -> String -> String
+    setBuffering h mode code = unlines [
         "do {"
-      , "System.IO.hSetBuffering System.IO.stdout " ++ fqnBMode outBMode ++ ";"
-      , "System.IO.hSetBuffering System.IO.stderr " ++ fqnBMode errBMode ++ ";"
-      , setBufferTimeout "System.IO.stdout" outBMode
-      , setBufferTimeout "System.IO.stderr" errBMode
-      , "" ++ MN.toString m ++ "." ++ fun ++ ";"
-      , "System.IO.hFlush System.IO.stdout;"
-      , "System.IO.hFlush System.IO.stderr"
+      , "System.IO.hSetBuffering " ++ h ++ " " ++ fqnBMode mode ++ ";"
+      , code ++ ";"
+      , "System.IO.hFlush " ++ h
       , "}"
       ]
+
+    setBufferTimeout :: String -> RunBufferMode -> String -> String
+    setBufferTimeout h (RunLineBuffering (Just n)) code =
+      bufferTimeout h n code
+    setBufferTimeout h (RunBlockBuffering _ (Just n)) code =
+      bufferTimeout h n code
+    setBufferTimeout _ _ code =
+      code
 
     fqnBMode :: RunBufferMode -> String
     fqnBMode RunNoBuffering =
@@ -276,18 +287,17 @@ runInGhc (m, fun) outBMode errBMode = do
     fqnBMode (RunBlockBuffering (Just i) _) =
       "(System.IO.BlockBuffering (Data.Maybe.Just " ++ show i ++ "))"
 
-    setBufferTimeout :: String -> RunBufferMode -> String
-    setBufferTimeout h (RunLineBuffering    (Just n)) = bufferTimeout h n
-    setBufferTimeout h (RunBlockBuffering _ (Just n)) = bufferTimeout h n
-    setBufferTimeout _ _                              = ""
-
-    bufferTimeout :: String -> Int -> String
-    bufferTimeout h n =
-      "let go = do {"
-            ++ "Control.Concurrent.threadDelay " ++ show n ++ "; "
-            ++ "System.IO.hFlush " ++ h ++ "; "
-            ++ "go } "
-            ++ "in Control.Concurrent.forkIO go;"
+    bufferTimeout :: String -> Int -> String -> String
+    bufferTimeout h n code = unlines [
+        "do {"
+      , "tid <- forkIO (let go = do {"
+      , "         Control.Concurrent.threadDelay " ++ show n ++ "; "
+      , "         System.IO.hFlush " ++ h ++ ";"
+      , "         go } in go);"
+      , code ++ ";"
+      , "killThread tid"
+      , "}"
+      ]
 
     handleError :: Show a => a -> Ghc RunResult
     handleError = return . RunGhcException . show
