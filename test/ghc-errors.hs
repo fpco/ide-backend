@@ -370,20 +370,8 @@ syntheticTests =
         updateSessionD session update2 1
         msgs2 <- getSourceErrors session
         assertOneError msgs2
-        let update3 = updateModuleDelete (fromString "M")
-                      <> updateModule (MN.ModuleName ["M.1.2.3.8.T"])
-                                      (BSLC.pack "module M.1.2.3.8.T where")
-        updateSessionD session update3 1
-        msgs3 <- getSourceErrors session
-        assertOneError msgs3
-        let update4 =
-              updateModule (MN.ModuleName ["M", "1", "2", "3", "8", "T"])
-                           (BSLC.pack "module M.1.2.3.8.T where")
-        updateSessionD session update4 1
-        msgs4 <- getSourceErrors session
-        assertOneError msgs4
         assertRaises "fromString M.1.2.3.8.T"
-          (\e -> show (e :: Ex.ErrorCall) == "ModuleName.fromString: invalid module name \"M.1.2.3.8.T\"")
+          (\e -> show (e :: Ex.ErrorCall) == "fromString: invalid module name M.1.2.3.8.T")
           (return $! MN.toString $ fromString "M.1.2.3.8.T")
     )
   , ( "Interrupt runStmt (after 1 sec)"

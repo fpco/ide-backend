@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 -- | Valid Haskell qualified module names.
 module ModuleName
-  ( ModuleName(..)
+  ( ModuleName
   , toString
   , fromString
   , toFilePath
