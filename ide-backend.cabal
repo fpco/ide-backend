@@ -1,5 +1,5 @@
 name:                 ide-backend
-version:              0.5
+version:              0.6
 synopsis:             An IDE backend library
 -- description:
 license:              AllRightsReserved
