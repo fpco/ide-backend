@@ -44,10 +44,12 @@ import ErrUtils   ( Message )
 #endif
 
 import Control.Applicative
+import Control.Exception (assert)
 import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM)
 import Data.IORef
 import Data.List ((\\))
+import Data.Maybe (catMaybes, fromJust)
 import System.FilePath.Find (find, always, extension)
 import System.Process
 #if __GLASGOW_HASKELL__ >= 706
@@ -219,7 +221,9 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
       graph <- getModuleGraph
       let moduleNames = map ms_mod_name graph
       loadedNames <- filterM isLoaded moduleNames
-      let loadedModules = map (MN.fromString . moduleNameString) loadedNames
+      let lmaybe = map (MN.fromString . moduleNameString) loadedNames
+          lcat = catMaybes lmaybe
+          loadedModules = assert (length lcat == length lmaybe) lcat
       return (reverse errs, loadedModules)
 
 -- | Run a snippet
@@ -430,7 +434,7 @@ checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
                                   ideGenerateCode verbosity
                                   errsRef handlerOutput handlerRemaining
         case funToRun of
-          Just (m, fun) -> Right <$> runInGhc (MN.fromString m, fun)
+          Just (m, fun) -> Right <$> runInGhc (fromJust $ MN.fromString m, fun)
                                               RunNoBuffering
                                               RunNoBuffering
           Nothing -> return (Left errs)

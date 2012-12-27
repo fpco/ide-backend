@@ -30,13 +30,12 @@ toString (ModuleName ms) = intercalate "." ms
 -- It results in an error when used with a string that is not
 -- a valid module name (wrong case of any name part, wrong symbols used).
 --
-fromString :: String -> ModuleName
+fromString :: String -> Maybe ModuleName
 fromString string
-  | all validModuleComponent components' = ModuleName components'
-  | otherwise                            = error badName
+  | all validModuleComponent components' = Just $ ModuleName components'
+  | otherwise                            = Nothing
  where
   components' = split string
-  badName     = "ModuleName.fromString: invalid module name " ++ show string
   split cs = case break (=='.') cs of
     (chunk,[])     -> chunk : []
     (chunk,_:rest) -> chunk : split rest
@@ -58,7 +57,7 @@ toFilePath :: ModuleName -> FilePath
 toFilePath (ModuleName ms) = intercalate [pathSeparator] ms
 
 -- | An auxiliary function for tests. Guesses a module name from a file path.
-fromFilePath :: FilePath -> ModuleName
+fromFilePath :: FilePath -> Maybe ModuleName
 fromFilePath path = fromString $ toString $ ModuleName $
   case splitDirectories path of
     "." : l -> l

@@ -44,16 +44,11 @@ loadModulesFrom session originalSourcesDir = do
                         ((`elem` hsExtentions) `liftM` extension)
                         originalSourcesDir
   -- HACK: here we fake module names, guessing them from file names.
-  let tryFromPath f p = do
-        mex <- Ex.try $ Ex.evaluate $ MN.fromFilePath p
-        return $ case mex of
-          Right n  -> Just (n, f)
-          Left _ex -> let _ = _ex :: Ex.ErrorCall in Nothing
-  triedModules <-
-     mapM (\ f -> tryFromPath f
-                  $ dropExtension $ makeRelative originalSourcesDir f)
-          originalFiles
-  let originalModules = catMaybes triedModules
+  let triedModules =
+        map (\ f -> fmap (\x -> (x, f)) $ MN.fromFilePath
+                    $ dropExtension $ makeRelative originalSourcesDir f)
+            originalFiles
+      originalModules = catMaybes triedModules
       upd (m, f) = updateModuleFromFile m f
       -- Let's also disable ChangeCodeGeneration, to keep the test stable
       -- in case the default value of CodeGeneration changes.
@@ -138,14 +133,14 @@ multipleTests =
         assertOneError msgs5
         assertRaises "runStmt session Main main"
           (== userError "Cannot run before the code is generated.")
-          (runStmt session (MN.fromString "Main") "main")
+          (runStmt session (fromString "Main") "main")
       )
     , ("Run the sample code; don't fail without an explanation"
       , \session -> do
         (_, lm) <- getModules session
         let update = updateCodeGeneration True
         updateSessionD session update (length lm)  -- all recompiled
-        mex <- Ex.try $ runStmt session (MN.fromString "Main") "main"
+        mex <- Ex.try $ runStmt session (fromString "Main") "main"
         case mex of
           Right runActions -> void $ runWaitAll runActions
           Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
@@ -155,14 +150,14 @@ multipleTests =
         (_, lm) <- getModules session
         let upd m = loadModule m "x = 1"
             update =
-              updateModule (MN.fromString "TotallyMain")
+              updateModule (fromString "TotallyMain")
                            (BSLC.pack "module TotallyMain where\nmain = print \"test run\"")
               <> mconcat (map upd lm)
         updateSessionD session update (length lm + 1)
         updateSessionD session mempty 0
         let update2 = updateCodeGeneration True
         updateSessionD session update2 (length lm + 1)
-        runActions <- runStmt session (MN.fromString "TotallyMain") "main"
+        runActions <- runStmt session (fromString "TotallyMain") "main"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" output (BSLC.pack "\"test run\"\n")
@@ -187,13 +182,13 @@ multipleTests =
         serverBefore <- getGhcServer session
         let update = updateCodeGeneration True
         updateSessionD session update (length lm)  -- all recompiled
-        mex <- Ex.try $ runStmt session (MN.fromString "Main") "main"
+        mex <- Ex.try $ runStmt session (fromString "Main") "main"
         case mex of
           Right _runActions -> return ()  -- don't runWaitAll
           Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
         restartSession session
         updateSessionD session mempty (length lm)  -- all compiled anew
-        mex2 <- Ex.try $ runStmt session (MN.fromString "Main") "main"
+        mex2 <- Ex.try $ runStmt session (fromString "Main") "main"
         case mex2 of
           Right runActions -> void $ runWaitAll runActions  -- now runWaitAll
           Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
@@ -213,18 +208,18 @@ syntheticTests :: [(String, Assertion)]
 syntheticTests =
   [ ( "Maintain list of compiled modules"
     , withConfiguredSession defOpts $ \session -> do
-        let m = MN.fromString "A"
+        let m = fromString "A"
         updateSessionD session (loadModule m "a = 5") 1
         assertEqual "[m]" [m] =<< getLoadedModules session
-        let m2 = MN.fromString "A2"
+        let m2 = fromString "A2"
         updateSessionD session (loadModule m2 "import A\na2 = A.a") 1
         assertEqual "[m, m2]" (sort [m, m2])
           =<< (liftM sort $ getLoadedModules session)
-        let m3 = MN.fromString "A3"
+        let m3 = fromString "A3"
         updateSessionD session (loadModule m3 "") 1
         assertEqual "[m, m2, m3]" (sort [m, m2, m3])
           =<< (liftM sort $ getLoadedModules session)
-        let m4 = MN.fromString "Wrong"
+        let m4 = fromString "Wrong"
         updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
         assertEqual "Wrong" (sort [m, m2, m3])
           =<< (liftM sort $ getLoadedModules session)
@@ -248,12 +243,12 @@ syntheticTests =
         withSession' (tweakConfig 2 config) $ \s2 -> do
          withSession' (tweakConfig 3 config) $ \s3 -> do
           withSession' (tweakConfig 4 config) $ \_s4 -> do
-           let update2 = loadModule (MN.fromString "M") "a = unknownX"
+           let update2 = loadModule (fromString "M") "a = unknownX"
            updateSessionD s2 update2 1
            msgs2 <- getSourceErrors s2
            assertOneError msgs2
            withSession' (tweakConfig 5 config) $ \s5 -> do
-            let update3 = loadModule (MN.fromString "M") "a = 3"
+            let update3 = loadModule (fromString "M") "a = 3"
             updateSessionD s3 update3 1
             msgs3 <- getSourceErrors s3
             assertNoErrors msgs3
@@ -302,14 +297,14 @@ syntheticTests =
         let update = updateDataFile "datafile.dat"
                                     (BSLC.pack "test data content")
         updateSessionD session update 0
-        let update2 = loadModule (MN.fromString "Main")
+        let update2 = loadModule (fromString "Main")
               "main = readFile \"datafile.dat\" >>= putStrLn"
         updateSessionD session update2 1
         msgs <- getSourceErrors session
         assertNoErrors msgs
         let update3 = updateCodeGeneration True
         updateSessionD session update3 1
-        runActions <- runStmt session (MN.fromString "Main") "main"
+        runActions <- runStmt session (fromString "Main") "main"
         (output, _) <- runWaitAll runActions
         assertEqual "compare test data content"
           (BSLC.pack "test data content\n") output
@@ -317,7 +312,7 @@ syntheticTests =
                                      (BSLC.pack "new content")
                       <> update2
         updateSessionD session update4 1
-        runActions2 <- runStmt session (MN.fromString "Main") "main"
+        runActions2 <- runStmt session (fromString "Main") "main"
         (output2, _) <- runWaitAll runActions2
         assertEqual "compare new content"
           (BSLC.pack "new content\n") output2
@@ -347,35 +342,35 @@ syntheticTests =
         shutdownSession session
         assertRaises "runStmt session Main main"
           (== userError "Session already shut down.")
-          (runStmt session (MN.fromString "Main") "main")
+          (runStmt session (fromString "Main") "main")
     )
   , ( "Reject a wrong CPP directive"
     , let packageOpts = [ "-hide-all-packages"
                         , "-XCPP"
                         ]
       in withConfiguredSession packageOpts $ \session -> do
-        let update = loadModule (MN.fromString "M") "#ifdef"
+        let update = loadModule (fromString "M") "#ifdef"
                      <> updateCodeGeneration True
         updateSessionD session update 1
         msgs <- getSourceErrors session
         assertSomeErrors msgs
         assertRaises "runStmt session Main main"
           (== userError "Module \"Main\" not successfully loaded, when trying to run code.")
-          (runStmt session (MN.fromString "Main") "main")
+          (runStmt session (fromString "Main") "main")
     )
   , ( "Reject a module with mangled header"
     , withConfiguredSession defOpts $ \session -> do
-        let update = updateModule (MN.fromString "M")
+        let update = updateModule (fromString "M")
                                   (BSLC.pack "module very-wrong where")
         updateSessionD session update 1
         msgs <- getSourceErrors session
         assertOneError msgs
-        let update2 = updateModule (MN.fromString "M")
+        let update2 = updateModule (fromString "M")
                                    (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update2 1
         msgs2 <- getSourceErrors session
         assertOneError msgs2
-        let update3 = updateModuleDelete (MN.fromString "M")
+        let update3 = updateModuleDelete (fromString "M")
                       <> updateModule (MN.ModuleName ["M.1.2.3.8.T"])
                                       (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update3 1
@@ -387,14 +382,14 @@ syntheticTests =
         updateSessionD session update4 1
         msgs4 <- getSourceErrors session
         assertOneError msgs4
-        assertRaises "MN.fromString M.1.2.3.8.T"
+        assertRaises "fromString M.1.2.3.8.T"
           (\e -> show (e :: Ex.ErrorCall) == "ModuleName.fromString: invalid module name \"M.1.2.3.8.T\"")
-          (return $! MN.toString $ MN.fromString "M.1.2.3.8.T")
+          (return $! MN.toString $ fromString "M.1.2.3.8.T")
     )
   , ( "Interrupt runStmt (after 1 sec)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent (threadDelay)"
                     , "loop :: IO ()"
@@ -403,7 +398,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "loop"
+        runActions <- runStmt session (fromString "M") "loop"
         threadDelay 1000000
         interrupt runActions
         resOrEx <- runWait runActions
@@ -414,7 +409,7 @@ syntheticTests =
   , ( "Interrupt runStmt (immediately)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent (threadDelay)"
                     , "loop :: IO ()"
@@ -423,7 +418,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "loop"
+        runActions <- runStmt session (fromString "M") "loop"
         interrupt runActions
         resOrEx <- runWait runActions
         case resOrEx of
@@ -433,7 +428,7 @@ syntheticTests =
   , ( "Interrupt runStmt (black hole; after 1 sec)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "loop :: IO ()"
                     , "loop = loop"
@@ -441,7 +436,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "loop"
+        runActions <- runStmt session (fromString "M") "loop"
         threadDelay 1000000
         interrupt runActions
         resOrEx <- runWait runActions
@@ -452,7 +447,7 @@ syntheticTests =
   , ( "Capture stdout (single putStrLn)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = putStrLn \"Hello World\""
@@ -460,7 +455,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "hello"
+        runActions <- runStmt session (fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "Hello World\n") output
@@ -469,7 +464,7 @@ syntheticTests =
   , ( "Capture stdout (single putStr)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = putStr \"Hello World\""
@@ -477,7 +472,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "hello"
+        runActions <- runStmt session (fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "Hello World") output
@@ -486,7 +481,7 @@ syntheticTests =
   , ( "Capture stdout (single putStr with delay)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent (threadDelay)"
                     , "import System.IO"
@@ -496,7 +491,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "hello"
+        runActions <- runStmt session (fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "hellohi") output
@@ -505,7 +500,7 @@ syntheticTests =
   , ( "Capture stdout (multiple putStrLn)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = do putStrLn \"Hello World 1\""
@@ -515,7 +510,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "hello"
+        runActions <- runStmt session (fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "Hello World 1\nHello World 2\nHello World 3\n") output
@@ -524,7 +519,7 @@ syntheticTests =
   , ( "Capture stdout (mixed putStr and putStrLn)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = do putStrLn \"Hello World 1\""
@@ -534,7 +529,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "hello"
+        runActions <- runStmt session (fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "Hello World 1\nHello World 2Hello World 3\n") output
@@ -543,7 +538,7 @@ syntheticTests =
   , ( "Capture stdin (simple echo process)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "echo :: IO ()"
                     , "echo = getLine >>= putStrLn"
@@ -551,7 +546,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "echo"
+        runActions <- runStmt session (fromString "M") "echo"
         supplyStdin runActions (BSSC.pack "ECHO!\n")
         (output, result) <- runWaitAll runActions
         case result of
@@ -561,7 +556,7 @@ syntheticTests =
   , ( "Capture stdin (infinite echo process)"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.IO"
                     , "import Control.Monad"
@@ -572,7 +567,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "echo"
+        runActions <- runStmt session (fromString "M") "echo"
 
         do supplyStdin runActions (BSSC.pack "ECHO 1!\n")
            result <- runWait runActions
@@ -591,7 +586,7 @@ syntheticTests =
   , ( "Two calls to runStmt"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "echo :: IO ()"
                     , "echo = getLine >>= putStrLn"
@@ -602,14 +597,14 @@ syntheticTests =
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
 
-        do runActions <- runStmt session (MN.fromString "M") "echo"
+        do runActions <- runStmt session (fromString "M") "echo"
            supplyStdin runActions (BSSC.pack "ECHO!\n")
            (output, result) <- runWaitAll runActions
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "ECHO!\n") output
              _       -> assertFailure $ "Unexpected run result: " ++ show result
 
-        do runActions <- runStmt session (MN.fromString "M") "echoReverse"
+        do runActions <- runStmt session (fromString "M") "echoReverse"
            supplyStdin runActions (BSSC.pack "!OHCE\n")
            (output, result) <- runWaitAll runActions
            case result of
@@ -619,7 +614,7 @@ syntheticTests =
   , ( "Make sure we can terminate the IDE session when code is running"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "echo :: IO ()"
                     , "echo = (getLine >>= putStrLn) >> echo"
@@ -627,13 +622,13 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        _runActions <- runStmt session (MN.fromString "M") "echo"
+        _runActions <- runStmt session (fromString "M") "echo"
         return ()
      )
   , ( "Capture stderr"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.IO"
                     , "hello :: IO ()"
@@ -642,7 +637,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "hello"
+        runActions <- runStmt session (fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" (BSLC.pack "Hello World\n") output
@@ -651,7 +646,7 @@ syntheticTests =
   , ( "Merge stdout and stderr"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.IO"
                     , "hello :: IO ()"
@@ -667,7 +662,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        runActions <- runStmt session (MN.fromString "M") "hello"
+        runActions <- runStmt session (fromString "M") "hello"
         (output, result) <- runWaitAll runActions
         let expectedOutput = "Hello World 1\n"
                           ++ "Hello World 2\n"
@@ -684,7 +679,7 @@ syntheticTests =
   , ( "Set environment variables"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.Environment (getEnv)"
                     , "printFoo :: IO ()"
@@ -697,12 +692,12 @@ syntheticTests =
         assertEqual "This should compile without errors" [] msgs
 
         -- At the start, both Foo and Bar are undefined
-        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+        do runActions <- runStmt session (fromString "M") "printFoo"
            (_, result) <- runWaitAll runActions
            case result of
              RunProgException ex -> assertEqual "" ex "IOException: Foo: getEnv: does not exist (no environment variable)"
              _ -> assertFailure $ "Unexpected result " ++ show result
-        do runActions <- runStmt session (MN.fromString "M") "printBar"
+        do runActions <- runStmt session (fromString "M") "printBar"
            (_, result) <- runWaitAll runActions
            case result of
              RunProgException ex -> assertEqual "" ex "IOException: Bar: getEnv: does not exist (no environment variable)"
@@ -710,12 +705,12 @@ syntheticTests =
 
         -- Update Foo, leave Bar undefined
         updateSession session (updateEnv "Foo" (Just "Value1")) (\_ -> return ())
-        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+        do runActions <- runStmt session (fromString "M") "printFoo"
            (output, result) <- runWaitAll runActions
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
              _       -> assertFailure $ "Unexpected result " ++ show result
-        do runActions <- runStmt session (MN.fromString "M") "printBar"
+        do runActions <- runStmt session (fromString "M") "printBar"
            (_, result) <- runWaitAll runActions
            case result of
              RunProgException ex -> assertEqual "" ex "IOException: Bar: getEnv: does not exist (no environment variable)"
@@ -723,12 +718,12 @@ syntheticTests =
 
         -- Update Bar, leave Foo defined
         updateSession session (updateEnv "Bar" (Just "Value2")) (\_ -> return ())
-        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+        do runActions <- runStmt session (fromString "M") "printFoo"
            (output, result) <- runWaitAll runActions
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
              _       -> assertFailure $ "Unexpected result " ++ show result
-        do runActions <- runStmt session (MN.fromString "M") "printBar"
+        do runActions <- runStmt session (fromString "M") "printBar"
            (output, result) <- runWaitAll runActions
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
@@ -736,12 +731,12 @@ syntheticTests =
 
         -- Unset Foo, leave Bar defined
         updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
-        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+        do runActions <- runStmt session (fromString "M") "printFoo"
            (_, result) <- runWaitAll runActions
            case result of
              RunProgException ex -> assertEqual "" ex "IOException: Foo: getEnv: does not exist (no environment variable)"
              _ -> assertFailure $ "Unexpected result " ++ show result
-        do runActions <- runStmt session (MN.fromString "M") "printBar"
+        do runActions <- runStmt session (fromString "M") "printBar"
            (output, result) <- runWaitAll runActions
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
@@ -750,7 +745,7 @@ syntheticTests =
   , ( "Update during run"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "loop :: IO ()"
                     , "loop = loop"
@@ -758,7 +753,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        _runActions <- runStmt session (MN.fromString "M") "loop"
+        _runActions <- runStmt session (fromString "M") "loop"
         assertRaises ""
           (== userError "Cannot update session in running mode")
           (updateSessionD session upd 1)
@@ -766,7 +761,7 @@ syntheticTests =
   , ( "getSourceErrors during run"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "{-# OPTIONS_GHC -Wall #-}"
                     , "module M where"
                     , "loop = loop"
@@ -777,44 +772,44 @@ syntheticTests =
           -- We expect a 'top-level identifier without type' warning
           [SrcError KindWarning _ _ _ _] -> return ()
           _ -> assertFailure "Unexpected source errors"
-        _runActions <- runStmt session (MN.fromString "M") "loop"
+        _runActions <- runStmt session (fromString "M") "loop"
         msgs' <- getSourceErrors session
         assertEqual "Running code does not affect getSourceErrors" msgs msgs'
     )
   , ( "getLoadedModules during run"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "{-# OPTIONS_GHC -Wall #-}"
                     , "module M where"
                     , "loop = loop"
                     ])
         updateSessionD session upd 1
         mods <- getLoadedModules session
-        assertEqual "" [MN.fromString "M"] mods
-        _runActions <- runStmt session (MN.fromString "M") "loop"
+        assertEqual "" [fromString "M"] mods
+        _runActions <- runStmt session (fromString "M") "loop"
         mods' <- getLoadedModules session
         assertEqual "Running code does not affect getLoadedModules" mods mods'
     )
   , ( "Interrupt, then capture stdout"
     , withConfiguredSession defOpts $ \session -> do
         updateSession session (updateCodeGeneration True) (\_ -> return ())
-        let upd1 = updateModule (MN.fromString "Main") . BSLC.pack . unlines $
+        let upd1 = updateModule (fromString "Main") . BSLC.pack . unlines $
                      [ "import Control.Monad"
                      , "main = forever $ print 1"
                      ]
-            upd2 = updateModule (MN.fromString "Main") . BSLC.pack . unlines $
+            upd2 = updateModule (fromString "Main") . BSLC.pack . unlines $
                      [ "main = print 1234" ]
 
         do updateSessionD session upd1 1
-           runActions <- runStmt session (MN.fromString "Main") "main"
+           runActions <- runStmt session (fromString "Main") "main"
            interrupt runActions
            delay <- randomIO :: IO Int
            threadDelay (delay `mod` 1000000) -- Between 0 and 1 sec
            void $ runWaitAll runActions
 
         do updateSessionD session upd2 1
-           runActions <- runStmt session (MN.fromString "Main") "main"
+           runActions <- runStmt session (fromString "Main") "main"
            (output, result) <- runWaitAll runActions
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "1234\n") output
@@ -864,7 +859,7 @@ syntheticTests =
   , ( "Make sure environment is restored after session restart"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.Environment (getEnv)"
                     , "printFoo :: IO ()"
@@ -878,7 +873,7 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertNoErrors msgs
-        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+        do runActions <- runStmt session (fromString "M") "printFoo"
            (output, result) <- runWaitAll runActions
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
@@ -903,7 +898,7 @@ syntheticTests =
         assertEqual "exitCodeAfter" Nothing exitCodeAfter
 
         -- Make sure environment is restored
-        do runActions <- runStmt session (MN.fromString "M") "printFoo"
+        do runActions <- runStmt session (fromString "M") "printFoo"
            (output, result) <- runWaitAll runActions
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
@@ -1026,16 +1021,11 @@ getModules session = do
   originalFiles <- find always
                         ((`elem` hsExtentions) `liftM` extension)
                         configSourcesDir
-  let tryFromPath f p = do
-        mex <- Ex.try $ Ex.evaluate $ MN.fromFilePath p
-        return $ case mex of
-          Right n  -> Just (n, f)
-          Left _ex -> let _ = _ex :: Ex.ErrorCall in Nothing
-  triedModules <-
-     mapM (\ f -> tryFromPath f
-                  $ dropExtension $ makeRelative configSourcesDir f)
-          originalFiles
-  let originalModules = catMaybes triedModules
+  let triedModules =
+        map (\ f -> fmap (\x -> (x, f)) $ MN.fromFilePath
+                    $ dropExtension $ makeRelative configSourcesDir f)
+            originalFiles
+      originalModules = catMaybes triedModules
       m = case originalModules of
         [] -> error "The test directory is empty."
         (x, _) : _ -> x
@@ -1045,6 +1035,11 @@ getModules session = do
       -- in "Run automatically corrected code; don't fail at all".
       !_ = length originalModules
   return (m, map fst originalModules)
+
+fromString :: String -> ModuleName
+fromString s = case MN.fromString s of
+  Nothing -> error $ "fromString: invalid module name " ++ s
+  Just m -> m
 
 loadModule :: ModuleName -> String -> IdeSessionUpdate
 loadModule m contents =
@@ -1078,14 +1073,14 @@ restartRun :: [String] -> ExitCode -> Assertion
 restartRun code exitCode =
       withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
                      code)
 
         -- Compile and run the code on the first server
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertNoErrors msgs
-        runActionsBefore <- runStmt session (MN.fromString "M") "loop"
+        runActionsBefore <- runStmt session (fromString "M") "loop"
 
         -- Start a new server
         threadDelay 100000
@@ -1117,7 +1112,7 @@ testBufferMode bufferMode expected =
     let upd = (updateCodeGeneration True)
            <> (updateStdoutBufferMode bufferMode)
            <> (updateStderrBufferMode bufferMode)
-           <> (updateModule (MN.fromString "M") . BSLC.pack . unlines $
+           <> (updateModule (fromString "M") . BSLC.pack . unlines $
                 [ "module M where"
                 , "import Control.Concurrent"
                 , "import Control.Monad"
@@ -1146,7 +1141,7 @@ testBufferMode bufferMode expected =
     msgs <- getSourceErrors session
     assertNoErrors msgs
 
-    runActions <- runStmt session (MN.fromString "M") "printCs"
+    runActions <- runStmt session (fromString "M") "printCs"
     let go es = do ret <- runWait runActions
                    case (es, ret) of
                      (e : es', Left b) -> do
