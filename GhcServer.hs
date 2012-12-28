@@ -18,7 +18,6 @@ module GhcServer
   , rpcCompile
   , RunActions(..)
   , runWaitAll
-  , afterRunActions
   , rpcRun
   , rpcSetEnv
   , shutdownGhcServer
@@ -30,10 +29,12 @@ import Control.Concurrent (ThreadId, myThreadId, throwTo)
 import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
 import Control.Concurrent.MVar
   ( MVar
+  , newMVar
   , newEmptyMVar
   , putMVar
   , readMVar
   , modifyMVar
+  , modifyMVar_
   )
 import Control.Concurrent.Async (async, withAsync, cancel, wait)
 import qualified Control.Exception as Ex
@@ -320,14 +321,27 @@ rpcCompile server opts dir genCode callback =
 
 -- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {
-    -- Wait for the code to output something or terminate
+    -- | Wait for the code to output something or terminate
     runWait     :: IO (Either BSS.ByteString RunResult)
-    -- Send a UserInterrupt exception to the code
+    -- | Send a UserInterrupt exception to the code
+    --
+    -- A call to 'interrupt' after the snippet has terminated has no effect.
   , interrupt   :: IO ()
-    -- Make data available on the code's stdin
+    -- | Make data available on the code's stdin
+    --
+    -- A call to 'supplyStdin' after the snippet has terminated has no effect.
   , supplyStdin :: BSS.ByteString -> IO ()
-    -- Force terminate the runaction
-    -- (The server will be useless after this)
+    -- | Register a callback to be invoked when the program terminates
+    -- The callback will only be invoked once.
+    --
+    -- A call to 'registerTerminationCallback' after the snippet has terminated
+    -- has no effect. The termination handler is NOT called when the the
+    -- 'RunActions' is 'forceCancel'ed.
+  , registerTerminationCallback :: (RunResult -> IO ()) -> IO ()
+    -- | Force terminate the runaction
+    -- (The server will be useless after this -- for internal use only).
+    --
+    -- Guranteed not to block.
   , forceCancel :: IO ()
   }
 
@@ -342,15 +356,6 @@ runWaitAll RunActions{runWait} = go []
       case resp of
         Left  bs        -> go (bs : acc)
         Right runResult -> return (BSL.fromChunks (reverse acc), runResult)
-
--- | Register a callback to be invoked when the program terminates
-afterRunActions :: RunActions -> (RunResult -> IO ()) -> RunActions
-afterRunActions runActions callback = runActions {
-    runWait = do result <- runWait runActions
-                 case result of
-                   Left bs -> return (Left bs)
-                   Right r -> callback r >> return (Right r)
-  }
 
 -- | Run code
 rpcRun :: GhcServer       -- ^ GHC server
@@ -373,18 +378,41 @@ rpcRun server m fun outBMode errBMode = do
       go
       wait sentAck
 
+  -- The runActionState initially is the termination callback to be called
+  -- when the snippet terminates. After termination it becomes (Right outcome).
+  -- This means that we will only execute the termination callback once, and
+  -- the user can safely call runWait after termination and get the same
+  -- result.
+  let onTermination :: RunResult -> IO ()
+      onTermination _ = do writeChan reqChan GhcRunAckDone
+                           wait conv
+  runActionsState <- newMVar (Left onTermination)
+
   return RunActions {
-      runWait = do
-        outcome <- readChan runWaitChan
-        case outcome of
-          Left  _ -> return ()
-          Right _ -> writeChan reqChan GhcRunAckDone >> wait conv
-        return outcome
+      runWait = modifyMVar runActionsState $ \st -> case st of
+        Right outcome ->
+          return (Right outcome, Right outcome)
+        Left terminationCallback -> do
+          outcome <- readChan runWaitChan
+          case outcome of
+            Left bs ->
+              return (Left terminationCallback, Left bs)
+            Right res@RunForceCancelled ->
+              return (Right res, Right res)
+            Right res -> do
+              terminationCallback res
+              return (Right res, Right res)
     , interrupt   = writeChan reqChan GhcRunInterrupt
     , supplyStdin = writeChan reqChan . GhcRunInput
+    , registerTerminationCallback = \callback' ->
+        modifyMVar_ runActionsState $ \st -> case st of
+          Right outcome ->
+            return (Right outcome)
+          Left callback ->
+            return (Left (\res -> callback res >> callback' res))
     , forceCancel = do
+        writeChan runWaitChan (Right RunForceCancelled)
         cancel conv
-        writeChan runWaitChan (error "runWait force-cancelled")
     }
   where
     sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> IO ()

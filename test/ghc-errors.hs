@@ -165,6 +165,8 @@ multipleTests =
             assertFailure "Unexpected exception raised by the running code."
           RunGhcException _ex  ->
             assertFailure "Manually corrected code not run successfully"
+          RunForceCancelled ->
+            assertFailure "Unexpected force-cancel"
       )
     , ("Make sure deleting modules removes them from the directory"
       , \session -> do
@@ -959,6 +961,120 @@ syntheticTests =
                RunOk _ -> assertEqual "" (BSLC.pack "Hello World") output
                _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Call runWait after termination (normal termination)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "hello :: IO ()"
+                    , "hello = putStrLn \"Hello World\""
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        runActions <- runStmt session (fromString "M") "hello"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk _ -> assertEqual "" (BSLC.pack "Hello World\n") output
+          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        result' <- runWait runActions
+        case result' of
+          Right (RunOk _) -> return ()
+          _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show result'
+    )
+  , ( "Call runWait after termination (interrupted)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Control.Concurrent (threadDelay)"
+                    , "loop :: IO ()"
+                    , "loop = threadDelay 100000 >> loop"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        runActions <- runStmt session (fromString "M") "loop"
+        threadDelay 1000000
+        interrupt runActions
+        resOrEx <- runWait runActions
+        case resOrEx of
+          Right (RunProgException "AsyncException: user interrupt") -> return ()
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+        resOrEx' <- runWait runActions
+        case resOrEx' of
+          Right (RunProgException "AsyncException: user interrupt") -> return ()
+          _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show resOrEx'
+    )
+  , ( "Call runWait after termination (restarted session)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Control.Concurrent (threadDelay)"
+                    , "loop :: IO ()"
+                    , "loop = threadDelay 100000 >> loop"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        runActions <- runStmt session (fromString "M") "loop"
+        threadDelay 1000000
+        restartSession session
+        resOrEx <- runWait runActions
+        case resOrEx of
+          Right RunForceCancelled -> return ()
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+        resOrEx' <- runWait runActions
+        case resOrEx' of
+          Right RunForceCancelled -> return ()
+          _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show resOrEx'
+    )
+  , ( "Call runWait after termination (started new snippet in meantime)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (fromString "M") . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Control.Concurrent"
+                    , "hello :: IO ()"
+                    , "hello = putStrLn \"Hello World\""
+                    , "slowHello :: IO ()"
+                    , "slowHello = threadDelay 2000000 >> putStrLn \"Oh, hello\""
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+
+        -- Start first snippet and wait for it to terminate
+        runActions1 <- runStmt session (fromString "M") "hello"
+        do (output, result) <- runWaitAll runActions1
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "Hello World\n") output
+             _       -> assertFailure $ "Unexpected run result: " ++ show result
+
+        -- Start second snippet
+        runActions2 <- runStmt session (fromString "M") "slowHello"
+
+        -- While it is running, call runWait again on the old runActions, make
+        -- sure it's still the same
+        do result <- runWait runActions1
+           case result of
+             Right (RunOk _) -> return ()
+             _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show result
+
+        -- Make sure that a call to 'runStmt' throws an exception
+        -- (because we are still in running state)
+        assertRaises "runStmt during running code"
+          (== userError "Cannot run code concurrently")
+          (runStmt session (fromString "M") "hello")
+
+        -- Now call runWait on the *new* runActions and make sure we
+        -- get the right result
+        do (output, result) <- runWaitAll runActions2
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "Oh, hello\n") output
+             _       -> assertFailure $ "Unexpected run result: " ++ show result
+    )
   ]
 
 defOpts :: [String]
@@ -1112,9 +1228,10 @@ restartRun code exitCode =
         assertEqual "exitCodeAfter" Nothing exitCodeAfter
 
         -- Just one more extra perverse test, since we have the setup ready.
-        assertRaises "runWait runActionsBefore after restartSession"
-          (\(Ex.ErrorCall str) -> str == "runWait force-cancelled")
-          (runWait runActionsBefore)
+        resOrEx <- runWait runActionsBefore
+        case resOrEx of
+          Right RunForceCancelled -> return ()
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
 
 testBufferMode :: RunBufferMode -> [BSS.ByteString] -> Assertion
 testBufferMode bufferMode expected =

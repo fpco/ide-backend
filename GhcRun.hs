@@ -73,6 +73,8 @@ data RunResult =
   | RunProgException String
     -- | GHC itself threw an exception when we tried to run the code
   | RunGhcException String
+    -- | The session was restarted
+  | RunForceCancelled
   deriving (Show, Eq)
 
 -- | Buffer modes for running code

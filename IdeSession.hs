@@ -138,7 +138,7 @@ module IdeSession (
   runWait,
   supplyStdin,
   runWaitAll,
-  afterRunActions,
+  registerTerminationCallback,
 
   -- ** Start and diagnose the server (probably only for debugging)
   ghcServer,
@@ -702,8 +702,8 @@ runStmt IdeSession{ideState} m fun = do
                                  m fun
                                  (idleState ^. ideStdoutBufferMode)
                                  (idleState ^. ideStderrBufferMode)
-            let runActions' = afterRunActions runActions restoreToIdle
-            return (IdeSessionRunning runActions' idleState, runActions')
+            registerTerminationCallback runActions restoreToIdle
+            return (IdeSessionRunning runActions idleState, runActions)
           else fail $ "Module " ++ show (MN.toString m)
                       ++ " not successfully loaded, when trying to run code."
        _ ->
