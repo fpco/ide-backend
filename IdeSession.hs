@@ -317,7 +317,9 @@ getDataDir = ideDataDir . ideStaticInfo
 -- | Create a fresh session, using some initial configuration.
 --
 initSession :: SessionConfig -> IO IdeSession
-initSession ideConfig@SessionConfig{..} = do
+initSession ideConfig'@SessionConfig{configStaticOpts} = do
+  configDir <- canonicalizePath $ configDir ideConfig'
+  let ideConfig = SessionConfig {..}
   ideSourcesDir <- createTempDirectory configDir "src."
   ideDataDir    <- createTempDirectory configDir "data."
   _ideGhcServer <- forkGhcServer configStaticOpts (Just ideDataDir)

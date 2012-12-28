@@ -937,6 +937,28 @@ syntheticTests =
        , "9\n"
        ]
     )
+  , ( "Use relative path in SessionConfig"
+    , do withTempDirectory "." "ide-backend-test." $ \fullPath -> do
+           relativePath <- makeRelativeToCurrentDirectory fullPath
+           let sessionConfig = SessionConfig{ configDir        = relativePath
+                                            , configStaticOpts = defOpts
+                                            }
+           withSession sessionConfig $ \session -> do
+             let upd = (updateCodeGeneration True)
+                    <> (updateModule (fromString "M") . BSLC.pack . unlines $
+                         [ "module M where"
+                         , "hello :: IO ()"
+                         , "hello = putStr \"Hello World\""
+                         ])
+             updateSessionD session upd 1
+             msgs <- getSourceErrors session
+             assertEqual "This should compile without errors" [] msgs
+             runActions <- runStmt session (fromString "M") "hello"
+             (output, result) <- runWaitAll runActions
+             case result of
+               RunOk _ -> assertEqual "" (BSLC.pack "Hello World") output
+               _       -> assertFailure $ "Unexpected run result: " ++ show result
+    )
   ]
 
 defOpts :: [String]
