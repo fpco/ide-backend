@@ -11,6 +11,7 @@ import Data.List (sort)
 import qualified Data.List as List
 import Data.Maybe (catMaybes)
 import Data.Monoid (mconcat, mempty, (<>))
+import Data.IORef (IORef, newIORef, writeIORef, readIORef)
 import System.Directory
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..))
@@ -1075,6 +1076,71 @@ syntheticTests =
              RunOk _ -> assertEqual "" (BSLC.pack "Oh, hello\n") output
              _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Don't recompile unnecessarily (single module)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (fromString "A") . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "a :: IO ()"
+                    , "a = print 'a'"
+                    ])
+
+        counter <- newCounter
+
+        updateSession session upd (\_ -> incCounter counter)
+        assertCounter counter 1
+
+        resetCounter counter
+        updateSession session upd (\_ -> incCounter counter)
+        assertCounter counter 0
+    )
+  , ( "Don't recompile unnecessarily (A depends on B)"
+    , withConfiguredSession defOpts $ \session -> do
+        -- 'updA' is defined so that the interface of 'updA n' is different
+        -- to the interface of 'updA m' (with n /= m)
+        let updA n = updateModule (fromString "A") . BSLC.pack . unlines $
+                       [ "module A where"
+                       , "import B"
+                       ]
+                      ++
+                       [ "a" ++ show i ++ " = b" ++ show i
+                       | i <- [0 .. n :: Int]
+                       ]
+        let updB n = updateModule (fromString "B") . BSLC.pack . unlines $
+                       [ "module B where"
+                       ]
+                      ++
+                       [ "b" ++ show i ++ " = return () :: IO ()"
+                       | i <- [0 .. n :: Int]
+                       ]
+        let upd = updateCodeGeneration True <> updA 0 <> updB 0
+
+        counter <- newCounter
+
+        -- Initial compilation needs to recompile for A and B
+        updateSession session upd (\_ -> incCounter counter)
+        assertCounter counter 2
+
+        -- Overwriting B with the same code requires no compilation at all
+        resetCounter counter
+        updateSession session (updB 0) (\_ -> incCounter counter)
+        assertCounter counter 0
+
+        -- Nor does overwriting A with the same code
+        resetCounter counter
+        updateSession session (updA 0) (\_ -> incCounter counter)
+        assertCounter counter 0
+
+        -- Giving B a new interface means both A and B need to be recompiled
+        resetCounter counter
+        updateSession session (updB 1) (\_ -> incCounter counter)
+        assertCounter counter 2
+
+        -- Changing the interface of A only requires recompilation of A
+        resetCounter counter
+        updateSession session (updA 1) (\_ -> incCounter counter)
+        assertCounter counter 1
+    )
   ]
 
 defOpts :: [String]
@@ -1283,3 +1349,27 @@ testBufferMode bufferMode expected =
                      ([], Right res) ->
                        assertFailure $ "Program terminated abnormally: " ++ show res
     go expected
+
+{-------------------------------------------------------------------------------
+  Aux
+-------------------------------------------------------------------------------}
+
+newtype Counter = Counter (IORef Int)
+
+newCounter :: IO Counter
+newCounter = do
+  c <- newIORef 0
+  return (Counter c)
+
+resetCounter :: Counter -> IO ()
+resetCounter (Counter c) = writeIORef c 0
+
+incCounter :: Counter -> IO ()
+incCounter (Counter c) = readIORef c >>= writeIORef c . (+ 1)
+
+assertCounter :: Counter -> Int -> Assertion
+assertCounter (Counter c) i = do
+  j <- readIORef c
+  assertEqual "" i j
+
+

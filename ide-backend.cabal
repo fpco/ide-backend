@@ -38,7 +38,10 @@ library
                       data-accessor,
                       data-accessor-template,
                       data-accessor-mtl,
-                      transformers
+                      transformers,
+                      pureMD5,
+                      crypto-api,
+                      tagged
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else
@@ -83,7 +86,10 @@ test-suite typecheck-dir
                       data-accessor,
                       data-accessor-template,
                       data-accessor-mtl,
-                      transformers
+                      transformers,
+                      pureMD5,
+                      crypto-api,
+                      tagged
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else
@@ -141,7 +147,10 @@ test-suite ghc-errors
                       data-accessor,
                       data-accessor-template,
                       data-accessor-mtl,
-                      transformers
+                      transformers,
+                      pureMD5,
+                      crypto-api,
+                      tagged
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else
@@ -172,6 +181,7 @@ test-suite in-process
                       aeson                >= 0.6 && < 0.7,
                       executable-path      >= 0.0 && < 0.1,
                       temporary >= 1.1.2.4 && < 1.2,
+                      data-accessor,
                       -- needed by the default test file:
                       parallel,
                       old-time

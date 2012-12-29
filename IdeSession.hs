@@ -199,15 +199,17 @@ import Control.Concurrent (MVar, newMVar, modifyMVar, modifyMVar_, withMVar)
 import qualified Control.Exception as Ex
 import Control.Monad
 import Data.ByteString.Lazy (ByteString)
-import qualified Data.ByteString.Lazy.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as BSL
+import qualified Data.ByteString as BSS
 import Data.List (delete)
 import Data.Monoid (Monoid (..))
 import System.Directory
 import System.FilePath (splitFileName, takeDirectory, (<.>), (</>))
 import qualified System.FilePath.Find as Find
-import System.IO (hClose, openBinaryTempFile)
+import System.IO (Handle, hClose, openBinaryTempFile)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (setFileTimes)
+import System.Posix.Types (EpochTime)
 
 import Common
 import GhcServer
@@ -220,6 +222,11 @@ import Control.Monad.State (StateT, execStateT)
 import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 import Data.Accessor.Template (nameDeriveAccessors)
+
+import Crypto.Types (BitLength)
+import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
+import Data.Tagged (Tagged, untag)
+import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
 
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.
@@ -267,9 +274,11 @@ data IdeSessionState =
   | IdeSessionRunning RunActions IdeIdleState
   | IdeSessionShutdown
 
+type LogicalTimestamp = EpochTime
+
 data IdeIdleState = IdeIdleState {
     -- Logical timestamps (used to force ghc to recompile files)
-    _ideLogicalTimestamp :: Int
+    _ideLogicalTimestamp :: LogicalTimestamp
     -- The result computed by the last 'updateSession' invocation.
   , _ideComputed         :: Maybe Computed
     -- Compiler dynamic options. If they are not set, the options from
@@ -284,18 +293,20 @@ data IdeIdleState = IdeIdleState {
     -- The GHC server (this is replaced in 'restartSession')
   , _ideGhcServer        :: GhcServer
     -- Buffer mode for standard output for 'runStmt'
-  , _ideStdoutBufferMode    :: RunBufferMode
+  , _ideStdoutBufferMode :: RunBufferMode
     -- Buffer mode for standard error for 'runStmt'
-  , _ideStderrBufferMode    :: RunBufferMode
+  , _ideStderrBufferMode :: RunBufferMode
     -- Has the environment (as recorded in this state) diverged from the
     -- environment on the server?
   , _ideUpdatedEnv       :: Bool
-    -- TODO: add _ideUpdatedCode
+    -- Has the code diverged from what has been loaded into GHC on the last
+    -- call to 'updateSession'?
+  , _ideUpdatedCode      :: Bool
   }
 
 -- | The collection of source and data files submitted by the user.
 data ManagedFiles = ManagedFiles
-  { _sourceFiles :: [ModuleName]
+  { _sourceFiles :: [(ModuleName, (MD5Digest, LogicalTimestamp))]
   , _dataFiles   :: [FilePath]
   }
 
@@ -331,6 +342,9 @@ initSession ideConfig'@SessionConfig{configStaticOpts} = do
                         , _ideManagedFiles     = ManagedFiles [] []
                         , _ideEnv              = []
                         , _ideUpdatedEnv       = False
+                          -- Make sure 'ideComputed' is set on first call
+                          -- to updateSession
+                        , _ideUpdatedCode      = True
                         , _ideStdoutBufferMode = RunNoBuffering
                         , _ideStderrBufferMode = RunNoBuffering
                         , _ideGhcServer
@@ -401,9 +415,10 @@ restartSession IdeSession{ideStaticInfo, ideState} =
       forceShutdownGhcServer $ _ideGhcServer idleState
       server <- forkGhcServer opts workingDir
       return . IdeSessionIdle
-             . (ideComputed   ^= Nothing)
-             . (ideUpdatedEnv ^= True)
-             . (ideGhcServer  ^= server)
+             . (ideComputed    ^= Nothing)
+             . (ideUpdatedEnv  ^= True)
+             . (ideUpdatedCode ^= True)
+             . (ideGhcServer   ^= server)
              $ idleState
 
     workingDir = Just (ideDataDir ideStaticInfo)
@@ -439,22 +454,26 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
       IdeSessionIdle idleState -> do
         idleState' <- execStateT (runSessionUpdate update ideStaticInfo) idleState
 
-        -- Update environment (if necessary)
+        -- Update environment
         when (idleState' ^. ideUpdatedEnv) $
           rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
 
-        -- Update code (TODO: skip this RPC call if not necessary)
-        (computedErrors, computedLoadedModules) <-
-          rpcCompile (idleState ^. ideGhcServer)
-                     (idleState' ^. ideNewOpts)
-                     (ideSourcesDir ideStaticInfo)
-                     (idleState' ^. ideGenerateCode)
-                     callback
+        -- Update code
+        computed <- if (idleState' ^. ideUpdatedCode)
+                      then do (computedErrors, computedLoadedModules) <-
+                                rpcCompile (idleState ^. ideGhcServer)
+                                           (idleState' ^. ideNewOpts)
+                                           (ideSourcesDir ideStaticInfo)
+                                           (idleState' ^. ideGenerateCode)
+                                           callback
+                              return $ Just Computed{..}
+                      else return $ idleState' ^. ideComputed
 
         -- Update state
         return . IdeSessionIdle
-               . (ideComputed   ^= Just Computed{..})
-               . (ideUpdatedEnv ^= False)
+               . (ideComputed    ^= computed)
+               . (ideUpdatedEnv  ^= False)
+               . (ideUpdatedCode ^= False)
                $ idleState'
       IdeSessionRunning _ _ ->
         Ex.throwIO (userError "Cannot update session in running mode")
@@ -469,7 +488,9 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
 -- On windows it is not possible to delete a file that is open by a process.
 -- This case will give an IO exception but the atomic property is not affected.
 --
-writeFileAtomic :: FilePath -> BS.ByteString -> IO ()
+-- Returns the hash of the file; we are careful not to force the entire input
+-- bytestring into memory (we compute the hash as we write the file).
+writeFileAtomic :: FilePath -> BSL.ByteString -> IO MD5Digest
 writeFileAtomic targetPath content = do
   let (targetDir, targetFile) = splitFileName targetPath
   createDirectoryIfMissing True targetDir
@@ -477,9 +498,36 @@ writeFileAtomic targetPath content = do
     (openBinaryTempFile targetDir $ targetFile <.> "tmp")
     (\(tmpPath, handle) -> hClose handle >> removeFile tmpPath)
     (\(tmpPath, handle) -> do
-        BS.hPut handle content
+        let bits :: Tagged MD5Digest BitLength ; bits = blockLength
+        hash <- go handle initialCtx $ makeBlocks (untag bits `div` 8) content
         hClose handle
-        renameFile tmpPath targetPath)
+        renameFile tmpPath targetPath
+        return hash)
+  where
+    go :: Handle -> MD5Context -> [BSS.ByteString] -> IO MD5Digest
+    go _ _   []       = error "Bug in makeBlocks"
+    go h ctx [bs]     = BSS.hPut h bs >> return (finalize ctx bs)
+    go h ctx (bs:bss) = BSS.hPut h bs >> go h (updateCtx ctx bs) bss
+
+-- | @makeBlocks n@ splits a bytestring into blocks with a size that is a
+-- multiple of 'n', with one left-over smaller bytestring at the end.
+--
+-- Based from the (unexported) 'makeBlocks' in the crypto-api package, but
+-- we are careful to be as lazy as possible (the first -- block can be returned
+-- before the entire input bytestring is forced)
+makeBlocks :: Int -> ByteString -> [BSS.ByteString]
+makeBlocks n = go . BSL.toChunks
+  where
+    go [] = [BSS.empty]
+    go (bs:bss)
+      | BSS.length bs >= n =
+          let l = BSS.length bs - (BSS.length bs `rem` n)
+              (bsInit, bsTail) = BSS.splitAt l bs
+          in bsInit : go (bsTail : bss)
+      | otherwise =
+          case bss of
+            []         -> [bs]
+            (bs':bss') -> go (BSS.append bs bs' : bss')
 
 -- | A session update that changes a source module by giving a new value for
 -- the module source. This can be used to add a new module or update an
@@ -491,46 +539,54 @@ writeFileAtomic targetPath content = do
 --
 updateModule :: ModuleName -> ByteString -> IdeSessionUpdate
 updateModule m bs = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
-  timestamp <- get ideLogicalTimestamp
   let internal = internalFile ideSourcesDir m
-  liftIO $ do
-    writeFileAtomic internal bs
-    setFileTimes internal (fromIntegral timestamp) (fromIntegral timestamp)
-  modify ideLogicalTimestamp (+ 1)
-  modify (ideManagedFiles .> sourceFiles) (m :)
+  old <- get (ideManagedFiles .> sourceFiles .> lookup' m)
+  -- We always overwrite the file, and then later set the timestamp back
+  -- to what it was if it turns out the hash was the same. If we compute
+  -- the hash first, we would force the entire lazy bytestring into memory
+  newHash <- liftIO $ writeFileAtomic internal bs
+  case old of
+    Just (oldHash, oldTS) | oldHash == newHash ->
+      liftIO $ setFileTimes internal oldTS oldTS
+    _ -> do
+      newTS <- get ideLogicalTimestamp
+      liftIO $ setFileTimes internal newTS newTS
+      modify ideLogicalTimestamp (+ 1)
+      set (ideManagedFiles .> sourceFiles .> lookup' m) (Just (newHash, newTS))
+      set ideUpdatedCode True
 
 -- | Like 'updateModule' except that instead of passing the module source by
 -- value, it's given by reference to an existing file, which will be copied.
 --
 updateModuleFromFile :: ModuleName -> FilePath -> IdeSessionUpdate
-updateModuleFromFile m p = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
-  timestamp <- get ideLogicalTimestamp
-  let internal = internalFile ideSourcesDir m
-      targetDir = takeDirectory internal
-  liftIO $ do
-    createDirectoryIfMissing True targetDir
-    copyFile p internal
-    setFileTimes internal (fromIntegral timestamp) (fromIntegral timestamp)
-  modify ideLogicalTimestamp (+ 1)
-  modify (ideManagedFiles .> sourceFiles) (m :)
+updateModuleFromFile m p = IdeSessionUpdate $ \staticInfo -> do
+  -- We just call 'updateModule' because we need to read the file anyway
+  -- to compute the hash.
+  bs <- liftIO $ BSL.readFile p
+  runSessionUpdate (updateModule m bs) staticInfo
 
 -- | A session update that deletes an existing module.
 --
 updateModuleDelete :: ModuleName -> IdeSessionUpdate
 updateModuleDelete m = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
   liftIO $ removeFile (internalFile ideSourcesDir m)
-  modify (ideManagedFiles .> sourceFiles) (delete m)
+  set (ideManagedFiles .> sourceFiles .> lookup' m) Nothing
+  set ideUpdatedCode True
 
 -- | Update dynamic compiler flags, including pragmas and packages to use.
 -- Warning: only dynamic flags can be set here.
 -- Static flags need to be set at server startup.
 updateGhcOptions :: (Maybe [String]) -> IdeSessionUpdate
-updateGhcOptions opts = IdeSessionUpdate $ \_ -> set ideNewOpts opts
+updateGhcOptions opts = IdeSessionUpdate $ \_ -> do
+  set ideNewOpts opts
+  set ideUpdatedCode True
 
 -- | Enable or disable code generation in addition
 -- to type-checking. Required by 'runStmt'.
 updateCodeGeneration :: Bool -> IdeSessionUpdate
-updateCodeGeneration b = IdeSessionUpdate $ \_ -> set ideGenerateCode b
+updateCodeGeneration b = IdeSessionUpdate $ \_ -> do
+  set ideGenerateCode b
+  set ideUpdatedCode True
 
 internalFile :: FilePath -> ModuleName -> FilePath
 internalFile ideSourcesDir m =
@@ -568,7 +624,7 @@ updateDataFileDelete n = IdeSessionUpdate $ \IdeStaticInfo{ideDataDir} -> do
 -- Use @updateEnv var Nothing@ to unset @var@.
 updateEnv :: String -> Maybe String -> IdeSessionUpdate
 updateEnv var val = IdeSessionUpdate $ \_ -> do
-  modify ideEnv (override var val)
+  set (ideEnv .> lookup' var) (Just val)
   set ideUpdatedEnv True
 
 -- | Set buffering mode for snippets' stdout
@@ -593,13 +649,13 @@ type Query a = IdeSession -> IO a
 --
 getSourceModule :: ModuleName -> Query ByteString
 getSourceModule m IdeSession{ideStaticInfo} =
-  BS.readFile $ internalFile (ideSourcesDir ideStaticInfo) m
+  BSL.readFile $ internalFile (ideSourcesDir ideStaticInfo) m
 
 -- | Read the current value of one of the data files.
 --
 getDataFile :: FilePath -> Query ByteString
 getDataFile n IdeSession{ideStaticInfo} =
-  BS.readFile $ ideDataDir ideStaticInfo </> n
+  BSL.readFile $ ideDataDir ideStaticInfo </> n
 
 -- | Get any compilation errors or warnings in the current state of the
 -- session, meaning errors that GHC reports for the current state of all the

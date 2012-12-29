@@ -1,6 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
--- | GHC-independent types that the GHC-specific modules nevertheless
--- need to know.
+-- | Common types and utilities
 module Common
   ( SourceError(..), SourceErrorKind(..)
   , formatSourceError
@@ -13,7 +12,7 @@ module Common
   , showExWithClass
   , dVerbosity, debug
   , accessorName
-  , override
+  , lookup'
   ) where
 
 import qualified Control.Exception as Ex
@@ -24,6 +23,8 @@ import qualified Data.ByteString.Char8 as BS
 import Data.Typeable (Typeable, typeOf)
 import System.FilePath (takeFileName)
 import System.IO (hFlush, stderr)
+
+import Data.Accessor (Accessor, accessor)
 
 -- | An error or warning in a source module.
 --
@@ -101,9 +102,22 @@ accessorName :: String -> Maybe String
 accessorName ('_' : str) = Just str
 accessorName _           = Nothing
 
--- | Update a value in a list-as-map
-override :: Eq a => a -> b -> [(a, b)] -> [(a, b)]
-override a b [] = [(a, b)]
-override a b ((a', b') : xs)
-  | a == a'   = (a, b) : xs
-  | otherwise = (a', b') : override a b xs
+-- | Prelude.lookup as an accessor
+lookup' :: Eq a => a -> Accessor [(a, b)] (Maybe b)
+lookup' key =
+    accessor (lookup key) $ \mVal list ->
+      case mVal of
+        Nothing  -> delete key list
+        Just val -> override key val list
+  where
+    override :: Eq a => a -> b -> [(a, b)] -> [(a, b)]
+    override a b [] = [(a, b)]
+    override a b ((a', b') : xs)
+      | a == a'   = (a, b) : xs
+      | otherwise = (a', b') : override a b xs
+
+    delete :: Eq a => a -> [(a, b)] -> [(a, b)]
+    delete _ [] = []
+    delete a ((a', b') : xs)
+      | a == a'   = xs
+      | otherwise = (a', b') : delete a xs
