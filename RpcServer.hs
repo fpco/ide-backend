@@ -54,15 +54,17 @@ import Control.Applicative ((<$>))
 import Control.Monad (void, forever, unless)
 import qualified Control.Exception as Ex
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
-import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
+import Control.Concurrent.Chan (Chan, newChan, writeChan)
+import Control.Concurrent.MVar (MVar, newMVar)
 import qualified Data.ByteString as BS
 import Data.ByteString.Lazy (ByteString, hPut, hGetContents)
 import Data.ByteString.Lazy.Char8 (pack, unpack)
 import Data.Attoparsec (parse, IResult(Fail, Partial, Done))
 import qualified Data.Attoparsec as Attoparsec
 import Data.IORef (IORef, writeIORef, readIORef, newIORef)
-import Control.Concurrent.Async (async, waitAnyCatchCancel, waitCatch)
+import Control.Concurrent.Async (async)
+
+import BlockingOps (putMVar, takeMVar, readChan, waitAnyCatchCancel, waitCatch)
 
 --------------------------------------------------------------------------------
 -- Exceptions thrown by the RPC server are retrown locally as                 --
@@ -153,8 +155,8 @@ rpcServer' hin hout herr server = do
     writer  <- async $ writeResponses responses hout
     handler <- async $ channelHandler requests responses server
 
-    waitAnyCatchCancel [reader, writer, handler] >>= tryShowException . snd
-    mapM_ waitCatch [reader, writer, handler]
+    $waitAnyCatchCancel [reader, writer, handler] >>= tryShowException . snd
+    mapM_ $waitCatch [reader, writer, handler]
     threadDelay 100000
   where
     tryShowException :: Either Ex.SomeException () -> IO ()
@@ -349,17 +351,17 @@ withRpcServer :: RpcServer
               -> IO a
 withRpcServer server io =
   Ex.mask $ \restore -> do
-    st <- takeMVar (rpcState server)
+    st <- $takeMVar (rpcState server)
 
     mResult <- Ex.try $ restore (io st)
 
     case mResult of
       Right (st', a) -> do
-        putMVar (rpcState server) st'
+        $putMVar (rpcState server) st'
         return a
       Left ex -> do
    --     terminate server
-        putMVar (rpcState server) (RpcStopped ex)
+        $putMVar (rpcState server) (RpcStopped ex)
         Ex.throwIO ex
 
 -- | Get the exit code of the RPC server, unless still running.
@@ -391,7 +393,7 @@ readRequests h ch = newStreamParser json' h >>= go
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: Chan Value -> Handle -> IO ()
-writeResponses ch h = forever $ readChan ch >>= hPutFlush h . encode . Response
+writeResponses ch h = forever $ $readChan ch >>= hPutFlush h . encode . Response
 
 -- | Run a handler repeatedly, given input and output channels
 channelHandler :: Chan Value
@@ -400,7 +402,7 @@ channelHandler :: Chan Value
                -> IO ()
 channelHandler requests responses server =
   server RpcConversation {
-      get = do value <- readChan requests
+      get = do value <- $readChan requests
                case fromJSON value of
                  Success req -> return req
                  Error err   -> Ex.throwIO (userError err)

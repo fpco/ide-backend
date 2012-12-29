@@ -195,7 +195,7 @@ module IdeSession (
   -- away all the transitory state and recovering.
 ) where
 
-import Control.Concurrent (MVar, newMVar, modifyMVar, modifyMVar_, withMVar)
+import Control.Concurrent (MVar, newMVar)
 import qualified Control.Exception as Ex
 import Control.Monad
 import Data.ByteString.Lazy (ByteString)
@@ -227,6 +227,8 @@ import Crypto.Types (BitLength)
 import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
 import Data.Tagged (Tagged, untag)
 import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
+
+import BlockingOps (modifyMVar, modifyMVar_, withMVar)
 
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.
@@ -362,7 +364,7 @@ initSession ideConfig'@SessionConfig{configStaticOpts} = do
 -- If code is still running, it will be interrupted.
 shutdownSession :: IdeSession -> IO ()
 shutdownSession IdeSession{ideState, ideStaticInfo} = do
-  snapshot <- modifyMVar ideState $ \state -> return (IdeSessionShutdown, state)
+  snapshot <- $modifyMVar ideState $ \state -> return (IdeSessionShutdown, state)
   case snapshot of
     IdeSessionRunning runActions idleState -> do
       -- We need to terminate the running program before we can shut down
@@ -400,7 +402,7 @@ shutdownSession IdeSession{ideState, ideStaticInfo} = do
 -- what would we do with the progress messages?)
 restartSession :: IdeSession -> IO ()
 restartSession IdeSession{ideStaticInfo, ideState} =
-  modifyMVar_ ideState $ \state ->
+  $modifyMVar_ ideState $ \state ->
     case state of
       IdeSessionIdle idleState ->
         restart idleState
@@ -449,7 +451,7 @@ instance Monoid IdeSessionUpdate where
 -- which can be used to monitor progress of the operation.
 updateSession :: IdeSession -> IdeSessionUpdate -> (Progress -> IO ()) -> IO ()
 updateSession IdeSession{ideStaticInfo, ideState} update callback = do
-  modifyMVar_ ideState $ \state ->
+  $modifyMVar_ ideState $ \state ->
     case state of
       IdeSessionIdle idleState -> do
         idleState' <- execStateT (runSessionUpdate update ideStaticInfo) idleState
@@ -668,7 +670,7 @@ getDataFile n IdeSession{ideStaticInfo} =
 --
 getSourceErrors :: Query [SourceError]
 getSourceErrors IdeSession{ideState} =
-  withMVar ideState $ \st ->
+  $withMVar ideState $ \st ->
     case st of
       IdeSessionIdle      idleState -> aux idleState
       IdeSessionRunning _ idleState -> aux idleState
@@ -689,19 +691,19 @@ getSourceErrors IdeSession{ideState} =
 -- Usually the two names are equal, but they neededn't be.
 getManagedFiles :: Query ManagedFiles
 getManagedFiles IdeSession{ideState} =
-  withMVar ideState $ \st ->
-  case st of
-    IdeSessionIdle idleState ->
-      return $ idleState ^. ideManagedFiles
-    IdeSessionRunning _ idleState ->
-      return $ idleState ^. ideManagedFiles
-    IdeSessionShutdown ->
-      fail "Session already shut down."
+  $withMVar ideState $ \st ->
+    case st of
+      IdeSessionIdle idleState ->
+        return $ idleState ^. ideManagedFiles
+      IdeSessionRunning _ idleState ->
+        return $ idleState ^. ideManagedFiles
+      IdeSessionShutdown ->
+        fail "Session already shut down."
 
 -- | Get the list of correctly compiled modules, as reported by the compiler.
 getLoadedModules :: Query LoadedModules
 getLoadedModules IdeSession{ideState} =
-  withMVar ideState $ \st ->
+  $withMVar ideState $ \st ->
     case st of
       IdeSessionIdle      idleState -> aux idleState
       IdeSessionRunning _ idleState -> aux idleState
@@ -731,7 +733,7 @@ getSymbolDefinitionMap = undefined
 -- | Get all current environment overrides
 getEnv :: Query [(String, Maybe String)]
 getEnv IdeSession{ideState} =
-  withMVar ideState $ \st ->
+  $withMVar ideState $ \st ->
     case st of
       IdeSessionIdle idleState ->
         return $ idleState ^. ideEnv
@@ -746,7 +748,7 @@ getEnv IdeSession{ideState} =
 -- and the running code can be interrupted or interacted with.
 runStmt :: IdeSession -> ModuleName -> String -> IO RunActions
 runStmt IdeSession{ideState} m fun = do
-  modifyMVar ideState $ \state -> case state of
+  $modifyMVar ideState $ \state -> case state of
     IdeSessionIdle idleState ->
      case (idleState ^. ideComputed, idleState ^. ideGenerateCode) of
        (Just comp, True) ->
@@ -770,7 +772,7 @@ runStmt IdeSession{ideState} m fun = do
       fail "Session already shut down."
   where
     restoreToIdle :: RunResult -> IO ()
-    restoreToIdle _ = modifyMVar_ ideState $ \state -> case state of
+    restoreToIdle _ = $modifyMVar_ ideState $ \state -> case state of
       IdeSessionIdle _ ->
         Ex.throwIO (userError "The impossible happened!")
       IdeSessionRunning _ idleState -> do
@@ -781,11 +783,11 @@ runStmt IdeSession{ideState} m fun = do
 -- | Get the RPC server used by the session.
 getGhcServer :: IdeSession -> IO GhcServer
 getGhcServer IdeSession{ideState} =
-  withMVar ideState $ \st ->
-  case st of
-    IdeSessionIdle idleState ->
-      return $! idleState ^. ideGhcServer
-    IdeSessionRunning _ idleState ->
-      return $! idleState ^. ideGhcServer
-    IdeSessionShutdown ->
-      fail "Session already shut down."
+  $withMVar ideState $ \st ->
+    case st of
+      IdeSessionIdle idleState ->
+        return $! idleState ^. ideGhcServer
+      IdeSessionRunning _ idleState ->
+        return $! idleState ^. ideGhcServer
+      IdeSessionShutdown ->
+        fail "Session already shut down."

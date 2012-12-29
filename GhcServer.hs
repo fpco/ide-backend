@@ -26,17 +26,9 @@ module GhcServer
   ) where
 
 import Control.Concurrent (ThreadId, myThreadId, throwTo)
-import Control.Concurrent.Chan (Chan, newChan, writeChan, readChan)
-import Control.Concurrent.MVar
-  ( MVar
-  , newMVar
-  , newEmptyMVar
-  , putMVar
-  , readMVar
-  , modifyMVar
-  , modifyMVar_
-  )
-import Control.Concurrent.Async (async, withAsync, cancel, wait)
+import Control.Concurrent.Chan (Chan, newChan, writeChan)
+import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar)
+import Control.Concurrent.Async (async, withAsync, cancel)
 import qualified Control.Exception as Ex
 import Control.Monad (forM_, forever, unless)
 import Data.Aeson.TH (deriveJSON)
@@ -57,6 +49,15 @@ import Common
 import GhcRun
 import ModuleName (LoadedModules, ModuleName)
 import RpcServer
+
+import BlockingOps (
+    readChan
+  , putMVar
+  , readMVar
+  , modifyMVar
+  , modifyMVar_
+  , wait
+  )
 
 import Paths_ide_backend
 
@@ -185,10 +186,10 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
     -- 4. In the 'reqThread' we ignore GhcRunInterrupts once the 'MVar' is
     --    'Nothing'
 
-    runOutcome <- ghandleJust isUserInterrupt return $ do
-      liftIO $ myThreadId >>= putMVar ghcThread . Just
+    runOutcome <- ghandle ghcException . ghandleJust isUserInterrupt return $ do
+      liftIO $ myThreadId >>= $putMVar ghcThread . Just
       outcome <- runInGhc (m, fun) outBMode errBMode
-      liftIO $ modifyMVar ghcThread $ \_ -> return (Nothing, outcome)
+      liftIO $ $modifyMVar ghcThread $ \_ -> return (Nothing, outcome)
 
     liftIO $ do
       -- Restore stdin and stdout
@@ -199,7 +200,7 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
       -- Closing the write end of the stdout pipe will cause the stdout
       -- thread to terminate after it processed all remaining output;
       -- wait for this to happen
-      wait stdoutThread
+      $wait stdoutThread
 
       -- Report the final result
       liftIO $ debug dVerbosity $ "returned from ghcHandleRun with "
@@ -208,7 +209,7 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
 
       -- Wait for the client to acknowledge the done
       -- (this avoids race conditions)
-      wait reqThread
+      $wait reqThread
   where
     -- Wait for and execute run requests from the client
     readRunRequests :: MVar (Maybe ThreadId) -> Handle -> IO ()
@@ -216,7 +217,7 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
       let go = do request <- get
                   case request of
                     GhcRunInterrupt -> do
-                      mTid <- readMVar ghcThread
+                      mTid <- $readMVar ghcThread
                       case mTid of
                         Just tid -> throwTo tid Ex.UserInterrupt
                         Nothing  -> return () -- See above
@@ -236,11 +237,16 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
                   unless (BSS.null bs) $ put (GhcRunOutp bs) >> go
       in go
 
+    -- Turn an asynchronous exception into a RunResult
     isUserInterrupt :: Ex.AsyncException -> Maybe RunResult
     isUserInterrupt ex@Ex.UserInterrupt =
       Just . RunProgException . showExWithClass . Ex.toException $ ex
     isUserInterrupt _ =
       Nothing
+
+    -- Turn a GHC exception into a RunResult
+    ghcException :: GhcException -> Ghc RunResult
+    ghcException = return . RunGhcException . show
 
     -- TODO: What is a good value here?
     blockSize :: Int
@@ -368,15 +374,16 @@ rpcRun server m fun outBMode errBMode = do
   runWaitChan <- newChan :: IO (Chan (Either BSS.ByteString RunResult))
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
-  conv <- async $ rpcConversation server $ \RpcConversation{..} -> do
-    put (ReqRun m fun outBMode errBMode)
-    withAsync (sendRequests put reqChan) $ \sentAck -> do
-      let go = do resp <- get
-                  case resp of
-                    GhcRunDone result -> writeChan runWaitChan (Right result)
-                    GhcRunOutp bs     -> writeChan runWaitChan (Left bs) >> go
-      go
-      wait sentAck
+  conv <- async . Ex.handle (handleExternalException runWaitChan) $
+    rpcConversation server $ \RpcConversation{..} -> do
+      put (ReqRun m fun outBMode errBMode)
+      withAsync (sendRequests put reqChan) $ \sentAck -> do
+        let go = do resp <- get
+                    case resp of
+                      GhcRunDone result -> writeChan runWaitChan (Right result)
+                      GhcRunOutp bs     -> writeChan runWaitChan (Left bs) >> go
+        go
+        $wait sentAck
 
   -- The runActionState initially is the termination callback to be called
   -- when the snippet terminates. After termination it becomes (Right outcome).
@@ -385,15 +392,15 @@ rpcRun server m fun outBMode errBMode = do
   -- result.
   let onTermination :: RunResult -> IO ()
       onTermination _ = do writeChan reqChan GhcRunAckDone
-                           wait conv
+                           $wait conv
   runActionsState <- newMVar (Left onTermination)
 
   return RunActions {
-      runWait = modifyMVar runActionsState $ \st -> case st of
+      runWait = $modifyMVar runActionsState $ \st -> case st of
         Right outcome ->
           return (Right outcome, Right outcome)
         Left terminationCallback -> do
-          outcome <- readChan runWaitChan
+          outcome <- $readChan runWaitChan
           case outcome of
             Left bs ->
               return (Left terminationCallback, Left bs)
@@ -405,7 +412,7 @@ rpcRun server m fun outBMode errBMode = do
     , interrupt   = writeChan reqChan GhcRunInterrupt
     , supplyStdin = writeChan reqChan . GhcRunInput
     , registerTerminationCallback = \callback' ->
-        modifyMVar_ runActionsState $ \st -> case st of
+        $modifyMVar_ runActionsState $ \st -> case st of
           Right outcome ->
             return (Right outcome)
           Left callback ->
@@ -417,12 +424,19 @@ rpcRun server m fun outBMode errBMode = do
   where
     sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> IO ()
     sendRequests put reqChan =
-      let go = do req <- readChan reqChan
+      let go = do req <- $readChan reqChan
                   put req
                   case req of
                     GhcRunAckDone -> return ()
                     _             -> go
       in go
+
+    -- TODO: should we restart the session when ghc crashes?
+    -- Maybe recommend that the session is started on GhcExceptions?
+    handleExternalException :: Chan (Either BSS.ByteString RunResult)
+                            -> ExternalException
+                            -> IO ()
+    handleExternalException ch = writeChan ch . Right . RunGhcException . show
 
 -- | Set the environment
 rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()
