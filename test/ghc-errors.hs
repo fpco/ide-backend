@@ -22,7 +22,7 @@ import System.Random (randomIO)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
-import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure)
+import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure, (@?=))
 
 import Common
 import GhcServer
@@ -164,8 +164,8 @@ multipleTests =
           RunOk _ -> assertEqual "" output (BSLC.pack "\"test run\"\n")
           RunProgException _ex ->
             assertFailure "Unexpected exception raised by the running code."
-          RunGhcException _ex  ->
-            assertFailure "Manually corrected code not run successfully"
+          RunGhcException ex  ->
+            assertFailure $ "Manually corrected code not run successfully: " ++ show ex
           RunForceCancelled ->
             assertFailure "Unexpected force-cancel"
       )
@@ -211,23 +211,24 @@ syntheticTests :: [(String, Assertion)]
 syntheticTests =
   [ ( "Maintain list of compiled modules"
     , withConfiguredSession defOpts $ \session -> do
+        let rts = fromString "IdeBackendRTS" -- TODO: Do we want this reported?
         let m = fromString "A"
         updateSessionD session (loadModule m "a = 5") 1
-        assertEqual "[m]" [m] =<< getLoadedModules session
+        assertEqual "[m]" [rts, m] =<< getLoadedModules session
         let m2 = fromString "A2"
         updateSessionD session (loadModule m2 "import A\na2 = A.a") 1
-        assertEqual "[m, m2]" (sort [m, m2])
+        assertEqual "[m, m2]" (sort [rts, m, m2])
           =<< (liftM sort $ getLoadedModules session)
         let m3 = fromString "A3"
         updateSessionD session (loadModule m3 "") 1
-        assertEqual "[m, m2, m3]" (sort [m, m2, m3])
+        assertEqual "[m, m2, m3]" (sort [rts, m, m2, m3])
           =<< (liftM sort $ getLoadedModules session)
         let m4 = fromString "Wrong"
         updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
-        assertEqual "Wrong" (sort [m, m2, m3])
+        assertEqual "Wrong" (sort [rts, m, m2, m3])
           =<< (liftM sort $ getLoadedModules session)
         updateSessionD session (loadModule m "a = c") 1
-        assertEqual "[m3]" [m3] =<< getLoadedModules session
+        assertEqual "[m3]" [rts, m3] =<< getLoadedModules session
     )
   , ( "Duplicate shutdown"
     , withConfiguredSession defOpts $ \session ->
@@ -320,12 +321,14 @@ syntheticTests =
         assertEqual "compare new content"
           (BSLC.pack "new content\n") output2
     )
+{- Now that we always load the RTS, we're never in this situation
   , ("Reject getSourceErrors without updateSession"
     , withConfiguredSession defOpts $ \session ->
         assertRaises "getSourceErrors session"
           (== userError "This session state does not admit queries.")
           (getSourceErrors session)
     )
+-}
   , ("Reject updateSession after shutdownSession"
     , withConfiguredSession defOpts $ \session -> do
         shutdownSession session
@@ -777,7 +780,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         mods <- getLoadedModules session
-        assertEqual "" [fromString "M"] mods
+        assertEqual "" [fromString "IdeBackendRTS", fromString "M"] mods
         _runActions <- runStmt session (fromString "M") "loop"
         mods' <- getLoadedModules session
         assertEqual "Running code does not affect getLoadedModules" mods mods'
@@ -1141,6 +1144,114 @@ syntheticTests =
         updateSession session (updA 1) (\_ -> incCounter counter)
         assertCounter counter 1
     )
+  , ( "First snippet closes stdin; next snippet unaffected"
+    , withConfiguredSession defOpts $ \session -> do
+        let main' = fromString "Main"
+
+        let updates2 = mconcat
+                [ updateCodeGeneration True
+                , updateModule main' (BSLC.pack "import System.IO\nmain = hClose stdin")
+                ]
+        updateSession session updates2 $ const $ return ()
+        ra2 <- runStmt session main' "main"
+        out2b <- runWait ra2
+        case out2b of
+          Right (RunOk _) -> return ()
+          _ -> assertFailure $ "Unexpected result " ++ show out2b
+
+        let updates3 =
+              updateModule main' (BSLC.pack "main = getLine >>= putStrLn")
+        updateSession session updates3 $ const $ return ()
+        ra3 <- runStmt session main' "main"
+        supplyStdin ra3 (BSSC.pack "Michael\n")
+        (output, out3b) <- runWaitAll ra3
+        case out3b of
+          RunOk _ -> assertEqual "" (BSLC.pack "Michael\n") output
+          _ -> assertFailure $ "Unexpected result " ++ show out3b
+    )
+  , ( "First snippet closes stdin (interrupted 'interact'); next snippet unaffected"
+    , withConfiguredSession defOpts $ \session -> do
+        let main' = fromString "Main"
+
+        let updates2 = mconcat
+                [ updateCodeGeneration True
+                , updateModule main' (BSLC.pack "main = getContents >>= putStr")
+                , updateStdoutBufferMode $ RunLineBuffering Nothing
+                ]
+        updateSession session updates2 $ const $ return ()
+        ra2 <- runStmt session main' "main"
+        supplyStdin ra2 (BSSC.pack "hello\n")
+        out2a <- runWait ra2
+        out2a @?= Left (BSSC.pack "hello\n")
+        interrupt ra2
+        out2b <- runWait ra2
+        out2b @?= Right (RunProgException "AsyncException: user interrupt")
+
+        let updates3 = mconcat
+                [ updateCodeGeneration True
+                , updateModule main' (BSLC.pack "main = putStrLn \"Hi!\" >> getLine >> return ()")
+                , updateStdoutBufferMode $ RunLineBuffering Nothing
+                ]
+        updateSession session updates3 $ const $ return ()
+        ra3 <- runStmt session main' "main"
+        out3a <- runWait ra3
+        out3a @?= Left (BSSC.pack "Hi!\n")
+        supplyStdin ra3 (BSSC.pack "Michael\n")
+        out3b <- runWait ra3
+        case out3b of
+          Right (RunOk _) -> return ()
+          _ -> assertFailure $ "Unexpected result " ++ show out3b
+    )
+  , ( "First snippet closes stdout; next snippet unaffected"
+    , withConfiguredSession defOpts $ \session -> do
+        let main' = fromString "Main"
+
+        let updates2 = mconcat
+                [ updateCodeGeneration True
+                , updateModule main' (BSLC.pack "import System.IO\nmain = hClose stdout")
+                ]
+        updateSession session updates2 $ const $ return ()
+        ra2 <- runStmt session main' "main"
+        out2b <- runWait ra2
+        case out2b of
+          Right (RunOk _) -> return ()
+          _ -> assertFailure $ "Unexpected result " ++ show out2b
+
+        let updates3 =
+              updateModule main' (BSLC.pack "main = getLine >>= putStrLn")
+        updateSession session updates3 $ const $ return ()
+        ra3 <- runStmt session main' "main"
+        supplyStdin ra3 (BSSC.pack "Michael\n")
+        (output, out3b) <- runWaitAll ra3
+        case out3b of
+          RunOk _ -> assertEqual "" (BSLC.pack "Michael\n") output
+          _ -> assertFailure $ "Unexpected result " ++ show out3b
+    )
+  , ( "First snippet closes stderr; next snippet unaffected"
+    , withConfiguredSession defOpts $ \session -> do
+        let main' = fromString "Main"
+
+        let updates2 = mconcat
+                [ updateCodeGeneration True
+                , updateModule main' (BSLC.pack "import System.IO\nmain = hClose stderr")
+                ]
+        updateSession session updates2 $ const $ return ()
+        ra2 <- runStmt session main' "main"
+        out2b <- runWait ra2
+        case out2b of
+          Right (RunOk _) -> return ()
+          _ -> assertFailure $ "Unexpected result " ++ show out2b
+
+        let updates3 =
+              updateModule main' (BSLC.pack "import System.IO\nmain = getLine >>= hPutStrLn stderr")
+        updateSession session updates3 $ const $ return ()
+        ra3 <- runStmt session main' "main"
+        supplyStdin ra3 (BSSC.pack "Michael\n")
+        (output, out3b) <- runWaitAll ra3
+        case out3b of
+          RunOk _ -> assertEqual "" (BSLC.pack "Michael\n") output
+          _ -> assertFailure $ "Unexpected result " ++ show out3b
+    )
   ]
 
 defOpts :: [String]
@@ -1196,7 +1307,7 @@ main = do
 displayCounter :: Int -> Progress -> Assertion
 displayCounter i p = do
   debug dVerbosity $ show p
-  assertBool (show p ++ " exceeds " ++ show i) (progressStep p <= i)
+  assertBool (show p ++ " exceeds " ++ show i) (progressStep p <= i + 1)
 
 updateSessionD :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
 updateSessionD session update i = do
@@ -1216,7 +1327,7 @@ getModules session = do
   let triedModules =
         map (\ f -> fmap (\x -> (x, f)) $ MN.fromFilePath
                     $ dropExtension $ makeRelative configSourcesDir f)
-            originalFiles
+            (filter (not . List.isSuffixOf "IdeBackendRTS.hs") originalFiles)
       originalModules = catMaybes triedModules
       m = case originalModules of
         [] -> error "The test directory is empty."

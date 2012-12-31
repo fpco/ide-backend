@@ -88,6 +88,8 @@ data RunResult =
 -- respectively (or does an explicit flush). However, you can specify a timeout
 -- in addition to the buffering mode; if you set this to @Just n@, the buffer
 -- will be flushed every @n@ microseconds.
+--
+-- NOTE: This is duplicated in the IdeBackendRTS (defined in IdeSession)
 data RunBufferMode =
     RunNoBuffering
   | RunLineBuffering  { runBufferTimeout :: Maybe Int }
@@ -240,9 +242,7 @@ runInGhc (m, fun) outBMode errBMode = do
 -- TODO: these debug statements break tests currently:
 --    _debugPpContext flags "context before setContext"
     setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName (MN.toString m)
-                 , IIDecl $ simpleImportDecl $ mkModuleName "System.IO"
-                 , IIDecl $ simpleImportDecl $ mkModuleName "Data.Maybe"
-                 , IIDecl $ simpleImportDecl $ mkModuleName "Control.Concurrent"
+                 , IIDecl $ simpleImportDecl $ mkModuleName "IdeBackendRTS"
                  ]
 --    _debugPpContext flags "context after setContext"
 --    liftIO $ writeFile "/Users/fpco/fpco/ide-backend/RunStmt.hs" expr
@@ -260,50 +260,25 @@ runInGhc (m, fun) outBMode errBMode = do
           error "checkModule: RunBreak"
   where
     expr :: String
-    expr = setBuffering     "System.IO.stdout" outBMode
-         . setBuffering     "System.IO.stderr" errBMode
-         . setBufferTimeout "System.IO.stdout" outBMode
-         . setBufferTimeout "System.IO.stderr" errBMode
-         $ MN.toString m ++ "." ++ fun
+    expr = fqn "run "
+        ++ "(" ++ fqBMode outBMode ++ ")"
+        ++ "(" ++ fqBMode errBMode ++ ")"
+        ++ "(" ++ MN.toString m ++ "." ++ fun ++ ")"
 
-    setBuffering :: String -> RunBufferMode -> String -> String
-    setBuffering h mode code = unlines [
-        "do {"
-      , "System.IO.hSetBuffering " ++ h ++ " " ++ fqnBMode mode ++ ";"
-      , code ++ ";"
-      , "System.IO.hFlush " ++ h
-      , "}"
-      ]
+    fqn :: String -> String
+    fqn = (++) "IdeBackendRTS."
 
-    setBufferTimeout :: String -> RunBufferMode -> String -> String
-    setBufferTimeout h (RunLineBuffering (Just n)) code =
-      bufferTimeout h n code
-    setBufferTimeout h (RunBlockBuffering _ (Just n)) code =
-      bufferTimeout h n code
-    setBufferTimeout _ _ code =
-      code
+    fqBMode :: RunBufferMode -> String
+    fqBMode RunNoBuffering =
+      fqn "RunNoBuffering"
+    fqBMode (RunLineBuffering t) =
+      fqn "RunLineBuffering (" ++ fqMInt t ++ ")"
+    fqBMode (RunBlockBuffering sz t) =
+      fqn "RunBlockBuffering (" ++ fqMInt sz ++ ") (" ++ fqMInt t ++ ")"
 
-    fqnBMode :: RunBufferMode -> String
-    fqnBMode RunNoBuffering =
-      "System.IO.NoBuffering"
-    fqnBMode (RunLineBuffering _) =
-      "System.IO.LineBuffering"
-    fqnBMode (RunBlockBuffering Nothing _) =
-      "(System.IO.BlockBuffering Data.Maybe.Nothing)"
-    fqnBMode (RunBlockBuffering (Just i) _) =
-      "(System.IO.BlockBuffering (Data.Maybe.Just " ++ show i ++ "))"
-
-    bufferTimeout :: String -> Int -> String -> String
-    bufferTimeout h n code = unlines [
-        "do {"
-      , "tid <- forkIO (let go = do {"
-      , "         Control.Concurrent.threadDelay " ++ show n ++ "; "
-      , "         System.IO.hFlush " ++ h ++ ";"
-      , "         go } in go);"
-      , code ++ ";"
-      , "killThread tid"
-      , "}"
-      ]
+    fqMInt :: Maybe Int -> String
+    fqMInt Nothing  = fqn "Nothing"
+    fqMInt (Just n) = fqn "Just " ++ show n
 
     handleError :: Show a => a -> Ghc RunResult
     handleError = return . RunGhcException . show
