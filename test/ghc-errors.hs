@@ -212,23 +212,28 @@ syntheticTests =
   [ ( "Maintain list of compiled modules"
     , withConfiguredSession defOpts $ \session -> do
         let rts = fromString "IdeBackendRTS" -- TODO: Do we want this reported?
-        let m = fromString "A"
-        updateSessionD session (loadModule m "a = 5") 1
-        assertEqual "[m]" [rts, m] =<< getLoadedModules session
+        let assEq name goodMods =
+              assertEqual name (sort $ rts : goodMods)
+                =<< (liftM sort $ getLoadedModules session)
+        let xxx = fromString "XXX"
+        updateSessionD session (loadModule xxx "a = 5") 1
+        assEq "XXX" [xxx]
+        let m1 = fromString "A"
+        updateSessionD session (loadModule m1 "a = 5") 1
+        assEq "[m1]" [m1, xxx]
         let m2 = fromString "A2"
         updateSessionD session (loadModule m2 "import A\na2 = A.a") 1
-        assertEqual "[m, m2]" (sort [rts, m, m2])
-          =<< (liftM sort $ getLoadedModules session)
+        assEq "[m1, m2]" [m1, m2, xxx]
         let m3 = fromString "A3"
         updateSessionD session (loadModule m3 "") 1
-        assertEqual "[m, m2, m3]" (sort [rts, m, m2, m3])
-          =<< (liftM sort $ getLoadedModules session)
+        assEq "[m1, m2, m3]" [m1, m2, m3, xxx]
         let m4 = fromString "Wrong"
+        updateSessionD session (loadModule m4 "import A4\na2 = A4.a + 1") 1
+        assEq "wrong1" [m1, m2, m3, xxx]
         updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
-        assertEqual "Wrong" (sort [rts, m, m2, m3])
-          =<< (liftM sort $ getLoadedModules session)
-        updateSessionD session (loadModule m "a = c") 1
-        assertEqual "[m3]" [rts, m3] =<< getLoadedModules session
+        assEq "wrong2" [m1, m2, m3, xxx]
+        updateSessionD session (loadModule m1 "a = c") 1
+        assEq "wrong3" [m3, xxx]
     )
   , ( "Duplicate shutdown"
     , withConfiguredSession defOpts $ \session ->
@@ -1482,5 +1487,3 @@ assertCounter :: Counter -> Int -> Assertion
 assertCounter (Counter c) i = do
   j <- readIORef c
   assertEqual "" i j
-
-
