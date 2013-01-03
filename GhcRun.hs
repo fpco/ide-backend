@@ -30,7 +30,7 @@ import qualified ErrUtils
 import Exception (ghandle)
 import FastString ( unpackFS )
 import qualified GHC
-import GHC hiding (flags, ModuleName, RunResult(..))
+import GHC hiding (flags, ModuleName, RunResult(..), load)
 import GhcMonad (liftIO, modifySession)
 import qualified HscTypes
 import HscTypes (HscEnv(hsc_mod_graph))
@@ -42,6 +42,9 @@ import ErrUtils   ( MsgDoc )
 #else
 import ErrUtils   ( Message )
 #endif
+
+-- Import our own version of --make.
+import GhcMakeFixed
 
 import Control.Applicative
 import Control.Exception (assert)

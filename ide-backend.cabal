@@ -19,6 +19,7 @@ library
                       RpcServer,
                       Paths_ide_backend,
                       BlockingOps
+                      GhcMakeFixed
   build-depends:      base      ==4.*,
                       directory ==1.*,
                       filemanip >= 0.3.6.2,
