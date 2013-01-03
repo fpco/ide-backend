@@ -209,7 +209,7 @@ multipleTests =
 
 syntheticTests :: [(String, Assertion)]
 syntheticTests =
-  [ ( "Maintain list of compiled modules"
+  [ ( "Maintain list of compiled modules I"
     , withConfiguredSession defOpts $ \session -> do
         let rts = fromString "IdeBackendRTS" -- TODO: Do we want this reported?
         let assEq name goodMods =
@@ -233,7 +233,43 @@ syntheticTests =
         updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
         assEq "wrong2" [m1, m2, m3, xxx]
         updateSessionD session (loadModule m1 "a = c") 1
+        -- Module "A" is compiled before "Wrong", fails, so it's invalidated
+        -- and all modules that depend on it are invalidated. Module "Wrong"
+        -- is never compiled.
         assEq "wrong3" [m3, xxx]
+    )
+  , ( "Maintain list of compiled modules II"
+    , withConfiguredSession defOpts $ \session -> do
+        let rts = fromString "IdeBackendRTS" -- TODO: Do we want this reported?
+        let assEq name goodMods =
+              assertEqual name (sort $ rts : goodMods)
+                =<< (liftM sort $ getLoadedModules session)
+        let xxx = fromString "XXX"
+        updateSessionD session (loadModule xxx "a = 5") 1
+        assEq "XXX" [xxx]
+        let m1 = fromString "A"
+        updateSessionD session (loadModule m1 "a = 5") 1
+        assEq "[m1]" [m1, xxx]
+        let m2 = fromString "A2"
+        updateSessionD session (loadModule m2 "import A\na2 = A.a") 1
+        assEq "[m1, m2]" [m1, m2, xxx]
+        let m3 = fromString "A3"
+        updateSessionD session (loadModule m3 "") 1
+        assEq "[m1, m2, m3]" [m1, m2, m3, xxx]
+        let m4 = fromString "Wrong"
+        updateSessionD session (loadModule m4 "import A4\na2 = A4.a + 1") 1
+        assEq "wrong1" [m1, m2, m3, xxx]
+        -- THis has to be disabled to get the different outcome below:
+          -- updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
+          -- assEq "wrong2" [m1, m2, m3, xxx]
+        -- We get this differemnt outcome both in original 7.4.2
+        -- and after the GHC#7231 fix. It's probably caused by target
+        -- Wrong place before or after target "A" depending on what kind
+        -- of error Wrong had. This is strange, but not incorrect.
+        updateSessionD session (loadModule m1 "a = c") 1
+        -- Module "Wrong" is compiled first here, fails, so module "A"
+        -- is never comipiled, so it's not invalidated.
+        assEq "wrong3" [m1, m2, m3, xxx]
     )
   , ( "Duplicate shutdown"
     , withConfiguredSession defOpts $ \session ->
