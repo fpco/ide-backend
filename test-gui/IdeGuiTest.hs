@@ -13,6 +13,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.IORef
+import Data.Maybe
 import Data.Monoid
 import Control.Monad
 
@@ -28,18 +29,12 @@ main = do
 guiMain :: [String] -> IO ()
 guiMain args = do
 
-    let sessionDir        = "./ide-session"
-        configSourcesDir  = sessionDir </> "src"
-        configWorkingDir  = sessionDir </> "build"
-        configDataDir     = sessionDir </> "run"
-        configTempDir     = sessionDir </> "tmp"
+    let configDir = "./ide-session"
         configStaticOpts  = args
 
-    exists <- doesDirectoryExist sessionDir
-    when exists (removeDirectoryRecursive sessionDir)
-    mapM_ (createDirectoryIfMissing False)
-          [sessionDir, configSourcesDir, configWorkingDir
-          ,configDataDir, configTempDir]
+    exists <- doesDirectoryExist configDir
+    when exists (removeDirectoryRecursive configDir)
+    createDirectoryIfMissing False configDir
 
     ide <- initSession SessionConfig{..}
 
@@ -274,7 +269,7 @@ chooseModuleFile parent onAddModule = do
   lab  <- labelNew (Just "Module name:")
   mentry <- entryNew
   set lab [ miscYalign := 0, miscXpad := 10 ]
-  
+
   boxPackStart hbox lab PackNatural 0
   boxPackStart hbox mentry PackGrow 0
 
@@ -289,12 +284,17 @@ chooseModuleFile parent onAddModule = do
     case resp of
       ResponseAccept -> do
         inp   <- fileChooserGetFilename dialog
-        mname <- get mentry entryText
+        mnameEntry <- get mentry entryText
+        let mname = if mnameEntry == ""
+                    then "Mo" ++ maybe "dule" takeBaseName inp
+                    else mnameEntry
         case inp of
-          Just file -> onAddModule (ModuleName.fromString mname) file
+          Just file ->
+            let errMsg = "wrong module name '" ++ mname ++ "'"
+                mn = fromMaybe (error errMsg) $ ModuleName.fromString mname
+            in onAddModule mn file
           Nothing   -> return ()
       _             -> return ()
     widgetDestroy dialog
 
   widgetShowAll dialog
-
