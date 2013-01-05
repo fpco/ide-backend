@@ -19,7 +19,9 @@ library
                       RpcServer,
                       Paths_ide_backend,
                       BlockingOps
-                      GhcMakeFixed
+  if impl(ghc == 7.4.2)
+    other-modules:    GhcMakeFixed
+
   build-depends:      base      ==4.*,
                       directory ==1.*,
                       filemanip >= 0.3.6.2,
