@@ -168,9 +168,11 @@ module IdeSession (
   --
   -- The intention is to reflect this purity property in this interface. The
   -- value of an 'IdeSession' represents the state of the files\/modules and
-  -- the result of the pure compilation function. It should always be the case
-  -- that we can throw away the session and recover it just from the persistent
-  -- state in the files.
+  -- contains the other parameters supplied by the user (compiler options,
+  -- environment variables). It also contains or represents the result
+  -- of the pure compilation function. It should always be the case
+  -- that we can throw away all the compilation results and recover
+  -- them just from the file state and user parameters.
   --
   -- One example where this notion makes a difference is with warnings.
   -- Traditionally, compilers just return the warnings for the modules they
@@ -178,17 +180,22 @@ module IdeSession (
   -- But this doesn't match the pure function idea, because the compilation
   -- result now depends on which steps we took to get there, rather than just
   -- on the current value of the files. So one of the things this wrapper can
-  -- do is to restore the purity in these corner cases, (which otherwise the
-  -- client of this API would probably have to do). [Not done yet.]
+  -- do is to restore the purity in these corner cases (which otherwise the
+  -- client of this API would probably have to do).
 
   -- ** Persistent and transitory state
   -- | The persistent state is obviously the files: source files and data
-  -- files. Internally there is a great deal of transitory and cached state,
+  -- files, as well as user-supplied parameters of the comilation.
+  -- Internally there is a great deal of transitory and cached state,
   -- either in memory or on disk (such as .hi files on disk or the equivalent
-  -- in memory).
+  -- in memory). Note that none of the state persists in case of a fatal
+  -- internal error (the files are wiped out before shutdown) and only
+  -- the files persist in case of a power failure (but have to be
+  -- recovered manually).
   --
-  -- It should always be possible to drop all the transitory state and recover,
-  -- just at the cost of some extra work.
+  -- It should be possible to drop all the transitory state and recover,
+  -- just at the cost of some extra work, as long as the original @Session@
+  -- value is avaiable. The 'restartSession' function does almost exactly that.
   --
   -- This property is a useful correctness property for internal testing: the
   -- results of all the queries should be the same before and after blowing
