@@ -212,7 +212,7 @@ import Data.List (delete)
 import Data.Monoid (Monoid (..))
 import Data.Maybe (fromJust)
 import System.Directory
-import System.FilePath (splitFileName, takeDirectory, (<.>), (</>))
+import System.FilePath (splitFileName, takeDirectory, makeRelative, (<.>), (</>))
 import qualified System.FilePath.Find as Find
 import System.IO (Handle, hClose, openBinaryTempFile)
 import System.IO.Temp (createTempDirectory)
@@ -692,7 +692,7 @@ getDataFile n IdeSession{ideStaticInfo} =
 -- would return all warnings (as if you did clean and rebuild each time).
 --
 getSourceErrors :: Query [SourceError]
-getSourceErrors IdeSession{ideState} =
+getSourceErrors IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
       IdeSessionIdle      idleState -> aux idleState
@@ -701,11 +701,13 @@ getSourceErrors IdeSession{ideState} =
   where
     aux :: IdeIdleState -> IO [SourceError]
     aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return computedErrors
--- Optionally, this could give last reported errors, instead forcing
--- IDE to wait for the next sessionUpdate to finish.
+      Just Computed{..} ->
+        let root = ideSourcesDir ideStaticInfo
+            mkRelative (SrcError kind path ii jj s) =
+              SrcError kind (makeRelative root path) ii jj s
+            mkRelative err = err
+        in return $ map mkRelative computedErrors
       Nothing -> fail "This session state does not admit queries."
-
 
 -- | Get the collection of files submitted by the user and not deleted yet.
 -- The module names are those supplied by the user as the first

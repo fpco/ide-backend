@@ -21,7 +21,6 @@ import Control.Monad.Trans (MonadIO, liftIO)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString.Char8 as BS
 import Data.Typeable (Typeable, typeOf)
-import System.FilePath (takeFileName)
 import System.IO (hFlush, stderr)
 
 import Data.Accessor (Accessor, accessor)
@@ -44,9 +43,7 @@ $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)
 
 formatSourceError :: SourceError -> String
-formatSourceError (SrcError kind path ii jj s) =
-  show (SrcError kind (takeFileName path) ii jj s)
-formatSourceError err@(OtherError _ ) = show err
+formatSourceError = show
 
 -- | A mapping from symbol uses to symbol definitions
 --
