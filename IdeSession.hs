@@ -296,7 +296,7 @@ data IdeIdleState = IdeIdleState {
     -- Whether to generate code in addition to type-checking.
   , _ideGenerateCode     :: Bool
     -- Files submitted by the user and not deleted yet.
-  , _ideManagedFiles     :: ManagedFiles
+  , _ideManagedFiles     :: ManagedFilesInternal
     -- Environment overrides
   , _ideEnv              :: [(String, Maybe String)]
     -- The GHC server (this is replaced in 'restartSession')
@@ -314,13 +314,19 @@ data IdeIdleState = IdeIdleState {
   }
 
 -- | The collection of source and data files submitted by the user.
+data ManagedFilesInternal = ManagedFilesInternal
+  { _managedSource :: [(ModuleName, (MD5Digest, LogicalTimestamp))]
+  , _managedData   :: [FilePath]
+  }
+
+-- | The collection of source and data files submitted by the user.
 data ManagedFiles = ManagedFiles
-  { _sourceFiles :: [(ModuleName, (MD5Digest, LogicalTimestamp))]
-  , _dataFiles   :: [FilePath]
+  { sourceFiles :: [ModuleName]
+  , dataFiles   :: [FilePath]
   }
 
 $(nameDeriveAccessors ''IdeIdleState accessorName)
-$(nameDeriveAccessors ''ManagedFiles accessorName)
+$(nameDeriveAccessors ''ManagedFilesInternal accessorName)
 
 -- | Recover the fixed config the session was initialized with.
 getSessionConfig :: IdeSession -> SessionConfig
@@ -348,7 +354,7 @@ initSession ideConfig'@SessionConfig{configStaticOpts} = do
                         , _ideComputed         = Nothing
                         , _ideNewOpts          = Nothing
                         , _ideGenerateCode     = False
-                        , _ideManagedFiles     = ManagedFiles [] []
+                        , _ideManagedFiles     = ManagedFilesInternal [] []
                         , _ideEnv              = []
                         , _ideUpdatedEnv       = False
                           -- Make sure 'ideComputed' is set on first call
@@ -551,7 +557,7 @@ makeBlocks n = go . BSL.toChunks
 updateModule :: ModuleName -> ByteString -> IdeSessionUpdate
 updateModule m bs = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
   let internal = internalFile ideSourcesDir m
-  old <- get (ideManagedFiles .> sourceFiles .> lookup' m)
+  old <- get (ideManagedFiles .> managedSource .> lookup' m)
   -- We always overwrite the file, and then later set the timestamp back
   -- to what it was if it turns out the hash was the same. If we compute
   -- the hash first, we would force the entire lazy bytestring into memory
@@ -563,7 +569,7 @@ updateModule m bs = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
       newTS <- get ideLogicalTimestamp
       liftIO $ setFileTimes internal newTS newTS
       modify ideLogicalTimestamp (+ 1)
-      set (ideManagedFiles .> sourceFiles .> lookup' m) (Just (newHash, newTS))
+      set (ideManagedFiles .> managedSource .> lookup' m) (Just (newHash, newTS))
       set ideUpdatedCode True
 
 -- | Like 'updateModule' except that instead of passing the module source by
@@ -581,7 +587,7 @@ updateModuleFromFile m p = IdeSessionUpdate $ \staticInfo -> do
 updateModuleDelete :: ModuleName -> IdeSessionUpdate
 updateModuleDelete m = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
   liftIO $ removeFile (internalFile ideSourcesDir m)
-  set (ideManagedFiles .> sourceFiles .> lookup' m) Nothing
+  set (ideManagedFiles .> managedSource .> lookup' m) Nothing
   set ideUpdatedCode True
 
 -- | Update dynamic compiler flags, including pragmas and packages to use.
@@ -609,7 +615,7 @@ internalFile ideSourcesDir m =
 updateDataFile :: FilePath -> ByteString -> IdeSessionUpdate
 updateDataFile n bs = IdeSessionUpdate $ \IdeStaticInfo{ideDataDir} -> do
   liftIO $ writeFileAtomic (ideDataDir </> n) bs
-  modify (ideManagedFiles .> dataFiles) (n :)
+  modify (ideManagedFiles .> managedData) (n :)
 
 -- | Like 'updateDataFile' except that instead of passing the file content by
 -- value, it's given by reference to an existing file (the second argument),
@@ -621,14 +627,14 @@ updateDataFileFromFile n p = IdeSessionUpdate $ \IdeStaticInfo{ideDataDir} -> do
       targetDir  = takeDirectory targetPath
   liftIO $ createDirectoryIfMissing True targetDir
   liftIO $ copyFile p targetPath
-  modify (ideManagedFiles .> dataFiles) (n :)
+  modify (ideManagedFiles .> managedData) (n :)
 
 -- | A session update that deletes an existing data file.
 --
 updateDataFileDelete :: FilePath -> IdeSessionUpdate
 updateDataFileDelete n = IdeSessionUpdate $ \IdeStaticInfo{ideDataDir} -> do
   liftIO $ removeFile (ideDataDir </> n)
-  modify (ideManagedFiles .> dataFiles) $ delete n
+  modify (ideManagedFiles .> managedData) $ delete n
 
 -- | Set an environment variable
 --
@@ -705,11 +711,15 @@ getManagedFiles IdeSession{ideState} =
   $withMVar ideState $ \st ->
     case st of
       IdeSessionIdle idleState ->
-        return $ idleState ^. ideManagedFiles
+        return $ plugLeaks $ idleState ^. ideManagedFiles
       IdeSessionRunning _ idleState ->
-        return $ idleState ^. ideManagedFiles
+        return $ plugLeaks $ idleState ^. ideManagedFiles
       IdeSessionShutdown ->
         fail "Session already shut down."
+ where
+  plugLeaks :: ManagedFilesInternal -> ManagedFiles
+  plugLeaks files = ManagedFiles { sourceFiles = map fst $ _managedSource files
+                                 , dataFiles = _managedData files }
 
 -- | Get the list of correctly compiled modules, as reported by the compiler.
 getLoadedModules :: Query LoadedModules
