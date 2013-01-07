@@ -902,7 +902,7 @@ ideBackendRTS = BSL.pack . unlines $ [
   , "withBufferTimeout :: IO.Handle -> Maybe Int -> IO a -> IO a"
   , "withBufferTimeout _ Nothing  io = io"
   , "withBufferTimeout h (Just n) io = do"
-  , "  tid <- forkIO . forever $ threadDelay n >> IO.hFlush h"
+  , "  tid <- forkIO . ignoreIOExceptions . forever $ threadDelay n >> IO.hFlush h"
   , "  result <- io"
   , "  killThread tid"
   , "  return result"

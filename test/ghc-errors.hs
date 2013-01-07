@@ -3,7 +3,7 @@ module Main (main) where
 
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
-import Control.Monad (liftM, void)
+import Control.Monad (liftM, void, forM_)
 import qualified Data.ByteString as BSS (ByteString)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
@@ -1293,6 +1293,36 @@ syntheticTests =
           RunOk _ -> assertEqual "" (BSLC.pack "Michael\n") output
           _ -> assertFailure $ "Unexpected result " ++ show out3b
     )
+  , ( "Snippet closes stderr, using timeout buffering"
+    , withConfiguredSession defOpts $ \session -> do
+        let main' = fromString "Main"
+        let upd = mconcat [
+                      updateCodeGeneration True
+                    , updateStdoutBufferMode $ RunLineBuffering Nothing
+                    , updateStderrBufferMode $ RunBlockBuffering (Just 4096) (Just 250000)
+                    , updateModule main' . BSLC.pack . unlines $ [
+                          "import Control.Concurrent"
+                        , "import Control.Monad"
+                        , "import System.IO"
+                        , "main :: IO ()"
+                        , "main = do"
+                        , "  hClose stderr"
+                        , "  forM_ [1 :: Int .. 3] $ \\i -> do"
+                        , "    print i"
+                        , "    threadDelay 500000"
+                        ]
+                    ]
+        updateSessionD session upd 1
+        ra <- runStmt session main' "main"
+        forM_ [1 :: Int .. 3] $ \i -> do
+          result <- runWait ra
+          result @?= Left (BSSC.pack $ show i ++ "\n")
+
+        finalResult <- runWait ra
+        case finalResult of
+          Right (RunOk _) -> return ()
+          _ -> assertFailure $ "Unexpected result " ++ show finalResult
+     )
   ]
 
 defOpts :: [String]
