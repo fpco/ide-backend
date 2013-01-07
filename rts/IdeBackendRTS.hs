@@ -10,7 +10,6 @@ import qualified System.IO as IO
 import qualified Control.Exception as Ex
 import Control.Monad (forever)
 
--- This requires access to the ghc package (needs to be exposed)
 import GHC.IO.Handle.Types (
     Handle(FileHandle)
   , HandleType(ClosedHandle, ReadHandle, WriteHandle)
@@ -29,9 +28,9 @@ import qualified GHC.IO.FD as FD
 
 run :: RunBufferMode -> RunBufferMode -> IO a -> IO a
 run outBMode errBMode io = do
-  resetStdin
-  resetStdout
-  resetStderr
+  resetStdin  IO.utf8
+  resetStdout IO.utf8
+  resetStderr IO.utf8
   withBuffering IO.stdout outBMode $ withBuffering IO.stderr errBMode $ io
 
 {-------------------------------------------------------------------------------
@@ -89,25 +88,22 @@ swapFileHandles _ _ =
   Handle
 -------------------------------------------------------------------------------}
 
-resetStdin :: IO ()
-resetStdin = do
-  enc <- getLocaleEncoding
+resetStdin :: IO.TextEncoding -> IO ()
+resetStdin enc = do
   new <- mkHandle FD.stdin "<stdin>" ReadHandle True (Just enc)
            nativeNewlineMode{-translate newlines-}
            (Just stdHandleFinalizer) Nothing
   swapFileHandles new IO.stdin
 
-resetStdout :: IO ()
-resetStdout = do
-  enc <- getLocaleEncoding
+resetStdout :: IO.TextEncoding -> IO ()
+resetStdout enc = do
   new <- mkHandle FD.stdout "<stdout>" WriteHandle True (Just enc)
            nativeNewlineMode{-translate newlines-}
            (Just stdHandleFinalizer) Nothing
   swapFileHandles new IO.stdout
 
-resetStderr :: IO ()
-resetStderr = do
-  enc <- getLocaleEncoding
+resetStderr :: IO.TextEncoding -> IO ()
+resetStderr enc = do
   new <- mkHandle FD.stderr "<stderr>" WriteHandle False{-stderr is unbuffered-}
            (Just enc)
            nativeNewlineMode{-translate newlines-}
