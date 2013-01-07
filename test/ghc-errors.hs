@@ -211,9 +211,8 @@ syntheticTests :: [(String, Assertion)]
 syntheticTests =
   [ ( "Maintain list of compiled modules I"
     , withConfiguredSession defOpts $ \session -> do
-        let rts = fromString "IdeBackendRTS" -- TODO: Do we want this reported?
         let assEq name goodMods =
-              assertEqual name (sort $ rts : goodMods)
+              assertEqual name (sort goodMods)
                 =<< (liftM sort $ getLoadedModules session)
         let xxx = fromString "XXX"
         updateSessionD session (loadModule xxx "a = 5") 1
@@ -240,9 +239,8 @@ syntheticTests =
     )
   , ( "Maintain list of compiled modules II"
     , withConfiguredSession defOpts $ \session -> do
-        let rts = fromString "IdeBackendRTS" -- TODO: Do we want this reported?
         let assEq name goodMods =
-              assertEqual name (sort $ rts : goodMods)
+              assertEqual name (sort goodMods)
                 =<< (liftM sort $ getLoadedModules session)
         let xxx = fromString "XXX"
         updateSessionD session (loadModule xxx "a = 5") 1
@@ -821,7 +819,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         mods <- getLoadedModules session
-        assertEqual "" [fromString "IdeBackendRTS", fromString "M"] mods
+        assertEqual "" [fromString "M"] mods
         _runActions <- runStmt session (fromString "M") "loop"
         mods' <- getLoadedModules session
         assertEqual "Running code does not affect getLoadedModules" mods mods'
@@ -1326,7 +1324,7 @@ syntheticTests =
   ]
 
 defOpts :: [String]
-defOpts = [ "-no-user-package-conf" ]
+defOpts = [ "-hide-all-packages", "-package base" ]
 
 -- Set of projects and options to use for them.
 projects :: [(String, FilePath, [String])]
@@ -1343,6 +1341,7 @@ projects =
       , "-package parallel"
       , "-package base"
       , "-package old-time"
+      , "-package ide-backend-rts"
       ])
   ]
 
@@ -1378,7 +1377,7 @@ main = do
 displayCounter :: Int -> Progress -> Assertion
 displayCounter i p = do
   debug dVerbosity $ show p
-  assertBool (show p ++ " exceeds " ++ show i) (progressStep p <= i + 1)
+  assertBool (show p ++ " exceeds " ++ show i) (progressStep p <= i)
 
 updateSessionD :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
 updateSessionD session update i = do

@@ -104,7 +104,7 @@ ghcServer fdsAndOpts = do
 ghcServerEngine :: [String] -> RpcConversation  -> IO ()
 ghcServerEngine staticOpts conv@RpcConversation{..} = do
   -- Submit static opts and get back leftover dynamic opts.
-  dOpts <- submitStaticOpts staticOpts
+  dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc . forever $ do
@@ -116,6 +116,8 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
         ghcHandleRun conv m fun outBMode errBMode
       ReqSetEnv env ->
         ghcHandleSetEnv conv env
+  where
+    ideBackendRTSOpts = ["-package ide-backend-rts"]
 
 -- | Handle a compile or type check request
 ghcHandleCompile :: RpcConversation
