@@ -155,7 +155,8 @@ test-suite ghc-errors
                       pureMD5,
                       crypto-api,
                       tagged,
-                      template-haskell
+                      template-haskell,
+                      utf8-string
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else

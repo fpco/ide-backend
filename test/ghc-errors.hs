@@ -7,6 +7,7 @@ import Control.Monad (liftM, void, forM_)
 import qualified Data.ByteString as BSS (ByteString)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
+import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
 import Data.List (sort)
 import qualified Data.List as List
 import Data.Maybe (catMaybes)
@@ -1321,6 +1322,23 @@ syntheticTests =
           Right (RunOk _) -> return ()
           _ -> assertFailure $ "Unexpected result " ++ show finalResult
      )
+  , ( "Make sure encoding is UTF8"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (fromString "M") . BSL8.fromString . unlines $
+                    [ "module M where"
+                    , "hello :: IO ()"
+                    , "hello = putStrLn \"你好\""
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        runActions <- runStmt session (fromString "M") "hello"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk _ -> assertEqual "" (BSL8.fromString "你好\n") output
+          _       -> assertFailure $ "Unexpected run result: " ++ show result
+    )
   ]
 
 defOpts :: [String]
