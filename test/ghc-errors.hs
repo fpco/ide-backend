@@ -1356,10 +1356,9 @@ projects =
   , ("A single file with a code to run in parallel"
     , "test/MainModule"
     , [ "-hide-all-packages"
-      , "-package parallel"
       , "-package base"
+      , "-package parallel"
       , "-package old-time"
-      , "-package ide-backend-rts"
       ])
   ]
 

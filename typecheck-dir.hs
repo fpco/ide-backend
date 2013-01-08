@@ -23,7 +23,10 @@ import qualified ModuleName as MN
 -- test file to fail. The same file type-checks OK with the ghc-errors
 -- test program (with no GHC extensions set).
 defOpts :: [String]
-defOpts = [ "-no-user-package-conf"
+defOpts = [ "-hide-all-packages"
+          , "-package base"
+          , "-package parallel"
+          , "-package old-time"
           , "-XCPP"
           , "-XTemplateHaskell"
           , "-XBangPatterns"
@@ -34,6 +37,8 @@ defOpts = [ "-no-user-package-conf"
           , "-XMultiParamTypeClasses"
           , "-XRankNTypes"
           , "-XTypeFamilies"
+          , "-package parallel"
+          , "-package old-time"
           ]
 
 main :: IO ()
@@ -47,7 +52,7 @@ main = do
               error "usage: typecheck-dir [source-dir [ghc-options]]"
             [dir] -> (dir, defOpts)
             dir : optsArg -> (dir, optsArg)
-            [] -> ("test/Cabal",
+            [] -> ("test/MainModule",  -- test/Cabal
                    defOpts)
       slashTmp <- getTemporaryDirectory
       withTempDirectory slashTmp "typecheck-dir."
