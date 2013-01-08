@@ -20,7 +20,6 @@ module GhcRun
   , RunBufferMode(..)
   , compileInGhc
   , runInGhc
-  , checkModuleInProcess
   ) where
 
 import Bag (bagToList)
@@ -50,13 +49,12 @@ import GHC hiding (flags, ModuleName, RunResult(..), load)
 import GHC hiding (flags, ModuleName, RunResult(..))
 #endif
 
-import Control.Applicative
 import Control.Exception (assert)
 import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM)
 import Data.IORef
 import Data.List ((\\))
-import Data.Maybe (catMaybes, fromJust)
+import Data.Maybe (catMaybes)
 import System.FilePath.Find (find, always, extension)
 import System.Process
 #if __GLASGOW_HASKELL__ >= 706
@@ -384,44 +382,6 @@ _debugPpContext flags msg = do
   context <- getContext
   liftIO $ debug dVerbosity
     $ msg ++ ": " ++ showSDocDebug flags (GHC.ppr context)
-
--- Kept for in-process tests.
-checkModuleInProcess :: FilePath     -- ^ target directory
-                     -> DynamicOpts  -- ^ dynamic flags for this run of runGhc
-                     -> Bool         -- ^ whether to generate code
-                     -> Maybe (String, String)
-                                     -- ^ module and function to run, if any
-                     -> Int          -- ^ verbosity level
-                     -> (String -> IO ())
-                                     -- ^ handler for each SevOutput message
-                     -> (String -> IO ())
-                                     -- ^ handler for remaining non-error msgs
-                     -> IO (Either [SourceError] RunResult)
-                                     -- ^ errors, warnings and results, if any
-checkModuleInProcess configSourcesDir dynOpts ideGenerateCode funToRun
-                     verbosity handlerOutput handlerRemaining = do
-  errsRef <- newIORef []
-  let collectedErrors = reverse <$> readIORef errsRef
-      handleOtherErrors =
-        Ex.handle $ \e -> do
-          debug dVerbosity $ "handleOtherErrors: " ++ showExWithClass e
-          let exError = OtherError (show (e :: Ex.SomeException))
-          -- In case of an exception, don't lose saved errors.
-          errs <- collectedErrors
-          return $ Left (errs ++ [exError])
-  -- Catch all errors.
-  handleOtherErrors $ do
-    libdir <- getGhcLibdir
-    -- Call the GHC API.
-    runGhc (Just libdir) $ do
-        (errs, _) <- compileInGhc configSourcesDir dynOpts
-                                  ideGenerateCode verbosity
-                                  errsRef handlerOutput handlerRemaining
-        case funToRun of
-          Just (m, fun) -> Right <$> runInGhc (fromJust $ MN.fromString m, fun)
-                                              RunNoBuffering
-                                              RunNoBuffering
-          Nothing -> return (Left errs)
 
 -- | Version of handleJust for use in the GHC monad
 ghandleJust :: Ex.Exception e => (e -> Maybe b) -> (b -> Ghc a) -> Ghc a -> Ghc a
