@@ -1339,6 +1339,26 @@ syntheticTests =
           RunOk _ -> assertEqual "" (BSL8.fromString "你好\n") output
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Using something from a different package (no \"Loading package\" msg)"
+      -- We pick something from the haskell platform but that doesn't come with ghc itself
+      -- https://github.com/haskell/haskell-platform/blob/2012.4.0.0/haskell-platform.cabal
+    , withConfiguredSession [] $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (fromString "M") . BSL8.fromString . unlines $
+                    [ "module M where"
+                    , "import Control.Concurrent.Async"
+                    , "hello :: IO ()"
+                    , "hello = async (return 5) >>= wait >>= print"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        runActions <- runStmt session (fromString "M") "hello"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk _ -> assertEqual "" (BSL8.fromString "5\n") output
+          _       -> assertFailure $ "Unexpected run result: " ++ show result
+    )
   ]
 
 defOpts :: [String]

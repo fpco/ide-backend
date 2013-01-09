@@ -242,6 +242,7 @@ runInGhc :: (ModuleName, String)  -- ^ module and function to run, if any
          -> Ghc RunResult
 runInGhc (m, fun) outBMode errBMode = do
   flags <- getSessionDynFlags
+  setSessionDynFlags (flags { verbosity = 0 })
   -- TODO: not sure if this cleanup handler is needed:
   defaultCleanupHandler flags . handleErrors $ do
 -- TODO: these debug statements break tests currently:

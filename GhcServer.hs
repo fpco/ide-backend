@@ -117,6 +117,7 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
       ReqSetEnv env ->
         ghcHandleSetEnv conv env
   where
+    -- Just in case the user specified -hide-all-packages
     ideBackendRTSOpts = ["-package ide-backend-rts"]
 
 -- | Handle a compile or type check request
