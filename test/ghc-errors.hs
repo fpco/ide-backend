@@ -1346,9 +1346,9 @@ syntheticTests =
         let upd = (updateCodeGeneration True)
                <> (updateModule (fromString "M") . BSL8.fromString . unlines $
                     [ "module M where"
-                    , "import Control.Concurrent.Async"
+                    , "import Control.Monad.IO.Class" -- From transformers
                     , "hello :: IO ()"
-                    , "hello = async (return 5) >>= wait >>= print"
+                    , "hello = liftIO $ print 5"
                     ])
         updateSessionD session upd 1
         msgs <- getSourceErrors session
