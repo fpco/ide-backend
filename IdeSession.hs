@@ -159,7 +159,7 @@ module IdeSession (
   -- exceptions and things going awry. Thus the caller does not need to
   -- duplicate the file state: it can rely on putting files in, applying
   -- updates to the files via the session, and extracting the files again
-  -- at any time.
+  -- at any time (before the session is closed).
 
   -- ** Morally pure queries
   -- | Morally, a compiler is a pure function from the current value of the
@@ -185,7 +185,7 @@ module IdeSession (
 
   -- ** Persistent and transitory state
   -- | The persistent state is obviously the files: source files and data
-  -- files, as well as user-supplied parameters of the comilation.
+  -- files, as well as user-supplied parameters of the compilation.
   -- Internally there is a great deal of transitory and cached state,
   -- either in memory or on disk (such as .hi files on disk or the equivalent
   -- in memory). Note that none of the state persists in case of a fatal
@@ -195,7 +195,8 @@ module IdeSession (
   --
   -- It should be possible to drop all the transitory state and recover,
   -- just at the cost of some extra work, as long as the original @Session@
-  -- value is avaiable. The 'restartSession' function does almost exactly that.
+  -- value is available. The 'restartSession' function does almost
+  -- exactly that.
   --
   -- This property is a useful correctness property for internal testing: the
   -- results of all the queries should be the same before and after blowing
@@ -244,7 +245,7 @@ data SessionConfig = SessionConfig {
     -- | The directory to use for all session files.
     configDir        :: FilePath
     -- | GHC static options. Can also contain default dynamic options,
-    -- that are overriden via session update.
+    -- that are overridden via session update.
   , configStaticOpts :: [String]
   }
 
@@ -404,11 +405,11 @@ shutdownSession IdeSession{ideState, ideStaticInfo} = do
     sourceExists <- doesDirectoryExist sourcesDir
     when sourceExists $ removeDirectoryRecursive sourcesDir
 
--- | Restarts a session. Techically, a new session is created under the old
+-- | Restarts a session. Technically, a new session is created under the old
 -- @IdeSession@ handle, with a state cloned from the old session,
 -- which is then shut down. The only behavioural difference between
 -- the restarted session and the old one is that any running code is stopped
--- (even if it was stuck and didn't repond to interrupt requests)
+-- (even if it was stuck and didn't respond to interrupt requests)
 -- and that no modules are loaded, though all old modules and data files
 -- are still contained in the new session and ready to be compiled with
 -- the same flags and environment variables as before.
@@ -499,7 +500,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
 
 -- | Writes a file atomically.
 --
--- The file is either written sucessfully or an IO exception is raised and
+-- The file is either written successfully or an IO exception is raised and
 -- the original file is left unchanged.
 --
 -- On windows it is not possible to delete a file that is open by a process.
@@ -552,7 +553,7 @@ makeBlocks n = go . BSL.toChunks
 -- and file where the module is located within the project. The actual
 -- internal compiler module name, such as the one given by the
 -- @getLoadedModules@ query, comes from within @module ... end@.
--- Usually the two names are equal, but they neededn't be.
+-- Usually the two names are equal, but they needn't be.
 --
 updateModule :: ModuleName -> ByteString -> IdeSessionUpdate
 updateModule m bs = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
@@ -705,7 +706,7 @@ getSourceErrors IdeSession{ideState, ideStaticInfo} =
 -- The module names are those supplied by the user as the first
 -- arguments of the @updateModule@ and @updateModuleFromFile@ calls,
 -- as opposed to the compiler internal @module ... end@ module names.
--- Usually the two names are equal, but they neededn't be.
+-- Usually the two names are equal, but they needn't be.
 getManagedFiles :: Query ManagedFiles
 getManagedFiles IdeSession{ideState} =
   $withMVar ideState $ \st ->
