@@ -58,6 +58,9 @@ library
                       DeriveDataTypeable
   ghc-options:        -Wall -fno-warn-unused-do-bind
 
+-- A hack to tell 7.6.1 from other 7.6.* in the codebase.
+  if impl(ghc == 7.6.1)
+    cpp-options:     -DGHC_761
 
 executable ide-backend-server
   main-is:            ide-backend-server.hs

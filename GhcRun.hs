@@ -45,8 +45,12 @@ import ErrUtils   ( Message )
 -- Import our own version of --make.
 import GhcMakeFixed
 import GHC hiding (flags, ModuleName, RunResult(..), load)
-#else
+#elif __GLASGOW_HASKELL__ >= 706 && !defined(GHC_761)
+-- Use the default tools. They are fixed in these GHC versions.
 import GHC hiding (flags, ModuleName, RunResult(..))
+#else
+-- Not fixed in this version and no workaround. Compilation should fail,
+-- because the problem is not minor and not easy to spot otherwise.
 #endif
 
 import Control.Exception (assert)
