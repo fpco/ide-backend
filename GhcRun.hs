@@ -250,6 +250,7 @@ runInGhc :: (ModuleName, String)  -- ^ module and function to run, if any
          -> Ghc RunResult
 runInGhc (m, fun) outBMode errBMode = do
   flags <- getSessionDynFlags
+  -- Set GHC verbosity to avoid stray GHC messages, e.g., from the linker.
   setSessionDynFlags (flags { verbosity = 0 })
   -- TODO: not sure if this cleanup handler is needed:
   defaultCleanupHandler flags . handleErrors $ do

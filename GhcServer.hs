@@ -131,7 +131,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts configSourcesDir ideGenera
     errsRef <- liftIO $ newIORef []
     counter <- liftIO $ newIORef initialProgress
     (errs, context) <-
-      surpressGhcStdout $ compileInGhc configSourcesDir
+      suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
                                        verbosity
@@ -458,17 +458,20 @@ getGhcExitCode = getRpcExitCode
 -- Auxiliary                                                                  --
 --------------------------------------------------------------------------------
 
-surpressGhcStdout :: Ghc a -> Ghc a
-surpressGhcStdout p = do
-  stdOutputBackup <- liftIO surpressStdOutput
+-- We suppress stdout during compilation to avoid stray messages, e.g. from
+-- the linker.
+-- TODO: sned all suppressed messages to a debug log file.
+suppressGhcStdout :: Ghc a -> Ghc a
+suppressGhcStdout p = do
+  stdOutputBackup <- liftIO suppressStdOutput
   x <- p
   liftIO $ restoreStdOutput stdOutputBackup
   return x
 
 type StdOutputBackup = Fd
 
-surpressStdOutput :: IO StdOutputBackup
-surpressStdOutput = do
+suppressStdOutput :: IO StdOutputBackup
+suppressStdOutput = do
   hFlush stdout
   stdOutputBackup <- dup stdOutput
   closeFd stdOutput
