@@ -132,7 +132,9 @@ runFromGhc a = do
   libdir <- getGhcLibdir
   runGhc (Just libdir) a
 
-#if __GLASGOW_HASKELL__ < 707
+#if __GLASGOW_HASKELL__ < 706 || defined(GHC_761)
+-- WIth some luck the fix should work for all these versions.
+-- The problem is fixed for 7.6.2 onwards.
 invalidateModSummaryCache :: GhcMonad m => m ()
 invalidateModSummaryCache =
   modifySession $ \h -> h { hsc_mod_graph = map inval (hsc_mod_graph h) }
@@ -182,7 +184,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                    `dopt_unset` Opt_GhciSandbox
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
-#if __GLASGOW_HASKELL__ < 707
+#if __GLASGOW_HASKELL__ < 706 || defined(GHC_761)
         invalidateModSummaryCache
 #endif
         setSessionDynFlags flags
