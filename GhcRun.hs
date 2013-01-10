@@ -181,7 +181,9 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                            log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
 #endif
                          }
+#if __GLASGOW_HASKELL__ < 708
                    `dopt_unset` Opt_GhciSandbox
+#endif
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
 #if __GLASGOW_HASKELL__ < 706 || defined(GHC_761)
