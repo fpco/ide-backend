@@ -350,8 +350,11 @@ initSession ideConfig'@SessionConfig{configStaticOpts} = do
   ideSourcesDir <- createTempDirectory configDir "src."
   ideDataDir    <- createTempDirectory configDir "data."
   _ideGhcServer <- forkGhcServer configStaticOpts (Just ideDataDir)
+  -- We have to make sure that file times never reach 0, because this will
+  -- trigger an exception (http://hackage.haskell.org/trac/ghc/ticket/7567)
+  -- We rather arbitrary start at Jan 2, 1970
   ideState <- newMVar $ IdeSessionIdle IdeIdleState {
-                          _ideLogicalTimestamp = 0
+                          _ideLogicalTimestamp = 86400 
                         , _ideComputed         = Nothing
                         , _ideNewOpts          = Nothing
                         , _ideGenerateCode     = False
