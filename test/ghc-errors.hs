@@ -1331,6 +1331,27 @@ syntheticTests =
           RunOk _ -> assertEqual "" (BSL8.fromString "5\n") output
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Using the FFI (expected failure)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateModuleFromFile (fromString "Main") "test/FFI/Main.hs"
+              ]
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        case msgs of
+          [] -> assertFailure "Unexpected success"
+          [_] -> return ()
+          _ -> assertFailure "Got more errors than expected"
+        {-
+        assertEqual "This should compile without errors" [] msgs
+        runActions <- runStmt session (fromString "M") "hello"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk _ -> assertEqual "" (BSL8.fromString "5\n") output
+          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        -}
+    )
   ]
 
 defOpts :: [String]
