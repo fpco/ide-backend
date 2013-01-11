@@ -42,7 +42,8 @@ import ErrUtils   ( Message )
 #endif
 
 #if __GLASGOW_HASKELL__ == 704
--- Import our own version of --make.
+-- Import our own version of --make as a workaround for
+-- http://hackage.haskell.org/trac/ghc/ticket/7548
 import GhcMakeFixed
 import GHC hiding (flags, ModuleName, RunResult(..), load)
 #elif __GLASGOW_HASKELL__ >= 706 && !defined(GHC_761)
@@ -133,6 +134,7 @@ runFromGhc a = do
   runGhc (Just libdir) a
 
 #if __GLASGOW_HASKELL__ < 706 || defined(GHC_761)
+-- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
 -- WIth some luck the fix should work for all these versions.
 -- The problem is fixed for 7.6.2 onwards.
 invalidateModSummaryCache :: GhcMonad m => m ()
@@ -182,6 +184,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 #endif
                          }
 #if __GLASGOW_HASKELL__ < 708
+  -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/1381.
                    `dopt_unset` Opt_GhciSandbox
 #endif
       defaultCleanupHandler flags $ do
@@ -217,10 +220,11 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
       (errs, context) <- prepareResult
       return (errs ++ [fromHscSourceError e], context)
 
-    -- Some errors are reported as exceptions instead
+    -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7430.
+    -- Some errors are reported as exceptions instead.
     ghcExceptionHandler :: GhcException -> Ghc ([SourceError], LoadedModules)
     ghcExceptionHandler e = do
-      let eText   = "Bar: " ++ show e
+      let eText   = show e
           exError = OtherError eText
       liftIO $ debug dVerbosity $ "handleOtherErrors: " ++ eText
       -- In case of an exception, don't lose saved errors.
@@ -250,6 +254,7 @@ runInGhc :: (ModuleName, String)  -- ^ module and function to run, if any
          -> Ghc RunResult
 runInGhc (m, fun) outBMode errBMode = do
   flags <- getSessionDynFlags
+  -- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
   -- Set GHC verbosity to avoid stray GHC messages, e.g., from the linker.
   setSessionDynFlags (flags { verbosity = 0 })
   -- TODO: not sure if this cleanup handler is needed:

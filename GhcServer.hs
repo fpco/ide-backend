@@ -458,9 +458,10 @@ getGhcExitCode = getRpcExitCode
 -- Auxiliary                                                                  --
 --------------------------------------------------------------------------------
 
+ -- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
 -- We suppress stdout during compilation to avoid stray messages, e.g. from
 -- the linker.
--- TODO: sned all suppressed messages to a debug log file.
+-- TODO: send all suppressed messages to a debug log file.
 suppressGhcStdout :: Ghc a -> Ghc a
 suppressGhcStdout p = do
   stdOutputBackup <- liftIO suppressStdOutput

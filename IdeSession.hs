@@ -287,6 +287,7 @@ data IdeSessionState =
 type LogicalTimestamp = EpochTime
 
 data IdeIdleState = IdeIdleState {
+    -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7473.
     -- Logical timestamps (used to force ghc to recompile files)
     _ideLogicalTimestamp :: LogicalTimestamp
     -- The result computed by the last 'updateSession' invocation.
@@ -350,11 +351,14 @@ initSession ideConfig'@SessionConfig{configStaticOpts} = do
   ideSourcesDir <- createTempDirectory configDir "src."
   ideDataDir    <- createTempDirectory configDir "data."
   _ideGhcServer <- forkGhcServer configStaticOpts (Just ideDataDir)
+  -- The value of _ideLogicalTimestamp field is a workaround for
+  -- the problems with 'invalidateModSummaryCache', which itself is
+  -- a workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
   -- We have to make sure that file times never reach 0, because this will
-  -- trigger an exception (http://hackage.haskell.org/trac/ghc/ticket/7567)
-  -- We rather arbitrary start at Jan 2, 1970
+  -- trigger an exception (http://hackage.haskell.org/trac/ghc/ticket/7567).
+  -- We rather arbitrary start at Jan 2, 1970.
   ideState <- newMVar $ IdeSessionIdle IdeIdleState {
-                          _ideLogicalTimestamp = 86400 
+                          _ideLogicalTimestamp = 86400
                         , _ideComputed         = Nothing
                         , _ideNewOpts          = Nothing
                         , _ideGenerateCode     = False
@@ -802,6 +806,11 @@ runStmt IdeSession{ideState} m fun = do
           else fail $ "Module " ++ show (MN.toString m)
                       ++ " not successfully loaded, when trying to run code."
        _ ->
+        -- This 'fail' invocation is, in part, a workaround for
+        -- http://hackage.haskell.org/trac/ghc/ticket/7539
+        -- which would otherwise lead to a hard GHC crash,
+        -- instead of providing a sensible error message
+        -- that we could show to the user.
         fail "Cannot run before the code is generated."
     IdeSessionRunning _ _ ->
       fail "Cannot run code concurrently"

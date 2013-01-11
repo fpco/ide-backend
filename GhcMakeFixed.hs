@@ -4,6 +4,9 @@
 {-# OPTIONS -fno-warn-unused-imports #-}
 {-# LANGUAGE CPP #-}
 
+-- Functions defined in this file are used in a workaround for
+-- http://hackage.haskell.org/trac/ghc/ticket/7548.
+
 -- Fixed according to
 -- http://hackage.haskell.org/trac/ghc/changeset/772e6d20bcac691bcfe8528829d6ed100fd701bb
 
