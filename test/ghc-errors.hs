@@ -1361,7 +1361,6 @@ defOpts = [ "-hide-all-packages", "-package base" ]
 projects :: [(String, FilePath, [String])]
 projects =
   [ ("A depends on B, throws exception", "test/ABnoError", defOpts)
-  , ("Our own code, package 'ghc' missing", ".", [])
   , ( "Cabal code"
     , "test/Cabal"
     , [ "-hide-all-packages"
