@@ -24,9 +24,6 @@ import qualified ModuleName as MN
 -- test program (with no GHC extensions set).
 defOpts :: [String]
 defOpts = [ "-hide-all-packages"
-          , "-package base"
-          , "-package parallel"
-          , "-package old-time"
           , "-XCPP"
           , "-XTemplateHaskell"
           , "-XBangPatterns"
@@ -36,9 +33,22 @@ defOpts = [ "-hide-all-packages"
           , "-XScopedTypeVariables"
           , "-XMultiParamTypeClasses"
           , "-XRankNTypes"
-          , "-XTypeFamilies"
-          , "-package parallel"
+-- causes problems with the Cabal code:          , "-XTypeFamilies"
+          , "-XForeignFunctionInterface"
+          , "-XDeriveDataTypeable"
           , "-package old-time"
+          , "-package parallel"
+          , "-package base"
+          , "-package deepseq"
+          , "-package filepath"
+          , "-package directory"
+          , "-package process"
+          , "-package time"
+          , "-package containers"
+          , "-package array"
+          , "-package pretty"
+          , "-package bytestring"
+          , "-package unix"
           ]
 
 main :: IO ()
@@ -52,7 +62,7 @@ main = do
               error "usage: typecheck-dir [source-dir [ghc-options]]"
             [dir] -> (dir, defOpts)
             dir : optsArg -> (dir, optsArg)
-            [] -> ("test/MainModule",  -- test/Cabal
+            [] -> ("test/Cabal",
                    defOpts)
       slashTmp <- getTemporaryDirectory
       withTempDirectory slashTmp "typecheck-dir."

@@ -1362,9 +1362,21 @@ projects :: [(String, FilePath, [String])]
 projects =
   [ ("A depends on B, throws exception", "test/ABnoError", defOpts)
   , ("Our own code, package 'ghc' missing", ".", [])
-  , ( "A subdirectory of Cabal code"
+  , ( "Cabal code"
     , "test/Cabal"
-    , defOpts
+    , [ "-hide-all-packages"
+      , "-package base"
+      , "-package deepseq"
+      , "-package filepath"
+      , "-package directory"
+      , "-package process"
+      , "-package time"
+      , "-package containers"
+      , "-package array"
+      , "-package pretty"
+      , "-package bytestring"
+      , "-package unix"
+      ]
     )
   , ("A single file with a code to run in parallel"
     , "test/MainModule"

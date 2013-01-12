@@ -58,7 +58,7 @@ import Text.PrettyPrint
         isEmpty, ($$), (<+>), colon, (<>), text, vcat, ($+$), Doc, render)
 import Distribution.Simple.Utils (writeUTF8File)
 import Distribution.ParseUtils (showFreeText, FieldDescr(..))
-import Distribution.Parse.Parse (pkgDescrFieldDescrs,binfoFieldDescrs,libFieldDescrs,
+import Distribution.PackageDescription.Parse (pkgDescrFieldDescrs,binfoFieldDescrs,libFieldDescrs,
        sourceRepoFieldDescrs)
 import Distribution.Package (Dependency(..))
 import Distribution.Text (Text(..))
@@ -233,3 +233,6 @@ ppDeps deps                              =
 
 emptyLine :: Doc -> Doc
 emptyLine d                              = text " " $+$ d
+
+
+
