@@ -35,8 +35,8 @@ import TestTools
 -- and a variety of small test Haskell projects.
 
 -- | Update the session with all modules of the given directory.
-loadModulesFrom :: IdeSession -> FilePath -> IO ()
-loadModulesFrom session originalSourcesDir = do
+prepareModulesFrom :: IdeSession -> FilePath -> IO (IdeSessionUpdate, Int)
+prepareModulesFrom session originalSourcesDir = do
   debug dVerbosity $ "\nCopying files from: " ++ originalSourcesDir
                      ++ " to: " ++ getSourcesDir session
   -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
@@ -55,7 +55,12 @@ loadModulesFrom session originalSourcesDir = do
       -- in case the default value of CodeGeneration changes.
       originalUpdate = updateCodeGeneration False
                        <> (mconcat $ map upd originalModules)
-  updateSessionD session originalUpdate (length originalFiles)
+  return (originalUpdate, length originalFiles)
+
+loadModulesFrom :: IdeSession -> FilePath -> IO ()
+loadModulesFrom session originalSourcesDir = do
+  (originalUpdate, n) <- prepareModulesFrom session originalSourcesDir
+  updateSessionD session originalUpdate n
 
 -- | Run the specified action with a new IDE session, configured to use a
 -- temporary directory
@@ -85,24 +90,28 @@ withSession' config' io = do
 -- E.g., check that the values of Progress do not exceeed the number of files.
 -- Also, check ModuleDelete and all the DataFileChange constructors,
 -- getSourceModule an getDataFile.
-multipleTests :: [(String, IdeSession -> Assertion)]
+multipleTests :: [(String, IdeSession -> IdeSessionUpdate -> Int -> Assertion)]
 multipleTests =
-  [ ("Just typecheck", \_ -> return ())
-  , ("Overwrite with error"
-    , \session -> do
+  [ ("Overwrite with error"
+    , \session originalUpdate n -> do
+        updateSessionD session originalUpdate n
+        msgs <- getSourceErrors session
+        -- No errors in the original test code.
+        assertNoErrors msgs
         -- Overwrite one of the copied files.
         (m, _) <- getModules session
         let update = loadModule m "a = unknownX"
         updateSessionD session update 1  -- at most 1 recompiled
-        msgs <- getSourceErrors session
-        assertSomeErrors msgs
+        msgs2 <- getSourceErrors session
+        -- Errors reported due to the overwrite.
+        assertSomeErrors msgs2
     )
   , ("Overwrite with the same module name in all files"
-    , \session -> do
+    , \session originalUpdate _n -> do
         (_, lm) <- getModules session
         let upd m =
               updateModule m (BSLC.pack "module Wrong where\na = 1")
-            update = mconcat $ map upd lm
+            update = originalUpdate <> mconcat (map upd lm)
         updateSessionD session update 2
         msgs <- getSourceErrors session
         if length lm >= 2
@@ -110,7 +119,8 @@ multipleTests =
           else assertNoErrors msgs
     )
   , ("Overwrite modules many times"
-    , \session -> do
+    , \session originalUpdate n -> do
+        updateSessionD session originalUpdate n
         -- Overwrite one of the copied files with an error.
         (m1, lm) <- getModules session
         let update1 =
@@ -120,7 +130,7 @@ multipleTests =
         updateSessionD session mempty 1  -- was an error, so trying again
         msgs2 <- getSourceErrors session
         assertSomeErrors msgs2
-        -- Overwrite all files, many times, with correct modules.
+        -- Overwrite all files, many times, with correct code.
         let upd m = loadModule m "x = unknownX"
                     <> loadModule m "y = 2"
                     <> updateCodeGeneration True
@@ -137,26 +147,27 @@ multipleTests =
           (runStmt session (fromString "Main") "main")
       )
     , ("Run the sample code; don't fail without an explanation"
-      , \session -> do
-        (_, lm) <- getModules session
+      , \session originalUpdate n -> do
+        updateSessionD session originalUpdate n
         let update = updateCodeGeneration True
-        updateSessionD session update (length lm)  -- all recompiled
+        updateSessionD session update n  -- all recompiled
         mex <- Ex.try $ runStmt session (fromString "Main") "main"
         case mex of
           Right runActions -> void $ runWaitAll runActions
           Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
       )
-    , ("Run automatically corrected code; don't fail at all"
-      , \session -> do
+    , ("Overwrite all with correct code; don't fail at all"
+      , \session originalUpdate _n -> do
         (_, lm) <- getModules session
         let upd m = loadModule m "x = 1"
             update =
-              updateModule (fromString "TotallyMain")
-                           (BSLC.pack "module TotallyMain where\nmain = print \"test run\"")
+              originalUpdate
+              <> updateModule
+                   (fromString "TotallyMain")
+                   (BSLC.pack
+                      "module TotallyMain where\nmain = print \"test run\"")
               <> mconcat (map upd lm)
-        updateSessionD session update (length lm + 1)
-        updateSessionD session mempty 0
-        let update2 = updateCodeGeneration True
+        let update2 = update <> updateCodeGeneration True
         updateSessionD session update2 (length lm + 1)
         runActions <- runStmt session (fromString "TotallyMain") "main"
         (output, result) <- runWaitAll runActions
@@ -170,21 +181,24 @@ multipleTests =
             assertFailure "Unexpected force-cancel"
       )
     , ("Make sure deleting modules removes them from the directory"
-      , \session -> do
+      , \session originalUpdate n -> do
+        updateSessionD session originalUpdate n
         (_, lm) <- getModules session
-        let update = mconcat $ map updateModuleDelete lm
-        updateSessionD session update 0
+        let updateDel = mconcat $ map updateModuleDelete lm
+        updateSessionD session updateDel 0
         msgs <- getSourceErrors session
         assertNoErrors msgs
+        -- The updates cancel each other out.
+        updateSessionD session (originalUpdate <> updateDel) 0
         let update2 = updateCodeGeneration True
         updateSessionD session update2 0  -- 0: nothing to generate code from
       )
     , ("Make sure restartSession does not lose source files"
-      , \session -> do
+      , \session originalUpdate n -> do
+        let update = originalUpdate <> updateCodeGeneration True
+        updateSessionD session update n
         (_, lm) <- getModules session
         serverBefore <- getGhcServer session
-        let update = updateCodeGeneration True
-        updateSessionD session update (length lm)  -- all recompiled
         mex <- Ex.try $ runStmt session (fromString "Main") "main"
         case mex of
           Right _runActions -> return ()  -- don't runWaitAll
@@ -1397,8 +1411,9 @@ tests =
         testCase caseName $ do
           debug dVerbosity $ featureName ++ " / " ++ caseName ++ ":"
           withConfiguredSession opts $ \session -> do
-            loadModulesFrom session originalSourcesDir
-            check session
+            (originalUpdate, n) <-
+              prepareModulesFrom session originalSourcesDir
+            check session originalUpdate n
   in [ testGroup "Full integration tests on multiple projects"
        $ map groupProject $ zip multipleTests [1 :: Int ..]
      , testGroup "Synthetic integration tests"
