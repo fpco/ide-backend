@@ -4,11 +4,11 @@ import Control.Monad (liftM)
 import qualified Data.List as List
 import Data.Maybe (catMaybes)
 import Data.Monoid (mconcat)
+import System.Directory
 import System.Environment
-import System.FilePath (dropExtension, makeRelative)
+import System.FilePath (dropExtension, makeRelative, takeBaseName)
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
-import System.Directory
 
 import Common
 import GhcServer
@@ -81,11 +81,18 @@ check opts originalSourcesDir configDir = do
   originalFiles <- find always
                         ((`elem` hsExtentions) `liftM` extension)
                         originalSourcesDir
+  isFile <- doesFileExist originalSourcesDir
+  isDirectory <- doesDirectoryExist originalSourcesDir
   -- HACK: here we fake module names, guessing them from file names.
-  let triedModules =
-        map (\ f -> fmap (\x -> (x, f)) $ MN.fromFilePath
-                    $ dropExtension $ makeRelative originalSourcesDir f)
+  let triedModules | isDirectory =
+        map (\f -> fmap (\x -> (x, f)) $ MN.fromFilePath
+                   $ dropExtension $ makeRelative originalSourcesDir f)
             originalFiles
+                   | isFile =
+        maybe [] (\x -> [Just (x, originalSourcesDir)])
+          (MN.fromFilePath $ takeBaseName originalSourcesDir)
+                   | otherwise = error $ originalSourcesDir
+                                         ++ " is not a directory nor a file!"
       originalModules = catMaybes triedModules
       upd (m, f) = updateModuleFromFile m f
       originalUpdate = mconcat $ map upd originalModules
