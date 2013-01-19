@@ -7,7 +7,7 @@ import Control.Monad (liftM, void, forM_)
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
-import Data.List (sort)
+import Data.List (sort, isPrefixOf)
 import qualified Data.List as List
 import Data.Maybe (catMaybes)
 import Data.Monoid (mconcat, mempty, (<>))
@@ -93,7 +93,7 @@ withSession' config' io = do
 -- getSourceModule an getDataFile.
 multipleTests :: [(String, IdeSession -> IdeSessionUpdate -> [ModuleName] -> Assertion)]
 multipleTests =
-  [ ("Overwrite with error"
+  [ ( "Overwrite with error"
     , \session originalUpdate lm -> do
         updateSessionD session originalUpdate (length lm)
         msgs <- getSourceErrors session
@@ -104,10 +104,12 @@ multipleTests =
         let update = loadModule m "a = unknownX"
         updateSessionD session update 1  -- at most 1 recompiled
         msgs2 <- getSourceErrors session
-        -- Errors reported due to the overwrite.
-        assertSomeErrors msgs2
+        -- Error reported due to the overwrite.
+        case msgs2 of
+          [SrcError _ _ _ _ "Not in scope: `unknownX'"] -> return ()
+          _ -> assertFailure "Unexpected source errors"
     )
-  , ("Overwrite with the same module name in all files"
+  , ( "Overwrite with the same module name in all files"
     , \session originalUpdate lm -> do
         let upd m =
               updateModule m (BSLC.pack "module Wrong where\na = 1")
@@ -115,10 +117,14 @@ multipleTests =
         updateSessionD session update 2
         msgs <- getSourceErrors session
         if length lm >= 2
-          then assertSomeErrors msgs
+          then case msgs of
+            [OtherError s] ->
+              assertBool "Wrong error message"
+              $ isPrefixOf "module `main:Wrong' is defined in multiple files" s
+            _ -> assertFailure "Unexpected source errors"
           else assertNoErrors msgs
     )
-  , ("Overwrite modules many times"
+  , ( "Overwrite modules many times"
     , \session originalUpdate lm0 -> do
         let doubleUpdate = mempty <> originalUpdate <> originalUpdate <> mempty
         -- Updates are idempotent, so no errors and no recompilation.
@@ -131,9 +137,15 @@ multipleTests =
               updateCodeGeneration False
               <> loadModule m1 "a = unknownX"
         updateSessionD session update1 1
+        msgs1 <- getSourceErrors session
+        case msgs1 of
+          [SrcError _ _ _ _ "Not in scope: `unknownX'"] -> return ()
+          _ -> assertFailure "Unexpected source errors"
         updateSessionD session mempty 1  -- was an error, so trying again
         msgs2 <- getSourceErrors session
-        assertSomeErrors msgs2
+        case msgs2 of
+          [SrcError _ _ _ _ "Not in scope: `unknownX'"] -> return ()
+          _ -> assertFailure "Unexpected source errors"
         -- Overwrite all files, many times, with correct code eventually.
         let upd m = loadModule m "x = unknownX"
                     <> loadModule m "y = 2"
@@ -145,22 +157,26 @@ multipleTests =
         -- Overwrite again with the error.
         updateSessionD session update1 1  -- drop bytecode, don't recompile
         msgs5 <- getSourceErrors session
-        assertOneError msgs5
+        case msgs5 of
+          [SrcError _ _ _ _ "Not in scope: `unknownX'"] -> return ()
+          _ -> assertFailure "Unexpected source errors"
         assertRaises "runStmt session Main main"
           (== userError "Cannot run before the code is generated.")
           (runStmt session (fromString "Main") "main")
       )
-    , ("Run the sample code; don't fail without an explanation"
+    , ( "Run the sample code; succeed or raise an exception"
       , \session originalUpdate lm -> do
         updateSessionD session originalUpdate (length lm)
         let update = updateCodeGeneration True
         updateSessionD session update (length lm)  -- all recompiled
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
         mex <- Ex.try $ runStmt session (fromString "Main") "main"
         case mex of
           Right runActions -> void $ runWaitAll runActions
           Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
       )
-    , ("Overwrite all with correct code; don't fail at all"
+    , ( "Overwrite all with exception-less code and run it"
       , \session originalUpdate lm -> do
         let upd m = loadModule m "x = 1"
             update =
@@ -171,7 +187,10 @@ multipleTests =
                       "module TotallyMain where\nmain = print \"test run\"")
               <> mconcat (map upd lm)
         let update2 = update <> updateCodeGeneration True
+        -- Compile from scratch, generating code from the start.
         updateSessionD session update2 (length lm + 1)
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
         runActions <- runStmt session (fromString "TotallyMain") "main"
         (output, result) <- runWaitAll runActions
         case result of
@@ -184,7 +203,7 @@ multipleTests =
           RunForceCancelled ->
             assertFailure "Unexpected force-cancel"
       )
-    , ("Make sure deleting modules removes them from the directory"
+    , ( "Make sure deleting modules removes them from the directory"
       , \session originalUpdate lm -> do
         updateSessionD session originalUpdate (length lm)
         let updateDel = mconcat $ map updateModuleDelete lm
@@ -195,8 +214,10 @@ multipleTests =
         updateSessionD session (originalUpdate <> updateDel) 0
         let update2 = updateCodeGeneration True
         updateSessionD session update2 0  -- 0: nothing to generate code from
+        msgs2 <- getSourceErrors session
+        assertNoErrors msgs2
       )
-    , ("Make sure restartSession does not lose source files"
+    , ( "Make sure restartSession does not lose source files"
       , \session originalUpdate lm -> do
         let update = originalUpdate <> updateCodeGeneration True
         updateSessionD session update (length lm)
@@ -207,6 +228,8 @@ multipleTests =
           Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
         restartSession session
         updateSessionD session mempty (length lm)  -- all compiled anew
+        msgs0 <- getSourceErrors session
+        assertNoErrors msgs0
         mex2 <- Ex.try $ runStmt session (fromString "Main") "main"
         case mex2 of
           Right runActions -> void $ runWaitAll runActions  -- now runWaitAll
@@ -1355,10 +1378,7 @@ syntheticTests =
               ]
         updateSessionD session upd 1
         msgs <- getSourceErrors session
-        case msgs of
-          [] -> assertFailure "Unexpected success"
-          [_] -> return ()
-          _ -> assertFailure "Got more errors than expected"
+        assertOneError msgs
         {-
         assertEqual "This should compile without errors" [] msgs
         runActions <- runStmt session (fromString "M") "hello"
