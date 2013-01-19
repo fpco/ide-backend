@@ -7,7 +7,7 @@ import Control.Monad (liftM, void, forM_)
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
-import Data.List (sort, isPrefixOf)
+import Data.List (sort, isPrefixOf, isSuffixOf)
 import qualified Data.List as List
 import Data.Maybe (catMaybes)
 import Data.Monoid (mconcat, mempty, (<>))
@@ -340,13 +340,25 @@ syntheticTests =
     , withConfiguredSession defOpts $ \session -> do
         loadModulesFrom session "test/AerrorB"
         msgs <- getSourceErrors session
-        assertOneError msgs
+        case msgs of
+          [SrcError _ fn _ _ s] -> do
+            assertBool "Wrong file reported for the error"
+              $ isSuffixOf "A.hs" fn
+            assertBool "Wrong error message"
+              $ isPrefixOf "No instance for (Num (IO ()))" s
+          _ -> assertFailure "Unexpected source errors"
     )
   , ( "Compile a project: A depends on B, error in B"
     , withConfiguredSession defOpts $ \session -> do
         loadModulesFrom session "test/ABerror"
         msgs <- getSourceErrors session
-        assertOneError msgs
+        case msgs of
+          [SrcError _ fn _ _ s] -> do
+            assertBool "Wrong file reported for the error"
+              $ isSuffixOf "B.hs" fn
+            assertBool "Wrong error message"
+              $ isPrefixOf "No instance for (Num (IO ()))" s
+          _ -> assertFailure "Unexpected source errors"
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = [ "-hide-all-packages"
@@ -362,6 +374,10 @@ syntheticTests =
                                             "test/Puns/EventLogFormat.h"
         updateSessionD session update 0
         loadModulesFrom session "test/Puns"
+        -- Exact errors depend on order of loaded modules, etc.
+        -- Anyway, right not the test is partially bit-rotted,
+        -- because the .h files are no longer available in the source dir
+        -- and the data dir can't be set to the source dir. See #10.
         msgs <- getSourceErrors session
         assertSomeErrors msgs
         let punOpts = packageOpts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
@@ -437,6 +453,8 @@ syntheticTests =
                      <> updateCodeGeneration True
         updateSessionD session update 1
         msgs <- getSourceErrors session
+        -- Due to a GHC bug there are now 2 errors. TODO; when it's fixed,
+        -- assert a single specific error here.
         assertSomeErrors msgs
         assertRaises "runStmt session Main main"
           (== userError "Module \"Main\" not successfully loaded, when trying to run code.")
@@ -448,12 +466,16 @@ syntheticTests =
                                   (BSLC.pack "module very-wrong where")
         updateSessionD session update 1
         msgs <- getSourceErrors session
-        assertOneError msgs
+        case msgs of
+          [SrcError _ _ _ _ "parse error on input `very'\n"] -> return ()
+          _ -> assertFailure "Unexpected source errors"
         let update2 = updateModule (fromString "M")
                                    (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update2 1
         msgs2 <- getSourceErrors session
-        assertOneError msgs2
+        case msgs2 of
+          [SrcError _ _ _ _ "parse error on input `.'\n"] -> return ()
+          _ -> assertFailure "Unexpected source errors"
         assertRaises "fromString M.1.2.3.8.T"
           (\e -> show (e :: Ex.ErrorCall) == "fromString: invalid module name M.1.2.3.8.T")
           (return $! MN.toString $ fromString "M.1.2.3.8.T")
