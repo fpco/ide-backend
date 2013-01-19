@@ -111,25 +111,6 @@ test-suite typecheck-dir
                       DeriveDataTypeable
   ghc-options:        -Wall -fno-warn-unused-do-bind
 
--- Has to be run after ghc-errors, so has to be defined before.
-test-suite golden
-  type:               exitcode-stdio-1.0
-  main-is:            golden-errors.hs
-  hs-source-dirs:     test
-  build-depends:      ide-backend,
-                      base      ==4.*,
-                      test-framework        >= 0.6,
-                      test-framework-golden >= 1.1,
-                      directory ==1.*,
-                      filepath  ==1.*
-
-  default-language:   Haskell2010
-  default-extensions: MonoLocalBinds,
-                      BangPatterns, RecordWildCards, NamedFieldPuns
-  other-extensions:   CPP, TemplateHaskell, ScopedTypeVariables,
-                      DeriveDataTypeable
-  ghc-options:        -Wall -fno-warn-unused-do-bind
-
 test-suite ghc-errors
   type:               exitcode-stdio-1.0
   main-is:            ghc-errors.hs
