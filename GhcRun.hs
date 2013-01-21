@@ -4,22 +4,26 @@
 -- (JP Moresmau's buildwrapper package used as template for GHC API use)
 --
 -- | Implementation details of the calls to GHC that compute information
--- based on source files and provides progress information.
+-- based on source files, provides progress information while doing so
+-- and optionally compiles, links and executes code.
 -- Only this file should import the GHC-internals modules.
 module GhcRun
-  ( Ghc
-  , RunResult(..)
+  ( -- * Re-expored GHC API
+    Ghc
+  , runFromGhc
   , liftIO
+  , GhcException
   , ghandle
   , ghandleJust
-  , GhcException
+    -- * Processing source files (including compilation)
+  , compileInGhc
   , DynamicOpts
   , submitStaticOpts
   , optsToDynFlags
-  , runFromGhc
-  , RunBufferMode(..)
-  , compileInGhc
+    -- * Executing snippets
   , runInGhc
+  , RunResult(..)
+  , RunBufferMode(..)
   ) where
 
 import Bag (bagToList)
@@ -117,6 +121,7 @@ submitStaticOpts opts = do
   (dynFlags, _) <- parseStaticFlags (map noLoc opts)
   return $ DynamicOpts dynFlags
 
+-- | Create dynamic flags from their command-line names.
 optsToDynFlags :: [String] -> DynamicOpts
 optsToDynFlags = DynamicOpts . map noLoc
 
@@ -132,6 +137,14 @@ runFromGhc :: Ghc a -> IO a
 runFromGhc a = do
   libdir <- getGhcLibdir
   runGhc (Just libdir) a
+
+-- | Version of handleJust for use in the GHC monad
+ghandleJust :: Ex.Exception e => (e -> Maybe b) -> (b -> Ghc a) -> Ghc a -> Ghc a
+ghandleJust p handler a = ghandle handler' a
+  where
+    handler' e = case p e of
+                   Nothing -> liftIO $ Ex.throwIO e
+                   Just b  -> handler b
 
 #if __GLASGOW_HASKELL__ < 706 || defined(GHC_761)
 -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
@@ -224,8 +237,8 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     -- Some errors are reported as exceptions instead.
     ghcExceptionHandler :: GhcException -> Ghc ([SourceError], LoadedModules)
     ghcExceptionHandler e = do
-      let eText   = show e
-          exError = OtherError eText
+      let eText   = show e            -- no SrcSpan as a field in GhcException
+          exError = OtherError eText  -- though it may be embedded in string
       liftIO $ debug dVerbosity $ "handleOtherErrors: " ++ eText
       -- In case of an exception, don't lose saved errors.
       (errs, context) <- prepareResult
@@ -247,8 +260,8 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
           loadedModules = assert (length lcat == length lmaybe) lcat
       return (reverse errs, loadedModules)
 
--- | Run a snippet
-runInGhc :: (ModuleName, String)  -- ^ module and function to run, if any
+-- | Run a snippet.
+runInGhc :: (ModuleName, String)  -- ^ module and function to execute
          -> RunBufferMode         -- ^ Buffer mode for stdout
          -> RunBufferMode         -- ^ Buffer mode for stderr
          -> Ghc RunResult
@@ -270,7 +283,7 @@ runInGhc (m, fun) outBMode errBMode = do
       runRes <- runStmt expr RunToCompletion
       case runRes of
         GHC.RunOk [name] ->
-          -- TODO: is it really useful to report these names as strings?
+          -- TODO: ignore @name@; this was only useful for debug
           return $ RunOk $ showSDocDebug flags (GHC.ppr name)
         GHC.RunOk _ ->
           error "checkModule: unexpected names in RunOk"
@@ -309,6 +322,10 @@ runInGhc (m, fun) outBMode errBMode = do
     handleErrors = handleSourceError handleError
                  . ghandle (handleError :: GhcException -> Ghc RunResult)
 
+-----------------------
+-- Source error conversion and collection
+--
+
 collectSrcError :: IORef [SourceError]
                 -> (String -> IO ())
                 -> (String -> IO ())
@@ -337,10 +354,10 @@ collectSrcError errsRef handlerOutput handlerRemaining flags
     errsRef handlerOutput handlerRemaining flags severity srcspan style msg
 
 collectSrcError' :: IORef [SourceError]
-                -> (String -> IO ())
-                -> (String -> IO ())
-                -> DynFlags
-                -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
+                 -> (String -> IO ())
+                 -> (String -> IO ())
+                 -> DynFlags
+                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 collectSrcError' errsRef _ _ flags severity srcspan style msg
   | Just errKind <- case severity of
                       SevWarning -> Just KindWarning
@@ -362,6 +379,33 @@ collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
 collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in handlerRemaining msgstr
+
+extractErrSpan :: SrcSpan -> Maybe (FilePath, (Int, Int), (Int, Int))
+extractErrSpan (RealSrcSpan srcspan) =
+  Just (unpackFS (srcSpanFile srcspan)
+       ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
+       ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
+extractErrSpan _ = Nothing
+
+-- TODO: perhaps make a honest SrcError from the first span from the first
+-- error message and put the rest into the message string? That probably
+-- entains string-search-and-replace inside the message string not to
+-- duplicate the first span, because the types involved are abstract.
+-- And even then, all the file paths but the first would be out of
+-- our control (and so, e.g., not relative to the project root).
+-- But at least the IDE could point somewhere in the code.
+-- | Convert GHC's SourceError type into ours.
+fromHscSourceError :: HscTypes.SourceError -> SourceError
+fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
+  [errMsg] -> case ErrUtils.errMsgSpans errMsg of
+    [RealSrcSpan sp] ->
+      SrcError KindError
+               (unpackFS (SrcLoc.srcSpanFile sp))
+               (srcSpanStartLine sp, srcSpanStartCol sp)
+               (srcSpanEndLine sp, srcSpanEndCol sp)
+               (show e)
+    _ -> OtherError (show e)
+  _ -> OtherError (show e)
 
 -----------------------
 -- GHC version compat
@@ -385,36 +429,8 @@ showSDocDebug  flags msg = GHC.showSDocDebug flags msg
 showSDocDebug _flags msg = GHC.showSDocDebug        msg
 #endif
 
-extractErrSpan :: SrcSpan -> Maybe (FilePath, (Int, Int), (Int, Int))
-extractErrSpan (RealSrcSpan srcspan) =
-  Just (unpackFS (srcSpanFile srcspan)
-       ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
-       ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
-extractErrSpan _ = Nothing
-
 _debugPpContext :: DynFlags -> String -> Ghc ()
 _debugPpContext flags msg = do
   context <- getContext
   liftIO $ debug dVerbosity
     $ msg ++ ": " ++ showSDocDebug flags (GHC.ppr context)
-
--- | Version of handleJust for use in the GHC monad
-ghandleJust :: Ex.Exception e => (e -> Maybe b) -> (b -> Ghc a) -> Ghc a -> Ghc a
-ghandleJust p handler a = ghandle handler' a
-  where
-    handler' e = case p e of
-                   Nothing -> liftIO $ Ex.throwIO e
-                   Just b  -> handler b
-
--- | Convert GHC's SourceError type into our
-fromHscSourceError :: HscTypes.SourceError -> SourceError
-fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
-  [errMsg] -> case ErrUtils.errMsgSpans errMsg of
-    [RealSrcSpan sp] ->
-      SrcError KindError
-               (unpackFS (SrcLoc.srcSpanFile sp))
-               (srcSpanStartLine sp, srcSpanStartCol sp)
-               (srcSpanEndLine sp, srcSpanEndCol sp)
-               (show e)
-    _ -> OtherError (show e)
-  _ -> OtherError (show e)
