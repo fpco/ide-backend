@@ -368,7 +368,12 @@ collectSrcError' errsRef _ _ flags severity srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in modifyIORef errsRef (SrcError errKind file st end msgstr :)
 
-collectSrcError' errsRef _ _ flags SevError _srcspan style msg
+collectSrcError' errsRef _ _ flags severity _srcspan style msg
+  | Just _       <- case severity of
+                      SevWarning -> Just KindWarning  -- TODO: include or not?
+                      SevError   -> Just KindError
+                      SevFatal   -> Just KindError
+                      _          -> Nothing
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in modifyIORef errsRef (OtherError msgstr :)
 
