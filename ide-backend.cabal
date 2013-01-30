@@ -142,7 +142,11 @@ test-suite ghc-errors
                       crypto-api,
                       tagged,
                       template-haskell,
-                      utf8-string
+                      utf8-string,
+-- parallel is only needed for the code of the tests; please do not remove;
+-- note that under cabal-dev it's still not enough and you need to install
+-- parallel by hand into a regular package DB
+                      parallel
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else
