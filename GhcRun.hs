@@ -76,6 +76,8 @@ import Common
 import ModuleName (ModuleName, LoadedModules)
 import qualified ModuleName as MN
 import Data.Aeson.TH (deriveJSON)
+import System.IO (hPutStrLn, IOMode(..), openFile, hClose)
+import Control.Monad (forM_)
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -179,27 +181,27 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     targets <- liftIO $ find always
                              ((`elem` hsExtentions) `liftM` extension)
                              configSourcesDir
-    handleErrors $ do
-      -- Compute new GHC flags.
-      flags0 <- getSessionDynFlags
-      (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
-      let (hscTarget, ghcLink) | generateCode = (HscInterpreted, LinkInMemory)
-                               | otherwise    = (HscNothing,     NoLink)
-          flags = flags1 {
-                           hscTarget,
-                           ghcLink,
-                           ghcMode    = CompManager,
-                           verbosity,
+    -- Compute new GHC flags.
+    flags0 <- getSessionDynFlags
+    (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
+    let (hscTarget, ghcLink) | generateCode = (HscInterpreted, LinkInMemory)
+                             | otherwise    = (HscNothing,     NoLink)
+        flags = flags1 {
+                         hscTarget,
+                         ghcLink,
+                         ghcMode    = CompManager,
+                         verbosity,
 #if __GLASGOW_HASKELL__ >= 706
-                           log_action = collectSrcError errsRef handlerOutput handlerRemaining
+                         log_action = collectSrcError errsRef handlerOutput handlerRemaining
 #else
-                           log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
+                         log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
 #endif
-                         }
+                       }
 #if __GLASGOW_HASKELL__ < 708
   -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/1381.
                    `dopt_unset` Opt_GhciSandbox
 #endif
+    handleErrors flags $ do
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
 #if __GLASGOW_HASKELL__ < 706 || defined(GHC_761)
@@ -225,34 +227,44 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         -- Load modules to typecheck and perhaps generate code, too.
         _loadRes <- load LoadAllTargets
         -- Recover all saved errors.
-        prepareResult
+        prepareResult flags
   where
-    sourceErrorHandler :: HscTypes.SourceError -> Ghc ([SourceError], LoadedModules)
-    sourceErrorHandler e = do
+    sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ([SourceError], LoadedModules)
+    sourceErrorHandler flags e = do
       liftIO $ debug dVerbosity $ "handleSourceError: " ++ show e
-      (errs, context) <- prepareResult
+      (errs, context) <- prepareResult flags
       return (errs ++ [fromHscSourceError e], context)
 
     -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7430.
     -- Some errors are reported as exceptions instead.
-    ghcExceptionHandler :: GhcException -> Ghc ([SourceError], LoadedModules)
-    ghcExceptionHandler e = do
+    ghcExceptionHandler :: DynFlags -> GhcException -> Ghc ([SourceError], LoadedModules)
+    ghcExceptionHandler flags e = do
       let eText   = show e            -- no SrcSpan as a field in GhcException
           exError = OtherError eText  -- though it may be embedded in string
       liftIO $ debug dVerbosity $ "handleOtherErrors: " ++ eText
       -- In case of an exception, don't lose saved errors.
-      (errs, context) <- prepareResult
+      (errs, context) <- prepareResult flags
       return (errs ++ [exError], context)
 
-    handleErrors :: Ghc ([SourceError], LoadedModules)
+    handleErrors :: DynFlags
                  -> Ghc ([SourceError], LoadedModules)
-    handleErrors = ghandle ghcExceptionHandler
-                 . handleSourceError sourceErrorHandler
+                 -> Ghc ([SourceError], LoadedModules)
+    handleErrors flags = ghandle (ghcExceptionHandler flags)
+                       . handleSourceError (sourceErrorHandler flags)
 
-    prepareResult :: Ghc ([SourceError], LoadedModules)
-    prepareResult = do
+    prepareResult :: DynFlags -> Ghc ([SourceError], LoadedModules)
+    prepareResult flags = do
       errs <- liftIO $ readIORef errsRef
       graph <- getModuleGraph
+
+      gbracket (liftIO $ openFile "/tmp/modulegraph.txt" WriteMode) (liftIO . hClose) $ \h -> do
+        let output :: GHC.Outputable a => a -> Ghc ()
+            output val = liftIO . hPutStrLn h $ GHC.showSDocDebug flags (GHC.ppr val)
+ 
+        forM_ graph $ \modSummary@ModSummary{ms_mod} -> do
+          info <- getModuleInfo ms_mod
+          output modSummary 
+
       let moduleNames = map ms_mod_name graph
       loadedNames <- filterM isLoaded moduleNames
       let lmaybe = map (MN.fromString . moduleNameString) loadedNames
