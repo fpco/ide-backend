@@ -253,17 +253,20 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                        . handleSourceError (sourceErrorHandler flags)
 
     prepareResult :: DynFlags -> Ghc ([SourceError], LoadedModules)
-    prepareResult flags = do
+    prepareResult _flags = do
       errs <- liftIO $ readIORef errsRef
       graph <- getModuleGraph
 
       gbracket (liftIO $ openFile "/tmp/modulegraph.txt" WriteMode) (liftIO . hClose) $ \h -> do
         let output :: GHC.Outputable a => a -> Ghc ()
-            output val = liftIO . hPutStrLn h $ GHC.showSDocDebug flags (GHC.ppr val)
- 
+#if __GLASGOW_HASKELL__ >= 706
+            output val = liftIO . hPutStrLn h $ GHC.showSDocDebug _flags (GHC.ppr val)
+#else
+            output val = liftIO . hPutStrLn h $ GHC.showSDocDebug (GHC.ppr val)
+#endif
         forM_ graph $ \modSummary@ModSummary{ms_mod} -> do
           Just info <- getModuleInfo ms_mod
-          output modSummary 
+          output modSummary
           let Just iface = modInfoIface info
           output ("modInfoTyThings", modInfoTyThings info)
           output ("mi_globals", mi_globals iface)
@@ -374,12 +377,12 @@ collectSrcError' :: IORef [SourceError]
                  -> DynFlags
                  -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 collectSrcError' errsRef _ _ flags severity srcspan style msg
-  | Just errKind <- case severity of
+  | Just (file, st, end) <- extractErrSpan srcspan
+  , Just errKind <- case severity of
                       SevWarning -> Just KindWarning
                       SevError   -> Just KindError
                       SevFatal   -> Just KindError
                       _          -> Nothing
-  , Just (file, st, end) <- extractErrSpan srcspan
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in modifyIORef errsRef (SrcError errKind file st end msgstr :)
 
@@ -405,7 +408,7 @@ extractErrSpan (RealSrcSpan srcspan) =
   Just (unpackFS (srcSpanFile srcspan)
        ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
        ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
-extractErrSpan _ = Nothing
+extractErrSpan UnhelpfulSpan{} = Nothing
 
 -- TODO: perhaps make a honest SrcError from the first span from the first
 -- error message and put the rest into the message string? That probably
