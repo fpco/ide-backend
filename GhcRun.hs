@@ -262,8 +262,11 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
             output val = liftIO . hPutStrLn h $ GHC.showSDocDebug flags (GHC.ppr val)
  
         forM_ graph $ \modSummary@ModSummary{ms_mod} -> do
-          info <- getModuleInfo ms_mod
+          Just info <- getModuleInfo ms_mod
           output modSummary 
+          let Just iface = modInfoIface info
+          output ("modInfoTyThings", modInfoTyThings info)
+          output ("mi_globals", mi_globals iface)
 
       let moduleNames = map ms_mod_name graph
       loadedNames <- filterM isLoaded moduleNames
