@@ -27,7 +27,7 @@ library
                       filemanip >= 0.3.6.2,
                       process   ==1.*,
                       filepath  ==1.*,
-                      ghc       ==7.*,
+                      ghc       ==7.4.* || >=7.6.2,
                       containers >= 0.4.1   && < 1,
                       random     >= 1.0.1   && < 2,
                       bytestring >= 0.9.2   && < 1,
@@ -46,7 +46,7 @@ library
                       pureMD5,
                       crypto-api,
                       tagged
-  if impl(ghc >= 7.6.1)
+  if impl(ghc >= 7.6.2)
      build-depends:   time      ==1.4.*
   else
      build-depends:   old-time  ==1.*
@@ -58,7 +58,7 @@ library
                       DeriveDataTypeable
   ghc-options:        -Wall -fno-warn-unused-do-bind
 
--- A hack to tell 7.6.1 from other 7.6.* in the codebase.
+  -- The standard macros don't give us 7.6.x granularity
   if impl(ghc == 7.6.1)
     cpp-options:     -DGHC_761
 
