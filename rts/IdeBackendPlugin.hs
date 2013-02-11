@@ -1,6 +1,8 @@
 {-# LANGUAGE CPP #-}
-module IdeBackendPlugin (plugin) where
+module IdeBackendPlugin (plugin, ideBackendPluginState) where
 
+import Data.IORef
+import System.IO.Unsafe (unsafePerformIO)
 import GhcPlugins
 
 plugin :: Plugin
@@ -13,6 +15,17 @@ install _ todo = do
   reinitializeGlobals
   return (CoreDoPluginPass "IdeBackend" pass : todo)
 
+ideBackendPluginState :: IORef String 
+{-# NOINLINE ideBackendPluginState #-}
+ideBackendPluginState = unsafePerformIO $ do
+  appendFile "/tmp/ghc.log" "created ide backend plugin state\n" 
+  newIORef "" 
+
+record :: String -> CoreM ()
+record str = liftIO $ do
+  oldState <- readIORef ideBackendPluginState
+  writeIORef ideBackendPluginState (oldState ++ str)
+
 pass :: ModGuts -> CoreM ModGuts
 pass guts = do
     dynFlags <- getDynFlags
@@ -21,9 +34,11 @@ pass guts = do
     printBind :: DynFlags -> CoreBind -> CoreM CoreBind
     printBind _dynFlags bndr@(NonRec b _) = do
 #if __GLASGOW_HASKELL__ >= 706
-      liftIO $ appendFile "/tmp/ghc.log" $ showSDoc _dynFlags (ppr b)
+      record $ showSDoc _dynFlags (ppr b)
+      liftIO $ appendFile "/tmp/ghc.log" $ "pass: " ++ showSDoc _dynFlags (ppr b)
 #else
-      liftIO $ appendFile "/tmp/ghc.log" $ showSDoc (ppr b)
+      record $ showSDoc (ppr b)
+      liftIO $ appendFile "/tmp/ghc.log" $ "pass: " ++ showSDoc (ppr b)
 #endif
       return bndr 
     printBind _dynFlags bndr = return bndr

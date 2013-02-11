@@ -80,6 +80,8 @@ import System.IO (hPutStrLn, IOMode(..), openFile, hClose)
 import Control.Monad (forM_)
 import qualified StringBuffer
 
+import IdeBackendPlugin (ideBackendPluginState)
+
 newtype DynamicOpts = DynamicOpts [Located String]
 
 -- | The outcome of running code
@@ -258,20 +260,9 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
       errs <- liftIO $ readIORef errsRef
       graph <- getModuleGraph
 
-      gbracket (liftIO $ openFile "/tmp/modulegraph.txt" WriteMode) (liftIO . hClose) $ \h -> do
-        let output :: GHC.Outputable a => a -> Ghc ()
-#if __GLASGOW_HASKELL__ >= 706
-            output val = liftIO . hPutStrLn h $ GHC.showSDocDebug _flags (GHC.ppr val)
-#else
-            output val = liftIO . hPutStrLn h $ GHC.showSDocDebug (GHC.ppr val)
-#endif
-        forM_ graph $ \modSummary@ModSummary{ms_mod, ms_hspp_buf = Just ms_hspp_buf} -> do
-          liftIO . hPutStrLn h $ StringBuffer.lexemeToString ms_hspp_buf (StringBuffer.len ms_hspp_buf)
-          Just info <- getModuleInfo ms_mod
-          output modSummary
-          let Just iface = modInfoIface info
-          output ("modInfoTyThings", modInfoTyThings info)
-          output ("mi_globals", mi_globals iface)
+      liftIO $ Ex.bracket (openFile "/tmp/modulegraph.txt" WriteMode) hClose $ \h -> do
+        st <- readIORef ideBackendPluginState
+        hPutStrLn h ("prepareResult: " ++ st) 
 
       let moduleNames = map ms_mod_name graph
       loadedNames <- filterM isLoaded moduleNames

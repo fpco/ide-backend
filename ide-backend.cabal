@@ -45,7 +45,8 @@ library
                       transformers,
                       pureMD5,
                       crypto-api,
-                      tagged
+                      tagged,
+                      ide-backend-rts >= 0.1.1
   if impl(ghc >= 7.6.2)
      build-depends:   time      ==1.4.*
   else
@@ -98,7 +99,8 @@ test-suite typecheck-dir
                       transformers,
                       pureMD5,
                       crypto-api,
-                      tagged
+                      tagged,
+                      ide-backend-rts >= 0.1.1
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else
@@ -143,6 +145,7 @@ test-suite ghc-errors
                       tagged,
                       template-haskell,
                       utf8-string,
+                      ide-backend-rts >= 0.1.1,
 -- parallel is only needed for the code of the tests; please do not remove;
 -- note that under cabal-dev it's still not enough and you need to install
 -- parallel by hand into a regular package DB
