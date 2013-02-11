@@ -1,0 +1,66 @@
+"ModGuts" preliminary conclusions
+---------------------------------
+
+The GHC API exports a function 
+
+  coreModule :: DesugaredMod m => m -> ModGuts
+
+There is only one instance of that DesugaredMod class: DesugaredModule, which
+instantiates coreModule to be simply dm_core_module:
+
+  data DesugaredModule =
+    DesugaredModule { dm_typechecked_module :: TypecheckedModule
+                    , dm_core_module        :: ModGuts
+                    }
+
+These DesugaredModules are created in
+
+  desugarModule :: GhcMonad m => TypecheckedModule -> m DesugaredModule
+  
+in GHC.hs. However, desugarModule is never called from "load" -- dead end.
+
+So let's focus on ModGuts itself.  There are 3 places in the compiler where
+ModGuts are created "from scratch" (using the ModGuts constructor directly):
+
+1. tcRnExtCore :: HscEnv -> HsExtCore RdrName -> IO (Messages, Maybe ModGuts)
+   in typecheck/TcRnDriver.lhs
+
+2. deSugar :: HscEnv -> ModLocation -> TcGblEnv -> IO (Messages, Maybe ModGuts)
+   in deSugar/Desugar.lhs
+
+3. mkModGuts :: Module -> SafeHaskellMode -> CoreProgram -> IO ModGuts
+   in main/HscMain.hs
+
+Neither (1) nor (3) is called from "load", but (2) is through the following call stack:
+
+  [Desugar.lhs] deSugar :: HscEnv -> ModLocation -> TcGblEnv -> IO (Messages, Maybe ModGuts)
+  [HscMain.hs] hscDesugar' :: ModLocation -> TcGblEnv -> Hsc ModGuts
+  [HscMain.hs] genericHscBackend :: HsCompiler a -> TcGblEnv -> ModSummary -> Maybe Fingerprint -> Hsc a
+  [HscMain.hs] hscInteractiveCompiler :: HsCompiler InteractiveResult
+  [HscMain.hs] hscCompileInteractive :: Compiler (InteractiveStatus, ModIface, ModDetails)
+  [DriverPipeline.hs] compile :: HscEnv -> ModSummary -> Int -> Int -> Maybe ModIface -> Maybe Linkable -> SourceModified -> IO HomeModInfo
+  [GhcMake.hs] upsweep_mod :: HscEnv -> HomePackageTable -> ([ModuleName],[ModuleName]) -> ModSummary -> Int -> Int -> IO HomeModInfo
+  [GhcMake.hs] upsweep :: GhcMonad m => HomePackageTable -> ([ModuleName],[ModuleName]) -> (HscEnv -> IO ()) -> [SCC ModSummary] -> m (SuccessFlag, [ModSummary])
+  [GhcMake.hs] load :: GhcMonad m => LoadHowMuch -> m SuccessFlag 
+
+That HsCompiler data type (defined in HscMain.hs) seems interesting:
+
+  data HsCompiler a = HsCompiler {
+      hscNoRecomp :: ModIface -> Hsc a,
+      hscRecompile :: ModSummary -> Maybe Fingerprint -> Hsc a,
+      hscBackend :: TcGblEnv -> ModSummary -> Maybe Fingerprint -> Hsc a,
+      hscGenBootOutput :: TcGblEnv -> ModSummary -> Maybe Fingerprint -> Hsc a,
+      hscGenOutput :: ModGuts -> ModSummary -> Maybe Fingerprint -> Hsc a
+    }
+
+Perhaps an appropriate point to plug our own stuff in? -- But maybe not, as
+this only happens from 'compile' down, which is dealing with a single module.
+In fact, this comment (above HscEnv) is reelvant:
+
+  -- Historical note: \"hsc\" used to be the name of the compiler binary,
+  -- when there was a separate driver and compiler.  To compile a single
+  -- module, the driver would invoke hsc on the source code... so nowadays
+  -- we think of hsc as the layer of the compiler that deals with compiling
+  -- a single module.
+
+
