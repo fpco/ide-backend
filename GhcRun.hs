@@ -78,6 +78,7 @@ import qualified ModuleName as MN
 import Data.Aeson.TH (deriveJSON)
 import System.IO (hPutStrLn, IOMode(..), openFile, hClose)
 import Control.Monad (forM_)
+import qualified StringBuffer
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -264,7 +265,8 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 #else
             output val = liftIO . hPutStrLn h $ GHC.showSDocDebug (GHC.ppr val)
 #endif
-        forM_ graph $ \modSummary@ModSummary{ms_mod} -> do
+        forM_ graph $ \modSummary@ModSummary{ms_mod, ms_hspp_buf = Just ms_hspp_buf} -> do
+          liftIO . hPutStrLn h $ StringBuffer.lexemeToString ms_hspp_buf (StringBuffer.len ms_hspp_buf)
           Just info <- getModuleInfo ms_mod
           output modSummary
           let Just iface = modInfoIface info

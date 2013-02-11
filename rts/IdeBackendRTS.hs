@@ -23,7 +23,6 @@ import GHC.IO.Handle.Internals (
   , ioe_finalizedHandle
   , flushWriteBuffer
   )
-import GHC.IO.Encoding (getLocaleEncoding)
 import qualified GHC.IO.FD as FD
 
 run :: RunBufferMode -> RunBufferMode -> IO a -> IO a
