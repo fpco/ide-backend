@@ -1,7 +1,7 @@
 "ModGuts" preliminary conclusions
 =================================
 
-The GHC API exports a function 
+The GHC API exports a function
 
   coreModule :: DesugaredMod m => m -> ModGuts
 
@@ -16,7 +16,7 @@ instantiates coreModule to be simply dm_core_module:
 These DesugaredModules are created in
 
   desugarModule :: GhcMonad m => TypecheckedModule -> m DesugaredModule
-  
+
 in GHC.hs. However, desugarModule is never called from "load" -- dead end.
 
 So let's focus on ModGuts itself.  There are 3 places in the compiler where
@@ -41,7 +41,7 @@ Neither (1) nor (3) is called from "load", but (2) is through the following call
   [DriverPipeline.hs] compile :: HscEnv -> ModSummary -> Int -> Int -> Maybe ModIface -> Maybe Linkable -> SourceModified -> IO HomeModInfo
   [GhcMake.hs] upsweep_mod :: HscEnv -> HomePackageTable -> ([ModuleName],[ModuleName]) -> ModSummary -> Int -> Int -> IO HomeModInfo
   [GhcMake.hs] upsweep :: GhcMonad m => HomePackageTable -> ([ModuleName],[ModuleName]) -> (HscEnv -> IO ()) -> [SCC ModSummary] -> m (SuccessFlag, [ModSummary])
-  [GhcMake.hs] load :: GhcMonad m => LoadHowMuch -> m SuccessFlag 
+  [GhcMake.hs] load :: GhcMonad m => LoadHowMuch -> m SuccessFlag
 
 That HsCompiler data type (defined in HscMain.hs) seems interesting:
 
@@ -83,7 +83,7 @@ Expanding on (3):
   describes that type checking is done *before* the desugarer (which is
   responsible for turning the original AST into core), and that this means that
   "error messages can display precisely the syntax that the user wrote" and
-  moreover "desugaring is not required to preserve type-inference properties." 
+  moreover "desugaring is not required to preserve type-inference properties."
 
 - http://darcs.haskell.org/ghc/docs/comm/the-beast/types.html talks about the
   different type systems for the AST and Core, and "hybrid" types
@@ -102,7 +102,21 @@ The type checker gets called through the callstack
     [DriverPipeline.hs] compile :: HscEnv -> ModSummary -> Int -> Int -> Maybe ModIface -> Maybe Linkable -> SourceModified -> IO HomeModInfo
     [GhcMake.hs] upsweep_mod :: HscEnv -> HomePackageTable -> ([ModuleName],[ModuleName]) -> ModSummary -> Int -> Int -> IO HomeModInfo
     [GhcMake.hs] upsweep :: GhcMonad m => HomePackageTable -> ([ModuleName],[ModuleName]) -> (HscEnv -> IO ()) -> [SCC ModSummary] -> m (SuccessFlag, [ModSummary])
-    [GhcMake.hs] load :: GhcMonad m => LoadHowMuch -> m SuccessFlag 
+    [GhcMake.hs] load :: GhcMonad m => LoadHowMuch -> m SuccessFlag
 
 This callstack is shared with the one for the desugarer (above) from the marked
 line (*).
+
+Non-unique Unique
+=================
+
+From http://hackage.haskell.org/trac/ghc/wiki/Commentary/Compiler/CoreSynType:
+
+    One of the important things when working with Core is that variable
+    shadowing is allowed. In other words, it is possible to come across
+    a definition of a variable that has the same name (realUnique)
+    as some other one that is already in scope.
+
+(TODO: verify that it's still the case in the newer GHC.)
+
+In other words, even at the Core level (and ever more so before the desugaring), we can't use the Unique numbers as global unique identifiers for our variables. We can't have a map from SrcSpan to Unique and from Unique to Id (containing a SrcSpan and a type). Instead we need a map from SrcSpan to Id directly and that takes much more memory. To fix this, we can hash the Ids and so assign our own unique names. Or traverse our db (or the Core code) and reassign the Unique identifiers using some GHC helper functions designed for that.
