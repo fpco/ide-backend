@@ -63,4 +63,18 @@ In fact, this comment (above HscEnv) is reelvant:
   -- we think of hsc as the layer of the compiler that deals with compiling
   -- a single module.
 
+--------------------------------------------------------------------------------
+
+We have access to ModGuts through the plugin architecture, but there are a few
+downsides:
+
+1. This means that the code for the plugin needs to reside in a separate
+package, because we can only load plugins through a ModuleName (although we
+could patch ghc to fix that)
+
+2. It is hard to share state with the plugin (fixing the above would fix that, too)
+
+3. Most importantly, it means we need to work at the level of Core, which may
+or may not be desirable.
+
 
