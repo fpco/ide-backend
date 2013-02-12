@@ -1,5 +1,5 @@
 "ModGuts" preliminary conclusions
----------------------------------
+=================================
 
 The GHC API exports a function 
 
@@ -88,3 +88,21 @@ Expanding on (3):
 - http://darcs.haskell.org/ghc/docs/comm/the-beast/types.html talks about the
   different type systems for the AST and Core, and "hybrid" types
 
+Hooking into the typechecker
+============================
+
+The type checker gets called through the callstack
+
+    [TcRnDriver.hs] tcRnModule :: HscEnv -> HscSource-> Bool -> HsParsedModule -> IO (Messages, Maybe TcGblEnv)
+    [HscMain.hs] tcRnModule' :: HscEnv -> ModSummary -> Bool -> HsParsedModule -> Hsc TcGblEnv
+    [HscMain.hs] hscFileFrontEnd :: ModSummary -> Hsc TcGblEnv
+    [HscMain.hs] genericHscRecompile :: HsCompiler a -> ModSummary -> Maybe Fingerprint -> Hsc a
+(*) [HscMain.hs] hscInteractiveCompiler :: HsCompiler InteractiveResult
+    [HscMain.hs] hscCompileInteractive :: Compiler (InteractiveStatus, ModIface, ModDetails)
+    [DriverPipeline.hs] compile :: HscEnv -> ModSummary -> Int -> Int -> Maybe ModIface -> Maybe Linkable -> SourceModified -> IO HomeModInfo
+    [GhcMake.hs] upsweep_mod :: HscEnv -> HomePackageTable -> ([ModuleName],[ModuleName]) -> ModSummary -> Int -> Int -> IO HomeModInfo
+    [GhcMake.hs] upsweep :: GhcMonad m => HomePackageTable -> ([ModuleName],[ModuleName]) -> (HscEnv -> IO ()) -> [SCC ModSummary] -> m (SuccessFlag, [ModSummary])
+    [GhcMake.hs] load :: GhcMonad m => LoadHowMuch -> m SuccessFlag 
+
+This callstack is shared with the one for the desugarer (above) from the marked
+line (*).
