@@ -16,9 +16,6 @@ cabal-version:       >=1.8
 
 library
   exposed-modules:     IdeBackendRTS 
-                       IdeBackendPlugin
   -- other-modules:       
-  build-depends:       base >=4.5 && <5,
-                       ghc ==7.4.* || >=7.6.2
-
+  build-depends:       base >=4.5 && <5
   ghc-options:         -Wall

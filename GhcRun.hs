@@ -33,9 +33,8 @@ import qualified ErrUtils
 import Exception (ghandle)
 import FastString ( unpackFS )
 import qualified GHC
-import GhcMonad (liftIO, modifySession)
+import GhcMonad (liftIO)
 import qualified HscTypes
-import HscTypes (HscEnv(hsc_mod_graph))
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
 import qualified SrcLoc
@@ -66,21 +65,11 @@ import Data.List ((\\))
 import Data.Maybe (catMaybes)
 import System.FilePath.Find (find, always, extension)
 import System.Process
-#if __GLASGOW_HASKELL__ >= 706
-import Data.Time
-#else
-import System.Time
-#endif
 
 import Common
 import ModuleName (ModuleName, LoadedModules)
 import qualified ModuleName as MN
 import Data.Aeson.TH (deriveJSON)
-import System.IO (hPutStrLn, IOMode(..), openFile, hClose)
-import Control.Monad (forM_)
-import qualified StringBuffer
-
-import IdeBackendPlugin (ideBackendPluginState)
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -259,11 +248,6 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     prepareResult _flags = do
       errs <- liftIO $ readIORef errsRef
       graph <- getModuleGraph
-
-      liftIO $ Ex.bracket (openFile "/tmp/modulegraph.txt" WriteMode) hClose $ \h -> do
-        st <- readIORef ideBackendPluginState
-        hPutStrLn h ("prepareResult: " ++ st) 
-
       let moduleNames = map ms_mod_name graph
       loadedNames <- filterM isLoaded moduleNames
       let lmaybe = map (MN.fromString . moduleNameString) loadedNames
