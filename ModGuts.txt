@@ -105,7 +105,17 @@ The type checker gets called through the callstack
     [GhcMake.hs] load :: GhcMonad m => LoadHowMuch -> m SuccessFlag
 
 This callstack is shared with the one for the desugarer (above) from the marked
-line (*).
+line (*). It seems this might be a good place to add a hook for "frontend plugins":
+
+  genericHscRecompile :: HsCompiler a
+                      -> ModSummary -> Maybe Fingerprint
+                      -> Hsc a
+  genericHscRecompile compiler mod_summary mb_old_hash
+      | ExtCoreFile <- ms_hsc_src mod_summary =
+          panic "GHC does not currently support reading External Core files"
+      | otherwise = do
+          tc_result <- hscFileFrontEnd mod_summary
+          hscBackend compiler tc_result mod_summary mb_old_hash
 
 Non-unique Unique
 =================
