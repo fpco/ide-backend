@@ -77,4 +77,14 @@ could patch ghc to fix that)
 3. Most importantly, it means we need to work at the level of Core, which may
 or may not be desirable.
 
+Expanding on (3):
+
+- http://hackage.haskell.org/trac/ghc/wiki/Commentary/Compiler/HscMain
+  describes that type checking is done *before* the desugarer (which is
+  responsible for turning the original AST into core), and that this means that
+  "error messages can display precisely the syntax that the user wrote" and
+  moreover "desugaring is not required to preserve type-inference properties." 
+
+- http://darcs.haskell.org/ghc/docs/comm/the-beast/types.html talks about the
+  different type systems for the AST and Core, and "hybrid" types
 
