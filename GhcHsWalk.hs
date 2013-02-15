@@ -1,10 +1,12 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving #-}
-module GhcHsWalk (IdentMap, extractIdsPlugin) where
+module GhcHsWalk (IdentMap, extractIdsPlugin, ppSymDefMap) where
 
 import Prelude hiding (span, id)
 import Control.Monad (forM_)
 import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
 import Control.Monad.Trans.Class (MonadTrans, lift)
+import Data.IORef
+import System.FilePath (takeFileName)
 import System.IO (withFile, IOMode(AppendMode), hPutStr)
 
 import GHC
@@ -42,8 +44,8 @@ debugPP header val = do
   dynFlags <- getDynFlags
   liftIO $ appendFile "/tmp/ghc.log" (header ++ showSDoc dynFlags (ppr val) ++ "\n")
 
-extractIdsPlugin :: HscPlugin
-extractIdsPlugin = HscPlugin $ \env -> do
+extractIdsPlugin :: IORef [IdentMap] -> HscPlugin
+extractIdsPlugin symbolRef = HscPlugin $ \env -> do
   dynFlags <- getDynFlags
   identMap <- execExtractIdsT $ extractIds (tcg_binds env)
 
@@ -51,10 +53,9 @@ extractIdsPlugin = HscPlugin $ \env -> do
 
   liftIO $ withFile "/tmp/ghc.log" AppendMode $ \h ->
     forM_ identMap $ \(span, id) -> do
-      hPutStr h $ showSDoc dynFlags (ppr span) ++ ": "
-      hPutStr h $ showSDoc dynFlags (ppr (varName id)) ++ " :: "
-      hPutStr h $ showSDoc dynFlags (ppr (varType id))
-      hPutStr h $ " (" ++ showSDoc dynFlags (ppr (nameSrcSpan (varName id))) ++ ")\n"
+      hPutStr h $ ppSymDefMap dynFlags [(span, id)]
+
+  liftIO $ modifyIORef symbolRef (identMap :)
 
   return env
 
@@ -157,3 +158,19 @@ instance ExtractIds (LHsExpr Id) where
   extractIds (L _ (EViewPat _ _)) = fail "extractIds: unsupported EViewPat"
   extractIds (L _ (ELazyPat _)) = fail "extractIds: unsupported ELazyPat"
   extractIds (L _ (HsType _ )) = fail "extractIds: unsupported HsType"
+
+
+-----------------------
+-- Debug
+--
+
+ppSymDefMap :: DynFlags -> IdentMap -> String
+ppSymDefMap dynFlags symDefMap =
+  let pp (span, id) =
+        takeFileName (showSDoc dynFlags (ppr span)) ++ ": "
+        ++ showSDoc dynFlags (ppr (varName id)) ++ " :: "
+        ++ showSDoc dynFlags (ppr (varType id))
+        ++ " ("
+        ++ takeFileName (showSDoc dynFlags (ppr (nameSrcSpan (varName id))))
+        ++ ")"
+  in unlines $ map pp symDefMap

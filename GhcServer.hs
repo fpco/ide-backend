@@ -23,6 +23,8 @@ module GhcServer
   , shutdownGhcServer
   , forceShutdownGhcServer
   , getGhcExitCode
+  , SymbolDefinitionMap(..)
+  , ppSymDefMap
   ) where
 
 import Control.Concurrent (ThreadId, myThreadId, throwTo)
@@ -62,6 +64,10 @@ import BlockingOps (
 
 import Paths_ide_backend
 
+-- | A mapping from symbol uses to symbol definitions
+newtype SymbolDefinitionMap = SymbolDefinitionMap String  -- IdentMap
+  deriving (Show, Eq)
+
 data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
   | ReqRun     ModuleName String RunBufferMode RunBufferMode
@@ -69,7 +75,7 @@ data GhcRequest
   deriving Show
 data GhcCompileResponse =
     GhcCompileProgress Progress
-  | GhcCompileDone ([SourceError], LoadedModules)
+  | GhcCompileDone ([SourceError], LoadedModules, SymbolDefinitionMap)
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -81,6 +87,7 @@ data GhcRunRequest =
   | GhcRunAckDone
   deriving Show
 
+$(deriveJSON id ''SymbolDefinitionMap)
 $(deriveJSON id ''GhcRequest)
 $(deriveJSON id ''GhcCompileResponse)
 $(deriveJSON id ''GhcRunResponse)
@@ -102,17 +109,18 @@ ghcServer fdsAndOpts = do
 --
 -- This function runs in end endless loop inside the @Ghc@ monad, making
 -- incremental compilation possible.
-ghcServerEngine :: [String] -> RpcConversation  -> IO ()
+ghcServerEngine :: [String] -> RpcConversation -> IO ()
 ghcServerEngine staticOpts conv@RpcConversation{..} = do
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
+  idMapRef <- newIORef []
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
     -- Initialize the dynamic flags
     dynFlags <- getSessionDynFlags
     let dynFlags' = dynFlags {
-          sourcePlugins = extractIdsPlugin : sourcePlugins dynFlags
+          sourcePlugins = extractIdsPlugin idMapRef : sourcePlugins dynFlags
         }
     setSessionDynFlags dynFlags'
 
@@ -121,7 +129,7 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
       req <- liftIO get
       case req of
         ReqCompile opts dir genCode ->
-          ghcHandleCompile conv dOpts opts dir genCode
+          ghcHandleCompile conv dOpts opts idMapRef dir genCode
         ReqRun m fun outBMode errBMode ->
           ghcHandleRun conv m fun outBMode errBMode
         ReqSetEnv env ->
@@ -136,13 +144,16 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 ghcHandleCompile :: RpcConversation
                  -> DynamicOpts        -- ^ startup dynamic flags
                  -> Maybe [String]     -- ^ new, user-submitted dynamic flags
-                 -> FilePath           -- ^ Source directory
-                 -> Bool               -- ^ Should we generate code
+                 -> IORef [IdentMap]   -- ref holding id info
+                 -> FilePath           -- ^ source directory
+                 -> Bool               -- ^ should we generate code
                  -> Ghc ()
-ghcHandleCompile RpcConversation{..} dOpts ideNewOpts configSourcesDir ideGenerateCode = do
+ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
+                 idMapRef configSourcesDir ideGenerateCode = do
+    liftIO $ writeIORef idMapRef []
     errsRef <- liftIO $ newIORef []
     counter <- liftIO $ newIORef initialProgress
-    (errs, context) <-
+    (errs, loadedModules) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
@@ -151,7 +162,10 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts configSourcesDir ideGenera
                                        (progressCallback counter)
                                        (\_ -> return ()) -- TODO: log?
     liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
-    liftIO $ put $ GhcCompileDone (errs, context)
+    flags <- getSessionDynFlags
+    idMap <- liftIO $ readIORef idMapRef
+    let symDefMap = SymbolDefinitionMap $ ppSymDefMap flags $ concat idMap
+    liftIO $ put $ GhcCompileDone (errs, loadedModules, symDefMap)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -166,8 +180,6 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts configSourcesDir ideGenera
       oldCounter <- readIORef counter
       modifyIORef counter (updateProgress ghcMsg)
       put $ GhcCompileProgress oldCounter
-
-
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation
@@ -328,7 +340,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ([SourceError], LoadedModules)
+           -> IO ([SourceError], LoadedModules, SymbolDefinitionMap)
 rpcCompile server opts dir genCode callback =
   rpcConversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)

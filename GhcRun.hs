@@ -21,6 +21,7 @@ module GhcRun
   , submitStaticOpts
   , optsToDynFlags
   , DynFlags(sourcePlugins)
+  , defaultDynFlags
   , getSessionDynFlags
   , setSessionDynFlags
     -- * Executing snippets
@@ -31,7 +32,7 @@ module GhcRun
 
 import Bag (bagToList)
 import qualified Config as GHC
-import DynFlags (dopt_unset)
+import DynFlags (dopt_unset, defaultDynFlags)
 import qualified ErrUtils
 import Exception (ghandle)
 import FastString ( unpackFS )
@@ -431,6 +432,10 @@ showSDocDebug  flags msg = GHC.showSDocDebug flags msg
 #else
 showSDocDebug _flags msg = GHC.showSDocDebug        msg
 #endif
+
+-----------------------
+-- Debug
+--
 
 _debugPpContext :: DynFlags -> String -> Ghc ()
 _debugPpContext flags msg = do

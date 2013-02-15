@@ -3,7 +3,6 @@
 module Common
   ( SourceError(..), SourceErrorKind(..)
   , formatSourceError
-  , SymbolDefinitionMap
   , hsExtentions
   , Progress
   , initialProgress
@@ -44,13 +43,6 @@ $(deriveJSON id ''SourceError)
 
 formatSourceError :: SourceError -> String
 formatSourceError = show
-
--- | A mapping from symbol uses to symbol definitions
---
--- * This is currently a stub, but it will be a full concrete type so that
--- it can be serialised etc.
---
-data SymbolDefinitionMap
 
 -- | These source files are type-checked.
 hsExtentions:: [FilePath]

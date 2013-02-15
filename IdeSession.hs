@@ -254,6 +254,7 @@ data Computed = Computed {
     computedErrors        :: [SourceError]
     -- | Modules that got loaded okay
   , computedLoadedModules :: LoadedModules
+  , computedSymDefMap :: SymbolDefinitionMap
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -484,15 +485,17 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
           rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
 
         -- Update code
-        computed <- if (idleState' ^. ideUpdatedCode)
-                      then do (computedErrors, computedLoadedModules) <-
-                                rpcCompile (idleState ^. ideGhcServer)
-                                           (idleState' ^. ideNewOpts)
-                                           (ideSourcesDir ideStaticInfo)
-                                           (idleState' ^. ideGenerateCode)
-                                           callback
-                              return $ Just Computed{..}
-                      else return $ idleState' ^. ideComputed
+        computed <- if (idleState' ^. ideUpdatedCode) then do
+                      (computedErrors,
+                       computedLoadedModules,
+                       computedSymDefMap) <-
+                        rpcCompile (idleState ^. ideGhcServer)
+                                   (idleState' ^. ideNewOpts)
+                                   (ideSourcesDir ideStaticInfo)
+                                   (idleState' ^. ideGenerateCode)
+                                   callback
+                      return $ Just Computed{..}
+                    else return $ idleState' ^. ideComputed
 
         -- Update state
         return . IdeSessionIdle
@@ -769,7 +772,18 @@ getAllDataFiles IdeSession{ideStaticInfo} =
 -- source module or a top-level symbol imported from another package.
 --
 getSymbolDefinitionMap :: Query SymbolDefinitionMap
-getSymbolDefinitionMap = undefined
+getSymbolDefinitionMap IdeSession{ideState} =
+  -- TODO: scrap all this boilerplate
+  $withMVar ideState $ \st ->
+    case st of
+      IdeSessionIdle      idleState -> aux idleState
+      IdeSessionRunning _ idleState -> aux idleState
+      IdeSessionShutdown            -> fail "Session already shut down."
+  where
+    aux :: IdeIdleState -> IO SymbolDefinitionMap
+    aux idleState = case idleState ^. ideComputed of
+      Just Computed{..} -> return computedSymDefMap
+      Nothing -> fail "This session state does not admit queries."
 
 -- | Get all current environment overrides
 getEnv :: Query [(String, Maybe String)]

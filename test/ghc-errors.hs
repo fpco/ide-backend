@@ -1428,12 +1428,36 @@ syntheticTests =
                     , "  where d = 6"
                     , "d :: Int -> T"
                     , "d _ = MkT"
-                    , "e = True `pseq` False" 
+                    , "e = True `pseq` False"
                     ])
         updateSessionD session upd 2
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        -- TODO: query types
+        SymbolDefinitionMap symDefMap <- getSymbolDefinitionMap session
+        let expectedSymDefMap = SymbolDefinitionMap $ unlines $ sort
+              [ "A.hs:3:1: a :: GHC.Types.Int (A.hs:3:1)"
+              , "A.hs:4:1: b :: GHC.Types.Int (A.hs:4:1)"
+              , "A.hs:4:5: A.a :: GHC.Types.Int (A.hs:3:1)"
+              , "A.hs:4:7: GHC.Num.+ :: forall a. GHC.Num.Num a => a -> a -> a (<no location info>)"
+              , "B.hs:9:1: e :: GHC.Types.Bool (B.hs:9:1)"
+              , "B.hs:9:5-8: GHC.Types.True :: GHC.Types.Bool (<wired into compiler>)"
+              , "B.hs:9:10-15: Control.Parallel.pseq :: forall a b. a -> b -> b (<no location info>)"
+              , "B.hs:9:17-21: GHC.Types.False :: GHC.Types.Bool (<wired into compiler>)"
+              , "B.hs:8:1: d :: GHC.Types.Int -> A.T (B.hs:8:1)"
+              , "B.hs:8:7-9: A.MkT :: A.T (A.hs:2:10-12)"
+              , "B.hs:4:1: c :: GHC.Types.Int (B.hs:4:1)"
+              , "B.hs:4:9: e :: GHC.Types.Int (B.hs:4:9)"
+              , "B.hs:5:8: A.b :: GHC.Types.Int (A.hs:4:1)"
+              , "B.hs:5:10: GHC.Num.+ :: forall a. GHC.Num.Num a => a -> a -> a (<no location info>)"
+              , "B.hs:5:14: GHC.Num.+ :: forall a. GHC.Num.Num a => a -> a -> a (<no location info>)"
+              , "B.hs:5:16: d :: GHC.Types.Int (B.hs:6:9)"
+              , "B.hs:5:18: GHC.Num.+ :: forall a. GHC.Num.Num a => a -> a -> a (<no location info>)"
+              , "B.hs:5:20: e :: GHC.Types.Int (B.hs:4:9)"
+              ]
+        assertEqual "Symbol defintion map should be correct"
+                    (SymbolDefinitionMap $ unlines $ sort $ lines symDefMap)
+                    expectedSymDefMap
+        return ()
     )
   ]
 
