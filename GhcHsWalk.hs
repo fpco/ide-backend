@@ -1,7 +1,9 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 module GhcHsWalk (IdentMap, extractIdsPlugin) where
 
+import Prelude hiding (span, id)
 import Control.Monad (forM_)
+import Control.Monad.Writer (WriterT, execWriterT, tell)
 import System.IO (withFile, IOMode(AppendMode), hPutStr)
 
 import GHC
@@ -11,18 +13,19 @@ import HscPlugin
 import DynFlags
 import Var
 import GhcMonad (liftIO)
-import MonadUtils (concatMapM)
 import Bag
 
 type IdentMap = [(SrcSpan, Id)] 
 
 class ExtractIds a where
-  extractIds :: (Functor m, Monad m) => a -> m IdentMap
+  extractIds :: (Functor m, Monad m) => a -> WriterT IdentMap m ()
 
 extractIdsPlugin :: HscPlugin 
 extractIdsPlugin = HscPlugin $ \env -> do
   dynFlags <- getDynFlags
-  identMap <- extractIds (tcg_binds env)
+  identMap <- execWriterT $ extractIds (tcg_binds env) 
+
+  let _ = identMap :: IdentMap 
 
   liftIO $ withFile "/tmp/ghc.log" AppendMode $ \h ->
     forM_ identMap $ \(span, id) -> do
@@ -34,24 +37,22 @@ extractIdsPlugin = HscPlugin $ \env -> do
   return env
 
 instance ExtractIds (LHsBinds Id) where
-  extractIds = concatMapM extractIds . bagToList 
+  extractIds = mapM_ extractIds . bagToList 
 
 instance ExtractIds (LHsBind Id) where
   extractIds (L _span bind@(FunBind {})) = do
-    fmap concat . sequence $ [
-        return [(getLoc (fun_id bind), unLoc (fun_id bind))] 
-      , extractIds (fun_matches bind)
-      ]
+    tell [(getLoc (fun_id bind), unLoc (fun_id bind))] 
+    extractIds (fun_matches bind)
   extractIds (L _span bind@(PatBind {})) =
     fail "extractIds: unsupported PatBind"
   extractIds (L span bind@(VarBind {})) =
-    return [(span, var_id bind)]
+    tell [(span, var_id bind)]
   extractIds (L _span bind@(AbsBinds {})) = 
     extractIds (abs_binds bind) 
 
 instance ExtractIds (MatchGroup Id) where
   extractIds (MatchGroup matches _postTcType) =
-    concatMapM extractIds matches
+    mapM_ extractIds matches
 
 instance ExtractIds (LMatch Id) where
   extractIds (L _span (Match pats _type rhss)) = 
@@ -59,18 +60,18 @@ instance ExtractIds (LMatch Id) where
 
 instance ExtractIds (GRHSs Id) where
   extractIds (GRHSs rhss binds) = 
-    concatMapM extractIds rhss
+    mapM_ extractIds rhss
 
 instance ExtractIds (LGRHS Id) where
   extractIds (L _span (GRHS _guards rhs)) = extractIds rhs
 
 instance ExtractIds (HsLocalBinds Id) where
   extractIds EmptyLocalBinds = 
-    return [] 
+    return () 
   extractIds (HsValBinds (ValBindsIn _ _)) = 
     fail "extractIds: Unexpected ValBindsIn (after renamer these should not exist)"
   extractIds (HsValBinds (ValBindsOut binds _sigs)) =
-    concatMapM (extractIds . snd) binds -- "fst" is 'rec flag'
+    mapM_ (extractIds . snd) binds -- "fst" is 'rec flag'
   extractIds (HsIPBinds _) =
     fail "extractIds: unsupported HsIPBinds"
 
@@ -80,18 +81,18 @@ instance ExtractIds (LHsExpr Id) where
   extractIds (L _ (ExprWithTySigOut expr _type)) = 
     extractIds expr
   extractIds (L _ (HsOverLit _ )) =
-    return [] 
-  extractIds (L _ (OpApp left op _fix right)) = do
-    concatMapM extractIds [left, op, right]
+    return () 
+  extractIds (L _ (OpApp left op _fix right)) = do 
+    extractIds left
+    extractIds op
+    extractIds right
   extractIds (L span (HsVar id)) = 
-    return [(span, id)] 
+    tell [(span, id)] 
   extractIds (L span (HsWrap _wrapper expr)) = 
     extractIds (L span expr)
-  extractIds (L _ (HsLet binds expr)) = do
-    fmap concat . sequence $ [
-        extractIds binds
-      , extractIds expr
-      ]
+  extractIds (L _ (HsLet binds expr)) = do 
+    extractIds binds
+    extractIds expr
 
   -- We should ignore unrecognized expressions rather than throw an error
   -- However, for writing this code in the first place it's useful to know

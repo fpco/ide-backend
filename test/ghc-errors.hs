@@ -1411,19 +1411,24 @@ syntheticTests =
         -}
     )
   , ( "Type information 1"
-    , withConfiguredSession defOpts $ \session -> do
+    , withConfiguredSession (defOpts ++ ["-package parallel"]) $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule (fromString "A") . BSLC.pack . unlines $
                     [ "module A where"
+                    , "data T = MkT"
                     , "a = (5 :: Int)"
                     , "b = a + 6"
                     ])
                <> (updateModule (fromString "B") . BSLC.pack . unlines $
                     [ "module B where"
                     , "import A"
+                    , "import Control.Parallel"
                     , "c = let e = 1"
                     , "    in b + 3 + d + e"
                     , "  where d = 6"
+                    , "d :: T"
+                    , "d = MkT"
+                    , "e = True `pseq` False" 
                     ])
         updateSessionD session upd 2
         msgs <- getSourceErrors session
