@@ -1,9 +1,10 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving #-}
 module GhcHsWalk (IdentMap, extractIdsPlugin) where
 
 import Prelude hiding (span, id)
 import Control.Monad (forM_)
-import Control.Monad.Writer (WriterT, execWriterT, tell)
+import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
+import Control.Monad.Trans.Class (MonadTrans, lift)
 import System.IO (withFile, IOMode(AppendMode), hPutStr)
 
 import GHC
@@ -12,18 +13,37 @@ import Outputable
 import HscPlugin
 import DynFlags
 import Var
-import GhcMonad (liftIO)
+import MonadUtils (MonadIO(..))
 import Bag
 
 type IdentMap = [(SrcSpan, Id)] 
 
+-- Define type synonym to avoid orphan instances
+newtype ExtractIdsT m a = ExtractIdsT { runExtractIdsT :: WriterT IdentMap m a }
+  deriving (Functor, Monad, MonadWriter IdentMap, MonadTrans)
+
+execExtractIdsT :: Monad m => ExtractIdsT m () -> m IdentMap
+execExtractIdsT = execWriterT . runExtractIdsT 
+
 class ExtractIds a where
-  extractIds :: (Functor m, Monad m) => a -> WriterT IdentMap m ()
+  extractIds :: (Functor m, MonadIO m, HasDynFlags m) => a -> ExtractIdsT m ()
+
+instance (HasDynFlags m, Monad m) => HasDynFlags (ExtractIdsT m) where
+  getDynFlags = lift getDynFlags
+
+-- This is not the standard MonadIO, but the MonadIO from GHC!
+instance MonadIO m => MonadIO (ExtractIdsT m) where
+  liftIO = lift . liftIO
+
+debugPP :: (MonadIO m, HasDynFlags m, Outputable a) => String -> a -> m ()
+debugPP header val = do
+  dynFlags <- getDynFlags
+  liftIO $ appendFile "/tmp/ghc.log" (header ++ showSDoc dynFlags (ppr val) ++ "\n")
 
 extractIdsPlugin :: HscPlugin 
 extractIdsPlugin = HscPlugin $ \env -> do
   dynFlags <- getDynFlags
-  identMap <- execWriterT $ extractIds (tcg_binds env) 
+  identMap <- execExtractIdsT $ extractIds (tcg_binds env) 
 
   let _ = identMap :: IdentMap 
 
@@ -46,13 +66,14 @@ instance ExtractIds (LHsBind Id) where
   extractIds (L _span bind@(PatBind {})) =
     fail "extractIds: unsupported PatBind"
   extractIds (L span bind@(VarBind {})) =
-    tell [(span, var_id bind)]
+    fail "extractIds: unsupported VarBind"
   extractIds (L _span bind@(AbsBinds {})) = 
     extractIds (abs_binds bind) 
 
 instance ExtractIds (MatchGroup Id) where
-  extractIds (MatchGroup matches _postTcType) =
+  extractIds (MatchGroup matches postTcType) = do
     mapM_ extractIds matches
+    extractIds postTcType
 
 instance ExtractIds (LMatch Id) where
   extractIds (L _span (Match pats _type rhss)) = 
@@ -134,3 +155,6 @@ instance ExtractIds (LHsExpr Id) where
   extractIds (L _ (EViewPat _ _)) = fail "extractIds: unsupported EViewPat"
   extractIds (L _ (ELazyPat _)) = fail "extractIds: unsupported ELazyPat"
   extractIds (L _ (HsType _ )) = fail "extractIds: unsupported HsType"
+
+instance ExtractIds Type where
+  extractIds = debugPP "Found type" 

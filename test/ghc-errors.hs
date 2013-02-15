@@ -1426,8 +1426,8 @@ syntheticTests =
                     , "c = let e = 1"
                     , "    in b + 3 + d + e"
                     , "  where d = 6"
-                    , "d :: T"
-                    , "d = MkT"
+                    , "d :: Int -> T"
+                    , "d _ = MkT"
                     , "e = True `pseq` False" 
                     ])
         updateSessionD session upd 2
