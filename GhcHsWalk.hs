@@ -16,6 +16,7 @@ import Var
 import MonadUtils (MonadIO(..))
 import Bag
 import TypeRep
+import TyCon
 
 type IdentMap = [(SrcSpan, Id)] 
 
@@ -72,9 +73,9 @@ instance ExtractIds (LHsBind Id) where
     extractIds (abs_binds bind) 
 
 instance ExtractIds (MatchGroup Id) where
-  extractIds (MatchGroup matches postTcType) = do
+  extractIds (MatchGroup matches _postTcType) = do
     mapM_ extractIds matches
-    extractIds postTcType
+    -- We ignore the postTcType, as it doesn't have location information
 
 instance ExtractIds (LMatch Id) where
   extractIds (L _span (Match pats _type rhss)) = 
@@ -156,27 +157,3 @@ instance ExtractIds (LHsExpr Id) where
   extractIds (L _ (EViewPat _ _)) = fail "extractIds: unsupported EViewPat"
   extractIds (L _ (ELazyPat _)) = fail "extractIds: unsupported ELazyPat"
   extractIds (L _ (HsType _ )) = fail "extractIds: unsupported HsType"
-
-instance ExtractIds Type where
-  -- Vanilla type or kind variable (*never* a coercion variable) 
-  extractIds (TyVarTy _var) =
-    fail "extractIds: Unsupported TyVarTy"
-
-  -- Type application (this is subject to some invariants; see TypeRep)
-  extractIds (AppTy _fn _arg) =
-    fail "extractIds: Unsupported AppTy"
-
-  -- Application of a 'TyCon', including newtypes /and/ synonyms. 
-  extractIds (TyConApp _con _args) =
-    fail "extractIds: Unsupported TyConApp"
-
-  -- ^ Special case of 'TyConApp': @TyConApp FunTyCon [t1, t2]@ 
-  extractIds (FunTy _fn _arg) =
-    fail "extractIds: Unsupported FunTy"
-
-  extractIds (ForAllTy _var _tp) = 
-    fail "extractIds: Unsupported ForAllTy"
-
-  -- ^ Type literals are simillar to type constructors. 
-  extractIds (LitTy _lit) = 
-    fail "extractIds: Unsupported LitTy"
