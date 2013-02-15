@@ -16,6 +16,7 @@ library
   other-modules:      Common,
                       GhcRun,
                       GhcServer,
+                      GhcHsWalk,
                       RpcServer,
                       Paths_ide_backend,
                       BlockingOps

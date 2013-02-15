@@ -20,6 +20,9 @@ module GhcRun
   , DynamicOpts
   , submitStaticOpts
   , optsToDynFlags
+  , DynFlags(sourcePlugins)
+  , getSessionDynFlags
+  , setSessionDynFlags
     -- * Executing snippets
   , runInGhc
   , RunResult(..)

@@ -1410,6 +1410,26 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
         -}
     )
+  , ( "Type information 1"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule (fromString "A") . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "a = (5 :: Int)"
+                    , "b = a + 6"
+                    ])
+               <> (updateModule (fromString "B") . BSLC.pack . unlines $
+                    [ "module B where"
+                    , "import A"
+                    , "c = let e = 1"
+                    , "    in b + 3 + d + e"
+                    , "  where d = 6"
+                    ])
+        updateSessionD session upd 2
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        -- TODO: query types
+    )
   ]
 
 defOpts :: [String]

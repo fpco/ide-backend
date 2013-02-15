@@ -47,6 +47,7 @@ import System.Posix.IO.ByteString
 
 import Common
 import GhcRun
+import GhcHsWalk
 import ModuleName (LoadedModules, ModuleName)
 import RpcServer
 
@@ -107,21 +108,28 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
   dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
-  runFromGhc . forever $ do
-    req <- liftIO get
-    case req of
-      ReqCompile opts dir genCode ->
-        ghcHandleCompile conv dOpts opts dir genCode
-      ReqRun m fun outBMode errBMode ->
-        ghcHandleRun conv m fun outBMode errBMode
-      ReqSetEnv env ->
-        ghcHandleSetEnv conv env
+  runFromGhc $ do
+    -- Initialize the dynamic flags
+    dynFlags <- getSessionDynFlags
+    let dynFlags' = dynFlags {
+          sourcePlugins = extractIdsPlugin : sourcePlugins dynFlags
+        }
+    setSessionDynFlags dynFlags'
+
+    -- Start handling RPC calls
+    forever $ do
+      req <- liftIO get
+      case req of
+        ReqCompile opts dir genCode ->
+          ghcHandleCompile conv dOpts opts dir genCode
+        ReqRun m fun outBMode errBMode ->
+          ghcHandleRun conv m fun outBMode errBMode
+        ReqSetEnv env ->
+          ghcHandleSetEnv conv env
   where
     ideBackendRTSOpts = [
         -- Just in case the user specified -hide-all-packages
         "-package ide-backend-rts"
-        -- Load the RTS for the plugin
-      , "-fplugin IdeBackendPlugin"
       ]
 
 -- | Handle a compile or type check request
