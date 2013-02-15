@@ -18,14 +18,14 @@ import Bag
 import TypeRep
 import TyCon
 
-type IdentMap = [(SrcSpan, Id)] 
+type IdentMap = [(SrcSpan, Id)]
 
 -- Define type synonym to avoid orphan instances
 newtype ExtractIdsT m a = ExtractIdsT { runExtractIdsT :: WriterT IdentMap m a }
   deriving (Functor, Monad, MonadWriter IdentMap, MonadTrans)
 
 execExtractIdsT :: Monad m => ExtractIdsT m () -> m IdentMap
-execExtractIdsT = execWriterT . runExtractIdsT 
+execExtractIdsT = execWriterT . runExtractIdsT
 
 class ExtractIds a where
   extractIds :: (Functor m, MonadIO m, HasDynFlags m) => a -> ExtractIdsT m ()
@@ -42,35 +42,35 @@ debugPP header val = do
   dynFlags <- getDynFlags
   liftIO $ appendFile "/tmp/ghc.log" (header ++ showSDoc dynFlags (ppr val) ++ "\n")
 
-extractIdsPlugin :: HscPlugin 
+extractIdsPlugin :: HscPlugin
 extractIdsPlugin = HscPlugin $ \env -> do
   dynFlags <- getDynFlags
-  identMap <- execExtractIdsT $ extractIds (tcg_binds env) 
+  identMap <- execExtractIdsT $ extractIds (tcg_binds env)
 
-  let _ = identMap :: IdentMap 
+  let _ = identMap :: IdentMap
 
   liftIO $ withFile "/tmp/ghc.log" AppendMode $ \h ->
     forM_ identMap $ \(span, id) -> do
       hPutStr h $ showSDoc dynFlags (ppr span) ++ ": "
       hPutStr h $ showSDoc dynFlags (ppr (varName id)) ++ " :: "
-      hPutStr h $ showSDoc dynFlags (ppr (varType id)) 
+      hPutStr h $ showSDoc dynFlags (ppr (varType id))
       hPutStr h $ " (" ++ showSDoc dynFlags (ppr (nameSrcSpan (varName id))) ++ ")\n"
 
   return env
 
 instance ExtractIds (LHsBinds Id) where
-  extractIds = mapM_ extractIds . bagToList 
+  extractIds = mapM_ extractIds . bagToList
 
 instance ExtractIds (LHsBind Id) where
   extractIds (L _span bind@(FunBind {})) = do
-    tell [(getLoc (fun_id bind), unLoc (fun_id bind))] 
+    tell [(getLoc (fun_id bind), unLoc (fun_id bind))]
     extractIds (fun_matches bind)
   extractIds (L _span bind@(PatBind {})) =
     fail "extractIds: unsupported PatBind"
   extractIds (L span bind@(VarBind {})) =
     fail "extractIds: unsupported VarBind"
-  extractIds (L _span bind@(AbsBinds {})) = 
-    extractIds (abs_binds bind) 
+  extractIds (L _span bind@(AbsBinds {})) =
+    extractIds (abs_binds bind)
 
 instance ExtractIds (MatchGroup Id) where
   extractIds (MatchGroup matches _postTcType) = do
@@ -78,20 +78,20 @@ instance ExtractIds (MatchGroup Id) where
     -- We ignore the postTcType, as it doesn't have location information
 
 instance ExtractIds (LMatch Id) where
-  extractIds (L _span (Match pats _type rhss)) = 
+  extractIds (L _span (Match pats _type rhss)) =
     extractIds rhss
 
 instance ExtractIds (GRHSs Id) where
-  extractIds (GRHSs rhss binds) = 
+  extractIds (GRHSs rhss binds) =
     mapM_ extractIds rhss
 
 instance ExtractIds (LGRHS Id) where
   extractIds (L _span (GRHS _guards rhs)) = extractIds rhs
 
 instance ExtractIds (HsLocalBinds Id) where
-  extractIds EmptyLocalBinds = 
-    return () 
-  extractIds (HsValBinds (ValBindsIn _ _)) = 
+  extractIds EmptyLocalBinds =
+    return ()
+  extractIds (HsValBinds (ValBindsIn _ _)) =
     fail "extractIds: Unexpected ValBindsIn (after renamer these should not exist)"
   extractIds (HsValBinds (ValBindsOut binds _sigs)) =
     mapM_ (extractIds . snd) binds -- "fst" is 'rec flag'
@@ -101,19 +101,19 @@ instance ExtractIds (HsLocalBinds Id) where
 instance ExtractIds (LHsExpr Id) where
   extractIds (L _ (HsPar expr)) =
     extractIds expr
-  extractIds (L _ (ExprWithTySigOut expr _type)) = 
+  extractIds (L _ (ExprWithTySigOut expr _type)) =
     extractIds expr
   extractIds (L _ (HsOverLit _ )) =
-    return () 
-  extractIds (L _ (OpApp left op _fix right)) = do 
+    return ()
+  extractIds (L _ (OpApp left op _fix right)) = do
     extractIds left
     extractIds op
     extractIds right
-  extractIds (L span (HsVar id)) = 
-    tell [(span, id)] 
-  extractIds (L span (HsWrap _wrapper expr)) = 
+  extractIds (L span (HsVar id)) =
+    tell [(span, id)]
+  extractIds (L span (HsWrap _wrapper expr)) =
     extractIds (L span expr)
-  extractIds (L _ (HsLet binds expr)) = do 
+  extractIds (L _ (HsLet binds expr)) = do
     extractIds binds
     extractIds expr
 
