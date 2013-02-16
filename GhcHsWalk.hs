@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving #-}
-module GhcHsWalk (IdentMap, extractIdsPlugin, ppSymDefMap) where
+module GhcHsWalk (IdentMap, extractIdsPlugin) where
 
 import Prelude hiding (span, id)
 import Control.Monad (forM_)
@@ -53,7 +53,7 @@ extractIdsPlugin symbolRef = HscPlugin $ \env -> do
 
   liftIO $ withFile "/tmp/ghc.log" AppendMode $ \h ->
     forM_ identMap $ \(span, id) -> do
-      hPutStr h $ ppSymDefMap dynFlags [(span, id)]
+      hPutStr h $ ppIdMap dynFlags [(span, id)]
 
   liftIO $ modifyIORef symbolRef (identMap :)
 
@@ -164,8 +164,8 @@ instance ExtractIds (LHsExpr Id) where
 -- Debug
 --
 
-ppSymDefMap :: DynFlags -> IdentMap -> String
-ppSymDefMap dynFlags symDefMap =
+ppIdMap :: DynFlags -> IdentMap -> String
+ppIdMap dynFlags idMap =
   let pp (span, id) =
         takeFileName (showSDoc dynFlags (ppr span)) ++ ": "
         ++ showSDoc dynFlags (ppr (varName id)) ++ " :: "
@@ -173,4 +173,4 @@ ppSymDefMap dynFlags symDefMap =
         ++ " ("
         ++ takeFileName (showSDoc dynFlags (ppr (nameSrcSpan (varName id))))
         ++ ")"
-  in unlines $ map pp symDefMap
+  in unlines $ map pp idMap

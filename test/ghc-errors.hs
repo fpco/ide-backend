@@ -1433,8 +1433,8 @@ syntheticTests =
         updateSessionD session upd 2
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        SymbolDefinitionMap symDefMap <- getSymbolDefinitionMap session
-        let expectedSymDefMap = SymbolDefinitionMap $ unlines $ sort
+        symDefMap <- getSymbolDefinitionMap session
+        let expectedSymDefMap = unlines $ sort
               [ "A.hs:3:1: a :: GHC.Types.Int (A.hs:3:1)"
               , "A.hs:4:1: b :: GHC.Types.Int (A.hs:4:1)"
               , "A.hs:4:5: A.a :: GHC.Types.Int (A.hs:3:1)"
@@ -1455,7 +1455,7 @@ syntheticTests =
               , "B.hs:5:20: e :: GHC.Types.Int (B.hs:4:9)"
               ]
         assertEqual "Symbol defintion map should be correct"
-                    (SymbolDefinitionMap $ unlines $ sort $ lines symDefMap)
+                    (unlines $ sort $ lines $ ppSymDefMap $ symDefMap)
                     expectedSymDefMap
         return ()
     )

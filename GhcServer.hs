@@ -23,6 +23,7 @@ module GhcServer
   , shutdownGhcServer
   , forceShutdownGhcServer
   , getGhcExitCode
+  , IdInfo(..)
   , SymbolDefinitionMap(..)
   , ppSymDefMap
   ) where
@@ -38,10 +39,12 @@ import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import Data.IORef
+import Data.Maybe (mapMaybe)
 import System.Exit (ExitCode)
 
 import System.Directory (doesFileExist)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeFileName)
+
 import System.IO (hFlush, stdout, Handle)
 import System.Posix (Fd)
 import System.Posix.Env (setEnv, unsetEnv)
@@ -64,8 +67,15 @@ import BlockingOps (
 
 import Paths_ide_backend
 
+data IdInfo = IdInfo
+  { idName    :: String
+  , idType    :: String  -- Type is opaque right now
+  , idDefSpan :: SourceSpan
+  }
+  deriving (Show, Eq)
+
 -- | A mapping from symbol uses to symbol definitions
-newtype SymbolDefinitionMap = SymbolDefinitionMap String  -- IdentMap
+newtype SymbolDefinitionMap = SymbolDefinitionMap [(SourceSpan, IdInfo)]
   deriving (Show, Eq)
 
 data GhcRequest
@@ -87,6 +97,7 @@ data GhcRunRequest =
   | GhcRunAckDone
   deriving Show
 
+$(deriveJSON id ''IdInfo)
 $(deriveJSON id ''SymbolDefinitionMap)
 $(deriveJSON id ''GhcRequest)
 $(deriveJSON id ''GhcCompileResponse)
@@ -164,7 +175,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
     liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
     flags <- getSessionDynFlags
     idMap <- liftIO $ readIORef idMapRef
-    let symDefMap = SymbolDefinitionMap $ ppSymDefMap flags $ concat idMap
+    let symDefMap = idMapToSymDefMap flags $ concat idMap
     liftIO $ put $ GhcCompileDone (errs, loadedModules, symDefMap)
   where
     dynOpts :: DynamicOpts
@@ -510,3 +521,25 @@ restoreStdOutput stdOutputBackup = do
   closeFd stdOutput
   dup stdOutputBackup
   closeFd stdOutputBackup
+
+idMapToSymDefMap :: DynFlags -> IdentMap -> SymbolDefinitionMap
+idMapToSymDefMap dynFlags idMap =
+  let f (sp, ident) = do
+        occurenceSpan <- extractSourceSpan sp
+        let (defSpan, idName, idType) = idToInfo dynFlags ident
+        idDefSpan <- extractSourceSpan defSpan
+        return (occurenceSpan, IdInfo {..})
+  in SymbolDefinitionMap $ mapMaybe f idMap
+
+ppSymDefMap :: SymbolDefinitionMap -> String
+ppSymDefMap (SymbolDefinitionMap symDefMap) =
+  let ppSpan (fn, (stL, stC), (_endL, _endC)) =
+        fn ++ ":" ++ show stL ++ ":" ++ show stC
+      pp (sp, idInfo) =
+        takeFileName (ppSpan sp) ++ ": "
+        ++ idName idInfo ++ " :: "
+        ++ idType idInfo
+        ++ " ("
+        ++ takeFileName (ppSpan $ idDefSpan idInfo)
+        ++ ")"
+  in unlines $ map pp symDefMap

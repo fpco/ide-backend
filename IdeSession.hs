@@ -128,7 +128,8 @@ module IdeSession (
 
   -- ** Symbol definition maps
   getSymbolDefinitionMap,
-  SymbolDefinitionMap,
+  IdInfo(..),
+  SymbolDefinitionMap(..),
 
   -- ** Run code
   runStmt,
