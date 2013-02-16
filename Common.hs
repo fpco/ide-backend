@@ -40,9 +40,6 @@ data SourceErrorKind = KindError | KindWarning
 
 type SourceSpan = (FilePath, (Int, Int), (Int, Int))
 
-$(deriveJSON id ''SourceErrorKind)
-$(deriveJSON id ''SourceError)
-
 formatSourceError :: SourceError -> String
 formatSourceError = show
 
@@ -65,6 +62,8 @@ updateProgress _msg (Progress n) = Progress (n + 1)
 progressStep :: Progress -> Int
 progressStep (Progress n) = n
 
+$(deriveJSON id ''SourceErrorKind)
+$(deriveJSON id ''SourceError)
 $(deriveJSON id ''Progress)
 
 -- | Show an exception together with its most precise type tag.

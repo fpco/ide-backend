@@ -29,48 +29,41 @@ module GhcServer
   ) where
 
 import Control.Concurrent (ThreadId, myThreadId, throwTo)
+import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
-import Control.Concurrent.MVar (MVar, newMVar, newEmptyMVar)
-import Control.Concurrent.Async (async, withAsync, cancel)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
 import qualified Control.Exception as Ex
 import Control.Monad (forM_, forever, unless)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
-import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import qualified Data.ByteString.Char8 as BSSC (pack)
+import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
 import Data.Maybe (mapMaybe)
 import System.Exit (ExitCode)
 
 import System.Directory (doesFileExist)
-import System.FilePath ((</>), takeFileName)
+import System.FilePath (takeFileName, (</>))
 
-import System.IO (hFlush, stdout, Handle)
+import System.IO (Handle, hFlush, stdout)
 import System.Posix (Fd)
 import System.Posix.Env (setEnv, unsetEnv)
 import System.Posix.IO.ByteString
 
 import Common
-import GhcRun
 import GhcHsWalk
+import GhcRun
 import ModuleName (LoadedModules, ModuleName)
 import RpcServer
 
-import BlockingOps (
-    readChan
-  , putMVar
-  , readMVar
-  , modifyMVar
-  , modifyMVar_
-  , wait
-  )
+import BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)
 
 import Paths_ide_backend
 
 data IdInfo = IdInfo
   { idName    :: String
   , idType    :: String  -- Type is opaque right now
-  , idDefSpan :: SourceSpan
+  , idDefSpan :: Either SourceSpan String
   }
   deriving (Show, Eq)
 
@@ -366,15 +359,15 @@ rpcCompile server opts dir genCode callback =
 -- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {
     -- | Wait for the code to output something or terminate
-    runWait     :: IO (Either BSS.ByteString RunResult)
+    runWait                     :: IO (Either BSS.ByteString RunResult)
     -- | Send a UserInterrupt exception to the code
     --
     -- A call to 'interrupt' after the snippet has terminated has no effect.
-  , interrupt   :: IO ()
+  , interrupt                   :: IO ()
     -- | Make data available on the code's stdin
     --
     -- A call to 'supplyStdin' after the snippet has terminated has no effect.
-  , supplyStdin :: BSS.ByteString -> IO ()
+  , supplyStdin                 :: BSS.ByteString -> IO ()
     -- | Register a callback to be invoked when the program terminates
     -- The callback will only be invoked once.
     --
@@ -386,7 +379,7 @@ data RunActions = RunActions {
     -- (The server will be useless after this -- for internal use only).
     --
     -- Guranteed not to block.
-  , forceCancel :: IO ()
+  , forceCancel                 :: IO ()
   }
 
 -- | Repeatedly call 'runWait' until we receive a 'Right' result, while
@@ -525,18 +518,21 @@ restoreStdOutput stdOutputBackup = do
 idMapToSymDefMap :: DynFlags -> IdentMap -> SymbolDefinitionMap
 idMapToSymDefMap dynFlags idMap =
   let f (sp, ident) = do
-        occurenceSpan <- extractSourceSpan sp
+        occurenceSpan <- either Just (const Nothing) $ extractSourceSpan sp
         let (defSpan, idName, idType) = idToInfo dynFlags ident
-        idDefSpan <- extractSourceSpan defSpan
+            idDefSpan = extractSourceSpan defSpan
         return (occurenceSpan, IdInfo {..})
   in SymbolDefinitionMap $ mapMaybe f idMap
 
 ppSymDefMap :: SymbolDefinitionMap -> String
 ppSymDefMap (SymbolDefinitionMap symDefMap) =
-  let ppSpan (fn, (stL, stC), (_endL, _endC)) =
-        fn ++ ":" ++ show stL ++ ":" ++ show stC
+  let ppDash n m | m - n <= 1 = show n
+                 | otherwise = show n ++ "-" ++ show (m - 1)
+      ppSpan (Left (fn, (stL, stC), (endL, endC))) =
+        fn ++ ":" ++ ppDash stL endL ++ ":" ++ ppDash stC endC
+      ppSpan (Right s) = s
       pp (sp, idInfo) =
-        takeFileName (ppSpan sp) ++ ": "
+        takeFileName (ppSpan $ Left sp) ++ ": "
         ++ idName idInfo ++ " :: "
         ++ idType idInfo
         ++ " ("

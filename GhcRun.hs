@@ -68,7 +68,7 @@ import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM)
 import Data.IORef
 import Data.List ((\\))
-import Data.Maybe (catMaybes, fromJust)
+import Data.Maybe (catMaybes)
 import System.FilePath.Find (find, always, extension)
 import System.Process
 
@@ -360,7 +360,7 @@ collectSrcError' :: IORef [SourceError]
                  -> DynFlags
                  -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 collectSrcError' errsRef _ _ flags severity srcspan style msg
-  | Just errSpan <- extractSourceSpan srcspan
+  | Left errSpan <- extractSourceSpan srcspan
   , Just errKind <- case severity of
                       SevWarning -> Just KindWarning
                       SevError   -> Just KindError
@@ -386,12 +386,12 @@ collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in handlerRemaining msgstr
 
-extractSourceSpan :: SrcSpan -> Maybe SourceSpan
+extractSourceSpan :: SrcSpan -> Either SourceSpan String
 extractSourceSpan (RealSrcSpan srcspan) =
-  Just ( unpackFS (srcSpanFile srcspan)
+  Left ( unpackFS (srcSpanFile srcspan)
        , (srcSpanStartLine srcspan, srcSpanStartCol srcspan)
        , (srcSpanEndLine   srcspan, srcSpanEndCol   srcspan) )
-extractSourceSpan UnhelpfulSpan{} = Nothing
+extractSourceSpan (UnhelpfulSpan s) = Right $ unpackFS s
 
 -- TODO: perhaps make a honest SrcError from the first span from the first
 -- error message and put the rest into the message string? That probably
@@ -405,7 +405,8 @@ fromHscSourceError :: HscTypes.SourceError -> SourceError
 fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
   [errMsg] -> case ErrUtils.errMsgSpans errMsg of
     [real@RealSrcSpan{}] ->
-      SrcError KindError (fromJust $ extractSourceSpan real) (show e)
+      SrcError
+        KindError (either id undefined $ extractSourceSpan real) (show e)
     _ -> OtherError (show e)
   _ -> OtherError (show e)
 
