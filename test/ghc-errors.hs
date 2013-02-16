@@ -106,7 +106,7 @@ multipleTests =
         msgs2 <- getSourceErrors session
         -- Error reported due to the overwrite.
         case msgs2 of
-          [SrcError _ _ _ _ "Not in scope: `unknownX'"] -> return ()
+          [SrcError _ _ "Not in scope: `unknownX'"] -> return ()
           _ -> assertFailure "Unexpected source errors"
     )
   , ( "Overwrite with the same module name in all files"
@@ -139,12 +139,12 @@ multipleTests =
         updateSessionD session update1 1
         msgs1 <- getSourceErrors session
         case msgs1 of
-          [SrcError _ _ _ _ "Not in scope: `unknownX'"] -> return ()
+          [SrcError _ _ "Not in scope: `unknownX'"] -> return ()
           _ -> assertFailure "Unexpected source errors"
         updateSessionD session mempty 1  -- was an error, so trying again
         msgs2 <- getSourceErrors session
         case msgs2 of
-          [SrcError _ _ _ _ "Not in scope: `unknownX'"] -> return ()
+          [SrcError _ _ "Not in scope: `unknownX'"] -> return ()
           _ -> assertFailure "Unexpected source errors"
         -- Overwrite all files, many times, with correct code eventually.
         let upd m = loadModule m "x = unknownX"
@@ -158,7 +158,7 @@ multipleTests =
         updateSessionD session update1 1  -- drop bytecode, don't recompile
         msgs5 <- getSourceErrors session
         case msgs5 of
-          [SrcError _ _ _ _ "Not in scope: `unknownX'"] -> return ()
+          [SrcError _ _ "Not in scope: `unknownX'"] -> return ()
           _ -> assertFailure "Unexpected source errors"
         assertRaises "runStmt session Main main"
           (== userError "Cannot run before the code is generated.")
@@ -341,7 +341,7 @@ syntheticTests =
         loadModulesFrom session "test/AerrorB"
         msgs <- getSourceErrors session
         case msgs of
-          [SrcError _ fn _ _ s] -> do
+          [SrcError _ (fn, _, _) s] -> do
             assertBool "Wrong file reported for the error"
               $ isSuffixOf "A.hs" fn
             assertBool "Wrong error message"
@@ -353,7 +353,7 @@ syntheticTests =
         loadModulesFrom session "test/ABerror"
         msgs <- getSourceErrors session
         case msgs of
-          [SrcError _ fn _ _ s] -> do
+          [SrcError _ (fn, _, _) s] -> do
             assertBool "Wrong file reported for the error"
               $ isSuffixOf "B.hs" fn
             assertBool "Wrong error message"
@@ -467,14 +467,14 @@ syntheticTests =
         updateSessionD session update 1
         msgs <- getSourceErrors session
         case msgs of
-          [SrcError _ _ _ _ "parse error on input `very'\n"] -> return ()
+          [SrcError _ _ "parse error on input `very'\n"] -> return ()
           _ -> assertFailure "Unexpected source errors"
         let update2 = updateModule (fromString "M")
                                    (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update2 1
         msgs2 <- getSourceErrors session
         case msgs2 of
-          [SrcError _ _ _ _ "parse error on input `.'\n"] -> return ()
+          [SrcError _ _ "parse error on input `.'\n"] -> return ()
           _ -> assertFailure "Unexpected source errors"
         assertRaises "fromString M.1.2.3.8.T"
           (\e -> show (e :: Ex.ErrorCall) == "fromString: invalid module name M.1.2.3.8.T")
@@ -864,7 +864,7 @@ syntheticTests =
         msgs <- getSourceErrors session
         case msgs of
           -- We expect a 'top-level identifier without type' warning
-          [SrcError KindWarning _ _ _ _] -> return ()
+          [SrcError KindWarning _ _] -> return ()
           _ -> assertFailure "Unexpected source errors"
         _runActions <- runStmt session (fromString "M") "loop"
         msgs' <- getSourceErrors session

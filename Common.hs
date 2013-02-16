@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 -- | Common types and utilities
 module Common
-  ( SourceError(..), SourceErrorKind(..)
+  ( SourceError(..), SourceErrorKind(..), SourceSpan
   , formatSourceError
   , hsExtentions
   , Progress
@@ -30,13 +30,15 @@ import Data.Accessor (Accessor, accessor)
 -- location point.
 --
 data SourceError =
-    SrcError SourceErrorKind FilePath (Int, Int) (Int, Int) String
+    SrcError SourceErrorKind SourceSpan String
   | OtherError String
   deriving (Show, Eq)
 
 -- | Severity of an error.
 data SourceErrorKind = KindError | KindWarning
   deriving (Show, Eq)
+
+type SourceSpan = (FilePath, (Int, Int), (Int, Int))
 
 $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)

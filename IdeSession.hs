@@ -109,6 +109,7 @@ module IdeSession (
   getSourceErrors,
   SourceError(..),
   SourceErrorKind(..),
+  SourceSpan,
 
   -- ** Files
   -- | Simply getting the current state of the persistent files fits the
@@ -706,8 +707,8 @@ getSourceErrors IdeSession{ideState, ideStaticInfo} =
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} ->
         let root = ideSourcesDir ideStaticInfo
-            mkRelative (SrcError kind path ii jj s) =
-              SrcError kind (makeRelative root path) ii jj s
+            mkRelative (SrcError kind (path, ii, jj) s) =
+              SrcError kind (makeRelative root path, ii, jj) s
             mkRelative err = err
         in return $ map mkRelative computedErrors
       Nothing -> fail "This session state does not admit queries."

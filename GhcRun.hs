@@ -24,6 +24,7 @@ module GhcRun
   , defaultDynFlags
   , getSessionDynFlags
   , setSessionDynFlags
+  , extractSourceSpan
     -- * Executing snippets
   , runInGhc
   , RunResult(..)
@@ -41,7 +42,6 @@ import GhcMonad (liftIO)
 import qualified HscTypes
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
-import qualified SrcLoc
 #if __GLASGOW_HASKELL__ >= 706
 import ErrUtils   ( MsgDoc )
 #else
@@ -66,7 +66,7 @@ import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM)
 import Data.IORef
 import Data.List ((\\))
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromJust)
 import System.FilePath.Find (find, always, extension)
 import System.Process
 
@@ -358,14 +358,14 @@ collectSrcError' :: IORef [SourceError]
                  -> DynFlags
                  -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
 collectSrcError' errsRef _ _ flags severity srcspan style msg
-  | Just (file, st, end) <- extractErrSpan srcspan
+  | Just errSpan <- extractSourceSpan srcspan
   , Just errKind <- case severity of
                       SevWarning -> Just KindWarning
                       SevError   -> Just KindError
                       SevFatal   -> Just KindError
                       _          -> Nothing
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
-     in modifyIORef errsRef (SrcError errKind file st end msgstr :)
+     in modifyIORef errsRef (SrcError errKind errSpan msgstr :)
 
 collectSrcError' errsRef _ _ flags severity _srcspan style msg
   | Just _       <- case severity of
@@ -384,12 +384,12 @@ collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in handlerRemaining msgstr
 
-extractErrSpan :: SrcSpan -> Maybe (FilePath, (Int, Int), (Int, Int))
-extractErrSpan (RealSrcSpan srcspan) =
-  Just (unpackFS (srcSpanFile srcspan)
-       ,(srcSpanStartLine srcspan, srcSpanStartCol srcspan)
-       ,(srcSpanEndLine   srcspan, srcSpanEndCol   srcspan))
-extractErrSpan UnhelpfulSpan{} = Nothing
+extractSourceSpan :: SrcSpan -> Maybe SourceSpan
+extractSourceSpan (RealSrcSpan srcspan) =
+  Just ( unpackFS (srcSpanFile srcspan)
+       , (srcSpanStartLine srcspan, srcSpanStartCol srcspan)
+       , (srcSpanEndLine   srcspan, srcSpanEndCol   srcspan) )
+extractSourceSpan UnhelpfulSpan{} = Nothing
 
 -- TODO: perhaps make a honest SrcError from the first span from the first
 -- error message and put the rest into the message string? That probably
@@ -402,12 +402,8 @@ extractErrSpan UnhelpfulSpan{} = Nothing
 fromHscSourceError :: HscTypes.SourceError -> SourceError
 fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
   [errMsg] -> case ErrUtils.errMsgSpans errMsg of
-    [RealSrcSpan sp] ->
-      SrcError KindError
-               (unpackFS (SrcLoc.srcSpanFile sp))
-               (srcSpanStartLine sp, srcSpanStartCol sp)
-               (srcSpanEndLine sp, srcSpanEndCol sp)
-               (show e)
+    [real@RealSrcSpan{}] ->
+      SrcError KindError (fromJust $ extractSourceSpan real) (show e)
     _ -> OtherError (show e)
   _ -> OtherError (show e)
 
