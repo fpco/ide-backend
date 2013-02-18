@@ -2,6 +2,7 @@
 module GhcHsWalk
   ( IdMap(..)
   , IdInfo(..)
+  , IdNameSpace(..)
   , IsBinder(..)
   , extractIdsPlugin
   ) where
@@ -26,6 +27,8 @@ import Outputable
 import HscPlugin
 import DynFlags
 import Var hiding (idInfo)
+import qualified Name as Name
+import qualified Module as Module
 import MonadUtils (MonadIO(..))
 import Bag
 
@@ -33,13 +36,28 @@ import Bag
   Environment mapping source locations to info
 -------------------------------------------------------------------------------}
 
+-- This type is abstract in GHC. One more reason to define our own.
+data IdNameSpace =
+    VarName    -- ^ Variables, including real data constructors
+  | DataName   -- ^ Source data constructors
+  | TvName     -- ^ Type variables
+  | TcClsName  -- ^ Type constructors and classes
+  deriving (Show, Eq)
+
 data IsBinder = Binding | NonBinding
   deriving (Show, Eq)
 
 -- | Information about identifiers
 data IdInfo = IdInfo
-  { -- The name of the identifer at this location
+  { -- | The base name of the identifer at this location. Module prefix
+    -- is not included.
     idName :: String
+    -- | The module prefix of the identifier. Empty, if a local variable.
+  , idModule :: Maybe String
+    -- | Package the identifier comes from. Empty, if a local variable.
+  , idPackage :: Maybe String
+    -- | Namespace of the identifier.
+  , idSpace :: IdNameSpace
     -- | The type
     -- We don't always know this; in particular, we don't know kinds because
     -- the type checker does not give us LSigs for top-level annotations)
@@ -53,6 +71,7 @@ data IdInfo = IdInfo
 
 data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
 
+$(deriveJSON (\x -> x) ''IdNameSpace)
 $(deriveJSON (\x -> x) ''IsBinder)
 $(deriveJSON (\x -> x) ''IdInfo)
 
@@ -77,6 +96,7 @@ instance Show IdMap where
       pp (sp, IdInfo{..}) =
         takeFileName (ppSpan $ Left sp)
         ++ (case idIsBinder of Binding -> " (binder): " ; _ -> ": ")
+        ++ maybe "" (++ ".") idModule
         ++ idName ++ " :: "
         ++ (case idType of Nothing -> " (type unknown)" ; Just tp -> tp)
         ++ " ("
@@ -89,6 +109,14 @@ instance Monoid IdMap where
 
 combineIdInfo :: IdInfo -> IdInfo -> IdInfo
 combineIdInfo _ _ = error "This should not (yet) happen"
+
+fromGhcNameSpace :: Name.NameSpace -> IdNameSpace
+fromGhcNameSpace ns =
+  if ns == Name.varName then VarName
+  else if ns == Name.dataName then DataName
+  else if ns == Name.tvName then TvName
+  else if ns == Name.tcName then TcClsName
+  else error "fromGhcNameSpace"
 
 {-------------------------------------------------------------------------------
   Extract an IdMap from information returned by the ghc type checker
@@ -143,9 +171,17 @@ class ConstructIdInfo id where
 instance ConstructIdInfo Id where
   constructIdInfo dynFlags idIsBinder id = IdInfo{..}
     where
-      idName    = showSDoc dynFlags (ppr $ Var.varName id)
+      nameStruct = Var.varName id
+      occStruct = Name.nameOccName nameStruct
+      moduleStruct = Name.nameModule_maybe nameStruct
+      idName    = Name.occNameString occStruct
+      idModule  =
+        fmap (Module.moduleNameString . Module.moduleName) moduleStruct
+      idPackage =
+        fmap (Module.packageIdString . Module.modulePackageId) moduleStruct
+      idSpace   = fromGhcNameSpace $ Name.occNameSpace occStruct
       idType    = Just $ showSDoc dynFlags (ppr $ Var.varType id)
-      idDefSpan = extractSourceSpan (nameSrcSpan $ Var.varName id)
+      idDefSpan = extractSourceSpan (Name.nameSrcSpan nameStruct)
 
 {-------------------------------------------------------------------------------
   ExtractIds

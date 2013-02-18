@@ -130,6 +130,8 @@ module IdeSession (
   getSymbolDefinitionMap,
   IdMap(..),
   IdInfo(..),
+  IdNameSpace(..),
+  IsBinder(..),
 
   -- ** Run code
   runStmt,
@@ -224,7 +226,7 @@ import System.Posix.Types (EpochTime)
 import Common
 import GhcServer
 import GhcRun (RunResult(..), RunBufferMode(..))
-import GhcHsWalk (IdMap(..), IdInfo(..))
+import GhcHsWalk (IdMap(..), IdInfo(..), IdNameSpace(..), IsBinder(..))
 import ModuleName (LoadedModules, ModuleName)
 import qualified ModuleName as MN
 
