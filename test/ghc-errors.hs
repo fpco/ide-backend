@@ -1455,7 +1455,7 @@ syntheticTests =
               , "B.hs:9:5-8: GHC.Types.True :: GHC.Types.Bool (<wired into compiler>)"
               ]
         assertEqual "Symbol defintion map should be correct"
-                    (unlines $ sort $ lines $ ppSymDefMap $ symDefMap)
+                    (unlines $ sort $ lines $ show symDefMap)
                     expectedSymDefMap
         return ()
     )

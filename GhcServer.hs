@@ -23,9 +23,6 @@ module GhcServer
   , shutdownGhcServer
   , forceShutdownGhcServer
   , getGhcExitCode
-  , IdInfo(..)
-  , SymbolDefinitionMap(..)
-  , ppSymDefMap
   ) where
 
 import Control.Concurrent (ThreadId, myThreadId, throwTo)
@@ -39,11 +36,11 @@ import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
-import Data.Maybe (mapMaybe)
+import Data.Monoid (mconcat)
 import System.Exit (ExitCode)
 
 import System.Directory (doesFileExist)
-import System.FilePath (takeFileName, (</>))
+import System.FilePath ((</>))
 
 import System.IO (Handle, hFlush, stdout)
 import System.Posix (Fd)
@@ -60,18 +57,6 @@ import BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)
 
 import Paths_ide_backend
 
-data IdInfo = IdInfo
-  { idName     :: String
-  , idType     :: String  -- Type is opaque right now
-  , idDefSpan  :: Either SourceSpan String
-  , idIsBinder :: IsBinder
-  }
-  deriving (Show, Eq)
-
--- | A mapping from symbol uses to symbol definitions
-newtype SymbolDefinitionMap = SymbolDefinitionMap [(SourceSpan, IdInfo)]
-  deriving (Show, Eq)
-
 data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
   | ReqRun     ModuleName String RunBufferMode RunBufferMode
@@ -79,7 +64,7 @@ data GhcRequest
   deriving Show
 data GhcCompileResponse =
     GhcCompileProgress Progress
-  | GhcCompileDone ([SourceError], LoadedModules, SymbolDefinitionMap)
+  | GhcCompileDone ([SourceError], LoadedModules, IdMap)
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -91,8 +76,6 @@ data GhcRunRequest =
   | GhcRunAckDone
   deriving Show
 
-$(deriveJSON id ''IdInfo)
-$(deriveJSON id ''SymbolDefinitionMap)
 $(deriveJSON id ''GhcRequest)
 $(deriveJSON id ''GhcCompileResponse)
 $(deriveJSON id ''GhcRunResponse)
@@ -149,7 +132,7 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 ghcHandleCompile :: RpcConversation
                  -> DynamicOpts        -- ^ startup dynamic flags
                  -> Maybe [String]     -- ^ new, user-submitted dynamic flags
-                 -> IORef [IdentMap]   -- ref holding id info
+                 -> IORef [IdMap]      -- ^ ref holding id info
                  -> FilePath           -- ^ source directory
                  -> Bool               -- ^ should we generate code
                  -> Ghc ()
@@ -167,10 +150,8 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                                        (progressCallback counter)
                                        (\_ -> return ()) -- TODO: log?
     liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
-    flags <- getSessionDynFlags
-    idMap <- liftIO $ readIORef idMapRef
-    let symDefMap = idMapToSymDefMap flags $ concat idMap
-    liftIO $ put $ GhcCompileDone (errs, loadedModules, symDefMap)
+    idMaps <- liftIO $ readIORef idMapRef
+    liftIO $ put $ GhcCompileDone (errs, loadedModules, mconcat idMaps)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -345,7 +326,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ([SourceError], LoadedModules, SymbolDefinitionMap)
+           -> IO ([SourceError], LoadedModules, IdMap)
 rpcCompile server opts dir genCode callback =
   rpcConversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
@@ -515,29 +496,3 @@ restoreStdOutput stdOutputBackup = do
   closeFd stdOutput
   dup stdOutputBackup
   closeFd stdOutputBackup
-
-idMapToSymDefMap :: DynFlags -> IdentMap -> SymbolDefinitionMap
-idMapToSymDefMap dynFlags idMap =
-  let f (sp, (idIsBinder, ident)) = do
-        occurenceSpan <- either Just (const Nothing) $ extractSourceSpan sp
-        let (defSpan, idName, idType) = idToInfo dynFlags ident
-            idDefSpan = extractSourceSpan defSpan
-        return (occurenceSpan, IdInfo {..})
-  in SymbolDefinitionMap $ mapMaybe f idMap
-
-ppSymDefMap :: SymbolDefinitionMap -> String
-ppSymDefMap (SymbolDefinitionMap symDefMap) =
-  let ppDash n m | m - n <= 1 = show n
-                 | otherwise = show n ++ "-" ++ show (m - 1)
-      ppSpan (Left (fn, (stL, stC), (endL, endC))) =
-        fn ++ ":" ++ ppDash stL endL ++ ":" ++ ppDash stC endC
-      ppSpan (Right s) = s
-      pp (sp, IdInfo{..}) =
-        takeFileName (ppSpan $ Left sp)
-        ++ (case idIsBinder of Binding -> " (binder): " ; _ -> ": ")
-        ++ idName ++ " :: "
-        ++ idType
-        ++ " ("
-        ++ takeFileName (ppSpan idDefSpan)
-        ++ ")"
-  in unlines $ map pp symDefMap

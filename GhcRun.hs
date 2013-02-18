@@ -15,7 +15,6 @@ module GhcRun
   , GhcException
   , ghandle
   , ghandleJust
-  , idToInfo
     -- * Processing source files (including compilation)
   , compileInGhc
   , DynamicOpts
@@ -43,7 +42,6 @@ import GhcMonad (liftIO)
 import qualified HscTypes
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
-import qualified Var as Var
 #if __GLASGOW_HASKELL__ >= 706
 import ErrUtils   ( MsgDoc )
 #else
@@ -409,12 +407,6 @@ fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
         KindError (either id undefined $ extractSourceSpan real) (show e)
     _ -> OtherError (show e)
   _ -> OtherError (show e)
-
-idToInfo :: DynFlags -> Id -> (SrcSpan, String, String)
-idToInfo dynFlags ident =
-  ( nameSrcSpan $ Var.varName ident
-  , GHC.showSDoc dynFlags $ GHC.ppr $ Var.varName ident
-  , GHC.showSDoc dynFlags $ GHC.ppr $ Var.varType ident )
 
 -----------------------
 -- GHC version compat

@@ -128,8 +128,8 @@ module IdeSession (
 
   -- ** Symbol definition maps
   getSymbolDefinitionMap,
+  IdMap(..),
   IdInfo(..),
-  SymbolDefinitionMap(..),
 
   -- ** Run code
   runStmt,
@@ -224,6 +224,7 @@ import System.Posix.Types (EpochTime)
 import Common
 import GhcServer
 import GhcRun (RunResult(..), RunBufferMode(..))
+import GhcHsWalk (IdMap(..), IdInfo(..))
 import ModuleName (LoadedModules, ModuleName)
 import qualified ModuleName as MN
 
@@ -256,7 +257,8 @@ data Computed = Computed {
     computedErrors        :: [SourceError]
     -- | Modules that got loaded okay
   , computedLoadedModules :: LoadedModules
-  , computedSymDefMap :: SymbolDefinitionMap
+    -- | Mapping from source locations to information about identifiers there
+  , computedSymDefMap     :: IdMap
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -773,7 +775,7 @@ getAllDataFiles IdeSession{ideStaticInfo} =
 -- the mapping tells us where that symbol is defined, either locally in a
 -- source module or a top-level symbol imported from another package.
 --
-getSymbolDefinitionMap :: Query SymbolDefinitionMap
+getSymbolDefinitionMap :: Query IdMap
 getSymbolDefinitionMap IdeSession{ideState} =
   -- TODO: scrap all this boilerplate
   $withMVar ideState $ \st ->
@@ -782,7 +784,7 @@ getSymbolDefinitionMap IdeSession{ideState} =
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO SymbolDefinitionMap
+    aux :: IdeIdleState -> IO IdMap
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} -> return computedSymDefMap
       Nothing -> fail "This session state does not admit queries."

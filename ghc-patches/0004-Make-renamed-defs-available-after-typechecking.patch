@@ -1,0 +1,25 @@
+From a96318f16349e144af0b17c584e0fdd2e2216630 Mon Sep 17 00:00:00 2001
+From: Edsko de Vries <edsko@well-typed.com>
+Date: Mon, 18 Feb 2013 15:12:21 +0000
+Subject: [PATCH 4/4] Make renamed defs available after typechecking
+
+---
+ compiler/main/HscMain.hs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/compiler/main/HscMain.hs b/compiler/main/HscMain.hs
+index 22d4168..c9ad2eb 100644
+--- a/compiler/main/HscMain.hs
++++ b/compiler/main/HscMain.hs
+@@ -873,7 +873,7 @@ hscFileFrontEnd :: ModSummary -> Hsc TcGblEnv
+ hscFileFrontEnd mod_summary = do
+     hpm <- hscParse' mod_summary
+     hsc_env <- getHscEnv
+-    tcg_env <- tcRnModule' hsc_env mod_summary False hpm
++    tcg_env <- tcRnModule' hsc_env mod_summary True hpm
+     return tcg_env
+ 
+ --------------------------------------------------------------
+-- 
+1.7.12.4 (Apple Git-37)
+

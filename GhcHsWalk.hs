@@ -1,42 +1,105 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, TemplateHaskell #-}
-module GhcHsWalk (IdentMap, extractIdsPlugin, IsBinder(..)) where
+module GhcHsWalk
+  ( IdMap(..)
+  , IdInfo(..)
+  , IsBinder(..)
+  , extractIdsPlugin
+  ) where
 
 import Prelude hiding (span, id)
-import Control.Monad (forM_)
 import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Data.IORef
 import System.FilePath (takeFileName)
-import System.IO (withFile, IOMode(AppendMode), hPutStr)
+import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Aeson.TH (deriveJSON)
+import Data.Map (Map)
+import qualified Data.Map as Map
+import Data.Monoid
 
-import GHC
+import Common
+import GhcRun (extractSourceSpan)
+
+import GHC hiding (idType)
 import TcRnTypes
 import Outputable
 import HscPlugin
 import DynFlags
-import Var
+import Var hiding (idInfo)
 import MonadUtils (MonadIO(..))
 import Bag
-import TypeRep
-import TyCon
+
+{-------------------------------------------------------------------------------
+  Environment mapping source locations to info
+-------------------------------------------------------------------------------}
 
 data IsBinder = Binding | NonBinding
   deriving (Show, Eq)
 
-$(deriveJSON (\x -> x) ''IsBinder)
+-- | Information about identifiers
+data IdInfo = IdInfo
+  { -- The name of the identifer at this location
+    idName :: String
+    -- | The type
+    -- We don't always know this; in particular, we don't know kinds because
+    -- the type checker does not give us LSigs for top-level annotations)
+  , idType :: Maybe String
+    -- | Where was this identifier defined?
+  , idDefSpan :: Either SourceSpan String
+    -- | Is this a binding occurrence?
+  , idIsBinder :: IsBinder
+  }
+  deriving (Show, Eq)
 
-type IdentMap = [(SrcSpan, (IsBinder, Id))]
+data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
+
+$(deriveJSON (\x -> x) ''IsBinder)
+$(deriveJSON (\x -> x) ''IdInfo)
+
+instance FromJSON IdMap where
+  parseJSON = fmap (IdMap . Map.fromList) . parseJSON
+
+instance ToJSON IdMap where
+  toJSON = toJSON . Map.toList . idMapToMap
+
+idMapToList :: IdMap -> [(SourceSpan, IdInfo)]
+idMapToList = Map.toList . idMapToMap
+
+instance Show IdMap where
+  show = unlines . map pp . idMapToList
+    where
+      ppDash n m | m - n <= 1 = show n
+                 | otherwise = show n ++ "-" ++ show (m - 1)
+      ppSpan (Left (fn, (stL, stC), (endL, endC))) =
+        fn ++ ":" ++ ppDash stL endL ++ ":" ++ ppDash stC endC
+      ppSpan (Right s) = s
+
+      pp (sp, IdInfo{..}) =
+        takeFileName (ppSpan $ Left sp)
+        ++ (case idIsBinder of Binding -> " (binder): " ; _ -> ": ")
+        ++ idName ++ " :: "
+        ++ (case idType of Nothing -> " (type unknown)" ; Just tp -> tp)
+        ++ " ("
+        ++ takeFileName (ppSpan idDefSpan)
+        ++ ")"
+
+instance Monoid IdMap where
+  mempty = IdMap Map.empty
+  (IdMap a) `mappend` (IdMap b) = IdMap (Map.unionWith combineIdInfo a b)
+
+combineIdInfo :: IdInfo -> IdInfo -> IdInfo
+combineIdInfo _ _ = error "This should not (yet) happen"
+
+{-------------------------------------------------------------------------------
+  Extract an IdMap from information returned by the ghc type checker
+-------------------------------------------------------------------------------}
 
 -- Define type synonym to avoid orphan instances
-newtype ExtractIdsT m a = ExtractIdsT { runExtractIdsT :: WriterT IdentMap m a }
-  deriving (Functor, Monad, MonadWriter IdentMap, MonadTrans)
+newtype ExtractIdsT m a = ExtractIdsT { runExtractIdsT :: WriterT IdMap m a }
+  deriving (Functor, Monad, MonadWriter IdMap, MonadTrans)
 
-execExtractIdsT :: Monad m => ExtractIdsT m () -> m IdentMap
+execExtractIdsT :: Monad m => ExtractIdsT m () -> m IdMap
 execExtractIdsT = execWriterT . runExtractIdsT
-
-class ExtractIds a where
-  extractIds :: (Functor m, MonadIO m, HasDynFlags m) => a -> ExtractIdsT m ()
 
 instance (HasDynFlags m, Monad m) => HasDynFlags (ExtractIdsT m) where
   getDynFlags = lift getDynFlags
@@ -50,57 +113,81 @@ debugPP header val = do
   dynFlags <- getDynFlags
   liftIO $ appendFile "/tmp/ghc.log" (header ++ showSDoc dynFlags (ppr val) ++ "\n")
 
-extractIdsPlugin :: IORef [IdentMap] -> HscPlugin
-extractIdsPlugin symbolRef = HscPlugin $ \env -> do
+record :: (HasDynFlags m, Monad m, ConstructIdInfo id)
+       => SrcSpan -> IsBinder -> id -> ExtractIdsT m ()
+record span isBinder id = do
   dynFlags <- getDynFlags
+  sourceSpan <- case extractSourceSpan span of
+    Left sourceSpan -> return sourceSpan
+    Right unhelpful -> fail $ "Id without sourcespan: " ++ unhelpful
+  tell . IdMap . Map.singleton sourceSpan $ constructIdInfo dynFlags isBinder id
+
+extractIdsPlugin :: IORef [IdMap] -> HscPlugin
+extractIdsPlugin symbolRef = HscPlugin $ \env -> do
   identMap <- execExtractIdsT $ extractIds (tcg_binds env)
 
   debugPP "tcg_rn_decls" (tcg_rn_decls env)
 
-  let _ = identMap :: IdentMap
-
-  liftIO $ withFile "/tmp/ghc.log" AppendMode $ \h ->
-    forM_ identMap $ \(span, id) -> do
-      hPutStr h $ ppIdMap dynFlags [(span, id)]
-
+  liftIO $ appendFile "/tmp/ghc.log" (show identMap)
   liftIO $ modifyIORef symbolRef (identMap :)
 
   return env
 
-instance ExtractIds (LHsBinds Id) where
+{-------------------------------------------------------------------------------
+  ConstructIdInfo
+-------------------------------------------------------------------------------}
+
+class ConstructIdInfo id where
+  constructIdInfo :: DynFlags -> IsBinder -> id -> IdInfo
+
+instance ConstructIdInfo Id where
+  constructIdInfo dynFlags idIsBinder id = IdInfo{..}
+    where
+      idName    = showSDoc dynFlags (ppr $ Var.varName id)
+      idType    = Just $ showSDoc dynFlags (ppr $ Var.varType id)
+      idDefSpan = extractSourceSpan (nameSrcSpan $ Var.varName id)
+
+{-------------------------------------------------------------------------------
+  ExtractIds
+-------------------------------------------------------------------------------}
+
+class ExtractIds a where
+  extractIds :: (Functor m, MonadIO m, HasDynFlags m) => a -> ExtractIdsT m ()
+
+instance ConstructIdInfo id => ExtractIds (LHsBinds id) where
   extractIds = mapM_ extractIds . bagToList
 
-instance ExtractIds (LHsBind Id) where
+instance ConstructIdInfo id => ExtractIds (LHsBind id) where
   extractIds (L _span bind@(FunBind {})) = do
-    tell [(getLoc (fun_id bind), (Binding, unLoc (fun_id bind)))]
+    record (getLoc (fun_id bind)) Binding (unLoc (fun_id bind))
     debugPP "wrapper" (fun_co_fn bind)
     extractIds (fun_matches bind)
-  extractIds (L _span bind@(PatBind {})) =
+  extractIds (L _span _bind@(PatBind {})) =
     fail "extractIds: unsupported PatBind"
-  extractIds (L span bind@(VarBind {})) =
+  extractIds (L _span _bind@(VarBind {})) =
     fail "extractIds: unsupported VarBind"
   extractIds (L _span bind@(AbsBinds {})) =
     extractIds (abs_binds bind)
 
-instance ExtractIds (MatchGroup Id) where
+instance ConstructIdInfo id => ExtractIds (MatchGroup id) where
   extractIds (MatchGroup matches _postTcType) = do
     mapM_ extractIds matches
     -- We ignore the postTcType, as it doesn't have location information
 
-instance ExtractIds (LMatch Id) where
-  extractIds (L _span (Match pats _type rhss)) =
+instance ConstructIdInfo id => ExtractIds (LMatch id) where
+  extractIds (L _span (Match _pats _type rhss)) =
+    -- TODO: process _pats
     extractIds rhss
 
-instance ExtractIds (GRHSs Id) where
-  extractIds (GRHSs rhss binds) = do
+instance ConstructIdInfo id => ExtractIds (GRHSs id) where
+  extractIds (GRHSs rhss _binds) = do
     mapM_ extractIds rhss
     -- TODO: deal with the where clause (`binds`)
-    debugPP "GRHSs" binds
 
-instance ExtractIds (LGRHS Id) where
+instance ConstructIdInfo id => ExtractIds (LGRHS id) where
   extractIds (L _span (GRHS _guards rhs)) = extractIds rhs
 
-instance ExtractIds (HsLocalBinds Id) where
+instance ConstructIdInfo id => ExtractIds (HsLocalBinds id) where
   extractIds EmptyLocalBinds =
     return ()
   extractIds (HsValBinds (ValBindsIn _ _)) =
@@ -110,7 +197,7 @@ instance ExtractIds (HsLocalBinds Id) where
   extractIds (HsIPBinds _) =
     fail "extractIds: unsupported HsIPBinds"
 
-instance ExtractIds (LHsExpr Id) where
+instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
   extractIds (L _ (HsPar expr)) =
     extractIds expr
   extractIds (L _ (ExprWithTySigOut expr _type)) = do
@@ -123,7 +210,7 @@ instance ExtractIds (LHsExpr Id) where
     extractIds op
     extractIds right
   extractIds (L span (HsVar id)) =
-    tell [(span, (NonBinding, id))]
+    record span NonBinding id
   extractIds (L span (HsWrap _wrapper expr)) =
     extractIds (L span expr)
   extractIds (L _ (HsLet binds expr)) = do
@@ -170,20 +257,3 @@ instance ExtractIds (LHsExpr Id) where
   extractIds (L _ (EViewPat _ _)) = fail "extractIds: unsupported EViewPat"
   extractIds (L _ (ELazyPat _)) = fail "extractIds: unsupported ELazyPat"
   extractIds (L _ (HsType _ )) = fail "extractIds: unsupported HsType"
-
-
------------------------
--- Debug
---
-
-ppIdMap :: DynFlags -> IdentMap -> String
-ppIdMap dynFlags idMap =
-  let pp (span, (isBinder, id)) =
-        takeFileName (showSDoc dynFlags (ppr span))
-        ++ (case isBinder of Binding -> " (binder): " ; _ -> ": ")
-        ++ showSDoc dynFlags (ppr (varName id)) ++ " :: "
-        ++ showSDoc dynFlags (ppr (varType id))
-        ++ " ("
-        ++ takeFileName (showSDoc dynFlags (ppr (nameSrcSpan (varName id))))
-        ++ ")"
-  in unlines $ map pp idMap
