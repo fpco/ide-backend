@@ -532,11 +532,12 @@ ppSymDefMap (SymbolDefinitionMap symDefMap) =
       ppSpan (Left (fn, (stL, stC), (endL, endC))) =
         fn ++ ":" ++ ppDash stL endL ++ ":" ++ ppDash stC endC
       ppSpan (Right s) = s
-      pp (sp, idInfo) =
-        takeFileName (ppSpan $ Left sp) ++ ": "
-        ++ idName idInfo ++ " :: "
-        ++ idType idInfo
+      pp (sp, IdInfo{..}) =
+        takeFileName (ppSpan $ Left sp)
+        ++ (case idIsBinder of Binding -> " (binder): " ; _ -> ": ")
+        ++ idName ++ " :: "
+        ++ idType
         ++ " ("
-        ++ takeFileName (ppSpan $ idDefSpan idInfo)
+        ++ takeFileName (ppSpan idDefSpan)
         ++ ")"
   in unlines $ map pp symDefMap
