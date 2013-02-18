@@ -42,7 +42,14 @@ data IdNameSpace =
   | DataName   -- ^ Source data constructors
   | TvName     -- ^ Type variables
   | TcClsName  -- ^ Type constructors and classes
-  deriving (Show, Eq)
+  deriving Eq
+
+-- Show approximately what Haddock adds to documantation URLs.
+instance Show IdNameSpace where
+  show VarName = "v"
+  show DataName = "v"
+  show TvName = "t"
+  show TcClsName = "t"
 
 data IsBinder = Binding | NonBinding
   deriving (Show, Eq)
@@ -93,9 +100,14 @@ instance Show IdMap where
         fn ++ ":" ++ ppDash stL endL ++ ":" ++ ppDash stC endC
       ppSpan (Right s) = s
 
+      dotToDash = map (\c -> if c == '.' then '-' else c)
+
       pp (sp, IdInfo{..}) =
         takeFileName (ppSpan $ Left sp)
         ++ (case idIsBinder of Binding -> " (binder): " ; _ -> ": ")
+        ++ maybe "" (++ "/") idPackage
+        ++ maybe "" ((++ ".html"). dotToDash) idModule  -- a la Haddock
+        ++ "#" ++ show idSpace ++ ": "
         ++ maybe "" (++ ".") idModule
         ++ idName ++ " :: "
         ++ (case idType of Nothing -> " (type unknown)" ; Just tp -> tp)
