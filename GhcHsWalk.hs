@@ -1,5 +1,5 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving #-}
-module GhcHsWalk (IdentMap, extractIdsPlugin) where
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, TemplateHaskell #-}
+module GhcHsWalk (IdentMap, extractIdsPlugin, IsBinder(..)) where
 
 import Prelude hiding (span, id)
 import Control.Monad (forM_)
@@ -8,6 +8,7 @@ import Control.Monad.Trans.Class (MonadTrans, lift)
 import Data.IORef
 import System.FilePath (takeFileName)
 import System.IO (withFile, IOMode(AppendMode), hPutStr)
+import Data.Aeson.TH (deriveJSON)
 
 import GHC
 import TcRnTypes
@@ -20,7 +21,12 @@ import Bag
 import TypeRep
 import TyCon
 
-type IdentMap = [(SrcSpan, Id)]
+data IsBinder = Binding | NonBinding
+  deriving (Show, Eq)
+
+$(deriveJSON (\x -> x) ''IsBinder)
+
+type IdentMap = [(SrcSpan, (IsBinder, Id))]
 
 -- Define type synonym to avoid orphan instances
 newtype ExtractIdsT m a = ExtractIdsT { runExtractIdsT :: WriterT IdentMap m a }
@@ -49,6 +55,8 @@ extractIdsPlugin symbolRef = HscPlugin $ \env -> do
   dynFlags <- getDynFlags
   identMap <- execExtractIdsT $ extractIds (tcg_binds env)
 
+  debugPP "tcg_rn_decls" (tcg_rn_decls env)
+
   let _ = identMap :: IdentMap
 
   liftIO $ withFile "/tmp/ghc.log" AppendMode $ \h ->
@@ -64,7 +72,8 @@ instance ExtractIds (LHsBinds Id) where
 
 instance ExtractIds (LHsBind Id) where
   extractIds (L _span bind@(FunBind {})) = do
-    tell [(getLoc (fun_id bind), unLoc (fun_id bind))]
+    tell [(getLoc (fun_id bind), (Binding, unLoc (fun_id bind)))]
+    debugPP "wrapper" (fun_co_fn bind)
     extractIds (fun_matches bind)
   extractIds (L _span bind@(PatBind {})) =
     fail "extractIds: unsupported PatBind"
@@ -83,8 +92,10 @@ instance ExtractIds (LMatch Id) where
     extractIds rhss
 
 instance ExtractIds (GRHSs Id) where
-  extractIds (GRHSs rhss binds) =
+  extractIds (GRHSs rhss binds) = do
     mapM_ extractIds rhss
+    -- TODO: deal with the where clause (`binds`)
+    debugPP "GRHSs" binds
 
 instance ExtractIds (LGRHS Id) where
   extractIds (L _span (GRHS _guards rhs)) = extractIds rhs
@@ -102,8 +113,9 @@ instance ExtractIds (HsLocalBinds Id) where
 instance ExtractIds (LHsExpr Id) where
   extractIds (L _ (HsPar expr)) =
     extractIds expr
-  extractIds (L _ (ExprWithTySigOut expr _type)) =
+  extractIds (L _ (ExprWithTySigOut expr _type)) = do
     extractIds expr
+    debugPP "ExprWithTySigOut" _type
   extractIds (L _ (HsOverLit _ )) =
     return ()
   extractIds (L _ (OpApp left op _fix right)) = do
@@ -111,7 +123,7 @@ instance ExtractIds (LHsExpr Id) where
     extractIds op
     extractIds right
   extractIds (L span (HsVar id)) =
-    tell [(span, id)]
+    tell [(span, (NonBinding, id))]
   extractIds (L span (HsWrap _wrapper expr)) =
     extractIds (L span expr)
   extractIds (L _ (HsLet binds expr)) = do
@@ -166,8 +178,9 @@ instance ExtractIds (LHsExpr Id) where
 
 ppIdMap :: DynFlags -> IdentMap -> String
 ppIdMap dynFlags idMap =
-  let pp (span, id) =
-        takeFileName (showSDoc dynFlags (ppr span)) ++ ": "
+  let pp (span, (isBinder, id)) =
+        takeFileName (showSDoc dynFlags (ppr span))
+        ++ (case isBinder of Binding -> " (binder): " ; _ -> ": ")
         ++ showSDoc dynFlags (ppr (varName id)) ++ " :: "
         ++ showSDoc dynFlags (ppr (varType id))
         ++ " ("

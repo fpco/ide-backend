@@ -61,9 +61,10 @@ import BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)
 import Paths_ide_backend
 
 data IdInfo = IdInfo
-  { idName    :: String
-  , idType    :: String  -- Type is opaque right now
-  , idDefSpan :: Either SourceSpan String
+  { idName     :: String
+  , idType     :: String  -- Type is opaque right now
+  , idDefSpan  :: Either SourceSpan String
+  , idIsBinder :: IsBinder
   }
   deriving (Show, Eq)
 
@@ -517,7 +518,7 @@ restoreStdOutput stdOutputBackup = do
 
 idMapToSymDefMap :: DynFlags -> IdentMap -> SymbolDefinitionMap
 idMapToSymDefMap dynFlags idMap =
-  let f (sp, ident) = do
+  let f (sp, (idIsBinder, ident)) = do
         occurenceSpan <- either Just (const Nothing) $ extractSourceSpan sp
         let (defSpan, idName, idType) = idToInfo dynFlags ident
             idDefSpan = extractSourceSpan defSpan
