@@ -1433,8 +1433,8 @@ syntheticTests =
         updateSessionD session upd 2
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        symDefMap <- getSymbolDefinitionMap session
-        let expectedSymDefMap = unlines $ sort
+        idMap <- getIdMap session
+        let expectedIdMap = unlines $ sort
               [ "A.hs:3:1 (binder): #v: a :: GHC.Types.Int (A.hs:3:1)"
               , "A.hs:4:1 (binder): #v: b :: GHC.Types.Int (A.hs:4:1)"
               , "A.hs:4:5: main/A.html#v: A.a :: GHC.Types.Int (A.hs:3:1)"
@@ -1455,8 +1455,8 @@ syntheticTests =
               , "B.hs:9:17-21: ghc-prim/GHC-Types.html#v: GHC.Types.False :: GHC.Types.Bool (<wired into compiler>)"
               ]
         assertEqual "Symbol defintion map should be correct"
-                    (unlines $ sort $ lines $ show symDefMap)
-                    expectedSymDefMap
+                    (unlines $ sort $ lines $ show idMap)
+                    expectedIdMap
         return ()
     )
   ]

@@ -127,7 +127,7 @@ module IdeSession (
   getEnv,
 
   -- ** Symbol definition maps
-  getSymbolDefinitionMap,
+  getIdMap,
   IdMap(..),
   IdInfo(..),
   IdNameSpace(..),
@@ -260,7 +260,7 @@ data Computed = Computed {
     -- | Modules that got loaded okay
   , computedLoadedModules :: LoadedModules
     -- | Mapping from source locations to information about identifiers there
-  , computedSymDefMap     :: IdMap
+  , computedIdMap         :: IdMap
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -494,7 +494,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         computed <- if (idleState' ^. ideUpdatedCode) then do
                       (computedErrors,
                        computedLoadedModules,
-                       computedSymDefMap) <-
+                       computedIdMap) <-
                         rpcCompile (idleState ^. ideGhcServer)
                                    (idleState' ^. ideNewOpts)
                                    (ideSourcesDir ideStaticInfo)
@@ -772,13 +772,18 @@ getAllDataFiles IdeSession{ideStaticInfo} =
             (Find.fileType Find.==? Find.RegularFile)
             (ideDataDir ideStaticInfo)
 
--- | Get a mapping from where symbols are used to where they are defined.
+-- | Get a mapping from symbol uses to symbol info.
 -- That is, given a symbol used at a particular location in a source module
 -- the mapping tells us where that symbol is defined, either locally in a
--- source module or a top-level symbol imported from another package.
+-- source module or a top-level symbol imported from another package,
+-- what is the type of this symbol and some more information.
+-- This information lets us, e.g, construct Haddock URLs for symbols,
+-- such as @parallel-3.2.0.3/Control-Parallel.html#v:pseq@
+-- (see the Show instance for 'IdMap' in "GhcHsWalk"
+-- and sample output in @test/ghc-errors.hs@).
 --
-getSymbolDefinitionMap :: Query IdMap
-getSymbolDefinitionMap IdeSession{ideState} =
+getIdMap :: Query IdMap
+getIdMap IdeSession{ideState} =
   -- TODO: scrap all this boilerplate
   $withMVar ideState $ \st ->
     case st of
@@ -788,7 +793,7 @@ getSymbolDefinitionMap IdeSession{ideState} =
   where
     aux :: IdeIdleState -> IO IdMap
     aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return computedSymDefMap
+      Just Computed{..} -> return computedIdMap
       Nothing -> fail "This session state does not admit queries."
 
 -- | Get all current environment overrides
