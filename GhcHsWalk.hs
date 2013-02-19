@@ -32,9 +32,9 @@ import qualified Module as Module
 import MonadUtils (MonadIO(..))
 import Bag
 
-{-------------------------------------------------------------------------------
+{------------------------------------------------------------------------------
   Environment mapping source locations to info
--------------------------------------------------------------------------------}
+------------------------------------------------------------------------------}
 
 -- This type is abstract in GHC. One more reason to define our own.
 data IdNameSpace =
@@ -42,14 +42,7 @@ data IdNameSpace =
   | DataName   -- ^ Source data constructors
   | TvName     -- ^ Type variables
   | TcClsName  -- ^ Type constructors and classes
-  deriving Eq
-
--- Show approximately what Haddock adds to documantation URLs.
-instance Show IdNameSpace where
-  show VarName = "v"
-  show DataName = "v"
-  show TvName = "t"
-  show TcClsName = "t"
+  deriving (Show, Eq)
 
 data IsBinder = Binding | NonBinding
   deriving (Show, Eq)
@@ -100,20 +93,15 @@ instance Show IdMap where
         fn ++ ":" ++ ppDash stL endL ++ ":" ++ ppDash stC endC
       ppSpan (Right s) = s
 
-      dotToDash = map (\c -> if c == '.' then '-' else c)
-
       pp (sp, IdInfo{..}) =
         takeFileName (ppSpan $ Left sp)
-        ++ (case idIsBinder of Binding -> " (binder): " ; _ -> ": ")
+        ++ " (" ++ show idSpace
+        ++ (case idIsBinder of Binding -> ", binder): " ; _ -> "): ")
         ++ maybe "" (++ "/") idPackage
-        ++ maybe "" ((++ ".html"). dotToDash) idModule  -- a la Haddock
-        ++ "#" ++ show idSpace ++ ": "
         ++ maybe "" (++ ".") idModule
         ++ idName ++ " :: "
         ++ (case idType of Nothing -> " (type unknown)" ; Just tp -> tp)
-        ++ " ("
-        ++ takeFileName (ppSpan idDefSpan)
-        ++ ")"
+        ++ " (" ++ takeFileName (ppSpan idDefSpan) ++ ")"
 
 instance Monoid IdMap where
   mempty = IdMap Map.empty
@@ -130,9 +118,9 @@ fromGhcNameSpace ns =
   else if ns == Name.tcName then TcClsName
   else error "fromGhcNameSpace"
 
-{-------------------------------------------------------------------------------
+{------------------------------------------------------------------------------
   Extract an IdMap from information returned by the ghc type checker
--------------------------------------------------------------------------------}
+------------------------------------------------------------------------------}
 
 -- Define type synonym to avoid orphan instances
 newtype ExtractIdsT m a = ExtractIdsT { runExtractIdsT :: WriterT IdMap m a }
@@ -195,9 +183,9 @@ instance ConstructIdInfo Id where
       idType    = Just $ showSDoc dynFlags (ppr $ Var.varType id)
       idDefSpan = extractSourceSpan (Name.nameSrcSpan nameStruct)
 
-{-------------------------------------------------------------------------------
+{------------------------------------------------------------------------------
   ExtractIds
--------------------------------------------------------------------------------}
+------------------------------------------------------------------------------}
 
 class ExtractIds a where
   extractIds :: (Functor m, MonadIO m, HasDynFlags m) => a -> ExtractIdsT m ()
