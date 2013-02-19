@@ -132,6 +132,7 @@ module IdeSession (
   IdInfo(..),
   IdNameSpace(..),
   IsBinder(..),
+  haddockLink,
 
   -- ** Run code
   runStmt,
@@ -226,7 +227,8 @@ import System.Posix.Types (EpochTime)
 import Common
 import GhcServer
 import GhcRun (RunResult(..), RunBufferMode(..))
-import GhcHsWalk (IdMap(..), IdInfo(..), IdNameSpace(..), IsBinder(..))
+import GhcHsWalk
+  (IdMap(..), IdInfo(..), IdNameSpace(..), IsBinder(..), haddockLink)
 import ModuleName (LoadedModules, ModuleName)
 import qualified ModuleName as MN
 
@@ -778,9 +780,7 @@ getAllDataFiles IdeSession{ideStaticInfo} =
 -- source module or a top-level symbol imported from another package,
 -- what is the type of this symbol and some more information.
 -- This information lets us, e.g, construct Haddock URLs for symbols,
--- such as @parallel-3.2.0.3/Control-Parallel.html#v:pseq@
--- (see the Show instance for 'IdMap' in "GhcHsWalk"
--- and sample output in @test/ghc-errors.hs@).
+-- like @parallel-3.2.0.3/Control-Parallel.html#v:pseq@.
 --
 getIdMap :: Query IdMap
 getIdMap IdeSession{ideState} =

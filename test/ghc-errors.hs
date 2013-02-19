@@ -1457,6 +1457,11 @@ syntheticTests =
         assertEqual "Symbol defintion map should be correct"
                     (unlines $ sort $ lines $ show idMap)
                     expectedIdMap
+        let configSourcesDir = getSourcesDir session
+        assertEqual "Haddock link for A.b should be correct"
+                    "main/A.html#v:b"
+                    $ haddockLink idMap ( configSourcesDir </> "B.hs"
+                                        , (5, 8), (5, 9) )
         return ()
     )
   ]

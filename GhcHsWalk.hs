@@ -5,6 +5,7 @@ module GhcHsWalk
   , IdNameSpace(..)
   , IsBinder(..)
   , extractIdsPlugin
+  , haddockLink
   ) where
 
 import Prelude hiding (span, id)
@@ -16,6 +17,7 @@ import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Aeson.TH (deriveJSON)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
 import Data.Monoid
 
 import Common
@@ -117,6 +119,29 @@ fromGhcNameSpace ns =
   else if ns == Name.tvName then TvName
   else if ns == Name.tcName then TcClsName
   else error "fromGhcNameSpace"
+
+-- | Show approximately what Haddock adds to documantation URLs.
+haddockSpaceMarks :: IdNameSpace -> String
+haddockSpaceMarks VarName = "v"
+haddockSpaceMarks DataName = "v"
+haddockSpaceMarks TvName = "t"
+haddockSpaceMarks TcClsName = "t"
+
+-- | Show approximately a haddock link (without haddock root) for an id.
+-- This is an illustraction and a test of the id info, but under ideal
+-- conditions could perhaps serve to link to documentation without
+-- going via Hoogle.
+haddockLink :: IdMap -> SourceSpan -> String
+haddockLink (IdMap m) sp =
+  case Map.lookup sp m of
+    Nothing -> "<identifier not found>"
+    Just IdInfo{..} ->
+        fromMaybe "<unknown package>" idPackage ++ "/"
+        ++ maybe "<unknown module>" dotToDash idModule ++ ".html#"
+        ++ haddockSpaceMarks idSpace ++ ":"
+        ++ idName
+ where
+  dotToDash = map (\c -> if c == '.' then '-' else c)
 
 {------------------------------------------------------------------------------
   Extract an IdMap from information returned by the ghc type checker
