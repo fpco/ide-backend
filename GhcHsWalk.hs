@@ -103,7 +103,7 @@ instance Show IdMap where
         ++ maybe "" (++ "/") idPackage
         ++ maybe "" (++ ".") idModule
         ++ idName ++ " :: "
-        ++ (case idType of Nothing -> " (type unknown)" ; Just tp -> tp)
+        ++ (case idType of Nothing -> "<unknown type>" ; Just tp -> tp)
         ++ " (" ++ takeFileName (ppSpan idDefSpan) ++ ")"
 
 -- Right-biased union (information provided by the type checker replaces
