@@ -1411,7 +1411,7 @@ syntheticTests =
         -}
     )
   , ( "Type information 1"
-    , withConfiguredSession (defOpts ++ ["-package parallel"]) $ \session -> do
+    , withConfiguredSession (defOpts ++ ["-package parallel", "-XScopedTypeVariables"]) $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule (fromString "A") . BSLC.pack . unlines $
                     [ "module A where"
@@ -1420,21 +1420,37 @@ syntheticTests =
                     , "b = a + 6"
                     ])
                <> (updateModule (fromString "B") . BSLC.pack . unlines $
-                    [ "module B where"
-                    , "import A"
-                    , "import Control.Parallel"
-                    , "c = let e = 1"
-                    , "    in b + 3 + d + e"
-                    , "  where d = 6"
-                    , "d :: Int -> T"
-                    , "d _ = MkT"
-                    , "e = True `pseq` False"
+                    [ {-  1 -} "module B where"
+
+                    , {-  2 -} "import A"
+                    , {-  3 -} "import Control.Parallel"
+
+                    , {-  4 -} "c = let e = 1"
+                    , {-  5 -} "    in b + 3 + d + e"
+                    , {-  6 -} "  where d = 6"
+
+                    , {-  7 -} "d :: Int -> T"
+                    , {-  8 -} "d _ = MkT"
+
+                    , {-  9 -} "e = True `pseq` False"
+
+                    , {- 10 -} "f :: a -> a"
+                    , {- 11 -} "f x = x"
+
+                    , {- 12 -} "g :: forall a. a -> a"
+                    , {- 13 -} "g x = x"
+
+                    , {- 14 -} "h :: forall a. a -> a"
+                    , {- 15 -} "h x = y"
+                    , {- 16 -} "  where"
+                    , {- 17 -} "    y :: a"
+                    , {- 18 -} "    y = x"
                     ])
         updateSessionD session upd 2
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
         idMap <- getIdMap session
-        let expectedIdMap = unlines $ sort
+        let expectedIdMap =
               [ "A.hs:3:1 (VarName, binder): a :: GHC.Types.Int (A.hs:3:1)"
               , "A.hs:4:1 (VarName, binder): b :: GHC.Types.Int (A.hs:4:1)"
               , "A.hs:4:5 (VarName): main/A.a :: GHC.Types.Int (A.hs:3:1)"
@@ -1447,6 +1463,7 @@ syntheticTests =
               , "B.hs:5:16 (VarName): d :: GHC.Types.Int (B.hs:6:9)"
               , "B.hs:5:18 (VarName): base/GHC.Num.+ :: forall a. GHC.Num.Num a => a -> a -> a (<no location info>)"
               , "B.hs:5:20 (VarName): e :: GHC.Types.Int (B.hs:4:9)"
+              , "B.hs:6:9 (VarName, binder): d :: GHC.Types.Int (B.hs:6:9)"
               , "B.hs:7:1 (VarName): main/B.d ::  (type unknown) (B.hs:8:1)"
               , "B.hs:7:6-8 (TcClsName): ghc-prim/GHC.Types.Int ::  (type unknown) (<wired into compiler>)"
               , "B.hs:7:13 (TcClsName): main/A.T ::  (type unknown) (A.hs:2:6)"
@@ -1456,10 +1473,28 @@ syntheticTests =
               , "B.hs:9:5-8 (VarName): ghc-prim/GHC.Types.True :: GHC.Types.Bool (<wired into compiler>)"
               , "B.hs:9:10-15 (VarName): parallel-3.2.0.3/Control.Parallel.pseq :: forall a b. a -> b -> b (<no location info>)"
               , "B.hs:9:17-21 (VarName): ghc-prim/GHC.Types.False :: GHC.Types.Bool (<wired into compiler>)"
+              , "B.hs:10:1 (VarName): main/B.f ::  (type unknown) (B.hs:11:1)"
+              , "B.hs:10:6 (TvName): a ::  (type unknown) (B.hs:10:6-11)"
+              , "B.hs:10:11 (TvName): a ::  (type unknown) (B.hs:10:6-11)"
+              , "B.hs:11:1 (VarName, binder): f :: a -> a (B.hs:11:1)"
+              , "B.hs:11:7 (VarName): x :: a (B.hs:11:3)"
+              , "B.hs:12:1 (VarName): main/B.g ::  (type unknown) (B.hs:13:1)"
+              , "B.hs:12:16 (TvName): a ::  (type unknown) (B.hs:12:13)"
+              , "B.hs:12:21 (TvName): a ::  (type unknown) (B.hs:12:13)"
+              , "B.hs:13:1 (VarName, binder): g :: a -> a (B.hs:13:1)"
+              , "B.hs:13:7 (VarName): x :: a (B.hs:13:3)"
+              , "B.hs:14:1 (VarName): main/B.h ::  (type unknown) (B.hs:15:1)"
+              , "B.hs:14:16 (TvName): a ::  (type unknown) (B.hs:14:13)"
+              , "B.hs:14:21 (TvName): a ::  (type unknown) (B.hs:14:13)"
+              , "B.hs:15:1 (VarName, binder): h :: a -> a (B.hs:15:1)"
+              , "B.hs:15:7 (VarName): y :: a (B.hs:18:5)"
+              , "B.hs:17:5 (VarName): y ::  (type unknown) (B.hs:18:5)"
+              , "B.hs:17:10 (TvName): a ::  (type unknown) (B.hs:14:13)"
+              , "B.hs:18:5 (VarName, binder): y :: a (B.hs:18:5)"
+              , "B.hs:18:9 (VarName): x :: a (B.hs:15:3)"
               ]
-        assertEqual "Symbol defintion map should be correct"
-                    (unlines $ sort $ lines $ show idMap)
-                    expectedIdMap
+        let actualIdMap = lines (show idMap )
+        assertSameList expectedIdMap actualIdMap
         let configSourcesDir = getSourcesDir session
         assertEqual "Haddock link for A.b should be correct"
                     "main/A.html#v:b"
@@ -1468,6 +1503,24 @@ syntheticTests =
         return ()
     )
   ]
+
+assertSameList :: (Ord a, Show a) => [a] -> [a] -> Assertion
+assertSameList xs ys = case diff xs ys of
+                         [] -> return ()
+                         ds -> assertFailure (unlines ds)
+
+-- | Compare two lists, both assumed sorted
+--
+-- @diff expected actual@ returns a list of differences between two lists,
+-- or an empty lists if the input lists are identical
+diff :: (Ord a, Show a) => [a] -> [a] -> [String]
+diff [] [] = []
+diff xs [] = map (\x -> "Missing "    ++ show x) xs
+diff [] ys = map (\y -> "Unexpected " ++ show y) ys
+diff (x:xs) (y:ys)
+  | x <  y    = ("Missing "    ++ show x) : diff xs (y:ys)
+  | x >  y    = ("Unexpected " ++ show y) : diff (x:xs) ys
+  | otherwise = diff xs ys
 
 defOpts :: [String]
 defOpts = [ "-hide-all-packages", "-package base" ]

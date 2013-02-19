@@ -264,8 +264,9 @@ instance ConstructIdInfo id => ExtractIds (LHsType id) where
     extractIds [arg, res]
   extractIds (L span (HsTyVar name)) =
     record span NonBinding name
+  extractIds (L _span (HsForAllTy _explicitFlag _tyVars _ctxt body)) =
+    extractIds body
 
-  extractIds (L _span (HsForAllTy _ _ _ _))    = unsupported "HsForAllTy _ _ _"
   extractIds (L _span (HsAppTy _ _))           = unsupported "HsAppTy _"
   extractIds (L _span (HsListTy _))            = unsupported "HsListTy"
   extractIds (L _span (HsPArrTy _))            = unsupported "HsPArrTy"
@@ -311,9 +312,9 @@ instance ConstructIdInfo id => ExtractIds (LMatch id) where
     extractIds rhss
 
 instance ConstructIdInfo id => ExtractIds (GRHSs id) where
-  extractIds (GRHSs rhss _binds) = do
+  extractIds (GRHSs rhss binds) = do
     extractIds rhss
-    -- TODO: deal with the where clause (`binds`)
+    extractIds binds
 
 instance ConstructIdInfo id => ExtractIds (LGRHS id) where
   extractIds (L _span (GRHS _guards rhs)) = extractIds rhs
@@ -323,8 +324,9 @@ instance ConstructIdInfo id => ExtractIds (HsLocalBinds id) where
     return ()
   extractIds (HsValBinds (ValBindsIn _ _)) =
     fail "extractIds: Unexpected ValBindsIn (after renamer these should not exist)"
-  extractIds (HsValBinds (ValBindsOut binds _sigs)) =
+  extractIds (HsValBinds (ValBindsOut binds sigs)) = do
     extractIds (map snd binds) -- "fst" is 'rec flag'
+    extractIds sigs
   extractIds (HsIPBinds _) =
     unsupported "HsIPBinds"
 
