@@ -264,7 +264,8 @@ instance ConstructIdInfo id => ExtractIds (LHsType id) where
     extractIds [arg, res]
   extractIds (L span (HsTyVar name)) =
     record span NonBinding name
-  extractIds (L _span (HsForAllTy _explicitFlag _tyVars _ctxt body)) =
+  extractIds (L _span (HsForAllTy _explicitFlag tyVars _ctxt body)) = do
+    extractIds tyVars
     extractIds body
 
   extractIds (L _span (HsAppTy _ _))           = unsupported "HsAppTy _"
@@ -286,6 +287,17 @@ instance ConstructIdInfo id => ExtractIds (LHsType id) where
   extractIds (L _span (HsExplicitTupleTy _ _)) = unsupported "HsExplicitTupleTy _"
   extractIds (L _span (HsTyLit _))             = unsupported "HsTyLit"
   extractIds (L _span (HsWrapTy _ _))          = unsupported "HsWrapTy _"
+
+instance ConstructIdInfo id => ExtractIds (LHsTyVarBndrs id) where
+  extractIds (HsQTvs _kvs tvs) = do
+    -- We don't have location info for the kind variables
+    extractIds tvs
+
+instance ConstructIdInfo id => ExtractIds (LHsTyVarBndr id) where
+  extractIds (L span (UserTyVar name)) =
+    record span Binding name
+  extractIds (L span (KindedTyVar name _kind)) =
+    record span Binding name
 
 instance ConstructIdInfo id => ExtractIds (LHsBinds id) where
   extractIds = extractIds . bagToList
