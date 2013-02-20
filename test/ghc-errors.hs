@@ -1411,7 +1411,12 @@ syntheticTests =
         -}
     )
   , ( "Type information 1"
-    , withConfiguredSession (defOpts ++ ["-package parallel", "-XScopedTypeVariables"]) $ \session -> do
+    , let opts = defOpts ++ [
+                     "-package parallel"
+                   , "-XScopedTypeVariables"
+                   , "-XKindSignatures"
+                   ]
+      in withConfiguredSession opts $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule (fromString "A") . BSLC.pack . unlines $
                     [ "module A where"
@@ -1445,6 +1450,9 @@ syntheticTests =
                     , {- 16 -} "  where"
                     , {- 17 -} "    y :: a"
                     , {- 18 -} "    y = x"
+
+                    , {- 19 -} "i :: forall (t :: * -> *) a. t a -> t a"
+                    , {- 20 -} "i x = x"
                     ])
         updateSessionD session upd 2
         msgs <- getSourceErrors session

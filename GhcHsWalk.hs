@@ -267,26 +267,27 @@ instance ConstructIdInfo id => ExtractIds (LHsType id) where
   extractIds (L _span (HsForAllTy _explicitFlag tyVars _ctxt body)) = do
     extractIds tyVars
     extractIds body
+  extractIds (L _span (HsAppTy fun arg)) =
+    extractIds [fun, arg]
 
-  extractIds (L _span (HsAppTy _ _))           = unsupported "HsAppTy _"
   extractIds (L _span (HsListTy _))            = unsupported "HsListTy"
   extractIds (L _span (HsPArrTy _))            = unsupported "HsPArrTy"
-  extractIds (L _span (HsTupleTy _ _))         = unsupported "HsTupleTy _"
-  extractIds (L _span (HsOpTy _ _ _))          = unsupported "HsOpTy _ _"
+  extractIds (L _span (HsTupleTy _ _))         = unsupported "HsTupleTy"
+  extractIds (L _span (HsOpTy _ _ _))          = unsupported "HsOpTy"
   extractIds (L _span (HsParTy _))             = unsupported "HsParTy"
-  extractIds (L _span (HsIParamTy _ _))        = unsupported "HsIParamTy _"
-  extractIds (L _span (HsEqTy _ _))            = unsupported "HsEqTy _"
-  extractIds (L _span (HsKindSig _ _))         = unsupported "HsKindSig _"
+  extractIds (L _span (HsIParamTy _ _))        = unsupported "HsIParamTy"
+  extractIds (L _span (HsEqTy _ _))            = unsupported "HsEqTy"
+  extractIds (L _span (HsKindSig _ _))         = unsupported "HsKindSig"
   extractIds (L _span (HsQuasiQuoteTy _))      = unsupported "HsQuasiQuoteTy"
-  extractIds (L _span (HsSpliceTy _ _ _))      = unsupported "HsSpliceTy _ _"
-  extractIds (L _span (HsDocTy _ _))           = unsupported "HsDocTy _"
-  extractIds (L _span (HsBangTy _ _))          = unsupported "HsBangTy _"
+  extractIds (L _span (HsSpliceTy _ _ _))      = unsupported "HsSpliceTy"
+  extractIds (L _span (HsDocTy _ _))           = unsupported "HsDocTy"
+  extractIds (L _span (HsBangTy _ _))          = unsupported "HsBangTy"
   extractIds (L _span (HsRecTy _))             = unsupported "HsRecTy"
   extractIds (L _span (HsCoreTy _))            = unsupported "HsCoreTy"
-  extractIds (L _span (HsExplicitListTy _ _))  = unsupported "HsExplicitListTy _"
-  extractIds (L _span (HsExplicitTupleTy _ _)) = unsupported "HsExplicitTupleTy _"
+  extractIds (L _span (HsExplicitListTy _ _))  = unsupported "HsExplicitListTy"
+  extractIds (L _span (HsExplicitTupleTy _ _)) = unsupported "HsExplicitTupleTy"
   extractIds (L _span (HsTyLit _))             = unsupported "HsTyLit"
-  extractIds (L _span (HsWrapTy _ _))          = unsupported "HsWrapTy _"
+  extractIds (L _span (HsWrapTy _ _))          = unsupported "HsWrapTy"
 
 instance ConstructIdInfo id => ExtractIds (LHsTyVarBndrs id) where
   extractIds (HsQTvs _kvs tvs) = do
