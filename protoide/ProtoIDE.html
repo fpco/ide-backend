@@ -1,13 +1,13 @@
 <html>
 
-<meta charset="UTF-8">
-<script type="text/JavaScript" src="ProtoIDE.js"></script>
+<head>
+  <meta charset="UTF-8">
+  <script type="text/JavaScript" src="ProtoIDE.js"></script>
+</head>
 
 <body>
-
-<form onSubmit="return updateSource()">
-
-<textarea id="source">
+  <form onSubmit="return updateSource()">
+    <textarea id="source" cols="80" rows="24">
 module M where
 
 a = 5
@@ -15,20 +15,12 @@ a = 5
 b = a
 
 c x = a + b + x
-</textarea>
+    </textarea>
+    <input type="submit">
+  </form>
 
-<input type="submit">
-
-</form>
-
-<hr>
-
-<pre id="errorsPre"></pre>
-
-<hr>
-
-<pre id="sourcePre"></pre>
-
+  <hr> <pre id="errorsPre"></pre>
+  <hr> <pre id="sourcePre"></pre>
 </body>
 
 </html>

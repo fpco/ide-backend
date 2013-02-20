@@ -61,8 +61,26 @@ function updateSource() {
   // Send request to the IDE server
   console.log("Sending request..");
   var xmlHttp = new XMLHttpRequest();
-  xmlHttp.open("POST", "http://localhost:8080", false); // Synchronous request
+  xmlHttp.open("POST", "http://localhost:8080", true);
   xmlHttp.send(source);
+  xmlHttp.onreadystatechange = processIdeResponse;
+  
+  // Don't actually submit the form
+  return false; 
+}
+
+function processIdeResponse(progress) {
+  var xmlHttp = progress.currentTarget;
+  
+  if(xmlHttp.readyState != 4) {
+    return;
+  }
+
+  if(xmlHttp.status != 200) {
+    errorsPre.innerHTML = "<b>ERROR: Could not contact server</b>";
+    return;
+  }
+
   var ideResponse = eval("(" + xmlHttp.responseText + ")");
   console.log(ideResponse);
 
@@ -94,7 +112,4 @@ function updateSource() {
       globalIdMap.push({src: srcSpan, def: defSpan});
     }
   }
-  
-  // Don't actually submit the form
-  return false; 
 }
