@@ -1,6 +1,7 @@
+// Is p within [p, r) ?
 function inRange(p, r) {
   return (p.l > r.fromLine || (p.l == r.fromLine && p.c >= r.fromCol))
-      && (p.l < r.toLine   || (p.l == r.toLine   && p.c <= r.toCol));
+      && (p.l < r.toLine   || (p.l == r.toLine   && p.c <  r.toCol)); 
 }
 
 function highlight(r) {
