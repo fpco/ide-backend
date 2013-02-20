@@ -363,12 +363,13 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
   extractIds (L _ (HsLet binds expr)) = do
     extractIds binds
     extractIds expr
+  extractIds (L _ (HsApp fun arg)) =
+    extractIds [fun, arg]
 
   extractIds (L _ (HsIPVar _ ))          = unsupported "HsIPVar"
   extractIds (L _ (HsLit _))             = unsupported "HsLit"
   extractIds (L _ (HsLam _))             = unsupported "HsLam"
   extractIds (L _ (HsLamCase _ _ ))      = unsupported "HsLamCase"
-  extractIds (L _ (HsApp _ _))           = unsupported "HsApp"
   extractIds (L _ (NegApp _ _))          = unsupported "NegApp"
   extractIds (L _ (SectionL _ _))        = unsupported "SectionL"
   extractIds (L _ (SectionR _ _))        = unsupported "SectionR"
