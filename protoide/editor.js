@@ -1,8 +1,15 @@
+/**
+ * Very basic editor
+ *
+ * Invariants: 
+ * - every line ends on a linebreak
+ * - There is always at least one line
+ */
+
 var cursorHighlighted = 1;
 var editor = { 
     cursorPos: {l:1, c:1}
-  , cursorIx:  0
-  , source:    "\n"
+  , source:    ["\n"]
   }
 
 String.prototype.splice = function( idx, rem, s ) {
@@ -16,7 +23,9 @@ window.onload = function() {
   // Start editor
   var body = document.getElementsByTagName("body")[0];
   body.onkeyup    = editorOnKeyUp;
-  body.onkeydown  = trapKeys;
+
+  // Make sure backspace doesn't load the previous page
+  body.onkeydown  = trapKeys; 
   body.onkeypress = trapKeys;
 }
 
@@ -29,80 +38,40 @@ function trapKeys(e) {
 }
 
 function lineLength(l) {
-  var line   = 1;
-  var column = 1;
-  var source = editor.source;
-  
-  for(var i = 0; i < source.length; i++) {
-    if(source[i] == '\n') {
-      if(line == l) {
-        return column;
-      } else {
-        line++;
-        column = 1;
-      }
-    } else {
-      column++;
-    }
-  }
-
-  throw "Invalid line";
-}
-
-function setCursorPos(l, c) {
-  var source = editor.source;
-  var line   = 1;
-  var column = 1;
-  var ix     = 0;
-
-  for(var i = 0; i < source.length; i++) {
-    if(line == l && column == c) {
-      editor.cursorPos = {l: line, c: column};
-      editor.cursorIx  = ix;
-      return;
-    }
-
-    if(source[i] == '\n') {
-      if(line == l || (line + 1 == l && c == 0)) {
-        editor.cursorPos = {l: line, c: column};
-        editor.cursorIx  = ix;
-        return;
-      }
-
-      line++;
-      column = 1;
-    } else {
-      column++;
-    }
-
-    ix++;
-  }
-  
-  editor.cursorPos = {l: line, c: column};
-  editor.cursorIx  = ix;
+  return editor.source[l - 1].length;
 }
 
 function numberOfLines() {
-  // TODO: cache?
-  var numLines = 0;
-  var source   = editor.source;
-  for(var i = 0; i < source.length; i++) {
-    if(source[i] == '\n') {
-      numLines++;
-    }
-  }
-  return numLines;
+  return editor.source.length;
+}
+
+function setCursorPos(l, c) {
+  // Make sure l and c are within range
+  if(l < 1)               l = 1;
+  if(l > numberOfLines()) l = numberOfLines();
+
+  if(c < 1)             c = 1;
+  if(c > lineLength(l)) c = lineLength(l);
+
+  editor.cursorPos = {l:l, c:c};
+}
+
+function spliceAtCursor(rem, ins) {
+  var l = editor.cursorPos.l;
+  var c = editor.cursorPos.c;
+
+  editor.source[l - 1] = editor.source[l - 1].splice(c - 1, rem, ins);
 }
 
 function editorOnKeyUp(e) {
   var chr;
 
   if(e.keyCode == 13) { // enter
-    editor.source = editor.source.splice(editor.cursorIx, 0, "\n");
+    editor.source.splice(editor.cursorPos.l, 0, "\n"); // splice on arrays modifies the array
     setCursorPos(editor.cursorPos.l + 1, 1);
   } else if (e.keyCode == 8) { // backspace {
     setCursorPos(editor.cursorPos.l, editor.cursorPos.c - 1);
-    editor.source = editor.source.splice(editor.cursorIx, 1, ""); 
+    spliceAtCursor(1, "");
   } else if (e.keyCode == 37) { // left arrow 
     setCursorPos(editor.cursorPos.l, editor.cursorPos.c - 1);
   } else if (e.keyCode == 38) { // up arrow 
@@ -118,7 +87,7 @@ function editorOnKeyUp(e) {
       chr = chr.toLowerCase(chr); 
     }
     
-    editor.source = editor.source.splice(editor.cursorIx, 0, chr);
+    spliceAtCursor(0, chr);
     setCursorPos(editor.cursorPos.l, editor.cursorPos.c + 1);
   } 
 
@@ -138,16 +107,17 @@ function reconstructEditorPre() {
     editorPre.removeChild(editorPre.firstChild);
   }
 
-  var line   = 1;
-  var column = 1;
-  for(var i = 0; i < source.length; i++) {
-    if(source.charAt(i) == '\n') {
-      editorPre.innerHTML += "<span id=\"{l:" + line + ",c:" + column + "}\" onClick=\"handleClick(this.id)\"> </span>\n";
-      line++;
-      column = 1;
-    } else {
-      editorPre.innerHTML += "<span id=\"{l:" + line + ",c:" + column + "}\" onClick=\"handleClick(this.id)\">" + source.charAt(i) + "</span>";
-      column++;
+  for(var l = 1; l <= numberOfLines(); l++) {
+    var line = editor.source[l - 1];
+
+    for(var c = 1; c <= line.length; c++) {
+      var chr = line[c - 1];
+
+      if(chr == '\n') {
+        editorPre.innerHTML += "<span id=\"{l:" + l + ",c:" + c + "}\" onClick=\"handleClick(this.id)\"> </span>\n";
+      } else {
+        editorPre.innerHTML += "<span id=\"{l:" + l + ",c:" + c + "}\" onClick=\"handleClick(this.id)\">" + chr + "</span>";
+      }
     }
   }
 
