@@ -54,11 +54,18 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   panedAdd2 hPaned infoAndErrors
   panedSetPosition hPaned 240
 
+  -- Create a scrolled window to scroll long lines instead of resizing.
+  scrolled <- scrolledWindowNew Nothing Nothing
+  set scrolled [ scrolledWindowHscrollbarPolicy := PolicyAutomatic
+             , scrolledWindowVscrollbarPolicy := PolicyAutomatic
+             ]
+  scrolledWindowAddWithViewport scrolled hPaned
+
   -- Create window
   window <- windowNew
   set window [ windowDefaultWidth  := 640
              , windowDefaultHeight := 480
-             , containerChild      := hPaned
+             , containerChild      := scrolled
              ]
   onDestroy window mainQuit
 
