@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Main (main) where
 
+import Prelude hiding (span)
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad (liftM, void, forM_)
@@ -19,6 +20,7 @@ import System.FilePath (dropExtension, makeRelative, (</>))
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
 import System.Random (randomIO)
+import qualified Data.Map as Map
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -1503,14 +1505,23 @@ syntheticTests =
               , "B.hs:17:10 (TvName): a :: <unknown type> (B.hs:14:13)"
               , "B.hs:18:5 (VarName, binder): y :: a (B.hs:18:5)"
               , "B.hs:18:9 (VarName): x :: a (B.hs:15:3)"
+              , "B.hs:19:1 (VarName): main/B.i :: <unknown type> (B.hs:20:1)"
+              , "B.hs:19:13-25 (TvName, binder): t :: <unknown type> (B.hs:19:13-25)"
+              , "B.hs:19:27 (TvName, binder): a :: <unknown type> (B.hs:19:27)"
+              , "B.hs:19:30 (TvName): t :: <unknown type> (B.hs:19:13-25)"
+              , "B.hs:19:32 (TvName): a :: <unknown type> (B.hs:19:27)"
+              , "B.hs:19:37 (TvName): t :: <unknown type> (B.hs:19:13-25)"
+              , "B.hs:19:39 (TvName): a :: <unknown type> (B.hs:19:27)"
+              , "B.hs:20:1 (VarName, binder): i :: t a -> t a (B.hs:20:1)"
+              , "B.hs:20:7 (VarName): x :: t a (B.hs:20:3)"
               ]
         let actualIdMap = lines (show idMap )
         assertSameList expectedIdMap actualIdMap
         let configSourcesDir = getSourcesDir session
+        let span = SourceSpan (configSourcesDir </> "B.hs") 5 8 5 9
         assertEqual "Haddock link for A.b should be correct"
                     "main/A.html#v:b"
-                    $ haddockLink idMap
-                        (SourceSpan (configSourcesDir </> "B.hs") 5 8 5 9)
+                    $ haddockLink (idMapToMap idMap Map.! span)
         return ()
     )
   ]

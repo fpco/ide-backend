@@ -133,17 +133,14 @@ haddockSpaceMarks TcClsName = "t"
 -- This is an illustraction and a test of the id info, but under ideal
 -- conditions could perhaps serve to link to documentation without
 -- going via Hoogle.
-haddockLink :: IdMap -> SourceSpan -> String
-haddockLink (IdMap m) sp =
-  case Map.lookup sp m of
-    Nothing -> "<identifier not found>"
-    Just IdInfo{..} ->
-        fromMaybe "<unknown package>" idPackage ++ "/"
-        ++ maybe "<unknown module>" dotToDash idModule ++ ".html#"
-        ++ haddockSpaceMarks idSpace ++ ":"
-        ++ idName
+haddockLink :: IdInfo -> String
+haddockLink IdInfo{..} =
+      fromMaybe "<unknown package>" idPackage ++ "/"
+   ++ maybe "<unknown module>" dotToDash idModule ++ ".html#"
+   ++ haddockSpaceMarks idSpace ++ ":"
+   ++ idName
  where
-  dotToDash = map (\c -> if c == '.' then '-' else c)
+   dotToDash = map (\c -> if c == '.' then '-' else c)
 
 idInfoAtLocation :: Int -> Int -> IdMap -> [IdInfo]
 idInfoAtLocation line col = map snd . filter inRange . idMapToList

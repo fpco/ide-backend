@@ -10,6 +10,7 @@ import System.FilePath (takeFileName)
 import IdeSession
 import ModuleName as MN
 
+
 main :: IO ()
 main = withSystemTempDirectory "protoide" $ \tempDir -> do
   initGUI
@@ -37,11 +38,21 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   errorsView <- textViewNewWithBuffer errorsBuff
   textViewSetWrapMode errorsView WrapWord
 
-  -- Create paned view to contain source and errors
+  -- Create text view for information about ids
+  idInfoBuff <- textBufferNew Nothing
+  idInfoView <- textViewNewWithBuffer idInfoBuff
+  textViewSetWrapMode idInfoView WrapWord
+
+  -- Create box to hold id info and errors
+  infoAndErrors <- vBoxNew True 5
+  boxPackEnd infoAndErrors errorsView PackGrow 0
+  boxPackEnd infoAndErrors idInfoView PackGrow 0
+
+  -- Create paned view to contain source and info/errors
   hPaned <- vPanedNew
   panedAdd1 hPaned textView
-  panedAdd2 hPaned errorsView
-  panedSetPosition hPaned 380
+  panedAdd2 hPaned infoAndErrors
+  panedSetPosition hPaned 240
 
   -- Create window
   window <- windowNew
@@ -85,7 +96,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     let idInfos = idInfoAtLocation (line + 1) (col + 1) idMap
 
     -- And highlight if it's defined in the current module
-    forM_ idInfos $ \idInfo ->
+    forM_ idInfos $ \idInfo -> do
       case idDefSpan idInfo of
         ProperSpan defSpan | takeFileName (spanFilePath defSpan) == "M.hs" -> do
           iterStart <- textBufferGetIterAtLineOffset textBuffer
@@ -95,8 +106,9 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
                          (spanToLine   defSpan - 1)
                          (spanToColumn defSpan - 1)
           textBufferApplyTag textBuffer highlight iterStart iterEnd
-        span ->
-          putStrLn $ "Unsupported span: " ++ show span
+        _ -> return ()
+
+      textBufferSetText idInfoBuff (show idInfo ++ " " ++ haddockLink idInfo)
 
   widgetShowAll window
   mainGUI
