@@ -66,20 +66,36 @@ function spliceAtCursor(rem, ins) {
 function editorOnKeyUp(e) {
   var chr;
 
+  var l = editor.cursorPos.l;
+  var c = editor.cursorPos.c;
+
   if(e.keyCode == 13) { // enter
-    editor.source.splice(editor.cursorPos.l, 0, "\n"); // splice on arrays modifies the array
-    setCursorPos(editor.cursorPos.l + 1, 1);
+    editor.source.splice(l, 0, "\n"); // splice on arrays modifies the array
+    setCursorPos(l + 1, 1);
   } else if (e.keyCode == 8) { // backspace {
-    setCursorPos(editor.cursorPos.l, editor.cursorPos.c - 1);
-    spliceAtCursor(1, "");
+    if(c > 1) {
+      setCursorPos(l, c - 1);
+      spliceAtCursor(1, "");
+    } else if(l > 1) {
+      // remove current line
+      var curLine = editor.source[l - 1];
+      editor.source.splice(l - 1, 1);
+
+      // and append it to the previous (minus the linebreak)
+      var prevLine = editor.source[l - 2]; 
+      editor.source[l - 2] = prevLine.splice(prevLine.length - 1, 1, curLine);
+
+      // And set cursor position
+      setCursorPos(l - 1, prevLine.length);
+    }
   } else if (e.keyCode == 37) { // left arrow 
-    setCursorPos(editor.cursorPos.l, editor.cursorPos.c - 1);
+    setCursorPos(l, c - 1);
   } else if (e.keyCode == 38) { // up arrow 
-    setCursorPos(editor.cursorPos.l - 1, editor.cursorPos.c);
+    setCursorPos(l - 1, c);
   } else if (e.keyCode == 39) { // right arrow 
-    setCursorPos(editor.cursorPos.l, editor.cursorPos.c + 1);
+    setCursorPos(l, c + 1);
   } else if (e.keyCode == 40) { // downarrow  arrow 
-    setCursorPos(editor.cursorPos.l + 1, editor.cursorPos.c);
+    setCursorPos(l + 1, c);
   } else {
     var chr = String.fromCharCode(parseInt("0x" + e.keyIdentifier.substr(2)));
 
@@ -88,7 +104,7 @@ function editorOnKeyUp(e) {
     }
     
     spliceAtCursor(0, chr);
-    setCursorPos(editor.cursorPos.l, editor.cursorPos.c + 1);
+    setCursorPos(l, c + 1);
   } 
 
   reconstructEditorPre();
