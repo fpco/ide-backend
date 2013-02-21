@@ -32,11 +32,22 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   fontDescriptionSetFamily font "Courier"
   widgetModifyFont textView (Just font)
 
+  -- Create text view for errors
+  errorsBuff <- textBufferNew Nothing
+  errorsView <- textViewNewWithBuffer errorsBuff
+  textViewSetWrapMode errorsView WrapWord
+
+  -- Create paned view to contain source and errors
+  hPaned <- vPanedNew
+  panedAdd1 hPaned textView
+  panedAdd2 hPaned errorsView
+  panedSetPosition hPaned 380
+
   -- Create window
   window <- windowNew
   set window [ windowDefaultWidth  := 640
              , windowDefaultHeight := 480
-             , containerChild := textView
+             , containerChild      := hPaned
              ]
   onDestroy window mainQuit
 
@@ -58,7 +69,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     updateSession ideSession upd (const $ return ())
     errors <- getSourceErrors ideSession
     idMap  <- getIdMap ideSession
-    putStrLn $ "Buffer was changed! " ++ show errors
+    textBufferSetText errorsBuff (show errors)
     writeIORef idMapRef idMap
 
   -- Highlight the identifier under the cursor
