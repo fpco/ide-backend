@@ -276,10 +276,12 @@ instance ConstructIdInfo id => ExtractIds (LHsType id) where
     extractIds body
   extractIds (L _span (HsAppTy fun arg)) =
     extractIds [fun, arg]
+  extractIds (L _span (HsTupleTy _tupleSort typs)) =
+    -- tupleSort is unboxed/boxed/etc.
+    extractIds typs
 
   extractIds (L _span (HsListTy _))            = unsupported "HsListTy"
   extractIds (L _span (HsPArrTy _))            = unsupported "HsPArrTy"
-  extractIds (L _span (HsTupleTy _ _))         = unsupported "HsTupleTy"
   extractIds (L _span (HsOpTy _ _ _))          = unsupported "HsOpTy"
   extractIds (L _span (HsParTy _))             = unsupported "HsParTy"
   extractIds (L _span (HsIParamTy _ _))        = unsupported "HsIParamTy"
@@ -372,9 +374,10 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
     extractIds expr
   extractIds (L _ (HsApp fun arg)) =
     extractIds [fun, arg]
+  extractIds (L _ (HsLit _)) =
+    return ()
 
   extractIds (L _ (HsIPVar _ ))          = unsupported "HsIPVar"
-  extractIds (L _ (HsLit _))             = unsupported "HsLit"
   extractIds (L _ (HsLam _))             = unsupported "HsLam"
   extractIds (L _ (HsLamCase _ _ ))      = unsupported "HsLamCase"
   extractIds (L _ (NegApp _ _))          = unsupported "NegApp"

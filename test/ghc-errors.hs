@@ -1455,6 +1455,9 @@ syntheticTests =
 
                     , {- 19 -} "i :: forall (t :: * -> *) a. t a -> t a"
                     , {- 20 -} "i x = x"
+
+                    , {- 21 -} "hello :: IO ()"
+                    , {- 22 -} "hello = putStrLn \"你好\""
                     ])
         updateSessionD session upd 2
         msgs <- getSourceErrors session
@@ -1514,6 +1517,10 @@ syntheticTests =
               , "B.hs:19:39 (TvName): a :: <unknown type> (B.hs:19:27)"
               , "B.hs:20:1 (VarName, binder): i :: t a -> t a (B.hs:20:1)"
               , "B.hs:20:7 (VarName): x :: t a (B.hs:20:3)"
+              , "B.hs:21:1-5 (VarName): main/B.hello :: <unknown type> (B.hs:22:1-5)"
+              , "B.hs:21:10-11 (TcClsName): ghc-prim/GHC.Types.IO :: <unknown type> (<no location info>)"
+              , "B.hs:22:1-5 (VarName, binder): hello :: GHC.Types.IO () (B.hs:22:1-5)"
+              , "B.hs:22:9-16 (VarName): base/System.IO.putStrLn :: GHC.Base.String -> GHC.Types.IO () (<no location info>)"
               ]
         let actualIdMap = lines (show idMap )
         assertSameList expectedIdMap actualIdMap
