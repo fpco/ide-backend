@@ -109,7 +109,8 @@ module IdeSession (
   getSourceErrors,
   SourceError(..),
   SourceErrorKind(..),
-  SourceSpan,
+  SourceSpan(..),
+  EitherSpan(..),
 
   -- ** Files
   -- | Simply getting the current state of the persistent files fits the
@@ -133,6 +134,7 @@ module IdeSession (
   IdNameSpace(..),
   IsBinder(..),
   haddockLink,
+  idInfoAtLocation,
 
   -- ** Run code
   runStmt,
@@ -228,7 +230,6 @@ import Common
 import GhcServer
 import GhcRun (RunResult(..), RunBufferMode(..))
 import GhcHsWalk
-  (IdMap(..), IdInfo(..), IdNameSpace(..), IsBinder(..), haddockLink)
 import ModuleName (LoadedModules, ModuleName)
 import qualified ModuleName as MN
 

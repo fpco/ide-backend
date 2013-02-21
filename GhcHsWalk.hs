@@ -6,6 +6,7 @@ module GhcHsWalk
   , IsBinder(..)
   , extractIdsPlugin
   , haddockLink
+  , idInfoAtLocation
   ) where
 
 import Prelude hiding (span, id, mod)
@@ -143,6 +144,14 @@ haddockLink (IdMap m) sp =
         ++ idName
  where
   dotToDash = map (\c -> if c == '.' then '-' else c)
+
+idInfoAtLocation :: Int -> Int -> IdMap -> [IdInfo]
+idInfoAtLocation line col = map snd . filter inRange . idMapToList
+  where
+    inRange :: (SourceSpan, a) -> Bool
+    inRange (SourceSpan{..}, _) =
+      (line   > spanFromLine || (line == spanFromLine && col >= spanFromColumn)) &&
+      (line   < spanToLine   || (line == spanToLine   && col <= spanToColumn))
 
 {------------------------------------------------------------------------------
   Extract an IdMap from information returned by the ghc type checker
