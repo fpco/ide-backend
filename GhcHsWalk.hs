@@ -66,7 +66,7 @@ data IdInfo = IdInfo
     -- the type checker does not give us LSigs for top-level annotations)
   , idType :: Maybe String
     -- | Where was this identifier defined?
-  , idDefSpan :: Either SourceSpan String
+  , idDefSpan :: EitherSpan
     -- | Is this a binding occurrence?
   , idIsBinder :: IsBinder
   }
@@ -92,19 +92,20 @@ instance Show IdMap where
     where
       ppDash n m | m - n <= 1 = show n
                  | otherwise = show n ++ "-" ++ show (m - 1)
-      ppSpan (Left (fn, (stL, stC), (endL, endC))) =
+      ppSpan (SourceSpan fn stL stC endL endC) =
         fn ++ ":" ++ ppDash stL endL ++ ":" ++ ppDash stC endC
-      ppSpan (Right s) = s
+      ppEitherSpan (ProperSpan sp) = ppSpan sp
+      ppEitherSpan (TextSpan s) = s
 
       pp (sp, IdInfo{..}) =
-        takeFileName (ppSpan $ Left sp)
+        takeFileName (ppSpan sp)
         ++ " (" ++ show idSpace
         ++ (case idIsBinder of Binding -> ", binder): " ; _ -> "): ")
         ++ maybe "" (++ "/") idPackage
         ++ maybe "" (++ ".") idModule
         ++ idName ++ " :: "
         ++ (case idType of Nothing -> "<unknown type>" ; Just tp -> tp)
-        ++ " (" ++ takeFileName (ppSpan idDefSpan) ++ ")"
+        ++ " (" ++ takeFileName (ppEitherSpan idDefSpan) ++ ")"
 
 -- Right-biased union (information provided by the type checker replaces
 -- information provided by the renamer)
@@ -187,8 +188,8 @@ record :: (HasDynFlags m, Monad m, ConstructIdInfo id)
 record span isBinder id = do
   dynFlags <- getDynFlags
   sourceSpan <- case extractSourceSpan span of
-    Left sourceSpan -> return sourceSpan
-    Right unhelpful -> fail $ "Id without sourcespan: " ++ unhelpful
+    ProperSpan sp -> return sp
+    TextSpan unhelpful -> fail $ "Id without sourcespan: " ++ unhelpful
   tell . IdMap . Map.singleton sourceSpan $ constructIdInfo dynFlags isBinder id
 
 -- We should ignore unrecognized expressions rather than throw an error

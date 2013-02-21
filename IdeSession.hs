@@ -714,8 +714,11 @@ getSourceErrors IdeSession{ideState, ideStaticInfo} =
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} ->
         let root = ideSourcesDir ideStaticInfo
-            mkRelative (SrcError kind (path, ii, jj) s) =
-              SrcError kind (makeRelative root path, ii, jj) s
+            mkRelative (SourceError kind
+                          (ProperSpan (SourceSpan path i1 i2 i3 i4)) msg) =
+              let relativePath = makeRelative root path
+              in SourceError kind
+                   (ProperSpan (SourceSpan relativePath i1 i2 i3 i4)) msg
             mkRelative err = err
         in return $ map mkRelative computedErrors
       Nothing -> fail "This session state does not admit queries."

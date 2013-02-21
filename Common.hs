@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 -- | Common types and utilities
 module Common
-  ( SourceError(..), SourceErrorKind(..), SourceSpan
+  ( SourceSpan(..), EitherSpan (..), SourceErrorKind(..), SourceError(..)
   , formatSourceError
   , hsExtentions
   , Progress
@@ -24,21 +24,34 @@ import System.IO (hFlush, stderr)
 
 import Data.Accessor (Accessor, accessor)
 
+data SourceSpan = SourceSpan
+  { spanFilePath   :: FilePath
+  , spanFromLine   :: Int
+  , spanFromColumn :: Int
+  , spanToLine     :: Int
+  , spanToColumn   :: Int }
+  deriving (Show, Eq, Ord)
+
+data EitherSpan =
+    ProperSpan SourceSpan
+  | TextSpan String
+  deriving (Show, Eq)
+
 -- | An error or warning in a source module.
 --
 -- Most errors are associated with a span of text, but some have only a
 -- location point.
 --
-data SourceError =
-    SrcError SourceErrorKind SourceSpan String
-  | OtherError String
+data SourceError = SourceError
+  { errorKind :: SourceErrorKind
+  , errorSpan :: EitherSpan
+  , errorMsg  :: String
+  }
   deriving (Show, Eq)
 
 -- | Severity of an error.
 data SourceErrorKind = KindError | KindWarning
   deriving (Show, Eq)
-
-type SourceSpan = (FilePath, (Int, Int), (Int, Int))
 
 formatSourceError :: SourceError -> String
 formatSourceError = show
@@ -62,6 +75,8 @@ updateProgress _msg (Progress n) = Progress (n + 1)
 progressStep :: Progress -> Int
 progressStep (Progress n) = n
 
+$(deriveJSON id ''SourceSpan)
+$(deriveJSON id ''EitherSpan)
 $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)
 $(deriveJSON id ''Progress)
