@@ -35,6 +35,7 @@ import qualified Name as Name
 import qualified Module as Module
 import MonadUtils (MonadIO(..))
 import Bag
+import DataCon (dataConName)
 
 {------------------------------------------------------------------------------
   Environment mapping source locations to info
@@ -494,10 +495,12 @@ instance ConstructIdInfo id => ExtractIds (LPat id) where
     extractIds pats
   extractIds (L _span (PArrPat pats _postTcType)) =
     extractIds pats
-  extractIds (L _span p@(ConPatIn _ _)) = do
-    debugPP "ConPatIn" p
-  extractIds (L _span p@(ConPatOut {})) = do
-    debugPP "ConPatOut" p
+  extractIds (L _span (ConPatIn con details)) = do
+    record (getLoc con) NonBinding (unLoc con) -- the constructor name is non-binding
+    -- TODO: deal with _details
+  extractIds (L _span (ConPatOut {pat_con, pat_args})) = do
+    record (getLoc pat_con) NonBinding (dataConName (unLoc pat_con))
+    -- TODO: deal with details (pat_args)
 
   -- View patterns
   extractIds (L _span (ViewPat _ _ _))     = unsupported "ViewPat"
