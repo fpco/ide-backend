@@ -158,10 +158,7 @@ extractIdsPlugin :: IORef [IdMap] -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \env -> do
   identMap <- execExtractIdsT $ do extractIds (tcg_rn_decls env)
                                    extractIds (tcg_binds env)
-
-  liftIO $ appendFile "/tmp/ghc.log" (show identMap)
   liftIO $ modifyIORef symbolRef (identMap :)
-
   return env
 
 {------------------------------------------------------------------------------
@@ -184,10 +181,10 @@ instance (HasDynFlags m, Monad m) => HasDynFlags (ExtractIdsT m) where
 instance MonadIO m => MonadIO (ExtractIdsT m) where
   liftIO = lift . liftIO
 
-debugPP :: (MonadIO m, HasDynFlags m, Outputable a) => String -> a -> m ()
+--debugPP :: (MonadIO m, HasDynFlags m, Outputable a) => String -> a -> m ()
 debugPP header val = do
   dynFlags <- getDynFlags
-  liftIO $ appendFile "/tmp/ghc.log" (header ++ showSDoc dynFlags (ppr val) ++ "\n")
+  liftIO $ appendFile "/tmp/ghc.log" (header ++ ": " ++ showSDoc dynFlags (ppr val) ++ "\n")
 
 record :: (HasDynFlags m, Monad m, ConstructIdInfo id)
        => SrcSpan -> IsBinder -> id -> ExtractIdsT m ()
@@ -329,8 +326,8 @@ instance ConstructIdInfo id => ExtractIds (MatchGroup id) where
     -- We ignore the postTcType, as it doesn't have location information
 
 instance ConstructIdInfo id => ExtractIds (LMatch id) where
-  extractIds (L _span (Match _pats _type rhss)) =
-    -- TODO: process _pats
+  extractIds (L _span (Match pats _type rhss)) = do
+    extractIds pats
     extractIds rhss
 
 instance ConstructIdInfo id => ExtractIds (GRHSs id) where
@@ -392,10 +389,6 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
     extractIds expr
     extractIds matches
 
-
-
-
-
   extractIds (L _ (HsIPVar _ ))          = unsupported "HsIPVar"
   extractIds (L _ (HsLamCase _ _ ))      = unsupported "HsLamCase"
   extractIds (L _ (NegApp _ _))          = unsupported "NegApp"
@@ -432,9 +425,9 @@ instance ConstructIdInfo id => ExtractIds (LStmt id) where
   extractIds (L _span (ExprStmt expr _seq _guard _postTcType)) =
     -- Neither _seq nor _guard are located
     extractIds expr
-  extractIds (L _span (BindStmt _pat expr _bind _fail)) =
+  extractIds (L _span (BindStmt pat expr _bind _fail)) = do
     -- Neither _bind or _fail are located
-    -- TODO: deal with pat
+    extractIds pat
     extractIds expr
   extractIds (L _span (LetStmt binds)) =
     extractIds binds
@@ -447,3 +440,38 @@ instance ConstructIdInfo id => ExtractIds (LStmt id) where
   extractIds (L _span (ParStmt _ _ _))    = unsupported "ParStmt"
   extractIds (L _span (TransStmt {}))     = unsupported "TransStmt"
   extractIds (L _span (RecStmt {}))       = unsupported "RecStmt"
+
+instance ConstructIdInfo id => ExtractIds (LPat id) where
+  extractIds (L _span (WildPat _postTcType)) =
+    return ()
+  extractIds (L span (VarPat id)) =
+    record span Binding id
+  extractIds (L _span (LazyPat pat)) =
+    extractIds pat
+  extractIds (L _span (AsPat id pat)) = do
+    record (getLoc id) Binding (unLoc id)
+    extractIds pat
+  extractIds (L _span (ParPat pat)) =
+    extractIds pat
+  extractIds (L _span (BangPat pat)) =
+    extractIds pat
+  extractIds (L _span (ListPat pats _postTcType)) =
+    extractIds pats
+  extractIds (L _span (TuplePat pats _boxity _postTcType)) =
+    extractIds pats
+  extractIds (L _span (PArrPat pats _postTcType)) =
+    extractIds pats
+  extractIds (L _span p@(ConPatIn _ _)) = do
+    debugPP "ConPatIn" p
+  extractIds (L _span p@(ConPatOut {})) = do
+    debugPP "ConPatOut" p
+
+  -- View patterns
+  extractIds (L _span (ViewPat _ _ _))     = unsupported "ViewPat"
+  extractIds (L _span (QuasiQuotePat _))   = unsupported "QuasiQuotePat"
+  extractIds (L _span (LitPat _))          = unsupported "LitPat"
+  extractIds (L _span (NPat _ _ _))        = unsupported "NPat"
+  extractIds (L _span (NPlusKPat _ _ _ _)) = unsupported "NPlusKPat"
+  extractIds (L _span (SigPatIn _ _))      = unsupported "SigPatIn"
+  extractIds (L _span (SigPatOut _ _))     = unsupported "SigPatOut"
+  extractIds (L _span (CoPat _ _ _))       = unsupported "CoPat"
