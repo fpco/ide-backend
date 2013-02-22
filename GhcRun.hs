@@ -53,6 +53,9 @@ import ErrUtils   ( Message )
 -- http://hackage.haskell.org/trac/ghc/ticket/7548
 import GhcMakeFixed
 import GHC hiding (flags, ModuleName, RunResult(..), load)
+import GhcMonad (modifySession)
+import HscTypes (HscEnv(hsc_mod_graph))
+import System.Time
 #elif __GLASGOW_HASKELL__ >= 706 && !defined(GHC_761)
 -- Use the default tools. They are fixed in these GHC versions.
 import GHC hiding (flags, ModuleName, RunResult(..))

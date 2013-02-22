@@ -12,6 +12,7 @@ module GhcHsWalk
 import Prelude hiding (span, id, mod)
 import Control.Monad (forM_)
 import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, ask)
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Data.IORef
 import System.FilePath (takeFileName)
@@ -29,7 +30,6 @@ import GHC hiding (idType)
 import TcRnTypes
 import Outputable
 import HscPlugin
-import DynFlags
 import Var hiding (idInfo)
 import qualified Name as Name
 import qualified Module as Module
@@ -155,9 +155,9 @@ idInfoAtLocation line col = map snd . filter inRange . idMapToList
 ------------------------------------------------------------------------------}
 
 extractIdsPlugin :: IORef [IdMap] -> HscPlugin
-extractIdsPlugin symbolRef = HscPlugin $ \env -> do
-  identMap <- execExtractIdsT $ do extractIds (tcg_rn_decls env)
-                                   extractIds (tcg_binds env)
+extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
+  identMap <- execExtractIdsT dynFlags $ do extractIds (tcg_rn_decls env)
+                                            extractIds (tcg_binds env)
   liftIO $ modifyIORef symbolRef (identMap :)
   return env
 
@@ -168,32 +168,41 @@ extractIdsPlugin symbolRef = HscPlugin $ \env -> do
 ------------------------------------------------------------------------------}
 
 -- Define type synonym to avoid orphan instances
-newtype ExtractIdsT m a = ExtractIdsT { runExtractIdsT :: WriterT IdMap m a }
-  deriving (Functor, Monad, MonadWriter IdMap, MonadTrans)
+newtype ExtractIdsT m a = ExtractIdsT {
+      runExtractIdsT :: ReaderT DynFlags (WriterT IdMap m) a
+    }
+  deriving (Functor, Monad, MonadWriter IdMap, MonadReader DynFlags)
 
-execExtractIdsT :: Monad m => ExtractIdsT m () -> m IdMap
-execExtractIdsT = execWriterT . runExtractIdsT
+execExtractIdsT :: Monad m => DynFlags -> ExtractIdsT m () -> m IdMap
+execExtractIdsT dynFlags m = execWriterT (runReaderT (runExtractIdsT m) dynFlags)
 
-instance (HasDynFlags m, Monad m) => HasDynFlags (ExtractIdsT m) where
-  getDynFlags = lift getDynFlags
+instance MonadTrans ExtractIdsT where
+  lift = ExtractIdsT . lift . lift
 
 -- This is not the standard MonadIO, but the MonadIO from GHC!
 instance MonadIO m => MonadIO (ExtractIdsT m) where
   liftIO = lift . liftIO
 
---debugPP :: (MonadIO m, HasDynFlags m, Outputable a) => String -> a -> m ()
-debugPP header val = do
-  dynFlags <- getDynFlags
-  liftIO $ appendFile "/tmp/ghc.log" (header ++ ": " ++ showSDoc dynFlags (ppr val) ++ "\n")
+-- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
+-- it does
+pretty :: (Monad m, Outputable a) => a -> ExtractIdsT m String
+pretty val = do
+  dynFlags <- ask
+  return $ showSDoc dynFlags (ppr val)
 
-record :: (HasDynFlags m, Monad m, ConstructIdInfo id)
+debugPP :: (MonadIO m, Outputable a) => String -> a -> ExtractIdsT m ()
+debugPP header val = do
+  val' <- pretty val
+  liftIO $ appendFile "/tmp/ghc.log" (header ++ ": " ++ val' ++ "\n")
+
+record :: (Monad m, ConstructIdInfo id)
        => SrcSpan -> IsBinder -> id -> ExtractIdsT m ()
 record span isBinder id = do
-  dynFlags <- getDynFlags
   sourceSpan <- case extractSourceSpan span of
     ProperSpan sp -> return sp
     TextSpan unhelpful -> fail $ "Id without sourcespan: " ++ unhelpful
-  tell . IdMap . Map.singleton sourceSpan $ constructIdInfo dynFlags isBinder id
+  idInfo <- constructIdInfo isBinder id
+  tell . IdMap $ Map.singleton sourceSpan idInfo
 
 -- We should ignore unrecognized expressions rather than throw an error
 -- However, for writing this code in the first place it's useful to know
@@ -206,16 +215,16 @@ unsupported c = fail $ "extractIds: unsupported " ++ c
 ------------------------------------------------------------------------------}
 
 class OutputableBndr id => ConstructIdInfo id where
-  constructIdInfo :: DynFlags -> IsBinder -> id -> IdInfo
+  constructIdInfo :: Monad m => IsBinder -> id -> ExtractIdsT m IdInfo
 
 instance ConstructIdInfo Id where
-  constructIdInfo dynFlags idIsBinder id =
-    (constructIdInfo dynFlags idIsBinder (Var.varName id)) {
-        idType = Just . showSDoc dynFlags . ppr . Var.varType $ id
-      }
+  constructIdInfo idIsBinder id = do
+    idInfo <- constructIdInfo idIsBinder (Var.varName id)
+    typ    <- pretty (Var.varType id)
+    return idInfo { idType = Just typ }
 
 instance ConstructIdInfo Name where
-  constructIdInfo _ idIsBinder name = IdInfo{..}
+  constructIdInfo idIsBinder name = return IdInfo{..}
     where
       occ       = Name.nameOccName name
       mod       = Name.nameModule_maybe name
@@ -231,7 +240,7 @@ instance ConstructIdInfo Name where
 ------------------------------------------------------------------------------}
 
 class ExtractIds a where
-  extractIds :: (Functor m, MonadIO m, HasDynFlags m) => a -> ExtractIdsT m ()
+  extractIds :: MonadIO m => a -> ExtractIdsT m ()
 
 instance ExtractIds a => ExtractIds [a] where
   extractIds = mapM_ extractIds

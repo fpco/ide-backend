@@ -1,7 +1,7 @@
-From e33c86b2a4b301c2ef0a545dc907bad443ae0d0f Mon Sep 17 00:00:00 2001
+From f54e8b39717635d97a404f5f608e05856fb1a0df Mon Sep 17 00:00:00 2001
 From: Edsko de Vries <edsko@well-typed.com>
-Date: Fri, 15 Feb 2013 14:01:31 +0000
-Subject: [PATCH] Add support for frontend plugins
+Date: Fri, 22 Feb 2013 14:40:19 +0000
+Subject: [PATCH 1/2] Add support for frontend plugins
 
 ---
  compiler/ghc.cabal.in           |  1 +
@@ -54,7 +54,7 @@ index c1dc88d..9b3dda8 100644
          outputFile              = Nothing,
          outputHi                = Nothing,
 diff --git a/compiler/main/HscMain.hs b/compiler/main/HscMain.hs
-index 010bc12..77136f9 100644
+index 010bc12..22385ee 100644
 --- a/compiler/main/HscMain.hs
 +++ b/compiler/main/HscMain.hs
 @@ -133,6 +133,7 @@ import NameSet          ( emptyNameSet )
@@ -81,18 +81,18 @@ index 010bc12..77136f9 100644
 -        hscBackend compiler tc_result mod_summary mb_old_hash
 +        dynFlags   <- getDynFlags
 +        tc_result  <- hscFileFrontEnd mod_summary
-+        tc_result' <- runHscPlugin (mconcat (sourcePlugins dynFlags)) tc_result
++        tc_result' <- runHscPlugin (mconcat (sourcePlugins dynFlags)) dynFlags tc_result
 +        hscBackend compiler tc_result' mod_summary mb_old_hash
  
  genericHscBackend :: HsCompiler a
                    -> TcGblEnv -> ModSummary -> Maybe Fingerprint
 diff --git a/compiler/main/HscPlugin.hs b/compiler/main/HscPlugin.hs
 new file mode 100644
-index 0000000..441444a
+index 0000000..feca61c
 --- /dev/null
 +++ b/compiler/main/HscPlugin.hs
 @@ -0,0 +1,17 @@
-+module HscPlugin 
++module HscPlugin
 +  ( HscPlugin(..)
 +  ) where
 +
@@ -103,11 +103,11 @@ index 0000000..441444a
 +import Data.Monoid
 +import Control.Monad
 +
-+data HscPlugin = HscPlugin { runHscPlugin :: forall m. (HasDynFlags m, Functor m, MonadIO m) => TcGblEnv -> m TcGblEnv }
++data HscPlugin = HscPlugin { runHscPlugin :: forall m. MonadIO m => DynFlags -> TcGblEnv -> m TcGblEnv }
 +
 +instance Monoid HscPlugin where
-+  mempty = HscPlugin return
-+  (HscPlugin f) `mappend` (HscPlugin g) = HscPlugin (f >=> g)
++  mempty = HscPlugin $ const return
++  (HscPlugin f) `mappend` (HscPlugin g) = HscPlugin (\dynFlags -> f dynFlags >=> g dynFlags)
 +
 diff --git a/compiler/main/HscPlugin.hs-boot b/compiler/main/HscPlugin.hs-boot
 new file mode 100644
