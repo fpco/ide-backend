@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, TemplateHaskell #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, TemplateHaskell, CPP #-}
 module GhcHsWalk
   ( IdMap(..)
   , IdInfo(..)
@@ -187,8 +187,12 @@ instance MonadIO m => MonadIO (ExtractIdsT m) where
 -- it does
 pretty :: (Monad m, Outputable a) => a -> ExtractIdsT m String
 pretty val = do
-  dynFlags <- ask
-  return $ showSDoc dynFlags (ppr val)
+  _dynFlags <- ask
+#if __GLASGOW_HASKELL__ >= 706
+  return $ showSDoc _dynFlags (ppr val)
+#else
+  return $ showSDoc (ppr val)
+#endif
 
 debugPP :: (MonadIO m, Outputable a) => String -> a -> ExtractIdsT m ()
 debugPP header val = do
@@ -301,18 +305,33 @@ instance ConstructIdInfo id => ExtractIds (LHsType id) where
   extractIds (L _span (HsCoreTy _))            = unsupported "HsCoreTy"
   extractIds (L _span (HsExplicitListTy _ _))  = unsupported "HsExplicitListTy"
   extractIds (L _span (HsExplicitTupleTy _ _)) = unsupported "HsExplicitTupleTy"
-  extractIds (L _span (HsTyLit _))             = unsupported "HsTyLit"
   extractIds (L _span (HsWrapTy _ _))          = unsupported "HsWrapTy"
 
+#if __GLASGOW_HASKELL__ >= 706
+  extractIds (L _span (HsTyLit _))             = unsupported "HsTyLit"
+#endif
+
+#if __GLASGOW_HASKELL__ >= 706
 instance ConstructIdInfo id => ExtractIds (LHsTyVarBndrs id) where
   extractIds (HsQTvs _kvs tvs) = do
     -- We don't have location info for the kind variables
     extractIds tvs
+#endif
 
 instance ConstructIdInfo id => ExtractIds (LHsTyVarBndr id) where
+#if __GLASGOW_HASKELL__ >= 706
   extractIds (L span (UserTyVar name)) =
+#else
+  extractIds (L span (UserTyVar name _postTcKind)) =
+#endif
     record span Binding name
+
+#if __GLASGOW_HASKELL__ >= 706
   extractIds (L span (KindedTyVar name _kind)) =
+#else
+  extractIds (L span (KindedTyVar name _kind _postTcKind)) =
+#endif
+    -- TODO: deal with _kind
     record span Binding name
 
 instance ConstructIdInfo id => ExtractIds (LHsBinds id) where
@@ -399,13 +418,11 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
     extractIds matches
 
   extractIds (L _ (HsIPVar _ ))          = unsupported "HsIPVar"
-  extractIds (L _ (HsLamCase _ _ ))      = unsupported "HsLamCase"
   extractIds (L _ (NegApp _ _))          = unsupported "NegApp"
   extractIds (L _ (SectionL _ _))        = unsupported "SectionL"
   extractIds (L _ (SectionR _ _))        = unsupported "SectionR"
   extractIds (L _ (ExplicitTuple _ _))   = unsupported "ExplicitTuple"
   extractIds (L _ (HsIf _ _ _ _))        = unsupported "HsIf"
-  extractIds (L _ (HsMultiIf _ _))       = unsupported "HsMultiIf"
   extractIds (L _ (ExplicitPArr _ _))    = unsupported "ExplicitPArr"
   extractIds (L _ (RecordUpd _ _ _ _ _)) = unsupported "RecordUpd"
   extractIds (L _ (ArithSeq _ _ ))       = unsupported "ArithSeq"
@@ -428,6 +445,11 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
   extractIds (L _ (ELazyPat _))          = unsupported "ELazyPat"
   extractIds (L _ (HsType _ ))           = unsupported "HsType"
 
+#if __GLASGOW_HASKELL__ >= 706
+  extractIds (L _ (HsLamCase _ _ ))      = unsupported "HsLamCase"
+  extractIds (L _ (HsMultiIf _ _))       = unsupported "HsMultiIf"
+#endif
+
 -- The meaning of the constructors of LStmt isn't so obvious; see various
 -- notes in ghc/compiler/hsSyn/HsExpr.lhs
 instance ConstructIdInfo id => ExtractIds (LStmt id) where
@@ -443,12 +465,14 @@ instance ConstructIdInfo id => ExtractIds (LStmt id) where
   extractIds (L _span (LastStmt expr _return)) =
     extractIds expr
 
-
-
-
-  extractIds (L _span (ParStmt _ _ _))    = unsupported "ParStmt"
   extractIds (L _span (TransStmt {}))     = unsupported "TransStmt"
   extractIds (L _span (RecStmt {}))       = unsupported "RecStmt"
+
+#if __GLASGOW_HASKELL__ >= 706
+  extractIds (L _span (ParStmt _ _ _))    = unsupported "ParStmt"
+#else
+  extractIds (L _span (ParStmt _ _ _ _))  = unsupported "ParStmt"
+#endif
 
 instance ConstructIdInfo id => ExtractIds (LPat id) where
   extractIds (L _span (WildPat _postTcType)) =
