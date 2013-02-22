@@ -376,21 +376,35 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
     extractIds [fun, arg]
   extractIds (L _ (HsLit _)) =
     return ()
+  extractIds (L _ (HsLam matches)) =
+    extractIds matches
+  extractIds (L _ (HsDo _ctxt stmts _postTcType)) =
+    -- ctxt indicates what kind of statement it is; AFAICT there is no
+    -- useful information in it for us
+    -- postTcType is not located
+    extractIds stmts
+  extractIds (L _ (ExplicitList _postTcType exprs)) =
+    extractIds exprs
+  extractIds (L _ (RecordCon con _postTcType _recordBinds)) =
+    record (getLoc con) NonBinding (unLoc con)
+    -- TODO: deal with _recordBinds
+  extractIds (L _ (HsCase expr matches)) = do
+    extractIds expr
+    extractIds matches
+
+
+
+
 
   extractIds (L _ (HsIPVar _ ))          = unsupported "HsIPVar"
-  extractIds (L _ (HsLam _))             = unsupported "HsLam"
   extractIds (L _ (HsLamCase _ _ ))      = unsupported "HsLamCase"
   extractIds (L _ (NegApp _ _))          = unsupported "NegApp"
   extractIds (L _ (SectionL _ _))        = unsupported "SectionL"
   extractIds (L _ (SectionR _ _))        = unsupported "SectionR"
   extractIds (L _ (ExplicitTuple _ _))   = unsupported "ExplicitTuple"
-  extractIds (L _ (HsCase _ _))          = unsupported "HsCase"
   extractIds (L _ (HsIf _ _ _ _))        = unsupported "HsIf"
   extractIds (L _ (HsMultiIf _ _))       = unsupported "HsMultiIf"
-  extractIds (L _ (HsDo _ _ _))          = unsupported "HsDo"
-  extractIds (L _ (ExplicitList _ _))    = unsupported "ExplicitList"
   extractIds (L _ (ExplicitPArr _ _))    = unsupported "ExplicitPArr"
-  extractIds (L _ (RecordCon _ _ _))     = unsupported "RecordCon"
   extractIds (L _ (RecordUpd _ _ _ _ _)) = unsupported "RecordUpd"
   extractIds (L _ (ArithSeq _ _ ))       = unsupported "ArithSeq"
   extractIds (L _ (PArrSeq _ _))         = unsupported "PArrSeq"
@@ -411,3 +425,25 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
   extractIds (L _ (EViewPat _ _))        = unsupported "EViewPat"
   extractIds (L _ (ELazyPat _))          = unsupported "ELazyPat"
   extractIds (L _ (HsType _ ))           = unsupported "HsType"
+
+-- The meaning of the constructors of LStmt isn't so obvious; see various
+-- notes in ghc/compiler/hsSyn/HsExpr.lhs
+instance ConstructIdInfo id => ExtractIds (LStmt id) where
+  extractIds (L _span (ExprStmt expr _seq _guard _postTcType)) =
+    -- Neither _seq nor _guard are located
+    extractIds expr
+  extractIds (L _span (BindStmt _pat expr _bind _fail)) =
+    -- Neither _bind or _fail are located
+    -- TODO: deal with pat
+    extractIds expr
+  extractIds (L _span (LetStmt binds)) =
+    extractIds binds
+  extractIds (L _span (LastStmt expr _return)) =
+    extractIds expr
+
+
+
+
+  extractIds (L _span (ParStmt _ _ _))    = unsupported "ParStmt"
+  extractIds (L _span (TransStmt {}))     = unsupported "TransStmt"
+  extractIds (L _span (RecStmt {}))       = unsupported "RecStmt"
