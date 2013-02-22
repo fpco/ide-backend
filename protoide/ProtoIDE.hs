@@ -43,6 +43,13 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   idInfoView <- textViewNewWithBuffer idInfoBuff
   textViewSetWrapMode idInfoView WrapWord
 
+  -- Create a scrolled window to scroll long lines instead of resizing.
+  scrolled <- scrolledWindowNew Nothing Nothing
+  set scrolled [ scrolledWindowHscrollbarPolicy := PolicyAutomatic
+               , scrolledWindowVscrollbarPolicy := PolicyAutomatic
+               , containerChild := textView
+               ]
+
   -- Create box to hold id info and errors
   infoAndErrors <- vBoxNew True 5
   boxPackEnd infoAndErrors errorsView PackGrow 0
@@ -50,22 +57,15 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
 
   -- Create paned view to contain source and info/errors
   hPaned <- vPanedNew
-  panedAdd1 hPaned textView
+  panedAdd1 hPaned scrolled
   panedAdd2 hPaned infoAndErrors
   panedSetPosition hPaned 240
-
-  -- Create a scrolled window to scroll long lines instead of resizing.
-  scrolled <- scrolledWindowNew Nothing Nothing
-  set scrolled [ scrolledWindowHscrollbarPolicy := PolicyAutomatic
-             , scrolledWindowVscrollbarPolicy := PolicyAutomatic
-             ]
-  scrolledWindowAddWithViewport scrolled hPaned
 
   -- Create window
   window <- windowNew
   set window [ windowDefaultWidth  := 640
              , windowDefaultHeight := 480
-             , containerChild      := scrolled
+             , containerChild      := hPaned
              ]
   onDestroy window mainQuit
 
