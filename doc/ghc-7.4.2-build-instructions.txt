@@ -1,0 +1,22 @@
+Get ghc from fpco:
+
+  git clone git@github.com:fpco/ghc
+
+Checkout the ide-backend branch of 7.4.2:
+
+  git checkout -b ide-backend ide-backend 
+
+Get packages, and checkout the 7.4.2 branches:
+
+  ./sync-all --no-dph -r http://darcs.haskell.org get
+  ./sync-all checkout -b ghc-7.4.2 ghc-7.4.2-release
+
+Now build as usual: 
+
+  cp mk/build.mk.sample mk/build.mk
+
+then edit mk/build.mk to use the quick build flavour, and finally
+
+  perl boot
+  ./configure 
+  make -j8
