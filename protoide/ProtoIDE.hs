@@ -1,4 +1,5 @@
 import Graphics.UI.Gtk
+import System.GIO.File.AppInfo
 import Data.IORef
 import Control.Monad (when, forM_)
 import System.IO.Temp (withSystemTempDirectory)
@@ -6,21 +7,35 @@ import Data.Maybe (fromJust)
 import Data.ByteString.Lazy (fromChunks)
 import Data.Monoid (mempty)
 import System.FilePath (takeFileName)
+import Control.Monad.Reader
 
 import IdeSession
 import ModuleName as MN
 
+openUrlBySystemTool :: String -> IO ()
+openUrlBySystemTool url = do
+  infos <- appInfoGetAllForType "text/html"
+  case infos of
+    [] -> return ()
+    xs -> appInfoLaunchUris (head xs) [url] Nothing
 
 main :: IO ()
 main = withSystemTempDirectory "protoide" $ \tempDir -> do
   initGUI
 
-  -- Create tag
+  -- Create URL link tag.
+  link <- textTagNew (Just "link")
+  set link [ textTagForeground := "blue"
+           , textTagUnderline := UnderlineSingle
+           ]
+
+  -- Create highlight tag
   highlight <- textTagNew (Just "highlight")
   set highlight [ textTagBackground := "#ffff00" ]
 
   -- Create tag table
   tagTable <- textTagTableNew
+  textTagTableAdd tagTable link
   textTagTableAdd tagTable highlight
 
   -- Create text buffer and text view
@@ -39,7 +54,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   textViewSetWrapMode errorsView WrapWord
 
   -- Create text view for information about ids
-  idInfoBuff <- textBufferNew Nothing
+  idInfoBuff <- textBufferNew (Just tagTable)
   idInfoView <- textViewNewWithBuffer idInfoBuff
   textViewSetWrapMode idInfoView WrapWord
 
@@ -116,6 +131,27 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
         _ -> return ()
 
       textBufferSetText idInfoBuff (show idInfo ++ " " ++ haddockLink idInfo)
+      iterStart <- textBufferGetIterAtLineOffset idInfoBuff
+                     0 (1 + length (show idInfo))
+      iterEnd   <- textBufferGetIterAtLineOffset idInfoBuff
+                     0 (1 + length (show idInfo ++ haddockLink idInfo))
+      textBufferApplyTag idInfoBuff link iterStart iterEnd
+
+  -- TODO: this doesn't work; not idea how to trigger textTagEvent, e.g.,
+  -- from a mouse click
+  link `on` textTagEvent $ \_ iter -> lift $ do
+    -- Find the IdInfo for the identifier under the tag.
+    line  <- textIterGetLine iter
+    col   <- textIterGetLineOffset iter
+    idMap <- readIORef idMapRef
+    let idInfos = idInfoAtLocation (line + 1) (col + 1) idMap
+        root = "http://hackage.haskell.org/packages/archive/"
+    case idInfos of
+      [] -> return False  -- TODO: no idea what the bool means
+      info : _ -> do
+        putStrLn $ root ++ haddockLink info  -- debug
+        openUrlBySystemTool $ root ++ haddockLink info
+        return True
 
   widgetShowAll window
   mainGUI
