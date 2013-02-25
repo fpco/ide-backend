@@ -8,34 +8,21 @@ import Data.ByteString.Lazy (fromChunks)
 import Data.Monoid (mempty)
 import System.FilePath (takeFileName)
 import Control.Monad.Reader
+import System.Process
 
 import IdeSession
 import ModuleName as MN
-
-openUrlBySystemTool :: String -> IO ()
-openUrlBySystemTool url = do
-  infos <- appInfoGetAllForType "text/html"
-  case infos of
-    [] -> return ()
-    xs -> appInfoLaunchUris (head xs) [url] Nothing
 
 main :: IO ()
 main = withSystemTempDirectory "protoide" $ \tempDir -> do
   initGUI
 
-  -- Create URL link tag.
-  link <- textTagNew (Just "link")
-  set link [ textTagForeground := "blue"
-           , textTagUnderline := UnderlineSingle
-           ]
-
-  -- Create highlight tag
+  -- Create tag
   highlight <- textTagNew (Just "highlight")
   set highlight [ textTagBackground := "#ffff00" ]
 
   -- Create tag table
   tagTable <- textTagTableNew
-  textTagTableAdd tagTable link
   textTagTableAdd tagTable highlight
 
   -- Create text buffer and text view
@@ -54,7 +41,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   textViewSetWrapMode errorsView WrapWord
 
   -- Create text view for information about ids
-  idInfoBuff <- textBufferNew (Just tagTable)
+  idInfoBuff <- textBufferNew Nothing
   idInfoView <- textViewNewWithBuffer idInfoBuff
   textViewSetWrapMode idInfoView WrapWord
 
@@ -131,27 +118,39 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
         _ -> return ()
 
       textBufferSetText idInfoBuff (show idInfo ++ " " ++ haddockLink idInfo)
-      iterStart <- textBufferGetIterAtLineOffset idInfoBuff
-                     0 (1 + length (show idInfo))
-      iterEnd   <- textBufferGetIterAtLineOffset idInfoBuff
-                     0 (1 + length (show idInfo ++ haddockLink idInfo))
-      textBufferApplyTag idInfoBuff link iterStart iterEnd
 
-  -- TODO: this doesn't work; not idea how to trigger textTagEvent, e.g.,
-  -- from a mouse click
-  link `on` textTagEvent $ \_ iter -> lift $ do
+  -- textTagEvent requires a 'dynamic upcast' to see that it's a button
+  -- release and EventM probably does not provide any, so I'd rather
+  -- do buttonReleaseEvent directly.
+  textView `on` buttonReleaseEvent $ tryEvent $ do
+    LeftButton <- eventButton
+    [Control] <- eventModifier
+    (x, y) <- eventCoordinates
+    (xb, yb) <- liftIO $
+      textViewWindowToBufferCoords textView TextWindowWidget (floor x, floor y)
+    iter <- liftIO $ textViewGetIterAtLocation textView xb yb
+    line <- liftIO $ textIterGetLine iter
+    col  <- liftIO $ textIterGetLineOffset iter
     -- Find the IdInfo for the identifier under the tag.
-    line  <- textIterGetLine iter
-    col   <- textIterGetLineOffset iter
-    idMap <- readIORef idMapRef
+    idMap <- liftIO $ readIORef idMapRef
     let idInfos = idInfoAtLocation (line + 1) (col + 1) idMap
         root = "http://hackage.haskell.org/packages/archive/"
     case idInfos of
-      [] -> return False  -- TODO: no idea what the bool means
+      [] -> do
+        -- DEBUG: liftIO $ putStrLn $ root ++ "ha: " ++ show (x, y, col, line)
+        return ()
       info : _ -> do
-        putStrLn $ root ++ haddockLink info  -- debug
-        openUrlBySystemTool $ root ++ haddockLink info
-        return True
+        -- DEBUG: liftIO $ putStrLn $ root ++ haddockLink info
+        liftIO $ openUrlBySystemTool $ root ++ haddockLink info
 
   widgetShowAll window
   mainGUI
+
+-- The original openUrlBySystemTool coredumps for me, so here's hack, after
+-- https://github.com/keera-studios/hails-templates/blob/master/src/System/Application.hs.
+openUrlBySystemTool :: String -> IO ()
+openUrlBySystemTool url = do
+  infos <- appInfoGetAllForType "text/html"
+  unless (null infos) $ void $ do
+    let exe = appInfoGetExecutable $ head infos
+    runProcess exe [url] Nothing Nothing Nothing Nothing Nothing
