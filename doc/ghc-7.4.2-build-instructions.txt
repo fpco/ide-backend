@@ -11,6 +11,10 @@ Get packages, and checkout the 7.4.2 branches:
   ./sync-all --no-dph -r http://darcs.haskell.org get
   ./sync-all checkout -b ghc-7.4.2 ghc-7.4.2-release
 
+and make sure we're still in the experimental branch of ghc:
+  
+  git checkout ide-backend-experimental
+
 Now build as usual: 
 
   cp mk/build.mk.sample mk/build.mk
