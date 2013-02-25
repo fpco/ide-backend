@@ -263,9 +263,13 @@ ast span info cont = do
 ast _ _ cont = cond
 #endif
 
-unsupported :: MonadIO m => String -> ExtractIdsT m ()
+unsupported :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m ()
 #if DEBUG
-unsupported c = liftIO . appendFile "/tmp/ghc.log" $ "extractIds: unsupported " ++ c
+unsupported mspan c = do
+  prettySpan <- case mspan of
+    Just span -> ast span c $ pretty span
+    Nothing   -> return "<No span given>"
+  liftIO . appendFile "/tmp/ghc.log" $ "extractIds: unsupported " ++ c ++ " at " ++ prettySpan
 #else
 unsupported _ = return ()
 #endif
@@ -325,12 +329,12 @@ instance ConstructIdInfo id => ExtractIds (LSig id) where
   extractIds (L span (TypeSig names tp)) = ast span "TypeSig" $ do
     forM_ names $ \name -> record (getLoc name) NonBinding (unLoc name)
     extractIds tp
-  extractIds (L _span (GenericSig _ _)) = unsupported "GenericSig"
-  extractIds (L _span (IdSig _))        = unsupported "IdSig"
-  extractIds (L _span (FixSig _))       = unsupported "FixSig"
-  extractIds (L _span (InlineSig _ _))  = unsupported "InlineSig"
-  extractIds (L _span (SpecSig _ _ _))  = unsupported "SpecSig"
-  extractIds (L _span (SpecInstSig _))  = unsupported "SpecInstSig"
+  extractIds (L span (GenericSig _ _)) = unsupported (Just span) "GenericSig"
+  extractIds (L span (IdSig _))        = unsupported (Just span) "IdSig"
+  extractIds (L span (FixSig _))       = unsupported (Just span) "FixSig"
+  extractIds (L span (InlineSig _ _))  = unsupported (Just span) "InlineSig"
+  extractIds (L span (SpecSig _ _ _))  = unsupported (Just span) "SpecSig"
+  extractIds (L span (SpecInstSig _))  = unsupported (Just span) "SpecInstSig"
 
 instance ConstructIdInfo id => ExtractIds (LHsType id) where
   extractIds (L span (HsFunTy arg res)) = ast span "HsFunTy" $
@@ -346,25 +350,25 @@ instance ConstructIdInfo id => ExtractIds (LHsType id) where
     -- tupleSort is unboxed/boxed/etc.
     extractIds typs
 
-  extractIds (L _span (HsListTy _))            = unsupported "HsListTy"
-  extractIds (L _span (HsPArrTy _))            = unsupported "HsPArrTy"
-  extractIds (L _span (HsOpTy _ _ _))          = unsupported "HsOpTy"
-  extractIds (L _span (HsParTy _))             = unsupported "HsParTy"
-  extractIds (L _span (HsIParamTy _ _))        = unsupported "HsIParamTy"
-  extractIds (L _span (HsEqTy _ _))            = unsupported "HsEqTy"
-  extractIds (L _span (HsKindSig _ _))         = unsupported "HsKindSig"
-  extractIds (L _span (HsQuasiQuoteTy _))      = unsupported "HsQuasiQuoteTy"
-  extractIds (L _span (HsSpliceTy _ _ _))      = unsupported "HsSpliceTy"
-  extractIds (L _span (HsDocTy _ _))           = unsupported "HsDocTy"
-  extractIds (L _span (HsBangTy _ _))          = unsupported "HsBangTy"
-  extractIds (L _span (HsRecTy _))             = unsupported "HsRecTy"
-  extractIds (L _span (HsCoreTy _))            = unsupported "HsCoreTy"
-  extractIds (L _span (HsExplicitListTy _ _))  = unsupported "HsExplicitListTy"
-  extractIds (L _span (HsExplicitTupleTy _ _)) = unsupported "HsExplicitTupleTy"
-  extractIds (L _span (HsWrapTy _ _))          = unsupported "HsWrapTy"
+  extractIds (L span (HsListTy _))            = unsupported (Just span) "HsListTy"
+  extractIds (L span (HsPArrTy _))            = unsupported (Just span) "HsPArrTy"
+  extractIds (L span (HsOpTy _ _ _))          = unsupported (Just span) "HsOpTy"
+  extractIds (L span (HsParTy _))             = unsupported (Just span) "HsParTy"
+  extractIds (L span (HsIParamTy _ _))        = unsupported (Just span) "HsIParamTy"
+  extractIds (L span (HsEqTy _ _))            = unsupported (Just span) "HsEqTy"
+  extractIds (L span (HsKindSig _ _))         = unsupported (Just span) "HsKindSig"
+  extractIds (L span (HsQuasiQuoteTy _))      = unsupported (Just span) "HsQuasiQuoteTy"
+  extractIds (L span (HsSpliceTy _ _ _))      = unsupported (Just span) "HsSpliceTy"
+  extractIds (L span (HsDocTy _ _))           = unsupported (Just span) "HsDocTy"
+  extractIds (L span (HsBangTy _ _))          = unsupported (Just span) "HsBangTy"
+  extractIds (L span (HsRecTy _))             = unsupported (Just span) "HsRecTy"
+  extractIds (L span (HsCoreTy _))            = unsupported (Just span) "HsCoreTy"
+  extractIds (L span (HsExplicitListTy _ _))  = unsupported (Just span) "HsExplicitListTy"
+  extractIds (L span (HsExplicitTupleTy _ _)) = unsupported (Just span) "HsExplicitTupleTy"
+  extractIds (L span (HsWrapTy _ _))          = unsupported (Just span) "HsWrapTy"
 
 #if __GLASGOW_HASKELL__ >= 706
-  extractIds (L _span (HsTyLit _))             = unsupported "HsTyLit"
+  extractIds (L span (HsTyLit _))             = unsupported (Just span) "HsTyLit"
 #endif
 
 #if __GLASGOW_HASKELL__ >= 706
@@ -398,9 +402,9 @@ instance ConstructIdInfo id => ExtractIds (LHsBind id) where
     record (getLoc (fun_id bind)) Binding (unLoc (fun_id bind))
     extractIds (fun_matches bind)
   extractIds (L span _bind@(PatBind {})) = ast span "PatBind" $
-    unsupported "PatBind"
-  extractIds (L span _bind@(VarBind {})) = ast span "VarBind" $
-    unsupported "VarBind"
+    unsupported (Just span) "PatBind"
+  extractIds (L span _bind@(VarBind {})) =
+    unsupported (Just span) "VarBind"
   extractIds (L span bind@(AbsBinds {})) = ast span "AbsBinds" $
     extractIds (abs_binds bind)
 
@@ -432,7 +436,7 @@ instance ConstructIdInfo id => ExtractIds (HsLocalBinds id) where
     extractIds (map snd binds) -- "fst" is 'rec flag'
     extractIds sigs
   extractIds (HsIPBinds _) =
-    unsupported "HsIPBinds"
+    unsupported Nothing "HsIPBinds"
 
 instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsPar expr)) = ast span "HsPar" $
@@ -474,37 +478,37 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
     extractIds expr
     extractIds matches
 
-  extractIds (L _ (HsIPVar _ ))          = unsupported "HsIPVar"
-  extractIds (L _ (NegApp _ _))          = unsupported "NegApp"
-  extractIds (L _ (SectionL _ _))        = unsupported "SectionL"
-  extractIds (L _ (SectionR _ _))        = unsupported "SectionR"
-  extractIds (L _ (ExplicitTuple _ _))   = unsupported "ExplicitTuple"
-  extractIds (L _ (HsIf _ _ _ _))        = unsupported "HsIf"
-  extractIds (L _ (ExplicitPArr _ _))    = unsupported "ExplicitPArr"
-  extractIds (L _ (RecordUpd _ _ _ _ _)) = unsupported "RecordUpd"
-  extractIds (L _ (ArithSeq _ _ ))       = unsupported "ArithSeq"
-  extractIds (L _ (PArrSeq _ _))         = unsupported "PArrSeq"
-  extractIds (L _ (HsSCC _ _))           = unsupported "HsSCC"
-  extractIds (L _ (HsCoreAnn _ _))       = unsupported "HsCoreAnn"
-  extractIds (L _ (HsBracket _))         = unsupported "HsBracket"
-  extractIds (L _ (HsBracketOut _ _))    = unsupported "HsBracketOut"
-  extractIds (L _ (HsSpliceE _))         = unsupported "HsSpliceE"
-  extractIds (L _ (HsQuasiQuoteE _ ))    = unsupported "HsQuasiQuoteE"
-  extractIds (L _ (HsProc _ _))          = unsupported "HsProc"
-  extractIds (L _ (HsArrApp _ _ _ _ _))  = unsupported "HsArrApp"
-  extractIds (L _ (HsArrForm _ _ _))     = unsupported "HsArrForm"
-  extractIds (L _ (HsTick _ _))          = unsupported "HsTick"
-  extractIds (L _ (HsBinTick _ _ _))     = unsupported "HsBinTick"
-  extractIds (L _ (HsTickPragma _ _))    = unsupported "HsTickPragma"
-  extractIds (L _ (EWildPat))            = unsupported "EWildPat"
-  extractIds (L _ (EAsPat _ _))          = unsupported "EAsPat"
-  extractIds (L _ (EViewPat _ _))        = unsupported "EViewPat"
-  extractIds (L _ (ELazyPat _))          = unsupported "ELazyPat"
-  extractIds (L _ (HsType _ ))           = unsupported "HsType"
+  extractIds (L span (HsIPVar _ ))          = unsupported (Just span) "HsIPVar"
+  extractIds (L span (NegApp _ _))          = unsupported (Just span) "NegApp"
+  extractIds (L span (SectionL _ _))        = unsupported (Just span) "SectionL"
+  extractIds (L span (SectionR _ _))        = unsupported (Just span) "SectionR"
+  extractIds (L span (ExplicitTuple _ _))   = unsupported (Just span) "ExplicitTuple"
+  extractIds (L span (HsIf _ _ _ _))        = unsupported (Just span) "HsIf"
+  extractIds (L span (ExplicitPArr _ _))    = unsupported (Just span) "ExplicitPArr"
+  extractIds (L span (RecordUpd _ _ _ _ _)) = unsupported (Just span) "RecordUpd"
+  extractIds (L span (ArithSeq _ _ ))       = unsupported (Just span) "ArithSeq"
+  extractIds (L span (PArrSeq _ _))         = unsupported (Just span) "PArrSeq"
+  extractIds (L span (HsSCC _ _))           = unsupported (Just span) "HsSCC"
+  extractIds (L span (HsCoreAnn _ _))       = unsupported (Just span) "HsCoreAnn"
+  extractIds (L span (HsBracket _))         = unsupported (Just span) "HsBracket"
+  extractIds (L span (HsBracketOut _ _))    = unsupported (Just span) "HsBracketOut"
+  extractIds (L span (HsSpliceE _))         = unsupported (Just span) "HsSpliceE"
+  extractIds (L span (HsQuasiQuoteE _ ))    = unsupported (Just span) "HsQuasiQuoteE"
+  extractIds (L span (HsProc _ _))          = unsupported (Just span) "HsProc"
+  extractIds (L span (HsArrApp _ _ _ _ _))  = unsupported (Just span) "HsArrApp"
+  extractIds (L span (HsArrForm _ _ _))     = unsupported (Just span) "HsArrForm"
+  extractIds (L span (HsTick _ _))          = unsupported (Just span) "HsTick"
+  extractIds (L span (HsBinTick _ _ _))     = unsupported (Just span) "HsBinTick"
+  extractIds (L span (HsTickPragma _ _))    = unsupported (Just span) "HsTickPragma"
+  extractIds (L span (EWildPat))            = unsupported (Just span) "EWildPat"
+  extractIds (L span (EAsPat _ _))          = unsupported (Just span) "EAsPat"
+  extractIds (L span (EViewPat _ _))        = unsupported (Just span) "EViewPat"
+  extractIds (L span (ELazyPat _))          = unsupported (Just span) "ELazyPat"
+  extractIds (L span (HsType _ ))           = unsupported (Just span) "HsType"
 
 #if __GLASGOW_HASKELL__ >= 706
-  extractIds (L _ (HsLamCase _ _ ))      = unsupported "HsLamCase"
-  extractIds (L _ (HsMultiIf _ _))       = unsupported "HsMultiIf"
+  extractIds (L span (HsLamCase _ _ ))      = unsupported "HsLamCase"
+  extractIds (L span (HsMultiIf _ _))       = unsupported "HsMultiIf"
 #endif
 
 instance (ExtractIds a, ConstructIdInfo id) => ExtractIds (HsRecFields id a) where
@@ -531,13 +535,13 @@ instance ConstructIdInfo id => ExtractIds (LStmt id) where
   extractIds (L span (LastStmt expr _return)) = ast span "LastStmt" $
     extractIds expr
 
-  extractIds (L _span (TransStmt {}))     = unsupported "TransStmt"
-  extractIds (L _span (RecStmt {}))       = unsupported "RecStmt"
+  extractIds (L span (TransStmt {}))     = unsupported (Just span) "TransStmt"
+  extractIds (L span (RecStmt {}))       = unsupported (Just span) "RecStmt"
 
 #if __GLASGOW_HASKELL__ >= 706
-  extractIds (L _span (ParStmt _ _ _))    = unsupported "ParStmt"
+  extractIds (L span (ParStmt _ _ _))    = unsupported (Just span) "ParStmt"
 #else
-  extractIds (L _span (ParStmt _ _ _ _))  = unsupported "ParStmt"
+  extractIds (L span (ParStmt _ _ _ _))  = unsupported (Just span) "ParStmt"
 #endif
 
 instance ConstructIdInfo id => ExtractIds (LPat id) where
@@ -568,14 +572,14 @@ instance ConstructIdInfo id => ExtractIds (LPat id) where
     extractIds pat_args
 
   -- View patterns
-  extractIds (L _span (ViewPat _ _ _))     = unsupported "ViewPat"
-  extractIds (L _span (QuasiQuotePat _))   = unsupported "QuasiQuotePat"
-  extractIds (L _span (LitPat _))          = unsupported "LitPat"
-  extractIds (L _span (NPat _ _ _))        = unsupported "NPat"
-  extractIds (L _span (NPlusKPat _ _ _ _)) = unsupported "NPlusKPat"
-  extractIds (L _span (SigPatIn _ _))      = unsupported "SigPatIn"
-  extractIds (L _span (SigPatOut _ _))     = unsupported "SigPatOut"
-  extractIds (L _span (CoPat _ _ _))       = unsupported "CoPat"
+  extractIds (L span (ViewPat _ _ _))     = unsupported (Just span) "ViewPat"
+  extractIds (L span (QuasiQuotePat _))   = unsupported (Just span) "QuasiQuotePat"
+  extractIds (L span (LitPat _))          = unsupported (Just span) "LitPat"
+  extractIds (L span (NPat _ _ _))        = unsupported (Just span) "NPat"
+  extractIds (L span (NPlusKPat _ _ _ _)) = unsupported (Just span) "NPlusKPat"
+  extractIds (L span (SigPatIn _ _))      = unsupported (Just span) "SigPatIn"
+  extractIds (L span (SigPatOut _ _))     = unsupported (Just span) "SigPatOut"
+  extractIds (L span (CoPat _ _ _))       = unsupported (Just span) "CoPat"
 
 instance ConstructIdInfo id => ExtractIds (HsConPatDetails id) where
   extractIds (PrefixCon args) = extractIds args
