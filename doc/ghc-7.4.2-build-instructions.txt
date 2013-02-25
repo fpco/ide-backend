@@ -4,7 +4,7 @@ Get ghc from fpco:
 
 Checkout the ide-backend branch of 7.4.2:
 
-  git checkout -b ide-backend ide-backend 
+  git checkout ide-backend-experimental
 
 Get packages, and checkout the 7.4.2 branches:
 
