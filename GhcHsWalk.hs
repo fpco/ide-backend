@@ -11,7 +11,7 @@ module GhcHsWalk
 
 import Prelude hiding (span, id, mod)
 import Control.Monad (forM_)
-import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
+import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell, censor)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, ask)
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Data.IORef
@@ -36,6 +36,24 @@ import qualified Module as Module
 import MonadUtils (MonadIO(..))
 import Bag
 import DataCon (dataConName)
+
+#define DEBUG 1
+
+{------------------------------------------------------------------------------
+  TODO: Current known problems:
+
+  - RECORDS
+
+    Given
+
+    > data T = MkT { a :: Bool, b :: Int }
+    > someT = MkT { a = True, b = 5 }
+
+    the record declaration does not have any source info at all for MkT, a or b;
+    the record definition as 'a' point to the record definition rather than the
+    record declaration.
+------------------------------------------------------------------------------}
+
 
 {------------------------------------------------------------------------------
   Environment mapping source locations to info
@@ -200,20 +218,56 @@ debugPP header val = do
   val' <- pretty val
   liftIO $ appendFile "/tmp/ghc.log" (header ++ ": " ++ val' ++ "\n")
 
-record :: (Monad m, ConstructIdInfo id)
+record :: (MonadIO m, ConstructIdInfo id)
        => SrcSpan -> IsBinder -> id -> ExtractIdsT m ()
 record span isBinder id = do
-  sourceSpan <- case extractSourceSpan span of
-    ProperSpan sp -> return sp
-    TextSpan unhelpful -> fail $ "Id without sourcespan: " ++ unhelpful
-  idInfo <- constructIdInfo isBinder id
-  tell . IdMap $ Map.singleton sourceSpan idInfo
+  case extractSourceSpan span of
+    ProperSpan sourceSpan -> do
+      idInfo <- constructIdInfo isBinder id
+      tell . IdMap $ Map.singleton sourceSpan idInfo
+    TextSpan _ ->
+      debugPP "Id without source span" id
 
+-- For debugging purposes, we also record information about the AST
+ast :: Monad m => SrcSpan -> String -> ExtractIdsT m a -> ExtractIdsT m a
+#if DEBUG
+ast span info cont = do
+  let idInfo = IdInfo { idName     = info
+                      , idModule   = Nothing
+                      , idPackage  = Nothing
+                      , idSpace    = VarName
+                      , idType     = Nothing
+                      , idDefSpan  = TextSpan "<Debugging>"
+                      , idIsBinder = NonBinding
+                      }
+  case extractSourceSpan span of
+    ProperSpan sourceSpan -> do
+      tell . IdMap $ Map.singleton sourceSpan idInfo
+      censor addInfo cont
+    TextSpan _ ->
+      censor addInfo cont
+  where
+    addInfo :: IdMap -> IdMap
+    addInfo = IdMap . Map.map addInfo' . idMapToMap
+
+    addInfo' :: IdInfo -> IdInfo
+    addInfo' idInfo =
+      if idDefSpan idInfo == TextSpan "<Debugging>"
+        then idInfo { idName = info ++ "/" ++ idName idInfo }
+        else idInfo
+#else
+ast _ _ cont = cond
+#endif
+
+unsupported :: Monad m => String -> ExtractIdsT m ()
+#if DEBUG
 -- We should ignore unrecognized expressions rather than throw an error
 -- However, for writing this code in the first place it's useful to know
 -- which constructor we fail to support
-unsupported :: Monad m => String -> ExtractIdsT m ()
 unsupported c = fail $ "extractIds: unsupported " ++ c
+#else
+unsupported _ = return ()
+#endif
 
 {------------------------------------------------------------------------------
   ConstructIdInfo
@@ -267,7 +321,7 @@ instance ConstructIdInfo id => ExtractIds (HsValBinds id) where
     extractIds sigs
 
 instance ConstructIdInfo id => ExtractIds (LSig id) where
-  extractIds (L _span (TypeSig names tp)) = do
+  extractIds (L span (TypeSig names tp)) = ast span "TypeSig" $ do
     forM_ names $ \name -> record (getLoc name) NonBinding (unLoc name)
     extractIds tp
   extractIds (L _span (GenericSig _ _)) = unsupported "GenericSig"
@@ -278,16 +332,16 @@ instance ConstructIdInfo id => ExtractIds (LSig id) where
   extractIds (L _span (SpecInstSig _))  = unsupported "SpecInstSig"
 
 instance ConstructIdInfo id => ExtractIds (LHsType id) where
-  extractIds (L _span (HsFunTy arg res)) =
+  extractIds (L span (HsFunTy arg res)) = ast span "HsFunTy" $
     extractIds [arg, res]
-  extractIds (L span (HsTyVar name)) =
+  extractIds (L span (HsTyVar name)) = ast span "HsTyVar" $
     record span NonBinding name
   extractIds (L _span (HsForAllTy _explicitFlag tyVars _ctxt body)) = do
     extractIds tyVars
     extractIds body
-  extractIds (L _span (HsAppTy fun arg)) =
+  extractIds (L span (HsAppTy fun arg)) = ast span "HsAppTy" $
     extractIds [fun, arg]
-  extractIds (L _span (HsTupleTy _tupleSort typs)) =
+  extractIds (L span (HsTupleTy _tupleSort typs)) = ast span "HsTupleTy" $
     -- tupleSort is unboxed/boxed/etc.
     extractIds typs
 
@@ -321,16 +375,16 @@ instance ConstructIdInfo id => ExtractIds (LHsTyVarBndrs id) where
 
 instance ConstructIdInfo id => ExtractIds (LHsTyVarBndr id) where
 #if __GLASGOW_HASKELL__ >= 706
-  extractIds (L span (UserTyVar name)) =
+  extractIds (L span (UserTyVar name)) = ast span "UserTyVar" $
 #else
-  extractIds (L span (UserTyVar name _postTcKind)) =
+  extractIds (L span (UserTyVar name _postTcKind)) = ast span "UserTyVar" $
 #endif
     record span Binding name
 
 #if __GLASGOW_HASKELL__ >= 706
-  extractIds (L span (KindedTyVar name _kind)) =
+  extractIds (L span (KindedTyVar name _kind)) = ast span "KindedTyVar" $
 #else
-  extractIds (L span (KindedTyVar name _kind _postTcKind)) =
+  extractIds (L span (KindedTyVar name _kind _postTcKind)) = ast span "KindedTyVar" $
 #endif
     -- TODO: deal with _kind
     record span Binding name
@@ -339,14 +393,14 @@ instance ConstructIdInfo id => ExtractIds (LHsBinds id) where
   extractIds = extractIds . bagToList
 
 instance ConstructIdInfo id => ExtractIds (LHsBind id) where
-  extractIds (L _span bind@(FunBind {})) = do
+  extractIds (L span bind@(FunBind {})) = ast span "FunBind" $ do
     record (getLoc (fun_id bind)) Binding (unLoc (fun_id bind))
     extractIds (fun_matches bind)
-  extractIds (L _span _bind@(PatBind {})) =
+  extractIds (L span _bind@(PatBind {})) = ast span "PatBind" $
     unsupported "PatBind"
-  extractIds (L _span _bind@(VarBind {})) =
+  extractIds (L span _bind@(VarBind {})) = ast span "VarBind" $
     unsupported "VarBind"
-  extractIds (L _span bind@(AbsBinds {})) =
+  extractIds (L span bind@(AbsBinds {})) = ast span "AbsBinds" $
     extractIds (abs_binds bind)
 
 instance ConstructIdInfo id => ExtractIds (MatchGroup id) where
@@ -355,7 +409,7 @@ instance ConstructIdInfo id => ExtractIds (MatchGroup id) where
     -- We ignore the postTcType, as it doesn't have location information
 
 instance ConstructIdInfo id => ExtractIds (LMatch id) where
-  extractIds (L _span (Match pats _type rhss)) = do
+  extractIds (L span (Match pats _type rhss)) = ast span "Match" $ do
     extractIds pats
     extractIds rhss
 
@@ -365,7 +419,8 @@ instance ConstructIdInfo id => ExtractIds (GRHSs id) where
     extractIds binds
 
 instance ConstructIdInfo id => ExtractIds (LGRHS id) where
-  extractIds (L _span (GRHS _guards rhs)) = extractIds rhs
+  extractIds (L span (GRHS _guards rhs)) = ast span "GRHS" $
+    extractIds rhs
 
 instance ConstructIdInfo id => ExtractIds (HsLocalBinds id) where
   extractIds EmptyLocalBinds =
@@ -379,42 +434,42 @@ instance ConstructIdInfo id => ExtractIds (HsLocalBinds id) where
     unsupported "HsIPBinds"
 
 instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
-  extractIds (L _ (HsPar expr)) =
+  extractIds (L span (HsPar expr)) = ast span "HsPar" $
     extractIds expr
-  extractIds (L _ (ExprWithTySig expr _type)) = do
-    extractIds expr
-    debugPP "ExprWithTySig" _type
-  extractIds (L _ (ExprWithTySigOut expr _type)) = do
+  extractIds (L span (ExprWithTySig expr _type)) = ast span "ExprWithTySig" $ do
     extractIds expr
     debugPP "ExprWithTySig" _type
-  extractIds (L _ (HsOverLit _ )) =
+  extractIds (L span (ExprWithTySigOut expr _type)) = ast span "ExprWithTySigOut" $ do
+    extractIds expr
+    debugPP "ExprWithTySig" _type
+  extractIds (L span (HsOverLit _ )) = ast span "HsOverLit" $
     return ()
-  extractIds (L _ (OpApp left op _fix right)) = do
+  extractIds (L span (OpApp left op _fix right)) = ast span "OpApp" $
     extractIds [left, op, right]
-  extractIds (L span (HsVar id)) =
+  extractIds (L span (HsVar id)) = ast span "HsVar" $
     record span NonBinding id
-  extractIds (L span (HsWrap _wrapper expr)) =
+  extractIds (L span (HsWrap _wrapper expr)) = ast span "HsWrap" $
     extractIds (L span expr)
-  extractIds (L _ (HsLet binds expr)) = do
+  extractIds (L span (HsLet binds expr)) = ast span "HsLet" $ do
     extractIds binds
     extractIds expr
-  extractIds (L _ (HsApp fun arg)) =
+  extractIds (L span (HsApp fun arg)) = ast span "HsApp" $
     extractIds [fun, arg]
-  extractIds (L _ (HsLit _)) =
+  extractIds (L span (HsLit _)) = ast span "HsLit" $
     return ()
-  extractIds (L _ (HsLam matches)) =
+  extractIds (L span (HsLam matches)) = ast span "HsLam" $
     extractIds matches
-  extractIds (L _ (HsDo _ctxt stmts _postTcType)) =
+  extractIds (L span (HsDo _ctxt stmts _postTcType)) = ast span "HsDo" $
     -- ctxt indicates what kind of statement it is; AFAICT there is no
     -- useful information in it for us
     -- postTcType is not located
     extractIds stmts
-  extractIds (L _ (ExplicitList _postTcType exprs)) =
+  extractIds (L span (ExplicitList _postTcType exprs)) = ast span "ExplicitList" $
     extractIds exprs
-  extractIds (L _ (RecordCon con _postTcType _recordBinds)) =
+  extractIds (L span (RecordCon con _postTcType recordBinds)) = ast span "RecordCon" $ do
     record (getLoc con) NonBinding (unLoc con)
-    -- TODO: deal with _recordBinds
-  extractIds (L _ (HsCase expr matches)) = do
+    extractIds recordBinds
+  extractIds (L span (HsCase expr matches)) = ast span "HsCase" $ do
     extractIds expr
     extractIds matches
 
@@ -451,19 +506,28 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
   extractIds (L _ (HsMultiIf _ _))       = unsupported "HsMultiIf"
 #endif
 
+instance (ExtractIds a, ConstructIdInfo id) => ExtractIds (HsRecFields id a) where
+  extractIds (HsRecFields rec_flds _rec_dotdot) =
+    extractIds rec_flds
+
+instance (ExtractIds a, ConstructIdInfo id) => ExtractIds (HsRecField id a) where
+  extractIds (HsRecField id arg _pun) = do
+    record (getLoc id) NonBinding (unLoc id)
+    extractIds arg
+
 -- The meaning of the constructors of LStmt isn't so obvious; see various
 -- notes in ghc/compiler/hsSyn/HsExpr.lhs
 instance ConstructIdInfo id => ExtractIds (LStmt id) where
-  extractIds (L _span (ExprStmt expr _seq _guard _postTcType)) =
+  extractIds (L span (ExprStmt expr _seq _guard _postTcType)) = ast span "ExprStmt" $
     -- Neither _seq nor _guard are located
     extractIds expr
-  extractIds (L _span (BindStmt pat expr _bind _fail)) = do
+  extractIds (L span (BindStmt pat expr _bind _fail)) = ast span "BindStmt" $ do
     -- Neither _bind or _fail are located
     extractIds pat
     extractIds expr
-  extractIds (L _span (LetStmt binds)) =
+  extractIds (L span (LetStmt binds)) = ast span "LetStmt" $
     extractIds binds
-  extractIds (L _span (LastStmt expr _return)) =
+  extractIds (L span (LastStmt expr _return)) = ast span "LastStmt" $
     extractIds expr
 
   extractIds (L _span (TransStmt {}))     = unsupported "TransStmt"
@@ -476,31 +540,31 @@ instance ConstructIdInfo id => ExtractIds (LStmt id) where
 #endif
 
 instance ConstructIdInfo id => ExtractIds (LPat id) where
-  extractIds (L _span (WildPat _postTcType)) =
+  extractIds (L span (WildPat _postTcType)) = ast span "WildPat" $
     return ()
-  extractIds (L span (VarPat id)) =
+  extractIds (L span (VarPat id)) = ast span "VarPat" $
     record span Binding id
-  extractIds (L _span (LazyPat pat)) =
+  extractIds (L span (LazyPat pat)) = ast span "LazyPat" $
     extractIds pat
-  extractIds (L _span (AsPat id pat)) = do
+  extractIds (L span (AsPat id pat)) = ast span "AsPat" $ do
     record (getLoc id) Binding (unLoc id)
     extractIds pat
-  extractIds (L _span (ParPat pat)) =
+  extractIds (L span (ParPat pat)) = ast span "ParPat" $
     extractIds pat
-  extractIds (L _span (BangPat pat)) =
+  extractIds (L span (BangPat pat)) = ast span "BangPat" $
     extractIds pat
-  extractIds (L _span (ListPat pats _postTcType)) =
+  extractIds (L span (ListPat pats _postTcType)) = ast span "ListPat" $
     extractIds pats
-  extractIds (L _span (TuplePat pats _boxity _postTcType)) =
+  extractIds (L span (TuplePat pats _boxity _postTcType)) = ast span "TuplePat" $
     extractIds pats
-  extractIds (L _span (PArrPat pats _postTcType)) =
+  extractIds (L span (PArrPat pats _postTcType)) = ast span "PArrPat" $
     extractIds pats
-  extractIds (L _span (ConPatIn con details)) = do
+  extractIds (L span (ConPatIn con details)) = ast span "ConPatIn" $ do
     record (getLoc con) NonBinding (unLoc con) -- the constructor name is non-binding
-    -- TODO: deal with _details
-  extractIds (L _span (ConPatOut {pat_con, pat_args})) = do
+    extractIds details
+  extractIds (L span (ConPatOut {pat_con, pat_args})) = ast span "ConPatOut" $ do
     record (getLoc pat_con) NonBinding (dataConName (unLoc pat_con))
-    -- TODO: deal with details (pat_args)
+    extractIds pat_args
 
   -- View patterns
   extractIds (L _span (ViewPat _ _ _))     = unsupported "ViewPat"
@@ -511,3 +575,10 @@ instance ConstructIdInfo id => ExtractIds (LPat id) where
   extractIds (L _span (SigPatIn _ _))      = unsupported "SigPatIn"
   extractIds (L _span (SigPatOut _ _))     = unsupported "SigPatOut"
   extractIds (L _span (CoPat _ _ _))       = unsupported "CoPat"
+
+instance ConstructIdInfo id => ExtractIds (HsConPatDetails id) where
+  extractIds (PrefixCon args) = extractIds args
+  extractIds (RecCon rec)     = extractIds rec
+  extractIds (InfixCon a b)   = extractIds [a, b]
+
+

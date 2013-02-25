@@ -105,7 +105,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     let idInfos = idInfoAtLocation (line + 1) (col + 1) idMap
 
     -- And highlight if it's defined in the current module
-    forM_ idInfos $ \idInfo -> do
+    idInfoText <- forM idInfos $ \idInfo -> do
       case idDefSpan idInfo of
         ProperSpan defSpan | takeFileName (spanFilePath defSpan) == "M.hs" -> do
           iterStart <- textBufferGetIterAtLineOffset textBuffer
@@ -117,7 +117,9 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
           textBufferApplyTag textBuffer highlight iterStart iterEnd
         _ -> return ()
 
-      textBufferSetText idInfoBuff (show idInfo ++ " " ++ haddockLink idInfo)
+      return $ show idInfo ++ " " ++ haddockLink idInfo
+
+    textBufferSetText idInfoBuff (unlines idInfoText)
 
   -- textTagEvent requires a 'dynamic upcast' to see that it's a button
   -- release and EventM probably does not provide any, so I'd rather
