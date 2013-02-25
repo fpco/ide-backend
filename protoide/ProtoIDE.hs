@@ -124,13 +124,11 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   -- textTagEvent requires a 'dynamic upcast' to see that it's a button
   -- release and EventM probably does not provide any, so I'd rather
   -- do buttonReleaseEvent directly.
-  textView `on` buttonReleaseEvent $ tryEvent $ do
-    LeftButton <- eventButton
+  textView `on` keyPressEvent $ tryEvent $ do
+    "a" <- eventKeyName
     [Control] <- eventModifier
-    (x, y) <- eventCoordinates
-    (xb, yb) <- liftIO $
-      textViewWindowToBufferCoords textView TextWindowWidget (floor x, floor y)
-    iter <- liftIO $ textViewGetIterAtLocation textView xb yb
+    mark <- liftIO $ textBufferGetInsert textBuffer
+    iter <- liftIO $ textBufferGetIterAtMark textBuffer mark
     line <- liftIO $ textIterGetLine iter
     col  <- liftIO $ textIterGetLineOffset iter
     -- Find the IdInfo for the identifier under the tag.
@@ -139,7 +137,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
         root = "http://hackage.haskell.org/packages/archive/"
     case idInfos of
       [] -> do
-        -- DEBUG: liftIO $ putStrLn $ root ++ "ha: " ++ show (x, y, col, line)
+        -- DEBUG: liftIO $ putStrLn $ root ++ "ha: " ++ show (col, line)
         return ()
       info : _ -> do
         -- DEBUG: liftIO $ putStrLn $ root ++ haddockLink info
