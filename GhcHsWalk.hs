@@ -214,9 +214,13 @@ pretty val = do
 #endif
 
 debugPP :: (MonadIO m, Outputable a) => String -> a -> ExtractIdsT m ()
+#if DEBUG
 debugPP header val = do
   val' <- pretty val
   liftIO $ appendFile "/tmp/ghc.log" (header ++ ": " ++ val' ++ "\n")
+#else
+debugPP _ _ = return ()
+#endif
 
 record :: (MonadIO m, ConstructIdInfo id)
        => SrcSpan -> IsBinder -> id -> ExtractIdsT m ()
@@ -259,12 +263,9 @@ ast span info cont = do
 ast _ _ cont = cond
 #endif
 
-unsupported :: Monad m => String -> ExtractIdsT m ()
+unsupported :: MonadIO m => String -> ExtractIdsT m ()
 #if DEBUG
--- We should ignore unrecognized expressions rather than throw an error
--- However, for writing this code in the first place it's useful to know
--- which constructor we fail to support
-unsupported c = fail $ "extractIds: unsupported " ++ c
+unsupported c = liftIO . appendFile "/tmp/ghc.log" $ "extractIds: unsupported " ++ c
 #else
 unsupported _ = return ()
 #endif
