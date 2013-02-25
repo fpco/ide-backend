@@ -135,7 +135,8 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     idMap <- liftIO $ readIORef idMapRef
     let idInfos = idInfoAtLocation (line + 1) (col + 1) idMap
         root = "http://hackage.haskell.org/packages/archive/"
-    case idInfos of
+        notDebug info = idDefSpan info /= TextSpan "<Debugging>"
+    case filter notDebug idInfos of
       [] -> do
         -- DEBUG: liftIO $ putStrLn $ root ++ "ha: " ++ show (col, line)
         return ()
