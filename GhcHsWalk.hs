@@ -155,12 +155,15 @@ haddockSpaceMarks TcClsName = "t"
 -- going via Hoogle.
 haddockLink :: IdInfo -> String
 haddockLink IdInfo{..} =
-      fromMaybe "<unknown package>" idPackage ++ "/"
+      latest (fromMaybe "<unknown package>" idPackage) ++ "/doc/html/"
    ++ maybe "<unknown module>" dotToDash idModule ++ ".html#"
    ++ haddockSpaceMarks idSpace ++ ":"
    ++ idName
  where
    dotToDash = map (\c -> if c == '.' then '-' else c)
+   latest p =
+     let (package, version) = break (== '-') p
+     in package ++ "/" ++ if null version then "latest" else tail version
 
 idInfoAtLocation :: Int -> Int -> IdMap -> [IdInfo]
 idInfoAtLocation line col = map snd . filter inRange . idMapToList
