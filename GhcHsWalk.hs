@@ -162,8 +162,10 @@ haddockLink IdInfo{..} =
  where
    dotToDash = map (\c -> if c == '.' then '-' else c)
    latest p =
-     let (package, version) = break (== '-') p
-     in package ++ "/" ++ if null version then "latest" else tail version
+     let (afterDash, uptoDash) = break (== '-') $ reverse p
+     in if null uptoDash
+        then reverse afterDash ++ "/latest"
+        else reverse (tail uptoDash) ++ "/" ++ reverse afterDash
 
 idInfoAtLocation :: Int -> Int -> IdMap -> [IdInfo]
 idInfoAtLocation line col = map snd . filter inRange . idMapToList
