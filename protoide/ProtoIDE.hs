@@ -127,11 +127,8 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   -- release and EventM probably does not provide any, so I'd rather
   -- do buttonReleaseEvent directly.
   textView `on` keyPressEvent $ tryEvent $ do
-    liftIO $ putStrLn "1"
     "a" <- eventKeyName
-    liftIO $ putStrLn "2"
     [Control] <- eventModifier
-    liftIO $ putStrLn "3"
     mark <- liftIO $ textBufferGetInsert textBuffer
     iter <- liftIO $ textBufferGetIterAtMark textBuffer mark
     line <- liftIO $ textIterGetLine iter
@@ -143,10 +140,10 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
         notDebug info = idDefSpan info /= TextSpan "<Debugging>"
     case filter notDebug idInfos of
       [] -> do
-        liftIO $ putStrLn $ root ++ "ha: " ++ show (col, line)
+        -- DEBUG: liftIO $ putStrLn $ root ++ "ha: " ++ show (col, line)
         return ()
       info : _ -> do
-        liftIO $ putStrLn $ root ++ haddockLink info
+        -- DEBUG: liftIO $ putStrLn $ root ++ haddockLink info
         liftIO $ openUrlBySystemTool $ root ++ haddockLink info
 
   widgetShowAll window
