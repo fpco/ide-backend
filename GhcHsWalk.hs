@@ -346,29 +346,7 @@ instance ConstructIdInfo Id where
 
 instance ConstructIdInfo Name where
   constructIdInfo idIsBinder name = do
-      idScope <- if idIsBinder
-        then
-          return Binder
-        else do
-          rdrElts <- lookupRdrEnv (Name.nameOccName name)
-          prov <- case rdrElts of
-            Just [gre] -> return $ RdrName.gre_prov gre
-            _ -> -- Assume local (TODO: that's not quite right -- () gets to this case too?)
-                 return RdrName.LocalDef
-          case prov of
-            RdrName.LocalDef ->
-              return Local {
-                  idDefSpan =  extractSourceSpan (Name.nameSrcSpan name)
-                }
-            RdrName.Imported spec -> do
-              let (impMod, impSpan) = extractImportInfo spec
-              return Imported {
-                  idDefSpan            = extractSourceSpan (Name.nameSrcSpan name)
-                , idDefinedInModule    = fmap (Module.moduleNameString . Module.moduleName) mod
-                , idDefinedInPackage   = fmap (Module.packageIdString . Module.modulePackageId) mod
-                , idImportedFromModule = impMod
-                , idImportSpan         = impSpan
-                }
+      idScope <- constructScope idIsBinder
       return IdInfo{..}
     where
       occ     = Name.nameOccName name
@@ -377,6 +355,29 @@ instance ConstructIdInfo Name where
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
       idType  = Nothing -- After renamer but before typechecker
 
+      constructScope :: Monad m => IsBinder -> ExtractIdsT m IdScope
+      constructScope True = return Binder
+      constructScope False = do
+        rdrElts <- lookupRdrEnv (Name.nameOccName name)
+        prov <- case rdrElts of
+          Just [gre] -> return $ RdrName.gre_prov gre
+          _ -> -- Assume local (TODO: that's not quite right -- () gets to this case too?)
+               return RdrName.LocalDef
+        return (scopeFromProv prov)
+
+      scopeFromProv :: RdrName.Provenance -> IdScope
+      scopeFromProv RdrName.LocalDef = Local {
+          idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
+        }
+      scopeFromProv (RdrName.Imported spec) =
+        let (impMod, impSpan) = extractImportInfo spec in Imported {
+          idDefSpan            = extractSourceSpan (Name.nameSrcSpan name)
+        , idDefinedInModule    = fmap (Module.moduleNameString . Module.moduleName) mod
+        , idDefinedInPackage   = fmap (Module.packageIdString . Module.modulePackageId) mod
+        , idImportedFromModule = impMod
+        , idImportSpan         = impSpan
+        }
+
       extractImportInfo :: [RdrName.ImportSpec] -> (String, EitherSpan)
       extractImportInfo (RdrName.ImpSpec decl item:_) =
         ( moduleNameString (RdrName.is_mod decl)
@@ -384,6 +385,7 @@ instance ConstructIdInfo Name where
             RdrName.ImpAll -> extractSourceSpan (RdrName.is_dloc decl)
             RdrName.ImpSome _explicit loc -> extractSourceSpan loc
         )
+      extractImportInfo _ = error "ghc invariant violated"
 
 {------------------------------------------------------------------------------
   ExtractIds
@@ -554,7 +556,7 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
     extractIds expr
   extractIds (L span (HsApp fun arg)) = ast (Just span) "HsApp" $
     extractIds [fun, arg]
-  extractIds (L span lit@(HsLit _)) =
+  extractIds (L _span (HsLit _)) =
     -- Intentional omission of the "ast" debugging call here.
     -- The syntax "assert" is replaced by GHC by "assertError <span>", where
     -- both "assertError" and the "<span>" are assigned the source span of
