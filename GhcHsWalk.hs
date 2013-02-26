@@ -346,36 +346,44 @@ instance ConstructIdInfo Id where
 
 instance ConstructIdInfo Name where
   constructIdInfo idIsBinder name = do
-    let occ     = Name.nameOccName name
-        mod     = Name.nameModule_maybe name
-        idName  = Name.occNameString occ
-        idSpace = fromGhcNameSpace $ Name.occNameSpace occ
-        idType  = Nothing -- After renamer but before typechecker
-    -- TODO: this is not yet correct. All non-binding occurrences are currently
-    -- reported as Imported. We need to check the reader env.
-    idScope <- if idIsBinder
-      then
-        return Binder
-      else do
-        rdrElts <- lookupRdrEnv (Name.nameOccName name)
-        prov <- case rdrElts of
-          Just [gre] -> return $ RdrName.gre_prov gre
-          _ -> -- Assume local (TODO: that's not quite right -- () gets to this case too?)
-               return RdrName.LocalDef
-        case prov of
-          RdrName.LocalDef ->
-            return Local {
-                idDefSpan =  extractSourceSpan (Name.nameSrcSpan name)
-              }
-          RdrName.Imported spec ->
-            return Imported {
-                idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
-              , idDefinedInModule = fmap (Module.moduleNameString . Module.moduleName) mod
-              , idDefinedInPackage = fmap (Module.packageIdString . Module.modulePackageId) mod
-              , idImportedFromModule = "<not yet implemented"
-              , idImportSpan = TextSpan "<not yet implemented>"
-              }
-    return IdInfo{..}
+      idScope <- if idIsBinder
+        then
+          return Binder
+        else do
+          rdrElts <- lookupRdrEnv (Name.nameOccName name)
+          prov <- case rdrElts of
+            Just [gre] -> return $ RdrName.gre_prov gre
+            _ -> -- Assume local (TODO: that's not quite right -- () gets to this case too?)
+                 return RdrName.LocalDef
+          case prov of
+            RdrName.LocalDef ->
+              return Local {
+                  idDefSpan =  extractSourceSpan (Name.nameSrcSpan name)
+                }
+            RdrName.Imported spec -> do
+              let (impMod, impSpan) = extractImportInfo spec
+              return Imported {
+                  idDefSpan            = extractSourceSpan (Name.nameSrcSpan name)
+                , idDefinedInModule    = fmap (Module.moduleNameString . Module.moduleName) mod
+                , idDefinedInPackage   = fmap (Module.packageIdString . Module.modulePackageId) mod
+                , idImportedFromModule = impMod
+                , idImportSpan         = impSpan
+                }
+      return IdInfo{..}
+    where
+      occ     = Name.nameOccName name
+      mod     = Name.nameModule_maybe name
+      idName  = Name.occNameString occ
+      idSpace = fromGhcNameSpace $ Name.occNameSpace occ
+      idType  = Nothing -- After renamer but before typechecker
+
+      extractImportInfo :: [RdrName.ImportSpec] -> (String, EitherSpan)
+      extractImportInfo (RdrName.ImpSpec decl item:_) =
+        ( moduleNameString (RdrName.is_mod decl)
+        , case item of
+            RdrName.ImpAll -> extractSourceSpan (RdrName.is_dloc decl)
+            RdrName.ImpSome _explicit loc -> extractSourceSpan loc
+        )
 
 {------------------------------------------------------------------------------
   ExtractIds
