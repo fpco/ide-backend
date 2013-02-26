@@ -37,6 +37,7 @@ import qualified Module
 import MonadUtils (MonadIO(..))
 import Bag
 import DataCon (dataConName)
+import qualified Packages
 
 #define DEBUG 1
 
@@ -153,8 +154,8 @@ haddockSpaceMarks TcClsName = "t"
 -- This is an illustraction and a test of the id info, but under ideal
 -- conditions could perhaps serve to link to documentation without
 -- going via Hoogle.
-haddockLink :: IdInfo -> String
-haddockLink IdInfo{..} =
+haddockLink :: {-DynFlags ->-} IdInfo -> String
+haddockLink {-dflags-} IdInfo{..} =
       latest (fromMaybe "<unknown package>" idPackage) ++ "/doc/html/"
    ++ maybe "<unknown module>" dotToDash idModule ++ ".html#"
    ++ haddockSpaceMarks idSpace ++ ":"
@@ -164,8 +165,19 @@ haddockLink IdInfo{..} =
    latest p =
      let (afterDash, uptoDash) = break (== '-') $ reverse p
      in if null uptoDash
-        then reverse afterDash ++ "/latest"
+        then fillVersion $ reverse afterDash
         else reverse (tail uptoDash) ++ "/" ++ reverse afterDash
+   fillVersion p@"<unknown package>" = p
+   fillVersion p | p == Module.packageIdString Module.mainPackageId = p
+   fillVersion p | False =
+     let pkg_state = pkgState dflags
+         pkg_config =
+           Packages.getPackageDetails pkg_state $ Module.stringToPackageId p
+         pkg_version =
+           Packages.pkgVersion $ Packages.sourcePackageId pkg_config
+     in p ++ "/" ++ show pkg_version
+   fillVersion p = p ++ "/latest"
+   dflags = undefined  -- TODO: get them from ConstructIdInfo or idleState?
 
 idInfoAtLocation :: Int -> Int -> IdMap -> [IdInfo]
 idInfoAtLocation line col = map snd . filter inRange . idMapToList
