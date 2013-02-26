@@ -108,6 +108,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
 
     -- And highlight if it's defined in the current module
     idInfoText <- forM idInfos $ \idInfo -> do
+      {-
       case idDefSpan idInfo of
         ProperSpan defSpan | takeFileName (spanFilePath defSpan) == "M.hs" -> do
           iterStart <- textBufferGetIterAtLineOffset textBuffer
@@ -118,7 +119,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
                          (spanToColumn defSpan - 1)
           textBufferApplyTag textBuffer highlight iterStart iterEnd
         _ -> return ()
-
+      -}
       return $ show idInfo ++ " " ++ haddockLink idInfo
 
     textBufferSetText idInfoBuff (unlines idInfoText)
@@ -126,6 +127,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   -- textTagEvent requires a 'dynamic upcast' to see that it's a button
   -- release and EventM probably does not provide any, so I'd rather
   -- do buttonReleaseEvent directly.
+  {-
   textView `on` keyPressEvent $ tryEvent $ do
     "a" <- eventKeyName
     [Control] <- eventModifier
@@ -145,6 +147,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
       info : _ -> do
         -- DEBUG: liftIO $ putStrLn $ root ++ haddockLink info
         liftIO $ openUrlBySystemTool $ root ++ haddockLink info
+  -}
 
   widgetShowAll window
   mainGUI

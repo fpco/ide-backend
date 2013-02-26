@@ -3,7 +3,7 @@ module GhcHsWalk
   ( IdMap(..)
   , IdInfo(..)
   , IdNameSpace(..)
-  , IsBinder(..)
+  , IdScope(..)
   , extractIdsPlugin
   , haddockLink
   , idInfoAtLocation
@@ -12,7 +12,7 @@ module GhcHsWalk
 import Prelude hiding (span, id, mod)
 import Control.Monad (forM_)
 import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell, censor)
-import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, ask)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Data.IORef
 import System.FilePath (takeFileName)
@@ -38,6 +38,8 @@ import MonadUtils (MonadIO(..))
 import Bag
 import DataCon (dataConName)
 import qualified Packages
+import qualified RdrName
+import OccName
 
 #define DEBUG 1
 
@@ -69,35 +71,50 @@ data IdNameSpace =
   | TcClsName  -- ^ Type constructors and classes
   deriving (Show, Eq)
 
-data IsBinder = Binding | NonBinding
-  deriving (Show, Eq)
-
 -- | Information about identifiers
 data IdInfo = IdInfo
   { -- | The base name of the identifer at this location. Module prefix
     -- is not included.
     idName :: String
     -- | The module prefix of the identifier. Empty, if a local variable.
-  , idModule :: Maybe String
-    -- | Package the identifier comes from. Empty, if a local variable.
-  , idPackage :: Maybe String
-    -- | Namespace of the identifier.
   , idSpace :: IdNameSpace
     -- | The type
     -- We don't always know this; in particular, we don't know kinds because
     -- the type checker does not give us LSigs for top-level annotations)
   , idType :: Maybe String
-    -- | Where was this identifier defined?
-  , idDefSpan :: EitherSpan
-    -- | Is this a binding occurrence?
-  , idIsBinder :: IsBinder
+    -- | Scope
+  , idScope :: IdScope
   }
   deriving (Show, Eq)
 
+-- TODO: Ideally, we would have
+-- 1. SourceSpan for Local rather than EitherSpan
+-- 2. String rather than Maybe String for idDefinedInModule/Package
+-- 3. SourceSpan for idImportSpan
+-- 4. Have a idImportedFromPackage, but unfortunately ghc doesn't give us
+--    this information (it's marked as a TODO in RdrName.lhs)
+data IdScope =
+    Binder
+  | Local {
+        idDefSpan :: EitherSpan
+      }
+  | Imported {
+        idDefSpan            :: EitherSpan
+      , idDefinedInModule    :: Maybe String
+      , idDefinedInPackage   :: Maybe String
+      , idImportedFromModule :: String
+      , idImportSpan         :: EitherSpan
+      }
+#ifdef DEBUG
+  | Debug
+#endif
+  deriving (Show, Eq)
+
 data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
+  deriving Show
 
 $(deriveJSON (\x -> x) ''IdNameSpace)
-$(deriveJSON (\x -> x) ''IsBinder)
+$(deriveJSON (\x -> x) ''IdScope)
 $(deriveJSON (\x -> x) ''IdInfo)
 
 instance FromJSON IdMap where
@@ -109,6 +126,7 @@ instance ToJSON IdMap where
 idMapToList :: IdMap -> [(SourceSpan, IdInfo)]
 idMapToList = Map.toList . idMapToMap
 
+{-
 instance Show IdMap where
   show = unlines . map pp . idMapToList
     where
@@ -122,12 +140,13 @@ instance Show IdMap where
       pp (sp, IdInfo{..}) =
         takeFileName (ppSpan sp)
         ++ " (" ++ show idSpace
-        ++ (case idIsBinder of Binding -> ", binder): " ; _ -> "): ")
+        ++ (case idIsBinder of True -> ", binder): " ; _ -> "): ")
         ++ maybe "" (++ "/") idPackage
         ++ maybe "" (++ ".") idModule
         ++ idName ++ " :: "
         ++ fromMaybe "<unknown type>" idType
         ++ " (" ++ takeFileName (ppEitherSpan idDefSpan) ++ ")"
+-}
 
 -- Right-biased union (information provided by the type checker replaces
 -- information provided by the renamer)
@@ -156,10 +175,14 @@ haddockSpaceMarks TcClsName = "t"
 -- going via Hoogle.
 haddockLink :: {-DynFlags ->-} IdInfo -> String
 haddockLink {-dflags-} IdInfo{..} =
-      latest (fromMaybe "<unknown package>" idPackage) ++ "/doc/html/"
-   ++ maybe "<unknown module>" dotToDash idModule ++ ".html#"
-   ++ haddockSpaceMarks idSpace ++ ":"
-   ++ idName
+  case idScope of
+    Imported{idDefinedInPackage, idDefinedInModule} ->
+         latest (fromMaybe "<unknown package>" idDefinedInPackage) ++ "/doc/html/"
+      ++ maybe "<unknown module>" dotToDash idDefinedInModule ++ ".html#"
+      ++ haddockSpaceMarks idSpace ++ ":"
+      ++ idName
+    _ ->
+      "<TODO>"
  where
    dotToDash = map (\c -> if c == '.' then '-' else c)
    latest p =
@@ -193,7 +216,9 @@ idInfoAtLocation line col = map snd . filter inRange . idMapToList
 
 extractIdsPlugin :: IORef [IdMap] -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
-  identMap <- execExtractIdsT dynFlags $ do
+  identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) $ do
+    pretty_rdr_env <- pretty (tcg_rdr_env env)
+    liftIO $ writeFile "/tmp/ghc.readerenv" pretty_rdr_env
     -- Information provided by the renamer
     -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
     extractIds (tcg_rn_decls env)
@@ -210,13 +235,14 @@ extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
 ------------------------------------------------------------------------------}
 
 -- Define type synonym to avoid orphan instances
-newtype ExtractIdsT m a = ExtractIdsT {
-      runExtractIdsT :: ReaderT DynFlags (WriterT IdMap m) a
-    }
-  deriving (Functor, Monad, MonadWriter IdMap, MonadReader DynFlags)
+newtype ExtractIdsT m a = ExtractIdsT (
+      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (WriterT IdMap m) a
+    )
+  deriving (Functor, Monad, MonadWriter IdMap, MonadReader (DynFlags, RdrName.GlobalRdrEnv))
 
-execExtractIdsT :: Monad m => DynFlags -> ExtractIdsT m () -> m IdMap
-execExtractIdsT dynFlags m = execWriterT (runReaderT (runExtractIdsT m) dynFlags)
+execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> ExtractIdsT m () -> m IdMap
+execExtractIdsT dynFlags rdrEnv (ExtractIdsT m) =
+  execWriterT $ runReaderT m (dynFlags, rdrEnv)
 
 instance MonadTrans ExtractIdsT where
   lift = ExtractIdsT . lift . lift
@@ -225,11 +251,22 @@ instance MonadTrans ExtractIdsT where
 instance MonadIO m => MonadIO (ExtractIdsT m) where
   liftIO = lift . liftIO
 
+getDynFlags :: Monad m => ExtractIdsT m DynFlags
+getDynFlags = asks fst
+
+getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
+getGlobalRdrEnv = asks snd
+
+lookupRdrEnv :: Monad m => OccName -> ExtractIdsT m (Maybe [RdrName.GlobalRdrElt])
+lookupRdrEnv name = do
+  rdrEnv <- getGlobalRdrEnv
+  return (lookupOccEnv rdrEnv name)
+
 -- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
 -- it does
 pretty :: (Monad m, Outputable a) => a -> ExtractIdsT m String
 pretty val = do
-  _dynFlags <- ask
+  _dynFlags <- getDynFlags
 #if __GLASGOW_HASKELL__ >= 706
   return $ showSDoc _dynFlags (ppr val)
 #else
@@ -261,13 +298,10 @@ ast :: Monad m => Maybe SrcSpan -> String -> ExtractIdsT m a -> ExtractIdsT m a
 ast mspan info cont = do
     case extractSourceSpan <$> mspan of
       Just (ProperSpan sourceSpan) -> do
-        let idInfo = IdInfo { idName     = info
-                            , idModule   = Nothing
-                            , idPackage  = Nothing
-                            , idSpace    = VarName
-                            , idType     = Nothing
-                            , idDefSpan  = TextSpan "<Debugging>"
-                            , idIsBinder = NonBinding
+        let idInfo = IdInfo { idName  = info
+                            , idSpace = VarName
+                            , idType  = Nothing
+                            , idScope = Debug
                             }
         tell . IdMap $ Map.singleton sourceSpan idInfo
       _ ->
@@ -279,7 +313,7 @@ ast mspan info cont = do
 
     addInfo' :: IdInfo -> IdInfo
     addInfo' idInfo =
-      if idDefSpan idInfo == TextSpan "<Debugging>"
+      if idScope idInfo == Debug
         then idInfo { idName = info ++ "/" ++ idName idInfo }
         else idInfo
 #else
@@ -299,6 +333,8 @@ unsupported _ = return ()
   ConstructIdInfo
 ------------------------------------------------------------------------------}
 
+type IsBinder = Bool
+
 class OutputableBndr id => ConstructIdInfo id where
   constructIdInfo :: Monad m => IsBinder -> id -> ExtractIdsT m IdInfo
 
@@ -309,16 +345,37 @@ instance ConstructIdInfo Id where
     return idInfo { idType = Just typ }
 
 instance ConstructIdInfo Name where
-  constructIdInfo idIsBinder name = return IdInfo{..}
-    where
-      occ       = Name.nameOccName name
-      mod       = Name.nameModule_maybe name
-      idName    = Name.occNameString occ
-      idModule  = fmap (Module.moduleNameString . Module.moduleName) mod
-      idPackage = fmap (Module.packageIdString . Module.modulePackageId) mod
-      idSpace   = fromGhcNameSpace $ Name.occNameSpace occ
-      idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
-      idType    = Nothing -- After renamer but before typechecker
+  constructIdInfo idIsBinder name = do
+    let occ     = Name.nameOccName name
+        mod     = Name.nameModule_maybe name
+        idName  = Name.occNameString occ
+        idSpace = fromGhcNameSpace $ Name.occNameSpace occ
+        idType  = Nothing -- After renamer but before typechecker
+    -- TODO: this is not yet correct. All non-binding occurrences are currently
+    -- reported as Imported. We need to check the reader env.
+    idScope <- if idIsBinder
+      then
+        return Binder
+      else do
+        rdrElts <- lookupRdrEnv (Name.nameOccName name)
+        prov <- case rdrElts of
+          Just [gre] -> return $ RdrName.gre_prov gre
+          _ -> -- Assume local (TODO: that's not quite right -- () gets to this case too?)
+               return RdrName.LocalDef
+        case prov of
+          RdrName.LocalDef ->
+            return Local {
+                idDefSpan =  extractSourceSpan (Name.nameSrcSpan name)
+              }
+          RdrName.Imported spec ->
+            return Imported {
+                idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
+              , idDefinedInModule = fmap (Module.moduleNameString . Module.moduleName) mod
+              , idDefinedInPackage = fmap (Module.packageIdString . Module.modulePackageId) mod
+              , idImportedFromModule = "<not yet implemented"
+              , idImportSpan = TextSpan "<not yet implemented>"
+              }
+    return IdInfo{..}
 
 {------------------------------------------------------------------------------
   ExtractIds
@@ -349,7 +406,7 @@ instance ConstructIdInfo id => ExtractIds (HsValBinds id) where
 
 instance ConstructIdInfo id => ExtractIds (LSig id) where
   extractIds (L span (TypeSig names tp)) = ast (Just span) "TypeSig" $ do
-    forM_ names $ \name -> record (getLoc name) NonBinding (unLoc name)
+    forM_ names $ \name -> record (getLoc name) False (unLoc name)
     extractIds tp
   extractIds (L span (GenericSig _ _)) = unsupported (Just span) "GenericSig"
   extractIds (L span (IdSig _))        = unsupported (Just span) "IdSig"
@@ -362,7 +419,7 @@ instance ConstructIdInfo id => ExtractIds (LHsType id) where
   extractIds (L span (HsFunTy arg res)) = ast (Just span) "HsFunTy" $
     extractIds [arg, res]
   extractIds (L span (HsTyVar name)) = ast (Just span) "HsTyVar" $
-    record span NonBinding name
+    record span False name
   extractIds (L span (HsForAllTy _explicitFlag tyVars ctxt body)) = ast (Just span) "hsForAllTy" $ do
     extractIds tyVars
     extractIds ctxt
@@ -411,7 +468,7 @@ instance ConstructIdInfo id => ExtractIds (LHsTyVarBndr id) where
 #else
   extractIds (L span (UserTyVar name _postTcKind)) = ast (Just span) "UserTyVar" $
 #endif
-    record span Binding name
+    record span True name
 
 #if __GLASGOW_HASKELL__ >= 706
   extractIds (L span (KindedTyVar name _kind)) = ast (Just span) "KindedTyVar" $
@@ -419,7 +476,7 @@ instance ConstructIdInfo id => ExtractIds (LHsTyVarBndr id) where
   extractIds (L span (KindedTyVar name _kind _postTcKind)) = ast (Just span) "KindedTyVar" $
 #endif
     -- TODO: deal with _kind
-    record span Binding name
+    record span True name
 
 instance ConstructIdInfo id => ExtractIds (LHsContext id) where
   extractIds (L span typs) = ast (Just span) "LHsContext" $
@@ -430,7 +487,7 @@ instance ConstructIdInfo id => ExtractIds (LHsBinds id) where
 
 instance ConstructIdInfo id => ExtractIds (LHsBind id) where
   extractIds (L span bind@(FunBind {})) = ast (Just span) "FunBind" $ do
-    record (getLoc (fun_id bind)) Binding (unLoc (fun_id bind))
+    record (getLoc (fun_id bind)) True (unLoc (fun_id bind))
     extractIds (fun_matches bind)
   extractIds (L span _bind@(PatBind {})) = ast (Just span) "PatBind" $
     unsupported (Just span) "PatBind"
@@ -481,7 +538,7 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
   extractIds (L span (OpApp left op _fix right)) = ast (Just span) "OpApp" $
     extractIds [left, op, right]
   extractIds (L span (HsVar id)) = ast (Just span) "HsVar" $
-    record span NonBinding id
+    record span False id
   extractIds (L span (HsWrap _wrapper expr)) = ast (Just span) "HsWrap" $
     extractIds (L span expr)
   extractIds (L span (HsLet binds expr)) = ast (Just span) "HsLet" $ do
@@ -506,7 +563,7 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
   extractIds (L span (ExplicitList _postTcType exprs)) = ast (Just span) "ExplicitList" $
     extractIds exprs
   extractIds (L span (RecordCon con _postTcType recordBinds)) = ast (Just span) "RecordCon" $ do
-    record (getLoc con) NonBinding (unLoc con)
+    record (getLoc con) False (unLoc con)
     extractIds recordBinds
   extractIds (L span (HsCase expr matches)) = ast (Just span) "HsCase" $ do
     extractIds expr
@@ -551,7 +608,7 @@ instance (ExtractIds a, ConstructIdInfo id) => ExtractIds (HsRecFields id a) whe
 
 instance (ExtractIds a, ConstructIdInfo id) => ExtractIds (HsRecField id a) where
   extractIds (HsRecField id arg _pun) = ast Nothing "HsRecField" $ do
-    record (getLoc id) NonBinding (unLoc id)
+    record (getLoc id) False (unLoc id)
     extractIds arg
 
 -- The meaning of the constructors of LStmt isn't so obvious; see various
@@ -582,11 +639,11 @@ instance ConstructIdInfo id => ExtractIds (LPat id) where
   extractIds (L span (WildPat _postTcType)) = ast (Just span) "WildPat" $
     return ()
   extractIds (L span (VarPat id)) = ast (Just span) "VarPat" $
-    record span Binding id
+    record span True id
   extractIds (L span (LazyPat pat)) = ast (Just span) "LazyPat" $
     extractIds pat
   extractIds (L span (AsPat id pat)) = ast (Just span) "AsPat" $ do
-    record (getLoc id) Binding (unLoc id)
+    record (getLoc id) True (unLoc id)
     extractIds pat
   extractIds (L span (ParPat pat)) = ast (Just span) "ParPat" $
     extractIds pat
@@ -599,10 +656,10 @@ instance ConstructIdInfo id => ExtractIds (LPat id) where
   extractIds (L span (PArrPat pats _postTcType)) = ast (Just span) "PArrPat" $
     extractIds pats
   extractIds (L span (ConPatIn con details)) = ast (Just span) "ConPatIn" $ do
-    record (getLoc con) NonBinding (unLoc con) -- the constructor name is non-binding
+    record (getLoc con) False (unLoc con) -- the constructor name is non-binding
     extractIds details
   extractIds (L span (ConPatOut {pat_con, pat_args})) = ast (Just span) "ConPatOut" $ do
-    record (getLoc pat_con) NonBinding (dataConName (unLoc pat_con))
+    record (getLoc pat_con) False (dataConName (unLoc pat_con))
     extractIds pat_args
 
   -- View patterns

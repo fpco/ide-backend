@@ -132,7 +132,7 @@ module IdeSession (
   IdMap(..),
   IdInfo(..),
   IdNameSpace(..),
-  IsBinder(..),
+  IdScope(..),
   haddockLink,
   idInfoAtLocation,
 
