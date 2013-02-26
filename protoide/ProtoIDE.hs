@@ -1,7 +1,5 @@
 import Graphics.UI.Gtk
-import System.GIO.File.AppInfo
 import Data.IORef
-import Control.Monad (when, forM_)
 import System.IO.Temp (withSystemTempDirectory)
 import Data.Maybe (fromJust)
 import Data.ByteString.Lazy (fromChunks)
@@ -9,6 +7,10 @@ import Data.Monoid (mempty)
 import System.FilePath (takeFileName)
 import Control.Monad.Reader
 import System.Process
+
+#ifndef darwin_HOST_OS
+import System.GIO.File.AppInfo
+#endif
 
 import IdeSession
 import ModuleName as MN
@@ -93,7 +95,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     writeIORef idMapRef idMap
 
   -- Highlight the identifier under the cursor
-  on textBuffer markSet $ \iter mark -> do
+  on textBuffer markSet $ \iter _mark -> do
     -- Remove old highlights
     (start, end) <- textBufferGetBounds textBuffer
     textBufferRemoveTag textBuffer highlight start end
@@ -125,8 +127,11 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   -- release and EventM probably does not provide any, so I'd rather
   -- do buttonReleaseEvent directly.
   textView `on` keyPressEvent $ tryEvent $ do
+    liftIO $ putStrLn "1"
     "a" <- eventKeyName
+    liftIO $ putStrLn "2"
     [Control] <- eventModifier
+    liftIO $ putStrLn "3"
     mark <- liftIO $ textBufferGetInsert textBuffer
     iter <- liftIO $ textBufferGetIterAtMark textBuffer mark
     line <- liftIO $ textIterGetLine iter
@@ -138,20 +143,26 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
         notDebug info = idDefSpan info /= TextSpan "<Debugging>"
     case filter notDebug idInfos of
       [] -> do
-        -- DEBUG: liftIO $ putStrLn $ root ++ "ha: " ++ show (col, line)
+        liftIO $ putStrLn $ root ++ "ha: " ++ show (col, line)
         return ()
       info : _ -> do
-        -- DEBUG: liftIO $ putStrLn $ root ++ haddockLink info
+        liftIO $ putStrLn $ root ++ haddockLink info
         liftIO $ openUrlBySystemTool $ root ++ haddockLink info
 
   widgetShowAll window
   mainGUI
 
+
 -- The original openUrlBySystemTool coredumps for me, so here's hack, after
 -- https://github.com/keera-studios/hails-templates/blob/master/src/System/Application.hs.
 openUrlBySystemTool :: String -> IO ()
 openUrlBySystemTool url = do
+#ifdef darwin_HOST_OS
+  void . system $ "open " ++ url
+#else
   infos <- appInfoGetAllForType "text/html"
+  print (null infos)
   unless (null infos) $ void $ do
     let exe = appInfoGetExecutable $ head infos
     runProcess exe [url] Nothing Nothing Nothing Nothing Nothing
+#endif
