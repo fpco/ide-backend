@@ -185,6 +185,7 @@ extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
     extractIds (tcg_rn_decls env)
     -- Information provided by the type checker
     extractIds (tcg_binds env)
+  liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
   liftIO $ modifyIORef symbolRef (identMap :)
   return env
 
@@ -457,12 +458,10 @@ instance ConstructIdInfo id => ExtractIds (HsLocalBinds id) where
 instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsPar expr)) = ast (Just span) "HsPar" $
     extractIds expr
-  extractIds (L span (ExprWithTySig expr _type)) = ast (Just span) "ExprWithTySig" $ do
+  extractIds (L span (ExprWithTySig expr _type)) = ast (Just span) "ExprWithTySig" $
     extractIds expr
-    debugPP "ExprWithTySig" _type
-  extractIds (L span (ExprWithTySigOut expr _type)) = ast (Just span) "ExprWithTySigOut" $ do
+  extractIds (L span (ExprWithTySigOut expr _type)) = ast (Just span) "ExprWithTySigOut" $
     extractIds expr
-    debugPP "ExprWithTySig" _type
   extractIds (L span (HsOverLit _ )) = ast (Just span) "HsOverLit" $
     return ()
   extractIds (L span (OpApp left op _fix right)) = ast (Just span) "OpApp" $
@@ -476,7 +475,12 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
     extractIds expr
   extractIds (L span (HsApp fun arg)) = ast (Just span) "HsApp" $
     extractIds [fun, arg]
-  extractIds (L span (HsLit _)) = ast (Just span) "HsLit" $
+  extractIds (L span lit@(HsLit _)) =
+    -- Intentional omission of the "ast" debugging call here.
+    -- The syntax "assert" is replaced by GHC by "assertError <span>", where
+    -- both "assertError" and the "<span>" are assigned the source span of
+    -- the original "assert". This means that the <span> (represented as an
+    -- HsLit) might override "assertError" in the IdMap.
     return ()
   extractIds (L span (HsLam matches)) = ast (Just span) "HsLam" $
     extractIds matches
