@@ -1,11 +1,11 @@
 {-# LANGUAGE NamedFieldPuns #-}
+import Prelude hiding (span)
 import Graphics.UI.Gtk
 import Data.IORef
 import System.IO.Temp (withSystemTempDirectory)
 import Data.Maybe (fromJust)
 import Data.ByteString.Lazy (fromChunks)
 import Data.Monoid (mempty)
-import System.FilePath (takeFileName)
 import Control.Monad.Reader
 import System.Process
 
@@ -107,6 +107,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     -- Remove old highlights
     (start, end) <- textBufferGetBounds textBuffer
     textBufferRemoveTag textBuffer highlight start end
+    textBufferRemoveTag textBuffer linkTag   start end
 
     -- Find the IdInfo for the identifier under the cursor
     line   <- textIterGetLine iter
@@ -125,14 +126,17 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     -- And highlight if it's defined in the current module
     idInfoText <- forM idInfos $ \(srcSpan, idInfo) -> do
       case idScope idInfo of
-        Imported{} -> tagSpan srcSpan linkTag
+        Imported{idImportSpan} -> do
+          tagSpan srcSpan linkTag
+          case idImportSpan of
+            ProperSpan span -> tagSpan span highlight
+            _               -> return ()
         Local{idDefSpan} ->
           case idDefSpan of
-            ProperSpan defSpan
-              | takeFileName (spanFilePath defSpan) == "M.hs" ->
-                tagSpan defSpan highlight
-            _ -> return ()
-        _ -> return ()
+            ProperSpan span -> tagSpan span highlight
+            _               -> return ()
+        _ ->
+          return ()
       return $ show idInfo ++ " " ++ haddockLink idInfo
 
     textBufferSetText idInfoBuff (unlines idInfoText)
