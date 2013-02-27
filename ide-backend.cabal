@@ -102,6 +102,7 @@ test-suite typecheck-dir
                       pureMD5,
                       crypto-api,
                       tagged,
+                      syb,
                       ide-backend-rts >= 0.1.1
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
@@ -147,6 +148,7 @@ test-suite ghc-errors
                       tagged,
                       template-haskell,
                       utf8-string,
+                      syb,
                       ide-backend-rts >= 0.1.1,
 -- parallel is only needed for the code of the tests; please do not remove;
 -- note that under cabal-dev it's still not enough and you need to install
