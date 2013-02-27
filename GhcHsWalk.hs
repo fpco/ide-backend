@@ -94,10 +94,13 @@ data IdInfo = IdInfo
 -- 4. Have a idImportedFromPackage, but unfortunately ghc doesn't give us
 --    this information (it's marked as a TODO in RdrName.lhs)
 data IdScope =
+    -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
     Binder
+    -- | Defined within this module
   | Local {
         idDefSpan :: EitherSpan
       }
+    -- | Imported from a different module
   | Imported {
         idDefSpan            :: EitherSpan
       , idDefinedInModule    :: Maybe String
@@ -105,6 +108,8 @@ data IdScope =
       , idImportedFromModule :: String
       , idImportSpan         :: EitherSpan
       }
+    -- | Wired into the compiler (@()@, @True@, etc.)
+  | WiredIn
 #ifdef DEBUG
   | Debug
 #endif
@@ -335,7 +340,7 @@ instance ConstructIdInfo Id where
 
 instance ConstructIdInfo Name where
   constructIdInfo idIsBinder name = do
-      idScope <- constructScope idIsBinder
+      idScope <- constructScope
       return IdInfo{..}
     where
       occ     = Name.nameOccName name
@@ -344,16 +349,17 @@ instance ConstructIdInfo Name where
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
       idType  = Nothing -- After renamer but before typechecker
 
-      constructScope :: Monad m => IsBinder -> ExtractIdsT m IdScope
-      constructScope True = return Binder
-      constructScope False = do
-        rdrElts <- lookupRdrEnv (Name.nameOccName name)
-        prov <- case rdrElts of
-          Just [gre] -> return $ RdrName.gre_prov gre
-          _ -> -- Assume local (TODO: that's not quite right -- () gets to this case too?)
-               return RdrName.LocalDef
-        dflags <- asks fst
-        return (scopeFromProv dflags prov)
+      constructScope :: Monad m => ExtractIdsT m IdScope
+      constructScope
+        | idIsBinder              = return Binder
+        | Name.isWiredInName name = return WiredIn
+        | otherwise = do
+            rdrElts <- lookupRdrEnv (Name.nameOccName name)
+            prov <- case rdrElts of
+              Just [gre] -> return $ RdrName.gre_prov gre
+              _ -> return RdrName.LocalDef -- Assume local
+            dflags <- asks fst
+            return (scopeFromProv dflags prov)
 
       scopeFromProv :: DynFlags -> RdrName.Provenance -> IdScope
       scopeFromProv _ RdrName.LocalDef = Local {
