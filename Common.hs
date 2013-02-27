@@ -30,12 +30,21 @@ data SourceSpan = SourceSpan
   , spanFromColumn :: Int
   , spanToLine     :: Int
   , spanToColumn   :: Int }
-  deriving (Show, Eq, Ord, Data, Typeable)
+  deriving (Eq, Ord, Data, Typeable)
+
+instance Show SourceSpan where
+  show (SourceSpan{..}) = spanFilePath ++ "@"
+                       ++ show spanFromLine ++ ":" ++ show spanFromColumn ++ "-"
+                       ++ show spanToLine   ++ ":" ++ show spanToColumn
 
 data EitherSpan =
     ProperSpan SourceSpan
   | TextSpan String
-  deriving (Show, Eq, Data, Typeable)
+  deriving (Eq, Data, Typeable)
+
+instance Show EitherSpan where
+  show (ProperSpan srcSpan) = show srcSpan
+  show (TextSpan str)       = str
 
 -- | An error or warning in a source module.
 --
