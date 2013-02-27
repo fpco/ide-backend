@@ -12,6 +12,7 @@ module GhcHsWalk
   ) where
 
 import Prelude hiding (span, id, mod)
+import Control.Arrow (first)
 import Control.Monad (forM_)
 import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell, censor)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
@@ -21,7 +22,6 @@ import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Aeson.TH (deriveJSON)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
 import Data.Monoid
 import Control.Applicative ((<$>))
 import Data.Version
@@ -105,11 +105,12 @@ data IdScope =
       }
     -- | Imported from a different module
   | Imported {
-        idDefSpan            :: EitherSpan
-      , idDefinedInModule    :: Maybe String
-      , idDefinedInPackage   :: Maybe String
-      , idImportedFromModule :: String
-      , idImportSpan         :: EitherSpan
+        idDefSpan             :: EitherSpan
+      , idDefinedInModule     :: Maybe String
+      , idDefinedInPackage    :: Maybe String
+      , idImportedFromModule  :: String
+      , idImportedFromPackage :: String
+      , idImportSpan          :: EitherSpan
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
@@ -187,8 +188,8 @@ haddockSpaceMarks TcClsName = "t"
 haddockLink :: IdInfo -> String
 haddockLink IdInfo{..} =
   case idScope of
-    Imported{idDefinedInPackage, idImportedFromModule} ->
-         dashToSlash (fromMaybe "<unknown package>" idDefinedInPackage)
+    Imported{idImportedFromPackage, idImportedFromModule} ->
+         dashToSlash idImportedFromPackage
       ++ "/doc/html/"
       ++ dotToDash idImportedFromModule ++ ".html#"
       ++ haddockSpaceMarks idSpace ++ ":"
@@ -376,9 +377,20 @@ instance ConstructIdInfo Name where
           idDefSpan            = extractSourceSpan (Name.nameSrcSpan name)
         , idDefinedInModule    = fmap (Module.moduleNameString . Module.moduleName) mod
         , idDefinedInPackage   = fmap (fillVersion dflags . Module.packageIdString . Module.modulePackageId) mod
-        , idImportedFromModule = impMod
+        , idImportedFromModule = moduleNameString impMod
+        , idImportedFromPackage = specToPkg dflags impMod
         , idImportSpan         = impSpan
         }
+
+      specToPkg dflags impMod =
+        let pkgAll = Packages.lookupModuleInAllPackages dflags impMod
+            pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
+            pkgIds = map (first (Module.packageIdString
+                                 . Packages.packageConfigId)) pkgExposed
+        in case pkgIds of
+          [p] -> fst p
+          _ -> error $ "specToPkg: " ++ moduleNameString impMod
+                       ++ ": " ++ show pkgIds
 
       fillVersion dflags p =
         let pkg_state = pkgState dflags
@@ -389,9 +401,9 @@ instance ConstructIdInfo Name where
             versionString = showVersion pkg_version
         in if null versionString then p else p ++ "-" ++ versionString
 
-      extractImportInfo :: [RdrName.ImportSpec] -> (String, EitherSpan)
+      extractImportInfo :: [RdrName.ImportSpec] -> (ModuleName, EitherSpan)
       extractImportInfo (RdrName.ImpSpec decl item:_) =
-        ( moduleNameString (RdrName.is_mod decl)
+        ( RdrName.is_mod decl
         , case item of
             RdrName.ImpAll -> extractSourceSpan (RdrName.is_dloc decl)
             RdrName.ImpSome _explicit loc -> extractSourceSpan loc
