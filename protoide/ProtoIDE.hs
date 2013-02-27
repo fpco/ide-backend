@@ -171,7 +171,7 @@ openUrlBySystemTool url = do
   void . system $ "open " ++ url
 #else
   infos <- appInfoGetAllForType "text/html"
-  print (null infos)
+  -- DEBUG: print (null infos)
   unless (null infos) $ void $ do
     let exe = appInfoGetExecutable $ head infos
     runProcess exe [url] Nothing Nothing Nothing Nothing Nothing

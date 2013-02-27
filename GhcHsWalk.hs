@@ -15,7 +15,6 @@ import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell, censor)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Data.IORef
-import System.FilePath (takeFileName)
 import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Aeson.TH (deriveJSON)
 import Data.Map (Map)
@@ -23,6 +22,7 @@ import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Monoid
 import Control.Applicative ((<$>))
+import Data.Version
 
 import Common
 import GhcRun (extractSourceSpan)
@@ -173,37 +173,26 @@ haddockSpaceMarks TcClsName = "t"
 -- This is an illustraction and a test of the id info, but under ideal
 -- conditions could perhaps serve to link to documentation without
 -- going via Hoogle.
-haddockLink :: {-DynFlags ->-} IdInfo -> String
-haddockLink {-dflags-} IdInfo{..} =
+haddockLink :: IdInfo -> String
+haddockLink IdInfo{..} =
   case idScope of
-    Imported{idDefinedInPackage, idDefinedInModule} ->
-         latest (fromMaybe "<unknown package>" idDefinedInPackage) ++ "/doc/html/"
-      ++ maybe "<unknown module>" dotToDash idDefinedInModule ++ ".html#"
+    Imported{idDefinedInPackage, idImportedFromModule} ->
+         dashToSlash (fromMaybe "<unknown package>" idDefinedInPackage)
+      ++ "/doc/html/"
+      ++ dotToDash idImportedFromModule ++ ".html#"
       ++ haddockSpaceMarks idSpace ++ ":"
       ++ idName
-    _ ->
-      "<TODO>"
+    _ -> "<local identifier>"
  where
    dotToDash = map (\c -> if c == '.' then '-' else c)
-   latest p =
+   dashToSlash p =
      let (afterDash, uptoDash) = break (== '-') $ reverse p
      in if null uptoDash
-        then fillVersion $ reverse afterDash
+        then p ++ "/latest"  -- error $ "dashToSlash: " ++ p
         else reverse (tail uptoDash) ++ "/" ++ reverse afterDash
-   fillVersion p@"<unknown package>" = p
-   fillVersion p | p == Module.packageIdString Module.mainPackageId = p
-   fillVersion p | False =
-     let pkg_state = pkgState dflags
-         pkg_config =
-           Packages.getPackageDetails pkg_state $ Module.stringToPackageId p
-         pkg_version =
-           Packages.pkgVersion $ Packages.sourcePackageId pkg_config
-     in p ++ "/" ++ show pkg_version
-   fillVersion p = p ++ "/latest"
-   dflags = undefined  -- TODO: get them from ConstructIdInfo or idleState?
 
-idInfoAtLocation :: Int -> Int -> IdMap -> [IdInfo]
-idInfoAtLocation line col = map snd . filter inRange . idMapToList
+idInfoAtLocation :: Int -> Int -> IdMap -> [(SourceSpan, IdInfo)]
+idInfoAtLocation line col = filter inRange . idMapToList
   where
     inRange :: (SourceSpan, a) -> Bool
     inRange (SourceSpan{..}, _) =
@@ -363,20 +352,30 @@ instance ConstructIdInfo Name where
           Just [gre] -> return $ RdrName.gre_prov gre
           _ -> -- Assume local (TODO: that's not quite right -- () gets to this case too?)
                return RdrName.LocalDef
-        return (scopeFromProv prov)
+        dflags <- asks fst
+        return (scopeFromProv dflags prov)
 
-      scopeFromProv :: RdrName.Provenance -> IdScope
-      scopeFromProv RdrName.LocalDef = Local {
+      scopeFromProv :: DynFlags -> RdrName.Provenance -> IdScope
+      scopeFromProv _ RdrName.LocalDef = Local {
           idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
         }
-      scopeFromProv (RdrName.Imported spec) =
+      scopeFromProv dflags (RdrName.Imported spec) =
         let (impMod, impSpan) = extractImportInfo spec in Imported {
           idDefSpan            = extractSourceSpan (Name.nameSrcSpan name)
         , idDefinedInModule    = fmap (Module.moduleNameString . Module.moduleName) mod
-        , idDefinedInPackage   = fmap (Module.packageIdString . Module.modulePackageId) mod
+        , idDefinedInPackage   = fmap (fillVersion dflags . Module.packageIdString . Module.modulePackageId) mod
         , idImportedFromModule = impMod
         , idImportSpan         = impSpan
         }
+
+      fillVersion dflags p =
+        let pkg_state = pkgState dflags
+            pkg_config =
+              Packages.getPackageDetails pkg_state $ Module.stringToPackageId p
+            pkg_version =
+              Packages.pkgVersion $ Packages.sourcePackageId pkg_config
+            versionString = showVersion pkg_version
+        in if null versionString then p else p ++ "-" ++ versionString
 
       extractImportInfo :: [RdrName.ImportSpec] -> (String, EitherSpan)
       extractImportInfo (RdrName.ImpSpec decl item:_) =
