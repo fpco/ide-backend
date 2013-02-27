@@ -47,6 +47,7 @@ library
                       pureMD5,
                       crypto-api,
                       tagged,
+                      syb,
                       ide-backend-rts >= 0.1.1
   if impl(ghc >= 7.6.2)
      build-depends:   time      ==1.4.*

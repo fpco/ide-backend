@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, DeriveDataTypeable #-}
 -- | Common types and utilities
 module Common
   ( SourceSpan(..), EitherSpan (..), SourceErrorKind(..), SourceError(..)
@@ -19,8 +19,8 @@ import Control.Monad (when)
 import Control.Monad.Trans (MonadIO, liftIO)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString.Char8 as BS
-import Data.Typeable (Typeable, typeOf)
 import System.IO (hFlush, stderr)
+import Data.Generics
 
 import Data.Accessor (Accessor, accessor)
 
@@ -30,12 +30,12 @@ data SourceSpan = SourceSpan
   , spanFromColumn :: Int
   , spanToLine     :: Int
   , spanToColumn   :: Int }
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Data, Typeable)
 
 data EitherSpan =
     ProperSpan SourceSpan
   | TextSpan String
-  deriving (Show, Eq)
+  deriving (Show, Eq, Data, Typeable)
 
 -- | An error or warning in a source module.
 --
@@ -47,11 +47,11 @@ data SourceError = SourceError
   , errorSpan :: EitherSpan
   , errorMsg  :: String
   }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Data, Typeable)
 
 -- | Severity of an error.
 data SourceErrorKind = KindError | KindWarning
-  deriving (Show, Eq)
+  deriving (Show, Eq, Data, Typeable)
 
 formatSourceError :: SourceError -> String
 formatSourceError = show

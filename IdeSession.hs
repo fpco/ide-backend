@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DeriveDataTypeable #-}
 module IdeSession (
 
   -- | This module provides an interface to the IDE backend.
@@ -245,6 +245,8 @@ import Data.Tagged (Tagged, untag)
 import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
 
 import BlockingOps (modifyMVar, modifyMVar_, withMVar)
+
+import Data.Generics
 
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.
@@ -714,14 +716,7 @@ getSourceErrors IdeSession{ideState, ideStaticInfo} =
     aux :: IdeIdleState -> IO [SourceError]
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} ->
-        let root = ideSourcesDir ideStaticInfo
-            mkRelative (SourceError kind
-                          (ProperSpan (SourceSpan path i1 i2 i3 i4)) msg) =
-              let relativePath = makeRelative root path
-              in SourceError kind
-                   (ProperSpan (SourceSpan relativePath i1 i2 i3 i4)) msg
-            mkRelative err = err
-        in return $ map mkRelative computedErrors
+        return (mkRelative (ideSourcesDir ideStaticInfo) computedErrors)
       Nothing -> fail "This session state does not admit queries."
 
 -- | Get the collection of files submitted by the user and not deleted yet.
@@ -787,7 +782,7 @@ getAllDataFiles IdeSession{ideStaticInfo} =
 -- like @parallel-3.2.0.3/Control-Parallel.html#v:pseq@.
 --
 getIdMap :: Query IdMap
-getIdMap IdeSession{ideState} =
+getIdMap IdeSession{ideState, ideStaticInfo} =
   -- TODO: scrap all this boilerplate
   $withMVar ideState $ \st ->
     case st of
@@ -797,7 +792,8 @@ getIdMap IdeSession{ideState} =
   where
     aux :: IdeIdleState -> IO IdMap
     aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return computedIdMap
+      Just Computed{..} ->
+        return (mkRelative (ideSourcesDir ideStaticInfo) computedIdMap)
       Nothing -> fail "This session state does not admit queries."
 
 -- | Get all current environment overrides
@@ -866,3 +862,12 @@ getGhcServer IdeSession{ideState} =
         return $! idleState ^. ideGhcServer
       IdeSessionShutdown ->
         fail "Session already shut down."
+
+-- Make all nested SourceSpans relative to the given directory
+mkRelative :: Data a => FilePath -> a -> a
+mkRelative path = everywhere (mkT aux)
+  where
+    aux :: SourceSpan -> SourceSpan
+    aux srcSpan = srcSpan {
+        spanFilePath = makeRelative path (spanFilePath srcSpan)
+      }

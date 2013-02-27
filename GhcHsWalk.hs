@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, TemplateHaskell, CPP #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, TemplateHaskell, CPP, DeriveDataTypeable #-}
 module GhcHsWalk
   ( IdMap(..)
   , IdInfo(..)
@@ -7,6 +7,8 @@ module GhcHsWalk
   , extractIdsPlugin
   , haddockLink
   , idInfoAtLocation
+  , idMapToList
+  , idMapFromList
   ) where
 
 import Prelude hiding (span, id, mod)
@@ -23,6 +25,7 @@ import Data.Maybe (fromMaybe)
 import Data.Monoid
 import Control.Applicative ((<$>))
 import Data.Version
+import Data.Generics
 
 import Common
 import GhcRun (extractSourceSpan)
@@ -69,7 +72,7 @@ data IdNameSpace =
   | DataName   -- ^ Source data constructors
   | TvName     -- ^ Type variables
   | TcClsName  -- ^ Type constructors and classes
-  deriving (Show, Eq)
+  deriving (Show, Eq, Data, Typeable)
 
 -- | Information about identifiers
 data IdInfo = IdInfo
@@ -85,7 +88,7 @@ data IdInfo = IdInfo
     -- | Scope
   , idScope :: IdScope
   }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Data, Typeable)
 
 -- TODO: Ideally, we would have
 -- 1. SourceSpan for Local rather than EitherSpan
@@ -113,23 +116,26 @@ data IdScope =
 #ifdef DEBUG
   | Debug
 #endif
-  deriving (Show, Eq)
+  deriving (Show, Eq, Data, Typeable)
 
 data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
-  deriving Show
+  deriving (Show, Data, Typeable)
 
 $(deriveJSON (\x -> x) ''IdNameSpace)
 $(deriveJSON (\x -> x) ''IdScope)
 $(deriveJSON (\x -> x) ''IdInfo)
 
 instance FromJSON IdMap where
-  parseJSON = fmap (IdMap . Map.fromList) . parseJSON
+  parseJSON = fmap idMapFromList . parseJSON
 
 instance ToJSON IdMap where
-  toJSON = toJSON . Map.toList . idMapToMap
+  toJSON = toJSON . idMapToList
 
 idMapToList :: IdMap -> [(SourceSpan, IdInfo)]
 idMapToList = Map.toList . idMapToMap
+
+idMapFromList :: [(SourceSpan, IdInfo)] -> IdMap
+idMapFromList = IdMap . Map.fromList
 
 {-
 instance Show IdMap where
