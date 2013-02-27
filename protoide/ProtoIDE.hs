@@ -1,3 +1,4 @@
+{-# LANGUAGE NamedFieldPuns #-}
 import Graphics.UI.Gtk
 import Data.IORef
 import System.IO.Temp (withSystemTempDirectory)
@@ -19,12 +20,19 @@ main :: IO ()
 main = withSystemTempDirectory "protoide" $ \tempDir -> do
   initGUI
 
-  -- Create tag
+  -- Create URL link tag.
+  linkTag <- textTagNew (Just "link")
+  set linkTag [ -- textTagForeground := "blue"
+                textTagUnderline := UnderlineSingle
+              ]
+
+  -- Create highlight tag
   highlight <- textTagNew (Just "highlight")
   set highlight [ textTagBackground := "#ffff00" ]
 
   -- Create tag table
   tagTable <- textTagTableNew
+  textTagTableAdd tagTable linkTag
   textTagTableAdd tagTable highlight
 
   -- Create text buffer and text view
@@ -105,29 +113,30 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     col    <- textIterGetLineOffset iter
     idMap  <- readIORef idMapRef
     let idInfos = idInfoAtLocation (line + 1) (col + 1) idMap
+        tagSpan sp tag = do
+          iterStart <- textBufferGetIterAtLineOffset textBuffer
+                         (spanFromLine   sp - 1)
+                         (spanFromColumn sp - 1)
+          iterEnd   <- textBufferGetIterAtLineOffset textBuffer
+                         (spanToLine   sp - 1)
+                         (spanToColumn sp - 1)
+          textBufferApplyTag textBuffer tag iterStart iterEnd
 
     -- And highlight if it's defined in the current module
-    idInfoText <- forM idInfos $ \idInfo -> do
-      {-
-      case idDefSpan idInfo of
-        ProperSpan defSpan | takeFileName (spanFilePath defSpan) == "M.hs" -> do
-          iterStart <- textBufferGetIterAtLineOffset textBuffer
-                         (spanFromLine   defSpan - 1)
-                         (spanFromColumn defSpan - 1)
-          iterEnd   <- textBufferGetIterAtLineOffset textBuffer
-                         (spanToLine   defSpan - 1)
-                         (spanToColumn defSpan - 1)
-          textBufferApplyTag textBuffer highlight iterStart iterEnd
+    idInfoText <- forM idInfos $ \(srcSpan, idInfo) -> do
+      case idScope idInfo of
+        Imported{} -> tagSpan srcSpan linkTag
+        Local{idDefSpan} ->
+          case idDefSpan of
+            ProperSpan defSpan
+              | takeFileName (spanFilePath defSpan) == "M.hs" ->
+                tagSpan defSpan highlight
+            _ -> return ()
         _ -> return ()
-      -}
       return $ show idInfo ++ " " ++ haddockLink idInfo
 
     textBufferSetText idInfoBuff (unlines idInfoText)
 
-  -- textTagEvent requires a 'dynamic upcast' to see that it's a button
-  -- release and EventM probably does not provide any, so I'd rather
-  -- do buttonReleaseEvent directly.
-  {-
   textView `on` keyPressEvent $ tryEvent $ do
     "a" <- eventKeyName
     [Control] <- eventModifier
@@ -139,15 +148,16 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     idMap <- liftIO $ readIORef idMapRef
     let idInfos = idInfoAtLocation (line + 1) (col + 1) idMap
         root = "http://hackage.haskell.org/packages/archive/"
-        notDebug info = idDefSpan info /= TextSpan "<Debugging>"
-    case filter notDebug idInfos of
+        isImported (_, info) = case idScope info of
+          Imported{} -> True
+          _ -> False
+    case filter isImported idInfos of
       [] -> do
         -- DEBUG: liftIO $ putStrLn $ root ++ "ha: " ++ show (col, line)
         return ()
-      info : _ -> do
+      (_, info) : _ -> do
         -- DEBUG: liftIO $ putStrLn $ root ++ haddockLink info
         liftIO $ openUrlBySystemTool $ root ++ haddockLink info
-  -}
 
   widgetShowAll window
   mainGUI
