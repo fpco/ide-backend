@@ -3,7 +3,6 @@ import Prelude hiding (span)
 import Graphics.UI.Gtk
 import Data.IORef
 import System.IO.Temp (withSystemTempDirectory)
-import Data.Maybe (fromJust)
 import Data.ByteString.Lazy (fromChunks)
 import Data.Monoid (mempty)
 import Control.Monad.Reader
@@ -14,7 +13,6 @@ import System.GIO.File.AppInfo
 #endif
 
 import IdeSession
-import ModuleName as MN
 
 main :: IO ()
 main = withSystemTempDirectory "protoide" $ \tempDir -> do
@@ -95,7 +93,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     (start, end) <- textBufferGetBounds textBuffer
     src <- textBufferGetByteString textBuffer start end False
     -- TODO: We should be able to vary the module name
-    let upd = updateModule (fromJust (MN.fromString "M")) (fromChunks [src])
+    let upd = updateModule "M.hs" (fromChunks [src])
     updateSession ideSession upd (const $ return ())
     errors <- getSourceErrors ideSession
     idMap  <- getIdMap ideSession
