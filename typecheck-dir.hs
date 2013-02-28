@@ -1,12 +1,9 @@
 module Main where
 
-import Control.Monad (liftM)
-import qualified Data.List as List
-import Data.Maybe (catMaybes)
+import Control.Monad (liftM, unless)
 import Data.Monoid (mconcat)
 import System.Directory
 import System.Environment
-import System.FilePath (dropExtension, makeRelative, takeBaseName)
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
 
@@ -68,37 +65,33 @@ main = do
         $ check opts originalSourcesDir
 
 check :: [String] -> FilePath -> FilePath -> IO ()
-check opts originalSourcesDir configDir = do
-  putStrLn $ "Copying files from: " ++ originalSourcesDir ++ "\n"
+check opts what configDir = do
+  putStrLn $ "Copying files from: " ++ what ++ "\n"
           ++ "to a temporary directory at: " ++ configDir ++ "\n"
   -- Init session.
   let sessionConfig = SessionConfig{ configDir
                                    , configStaticOpts = opts
                                    }
-  session <- initSession sessionConfig
-  -- Copy some source files from 'originalSourcesDir' to 'configSourcesDir'.
-  originalFiles <- find always
-                        ((`elem` hsExtentions) `liftM` extension)
-                        originalSourcesDir
-  isFile <- doesFileExist originalSourcesDir
-  isDirectory <- doesDirectoryExist originalSourcesDir
-  -- HACK: here we fake module names, guessing them from file names.
-  let triedModules | isDirectory =
-        map (\f -> fmap (\x -> (x, f)) $ makeRelative originalSourcesDir f)
-            originalFiles
-                   | isFile =
-        maybe [] (\x -> [Just (x, originalSourcesDir)])
-          (takeBaseName originalSourcesDir)
-                   | otherwise = error $ originalSourcesDir
-                                         ++ " is not a directory nor a file!"
-      originalModules = catMaybes triedModules
-      upd (m, f) = updateModuleFromFile m f
-      originalUpdate = mconcat $ map upd originalModules
-      len = show $ length originalFiles
+  session     <- initSession sessionConfig
+  isFile      <- doesFileExist      what
+  isDirectory <- doesDirectoryExist what
+
+  unless (isFile || isDirectory) $ fail ("invalid argument " ++ what)
+
+  modules <- if isFile
+    then return [what]
+    else find always ((`elem` hsExtentions) `liftM` extension) what
+
+  print modules
+
+  let len = show $ length modules
+
       displayCounter :: Progress -> IO ()
       displayCounter n = putStrLn ("[" ++ show n ++ "/" ++ len ++ "]")
-  updateSession session originalUpdate displayCounter
-  msgs0 <- getSourceErrors session
-  putStrLn $ "\nErrors and warnings:\n" ++ List.intercalate "\n"
-    (map formatSourceError msgs0) ++ "\n"
+
+      update = mconcat (map updateModuleFromFile modules)
+
+  updateSession session update displayCounter
+  errs <- getSourceErrors session
+  putStrLn $ "\nErrors and warnings:\n" ++ unlines (map formatSourceError errs)
   shutdownSession session
