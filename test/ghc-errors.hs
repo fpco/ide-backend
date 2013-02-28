@@ -94,13 +94,14 @@ multipleTests =
         assertNoErrors msgs
         -- Overwrite one of the copied files.
         (_, ms) <- getModules session
-        let update = loadModule (head ms) "a = unknownX"
+--        let update = loadModule (head ms) "a = unknownX"
+        let update = updateModule (head ms) $ BSLC.pack "a = unknownX"
         updateSessionD session update 1  -- at most 1 recompiled
         msgs2 <- getSourceErrors session
         -- Error reported due to the overwrite.
         case msgs2 of
           [SourceError _ _ "Not in scope: `unknownX'"] -> return ()
-          _ -> assertFailure "Unexpected source errors"
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
     )
   , ( "Overwrite with the same module name in all files"
     , \session originalUpdate lm -> do
@@ -114,7 +115,7 @@ multipleTests =
             [SourceError _ (TextSpan _) s ] ->
               assertBool "Wrong error message"
               $ isPrefixOf "module `main:Wrong' is defined in multiple files" s
-            _ -> assertFailure "Unexpected source errors"
+            _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
           else assertNoErrors msgs
     )
   , ( "Overwrite modules many times"
@@ -133,12 +134,12 @@ multipleTests =
         msgs1 <- getSourceErrors session
         case msgs1 of
           [SourceError _ _ "Not in scope: `unknownX'"] -> return ()
-          _ -> assertFailure "Unexpected source errors"
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs1
         updateSessionD session mempty 1  -- was an error, so trying again
         msgs2 <- getSourceErrors session
         case msgs2 of
           [SourceError _ _ "Not in scope: `unknownX'"] -> return ()
-          _ -> assertFailure "Unexpected source errors"
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
         -- Overwrite all files, many times, with correct code eventually.
         let upd m = loadModule m "x = unknownX"
                     <> loadModule m "y = 2"
@@ -152,7 +153,7 @@ multipleTests =
         msgs5 <- getSourceErrors session
         case msgs5 of
           [SourceError _ _ "Not in scope: `unknownX'"] -> return ()
-          _ -> assertFailure "Unexpected source errors"
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs5
         assertRaises "runStmt session Main main"
           (== userError "Cannot run before the code is generated.")
           (runStmt session "Main" "main")
@@ -329,8 +330,8 @@ syntheticTests =
               $ isSuffixOf "A.hs" fn
             assertBool "Wrong error message"
               $ isPrefixOf "No instance for (Num (IO ()))" s
-          _ -> assertFailure "Unexpected source errors"
-    )
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
+     )
   , ( "Compile a project: A depends on B, error in B"
     , withConfiguredSession defOpts $ \session -> do
         loadModulesFrom session "test/ABerror"
@@ -341,7 +342,7 @@ syntheticTests =
               $ isSuffixOf "B.hs" fn
             assertBool "Wrong error message"
               $ isPrefixOf "No instance for (Num (IO ()))" s
-          _ -> assertFailure "Unexpected source errors"
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = [ "-hide-all-packages"
@@ -451,14 +452,14 @@ syntheticTests =
         msgs <- getSourceErrors session
         case msgs of
           [SourceError _ _ "parse error on input `very'\n"] -> return ()
-          _ -> assertFailure "Unexpected source errors"
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
         let update2 = updateModule "M.hs"
                                    (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update2 1
         msgs2 <- getSourceErrors session
         case msgs2 of
           [SourceError _ _ "parse error on input `.'\n"] -> return ()
-          _ -> assertFailure "Unexpected source errors"
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
     )
   , ( "Interrupt runStmt (after 1 sec)"
     , withConfiguredSession defOpts $ \session -> do
@@ -845,7 +846,7 @@ syntheticTests =
         case msgs of
           -- We expect a 'top-level identifier without type' warning
           [SourceError KindWarning _ _] -> return ()
-          _ -> assertFailure "Unexpected source errors"
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
         _runActions <- runStmt session "M" "loop"
         msgs' <- getSourceErrors session
         assertEqual "Running code does not affect getSourceErrors" msgs msgs'
@@ -1604,6 +1605,7 @@ updateSessionD session update i = do
 
 loadModule :: FilePath -> String -> IdeSessionUpdate
 loadModule file contents =
+  -- This is a hack: construct a module name from a filename
   let mod = takeBaseName file
   in updateModule file . BSLC.pack
      $ "module " ++ mod ++ " where\n" ++ contents
