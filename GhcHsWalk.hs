@@ -381,8 +381,7 @@ instance ConstructIdInfo Name where
             (impMod, impSpan) = extractImportInfo spec in Imported {
           idDefSpan            = extractSourceSpan (Name.nameSrcSpan name)
         , idDefinedInModule    = moduleNameString $ Module.moduleName mod
-        , idDefinedInPackage   = fillVersion dflags $ Module.packageIdString
-                                 $ Module.modulePackageId mod
+        , idDefinedInPackage   = fillVersion dflags $ Module.modulePackageId mod
         , idImportedFromModule = moduleNameString impMod
         , idImportedFromPackage = modToPkg dflags impMod
         , idImportSpan         = impSpan
@@ -391,18 +390,16 @@ instance ConstructIdInfo Name where
       modToPkg dflags impMod =
         let pkgAll = Packages.lookupModuleInAllPackages dflags impMod
             pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
-            pkgIds = map (first (Module.packageIdString
-                                 . Packages.packageConfigId)) pkgExposed
+            pkgIds = map (first Packages.packageConfigId) pkgExposed
         in case pkgIds of
           [p] -> fillVersion dflags $ fst p
           _ -> error $ "modToPkg: " ++ moduleNameString impMod
-                       ++ ": " ++ show pkgIds
 
+      fillVersion :: DynFlags -> PackageId -> Package
       fillVersion dflags p =
         let pkgSt = pkgState dflags
             sourcePkgId =
-              Packages.sourcePackageId $ Packages.getPackageDetails pkgSt
-              $ Module.stringToPackageId p
+              Packages.sourcePackageId $ Packages.getPackageDetails pkgSt p
             pkgVersion = Packages.pkgVersion sourcePkgId
             packageVersion = case showVersion pkgVersion of
               "" -> Nothing
