@@ -13,7 +13,6 @@ import System.IO.Temp (withTempDirectory)
 import Common
 import GhcServer
 import IdeSession
-import qualified ModuleName as MN
 
 --- A sample program using the library. It type-checks all files
 --- in the given directory and prints out the list of errors.
@@ -85,12 +84,11 @@ check opts originalSourcesDir configDir = do
   isDirectory <- doesDirectoryExist originalSourcesDir
   -- HACK: here we fake module names, guessing them from file names.
   let triedModules | isDirectory =
-        map (\f -> fmap (\x -> (x, f)) $ MN.fromFilePath
-                   $ dropExtension $ makeRelative originalSourcesDir f)
+        map (\f -> fmap (\x -> (x, f)) $ makeRelative originalSourcesDir f)
             originalFiles
                    | isFile =
         maybe [] (\x -> [Just (x, originalSourcesDir)])
-          (MN.fromFilePath $ takeBaseName originalSourcesDir)
+          (takeBaseName originalSourcesDir)
                    | otherwise = error $ originalSourcesDir
                                          ++ " is not a directory nor a file!"
       originalModules = catMaybes triedModules

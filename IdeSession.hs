@@ -47,6 +47,10 @@ module IdeSession (
   -- * 'RunActions' for handles on the running code, through which
   --   one can interact with the code.
 
+  -- * Basic types
+  ModuleName,
+  LoadedModules,
+
   -- * Sessions
   IdeSession,
 
@@ -228,10 +232,8 @@ import System.Posix.Types (EpochTime)
 
 import Common
 import GhcServer
-import GhcRun (RunResult(..), RunBufferMode(..))
+import GhcRun (RunResult(..), RunBufferMode(..), LoadedModules, ModuleName)
 import GhcHsWalk
-import ModuleName (LoadedModules, ModuleName)
-import qualified ModuleName as MN
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT, execStateT)
@@ -329,13 +331,13 @@ data IdeIdleState = IdeIdleState {
 
 -- | The collection of source and data files submitted by the user.
 data ManagedFilesInternal = ManagedFilesInternal
-  { _managedSource :: [(ModuleName, (MD5Digest, LogicalTimestamp))]
+  { _managedSource :: [(FilePath, (MD5Digest, LogicalTimestamp))]
   , _managedData   :: [FilePath]
   }
 
 -- | The collection of source and data files submitted by the user.
 data ManagedFiles = ManagedFiles
-  { sourceFiles :: [ModuleName]
+  { sourceFiles :: [FilePath]
   , dataFiles   :: [FilePath]
   }
 
@@ -576,7 +578,7 @@ makeBlocks n = go . BSL.toChunks
 -- @getLoadedModules@ query, comes from within @module ... end@.
 -- Usually the two names are equal, but they needn't be.
 --
-updateModule :: ModuleName -> ByteString -> IdeSessionUpdate
+updateModule :: FilePath -> ByteString -> IdeSessionUpdate
 updateModule m bs = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
   let internal = internalFile ideSourcesDir m
   old <- get (ideManagedFiles .> managedSource .> lookup' m)
@@ -597,16 +599,16 @@ updateModule m bs = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
 -- | Like 'updateModule' except that instead of passing the module source by
 -- value, it's given by reference to an existing file, which will be copied.
 --
-updateModuleFromFile :: ModuleName -> FilePath -> IdeSessionUpdate
-updateModuleFromFile m p = IdeSessionUpdate $ \staticInfo -> do
+updateModuleFromFile :: FilePath -> IdeSessionUpdate
+updateModuleFromFile p = IdeSessionUpdate $ \staticInfo -> do
   -- We just call 'updateModule' because we need to read the file anyway
   -- to compute the hash.
   bs <- liftIO $ BSL.readFile p
-  runSessionUpdate (updateModule m bs) staticInfo
+  runSessionUpdate (updateModule p bs) staticInfo
 
 -- | A session update that deletes an existing module.
 --
-updateModuleDelete :: ModuleName -> IdeSessionUpdate
+updateModuleDelete :: FilePath -> IdeSessionUpdate
 updateModuleDelete m = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
   liftIO $ removeFile (internalFile ideSourcesDir m)
   set (ideManagedFiles .> managedSource .> lookup' m) Nothing
@@ -627,9 +629,8 @@ updateCodeGeneration b = IdeSessionUpdate $ \_ -> do
   set ideGenerateCode b
   set ideUpdatedCode True
 
-internalFile :: FilePath -> ModuleName -> FilePath
-internalFile ideSourcesDir m =
-  ideSourcesDir </> MN.toFilePath m <.> ".hs"
+internalFile :: FilePath -> FilePath -> FilePath
+internalFile ideSourcesDir m = ideSourcesDir </> m
 
 -- | A session update that changes a data file by giving a new value for the
 -- file. This can be used to add a new file or update an existing one.
@@ -686,7 +687,7 @@ type Query a = IdeSession -> IO a
 
 -- | Read the current value of one of the source modules.
 --
-getSourceModule :: ModuleName -> Query ByteString
+getSourceModule :: FilePath -> Query ByteString
 getSourceModule m IdeSession{ideStaticInfo} =
   BSL.readFile $ internalFile (ideSourcesDir ideStaticInfo) m
 
@@ -828,7 +829,7 @@ runStmt IdeSession{ideState} m fun = do
                                  (idleState ^. ideStderrBufferMode)
             registerTerminationCallback runActions restoreToIdle
             return (IdeSessionRunning runActions idleState, runActions)
-          else fail $ "Module " ++ show (MN.toString m)
+          else fail $ "Module " ++ show m
                       ++ " not successfully loaded, when trying to run code."
        _ ->
         -- This 'fail' invocation is, in part, a workaround for

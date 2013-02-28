@@ -8,8 +8,11 @@
 -- and optionally compiles, links and executes code.
 -- Only this file should import the GHC-internals modules.
 module GhcRun
-  ( -- * Re-expored GHC API
-    Ghc
+  ( -- * Types
+    ModuleName
+  , LoadedModules
+    -- * Re-expored GHC API
+  , Ghc
   , runFromGhc
   , liftIO
   , GhcException
@@ -64,19 +67,18 @@ import GHC hiding (flags, ModuleName, RunResult(..))
 -- because the problem is not minor and not easy to spot otherwise.
 #endif
 
-import Control.Exception (assert)
 import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM)
 import Data.IORef
 import Data.List ((\\))
-import Data.Maybe (catMaybes)
 import System.FilePath.Find (find, always, extension)
 import System.Process
 
 import Common
-import ModuleName (ModuleName, LoadedModules)
-import qualified ModuleName as MN
 import Data.Aeson.TH (deriveJSON)
+
+type ModuleName    = String
+type LoadedModules = [ModuleName]
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -255,14 +257,10 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 
     prepareResult :: DynFlags -> Ghc ([SourceError], LoadedModules)
     prepareResult _flags = do
-      errs <- liftIO $ readIORef errsRef
-      graph <- getModuleGraph
-      let moduleNames = map ms_mod_name graph
-      loadedNames <- filterM isLoaded moduleNames
-      let lmaybe = map (MN.fromString . moduleNameString) loadedNames
-          lcat = catMaybes lmaybe
-          loadedModules = assert (length lcat == length lmaybe) lcat
-      return (reverse errs, loadedModules)
+      errs   <- liftIO $ readIORef errsRef
+      graph  <- getModuleGraph
+      loaded <- filterM isLoaded (map ms_mod_name graph)
+      return (reverse errs, map moduleNameString loaded)
 
 -- | Run a snippet.
 runInGhc :: (ModuleName, String)  -- ^ module and function to execute
@@ -278,7 +276,7 @@ runInGhc (m, fun) outBMode errBMode = do
   defaultCleanupHandler flags . handleErrors $ do
 -- TODO: these debug statements break tests currently:
 --    _debugPpContext flags "context before setContext"
-    setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName (MN.toString m)
+    setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName m
                  , IIDecl $ simpleImportDecl $ mkModuleName "IdeBackendRTS"
                  ]
 --    _debugPpContext flags "context after setContext"
@@ -300,7 +298,7 @@ runInGhc (m, fun) outBMode errBMode = do
     expr = fqn "run "
         ++ "(" ++ fqBMode outBMode ++ ")"
         ++ "(" ++ fqBMode errBMode ++ ")"
-        ++ "(" ++ MN.toString m ++ "." ++ fun ++ ")"
+        ++ "(" ++ m ++ "." ++ fun ++ ")"
 
     fqn :: String -> String
     fqn = (++) "IdeBackendRTS."

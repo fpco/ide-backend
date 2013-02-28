@@ -50,7 +50,6 @@ import System.Posix.IO.ByteString
 import Common
 import GhcHsWalk
 import GhcRun
-import ModuleName (LoadedModules, ModuleName)
 import RpcServer
 
 import BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)
@@ -169,7 +168,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation
-             -> ModuleName        -- ^ Module
+             -> ModuleName       -- ^ Module
              -> String            -- ^ Function
              -> RunBufferMode     -- ^ Buffer mode for stdout
              -> RunBufferMode     -- ^ Buffer mode for stderr
