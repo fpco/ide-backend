@@ -254,11 +254,11 @@ syntheticTests =
         assEq "[m1, m2]" ["A", "A2", "XXX"]
         updateSessionD session (loadModule "A3.hs" "") 1
         assEq "[m1, m2, m3]" ["A", "A2", "A3", "XXX"]
-        updateSessionD session (loadModule "A4.hs" "import A4\na2 = A4.a + 1") 1
+        updateSessionD session (loadModule "Wrong.hs" "import A4\na2 = A4.a + 1") 1
         assEq "wrong1" ["A", "A2", "A3", "XXX"]
-        updateSessionD session (loadModule "A4.hs" "import A\na2 = A.a + c") 1
+        updateSessionD session (loadModule "Wrong.hs" "import A\na2 = A.a + c") 1
         assEq "wrong2" ["A", "A2", "A3", "XXX"]
-        updateSessionD session (loadModule "A" "a = c") 1
+        updateSessionD session (loadModule "A.hs" "a = c") 1
         -- Module "A" is compiled before "Wrong", fails, so it's invalidated
         -- and all modules that depend on it are invalidated. Module "Wrong"
         -- is never compiled.
@@ -276,9 +276,9 @@ syntheticTests =
         updateSessionD session (loadModule "A2.hs" "import A\na2 = A.a") 1
         assEq "[m1, m2]" ["A", "A2", "XXX"]
         updateSessionD session (loadModule "A3.hs" "") 1
-        assEq "[m1, m2, m3]" ["A1", "A2", "A3", "XXX"]
+        assEq "[m1, m2, m3]" ["A", "A2", "A3", "XXX"]
         updateSessionD session (loadModule "Wrong.hs" "import A4\na2 = A4.a + 1") 1
-        assEq "wrong1" ["A1", "A2", "A3", "XXX"]
+        assEq "wrong1" ["A", "A2", "A3", "XXX"]
         -- THis has to be disabled to get the different outcome below:
           -- updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
           -- assEq "wrong2" [m1, m2, m3, xxx]
@@ -289,7 +289,7 @@ syntheticTests =
         updateSessionD session (loadModule "A.hs" "a = c") 1
         -- Module "Wrong" is compiled first here, fails, so module "A"
         -- is never comipiled, so it's not invalidated.
-        assEq "wrong3" ["A1", "A2", "A3", "XXX"]
+        assEq "wrong3" ["A", "A2", "A3", "XXX"]
     )
   , ( "Duplicate shutdown"
     , withConfiguredSession defOpts $ \session ->
@@ -1381,6 +1381,7 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
         -}
     )
+{-
   , ( "Type information 1"
     , let opts = defOpts ++ [
                      "-package parallel"
@@ -1504,6 +1505,7 @@ syntheticTests =
                     $ haddockLink (idMapToMap idMap Map.! span)
         return ()
     )
+-}
   ]
 
 assertSameList :: (Ord a, Show a) => [a] -> [a] -> Assertion
