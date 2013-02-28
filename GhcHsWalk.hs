@@ -22,7 +22,6 @@ import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Aeson.TH (deriveJSON)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
 import Data.Monoid
 import Control.Applicative ((<$>))
 import Data.Version
@@ -93,6 +92,9 @@ data IdInfo = IdInfo
 
 -- TODO: Ideally, we would have
 -- 1. SourceSpan for Local rather than EitherSpan
+-- 2. Don't have Maybe String or Maybe Package in the import case
+--    (under which circumstances do we not get package information? -- the unit
+--    tests give us examples)
 -- 3. SourceSpan for idImportSpan
 -- 4. Have a idImportedFromPackage, but unfortunately ghc doesn't give us
 --    this information (it's marked as a TODO in RdrName.lhs)
@@ -106,10 +108,10 @@ data IdScope =
     -- | Imported from a different module
   | Imported {
         idDefSpan             :: EitherSpan
-      , idDefinedInModule     :: String
-      , idDefinedInPackage    :: Package
+      , idDefinedInModule     :: Maybe String
+      , idDefinedInPackage    :: Maybe Package
       , idImportedFromModule  :: String
-      , idImportedFromPackage :: Package
+      , idImportedFromPackage :: Maybe Package
       , idImportSpan          :: EitherSpan
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
@@ -204,9 +206,10 @@ haddockLink IdInfo{..} =
     _ -> "<local identifier>"
  where
    dotToDash = map (\c -> if c == '.' then '-' else c)
-   dashToSlash p = case packageVersion p of
+   dashToSlash (Just p) = case packageVersion p of
      Nothing -> packageName p ++ "/latest"
      Just version -> packageName p ++ "/" ++ version
+   dashToSlash Nothing = "<unknown package>" -- TODO
 
 idInfoAtLocation :: Int -> Int -> IdMap -> [(SourceSpan, IdInfo)]
 idInfoAtLocation line col = filter inRange . idMapToList
@@ -377,37 +380,40 @@ instance ConstructIdInfo Name where
           idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
         }
       scopeFromProv dflags (RdrName.Imported spec) =
-        let mod = fromMaybe (error "scopeFromProv") $ Name.nameModule_maybe name
-            (impMod, impSpan) = extractImportInfo spec in Imported {
-          idDefSpan            = extractSourceSpan (Name.nameSrcSpan name)
-        , idDefinedInModule    = moduleNameString $ Module.moduleName mod
-        , idDefinedInPackage   = fillVersion dflags $ Module.modulePackageId mod
-        , idImportedFromModule = moduleNameString impMod
+        let mod               = Name.nameModule_maybe name
+            (impMod, impSpan) = extractImportInfo spec
+        in Imported {
+          idDefSpan             = extractSourceSpan (Name.nameSrcSpan name)
+        , idDefinedInModule     = fmap (moduleNameString . Module.moduleName) mod
+        , idDefinedInPackage    = fmap Module.modulePackageId mod >>= fillVersion dflags
+        , idImportedFromModule  = moduleNameString impMod
         , idImportedFromPackage = modToPkg dflags impMod
-        , idImportSpan         = impSpan
+        , idImportSpan          = impSpan
         }
 
+      modToPkg :: DynFlags -> ModuleName -> Maybe Package
       modToPkg dflags impMod =
         let pkgAll = Packages.lookupModuleInAllPackages dflags impMod
             pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
             pkgIds = map (first Packages.packageConfigId) pkgExposed
         in case pkgIds of
           [p] -> fillVersion dflags $ fst p
-          _ -> error $ "modToPkg: " ++ moduleNameString impMod
+          _ -> Nothing
 
-      fillVersion :: DynFlags -> PackageId -> Package
+      fillVersion :: DynFlags -> PackageId -> Maybe Package
       fillVersion dflags p =
-        let pkgSt = pkgState dflags
-            sourcePkgId =
-              Packages.sourcePackageId $ Packages.getPackageDetails pkgSt p
-            pkgVersion = Packages.pkgVersion sourcePkgId
-            packageVersion = case showVersion pkgVersion of
-              "" -> Nothing
-              s -> Just s
-            packageName = -- a hack to avoid importing Distribution.Package
+        case Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) p of
+          Nothing -> Nothing
+          Just pkgCfg ->
+            let sourcePkgId = Packages.sourcePackageId pkgCfg
+                pkgVersion  = Packages.pkgVersion sourcePkgId
+                packageVersion = case showVersion pkgVersion of
+                                   "" -> Nothing
+                                   s  -> Just s
+                packageName = -- a hack to avoid importing Distribution.Package
                           tail $ init $ unwords $ tail $ words $ show
                           $ Packages.pkgName sourcePkgId
-        in Package {..}
+            in Just Package {..}
 
       extractImportInfo :: [RdrName.ImportSpec] -> (ModuleName, EitherSpan)
       extractImportInfo (RdrName.ImpSpec decl item:_) =
