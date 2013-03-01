@@ -292,6 +292,26 @@ syntheticTests =
         -- is never comipiled, so it's not invalidated.
         assEq "wrong3" ["A", "A2", "A3", "XXX"]
     )
+  , ( "Maintain list of compiled modules III"
+    , withConfiguredSession defOpts $ \session -> do
+        let assEq name goodMods =
+              assertEqual name (sort goodMods)
+                =<< (liftM sort $ getLoadedModules session)
+        updateSessionD session (loadModule "A.hs" "a = 5") 1
+        assEq "1 [A]" ["A"]
+        updateSessionD session (loadModule "A.hs" "a = 5 + True") 1
+        assEq "1 []" []
+        updateSessionD session (loadModule "A.hs" "a = 5") 1
+        assEq "2 [A]" ["A"]
+        updateSessionD session (loadModule "A.hs" "a = 5 + wrong") 1
+        assEq "2 []" []
+        updateSessionD session (loadModule "A.hs" "a = 5") 1
+        assEq "3 [A]" ["A"]
+        updateSessionD session (loadModule "A.hs" "import WRONG\na = 5") 1
+        assEq "3 [A]; wrong imports do not unload old modules" ["A"]
+        updateSessionD session (loadModule "A.hs" "a = 5 + True") 1
+        assEq "3 []" []
+    )
   , ( "Duplicate shutdown"
     , withConfiguredSession defOpts $ \session ->
         -- withConfiguredSession will shutdown the session as well
