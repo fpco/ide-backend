@@ -385,34 +385,30 @@ instance ConstructIdInfo Name where
         in Imported {
           idDefSpan             = extractSourceSpan (Name.nameSrcSpan name)
         , idDefinedInModule     = fmap (moduleNameString . Module.moduleName) mod
-        , idDefinedInPackage    = fmap Module.modulePackageId mod >>= fillVersion dflags
+        , idDefinedInPackage    = fmap Module.modulePackageId mod >>= (Just . fillVersion dflags)
         , idImportedFromModule  = moduleNameString impMod
-        , idImportedFromPackage = modToPkg dflags impMod
+        , idImportedFromPackage = Just $ modToPkg dflags impMod
         , idImportSpan          = impSpan
         }
 
-      modToPkg :: DynFlags -> ModuleName -> Maybe Package
+      modToPkg :: DynFlags -> ModuleName -> Package
       modToPkg dflags impMod =
         let pkgAll = Packages.lookupModuleInAllPackages dflags impMod
             pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
         in case pkgExposed of
-          [] -> Just mainPackage  -- we assume GHC would signal an error
+          [] -> mainPackage  -- we assume otherwise GHC would signal an error
           [p] -> fillVersion dflags $ Packages.packageConfigId $ fst p
-          _ -> Nothing
-          -- DEBUG:
-          -- _ -> let pkgIds = map (first (Module.packageIdString
-          --                               . Packages.packageConfigId)) pkgExposed
-          --      in error $ "modToPkg: " ++ moduleNameString impMod
-          --                 ++ ": " ++ show pkgIds
+          _ -> let pkgIds = map (first (Module.packageIdString
+                                        . Packages.packageConfigId)) pkgExposed
+               in error $ "modToPkg: " ++ moduleNameString impMod
+                          ++ ": " ++ show pkgIds
 
-      fillVersion :: DynFlags -> PackageId -> Maybe Package
+      fillVersion :: DynFlags -> PackageId -> Package
       fillVersion dflags p =
         case Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) p of
           Nothing -> if p == Module.mainPackageId
-                     then Just mainPackage
-                     else Nothing
-                     -- DEBUG:
-                     -- else error $ "fillVersion:" ++ Module.packageIdString p
+                     then mainPackage
+                     else error $ "fillVersion:" ++ Module.packageIdString p
           Just pkgCfg ->
             let sourcePkgId = Packages.sourcePackageId pkgCfg
                 pkgVersion  = Packages.pkgVersion sourcePkgId
@@ -422,7 +418,7 @@ instance ConstructIdInfo Name where
                 packageName = -- a hack to avoid importing Distribution.Package
                           tail $ init $ unwords $ tail $ words $ show
                           $ Packages.pkgName sourcePkgId
-            in Just Package {..}
+            in Package {..}
 
       mainPackage :: Package
       mainPackage =
