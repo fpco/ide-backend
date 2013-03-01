@@ -387,25 +387,27 @@ instance ConstructIdInfo Name where
         , idDefinedInModule     = fmap (moduleNameString . Module.moduleName) mod
         , idDefinedInPackage    = fmap Module.modulePackageId mod >>= (Just . fillVersion dflags)
         , idImportedFromModule  = moduleNameString impMod
-        , idImportedFromPackage = modToPkg dflags impMod
+        , idImportedFromPackage = Just $ modToPkg dflags impMod
         , idImportSpan          = impSpan
         }
 
-      modToPkg :: DynFlags -> ModuleName -> Maybe Package
+      modToPkg :: DynFlags -> ModuleName -> Package
       modToPkg dflags impMod =
         let pkgAll = Packages.lookupModuleInAllPackages dflags impMod
             pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
-            pkgIds = map (first Packages.packageConfigId) pkgExposed
-        in case pkgIds of
-          [p] -> Just $ fillVersion dflags $ fst p
-          _ -> Nothing
+        in case pkgExposed of
+          [] -> mainPackage  -- we assume otherwise GHC would signal an error
+          [p] -> fillVersion dflags $ Packages.packageConfigId $ fst p
+          _ -> let pkgIds = map (first (Module.packageIdString
+                                        . Packages.packageConfigId)) pkgExposed
+               in error $ "modToPkg: " ++ moduleNameString impMod
+                          ++ ": " ++ show pkgIds
 
       fillVersion :: DynFlags -> PackageId -> Package
       fillVersion dflags p =
         case Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) p of
           Nothing -> if p == Module.mainPackageId
-                     then Package { packageName = Module.packageIdString p
-                                  , packageVersion = Nothing }
+                     then mainPackage
                      else error $ "fillVersion:" ++ Module.packageIdString p
           Just pkgCfg ->
             let sourcePkgId = Packages.sourcePackageId pkgCfg
@@ -417,6 +419,11 @@ instance ConstructIdInfo Name where
                           tail $ init $ unwords $ tail $ words $ show
                           $ Packages.pkgName sourcePkgId
             in Package {..}
+
+      mainPackage :: Package
+      mainPackage =
+        Package { packageName = Module.packageIdString Module.mainPackageId
+                , packageVersion = Nothing }
 
       extractImportInfo :: [RdrName.ImportSpec] -> (ModuleName, EitherSpan)
       extractImportInfo (RdrName.ImpSpec decl item:_) =
