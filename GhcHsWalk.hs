@@ -385,7 +385,7 @@ instance ConstructIdInfo Name where
         in Imported {
           idDefSpan             = extractSourceSpan (Name.nameSrcSpan name)
         , idDefinedInModule     = fmap (moduleNameString . Module.moduleName) mod
-        , idDefinedInPackage    = fmap Module.modulePackageId mod >>= fillVersion dflags
+        , idDefinedInPackage    = fmap Module.modulePackageId mod >>= (Just . fillVersion dflags)
         , idImportedFromModule  = moduleNameString impMod
         , idImportedFromPackage = modToPkg dflags impMod
         , idImportSpan          = impSpan
@@ -397,13 +397,16 @@ instance ConstructIdInfo Name where
             pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
             pkgIds = map (first Packages.packageConfigId) pkgExposed
         in case pkgIds of
-          [p] -> fillVersion dflags $ fst p
+          [p] -> Just $ fillVersion dflags $ fst p
           _ -> Nothing
 
-      fillVersion :: DynFlags -> PackageId -> Maybe Package
+      fillVersion :: DynFlags -> PackageId -> Package
       fillVersion dflags p =
         case Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) p of
-          Nothing -> Nothing
+          Nothing -> if p == Module.mainPackageId
+                     then Package { packageName = Module.packageIdString p
+                                  , packageVersion = Nothing }
+                     else error $ "fillVersion:" ++ Module.packageIdString p
           Just pkgCfg ->
             let sourcePkgId = Packages.sourcePackageId pkgCfg
                 pkgVersion  = Packages.pkgVersion sourcePkgId
@@ -413,7 +416,7 @@ instance ConstructIdInfo Name where
                 packageName = -- a hack to avoid importing Distribution.Package
                           tail $ init $ unwords $ tail $ words $ show
                           $ Packages.pkgName sourcePkgId
-            in Just Package {..}
+            in Package {..}
 
       extractImportInfo :: [RdrName.ImportSpec] -> (ModuleName, EitherSpan)
       extractImportInfo (RdrName.ImpSpec decl item:_) =
