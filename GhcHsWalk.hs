@@ -219,14 +219,15 @@ idInfoAtLocation line col = filter inRange . idMapToList
 extractIdsPlugin :: IORef [IdMap] -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
   identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) $ do
+    pretty_mod     <- pretty False (tcg_mod env)
     pretty_rdr_env <- pretty False (tcg_rdr_env env)
     liftIO $ writeFile "/tmp/ghc.readerenv" pretty_rdr_env
     -- Information provided by the renamer
     -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
-    liftIO $ appendFile "/tmp/ghc.log" "<<PROCESSING RENAMED AST>>\n"
+    liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING RENAMED AST " ++ pretty_mod ++ ">>\n"
     extractIds (tcg_rn_decls env)
     -- Information provided by the type checker
-    liftIO $ appendFile "/tmp/ghc.log" "<<PROCESSING TYPED AST>>\n"
+    liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPED AST " ++ pretty_mod ++ ">>\n"
     extractIds (tcg_binds env)
   liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
   liftIO $ modifyIORef symbolRef (identMap :)
