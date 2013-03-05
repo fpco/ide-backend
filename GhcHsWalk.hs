@@ -26,6 +26,7 @@ import Data.Monoid
 import Control.Applicative ((<$>))
 import Data.Version
 import Data.Generics
+import Debug.Trace
 
 import Common
 import GhcRun (extractSourceSpan)
@@ -380,7 +381,8 @@ instance ConstructIdInfo Name where
           idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
         }
       scopeFromProv dflags (RdrName.Imported spec) =
-        let mod               = Name.nameModule_maybe name
+        let mod               =
+              maybe (trace (concatMap showSDocDebug $ ppr name : map ppr spec) Nothing) Just $ Name.nameModule_maybe name
             (impMod, impSpan) = extractImportInfo spec
         in Imported {
           idDefSpan             = extractSourceSpan (Name.nameSrcSpan name)
