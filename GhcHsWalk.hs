@@ -227,7 +227,7 @@ idInfoAtLocation line col = filter inRange . idMapToList
 extractIdsPlugin :: IORef [IdMap] -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
   identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) $ do
-    pretty_rdr_env <- pretty (tcg_rdr_env env)
+    pretty_rdr_env <- pretty False (tcg_rdr_env env)
     liftIO $ writeFile "/tmp/ghc.readerenv" pretty_rdr_env
     -- Information provided by the renamer
     -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
@@ -274,19 +274,19 @@ lookupRdrEnv name = do
 
 -- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
 -- it does
-pretty :: (Monad m, Outputable a) => a -> ExtractIdsT m String
-pretty val = do
+pretty :: (Monad m, Outputable a) => Bool -> a -> ExtractIdsT m String
+pretty debugShow val = do
   _dynFlags <- getDynFlags
 #if __GLASGOW_HASKELL__ >= 706
-  return $ showSDoc _dynFlags (ppr val)
+  return $ (if debugShow then showSDocDebug else showSDoc) _dynFlags (ppr val)
 #else
-  return $ showSDoc (ppr val)
+  return $ (if debugShow then showSDocDebug else showSDoc) (ppr val)
 #endif
 
 debugPP :: (MonadIO m, Outputable a) => String -> a -> ExtractIdsT m ()
 #if DEBUG
 debugPP header val = do
-  val' <- pretty val
+  val' <- pretty True val
   liftIO $ appendFile "/tmp/ghc.log" (header ++ ": " ++ val' ++ "\n")
 #else
 debugPP _ _ = return ()
@@ -333,7 +333,7 @@ ast _ _ cont = cond
 unsupported :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m ()
 #if DEBUG
 unsupported mspan c = ast mspan c $ do
-  prettySpan <- pretty mspan
+  prettySpan <- pretty False mspan
   liftIO . appendFile "/tmp/ghc.log" $ "extractIds: unsupported " ++ c ++ " at " ++ prettySpan ++ "\n"
 #else
 unsupported _ = return ()
@@ -351,7 +351,7 @@ class OutputableBndr id => ConstructIdInfo id where
 instance ConstructIdInfo Id where
   constructIdInfo idIsBinder id = do
     idInfo <- constructIdInfo idIsBinder (Var.varName id)
-    typ    <- pretty (Var.varType id)
+    typ    <- pretty False (Var.varType id)
     return idInfo { idType = Just typ }
 
 instance ConstructIdInfo Name where
@@ -377,7 +377,7 @@ instance ConstructIdInfo Name where
               Just [gre] -> return $ RdrName.gre_prov gre
               _ -> do
 #ifdef DEBUG
-                prettyName <- pretty name
+                prettyName <- pretty True name
                 liftIO . appendFile "/tmp/ghc.log" $ "Warning: missing entry in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ "\n"
 #endif
                 return RdrName.LocalDef -- Assume local
