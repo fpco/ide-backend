@@ -379,7 +379,7 @@ instance Record Name where
               _ -> do
                 prettyName <- pretty True name
                 prettyOcc  <- pretty True (Name.nameOccName name)
-                liftIO . appendFile "/tmp/ghc.log" $ "Missing entry " ++ show prettyOcc ++ " in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ "\n"
+                liftIO . appendFile "/tmp/ghc.log" $ "Missing entry " ++ show prettyOcc ++ " in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ " at location " ++ show span ++ "\n"
                 return Nothing
 
       nameSort :: String
