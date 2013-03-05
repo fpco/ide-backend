@@ -14,7 +14,7 @@ module GhcHsWalk
 import Prelude hiding (span, id, mod)
 import Control.Arrow (first)
 import Control.Monad (forM_)
-import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell, censor)
+import Control.Monad.State (MonadState, StateT, execStateT, modify)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Data.IORef
@@ -22,8 +22,6 @@ import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Aeson.TH (deriveJSON)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Monoid
-import Control.Applicative ((<$>))
 import Data.Version
 import Data.Generics
 import Debug.Trace
@@ -170,12 +168,6 @@ instance Show IdMap where
         ++ " (" ++ takeFileName (ppEitherSpan idDefSpan) ++ ")"
 -}
 
--- Right-biased union (information provided by the type checker replaces
--- information provided by the renamer)
-instance Monoid IdMap where
-  mempty = IdMap Map.empty
-  (IdMap a) `mappend` (IdMap b) = IdMap (b `Map.union` a)
-
 fromGhcNameSpace :: Name.NameSpace -> IdNameSpace
 fromGhcNameSpace ns
   | ns == Name.varName  = VarName
@@ -231,8 +223,10 @@ extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
     liftIO $ writeFile "/tmp/ghc.readerenv" pretty_rdr_env
     -- Information provided by the renamer
     -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
+    liftIO $ appendFile "/tmp/ghc.log" "<<PROCESSING RENAMED AST>>\n"
     extractIds (tcg_rn_decls env)
     -- Information provided by the type checker
+    liftIO $ appendFile "/tmp/ghc.log" "<<PROCESSING TYPED AST>>\n"
     extractIds (tcg_binds env)
   liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
   liftIO $ modifyIORef symbolRef (identMap :)
@@ -246,13 +240,13 @@ extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
 
 -- Define type synonym to avoid orphan instances
 newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (WriterT IdMap m) a
+      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StateT IdMap m) a
     )
-  deriving (Functor, Monad, MonadWriter IdMap, MonadReader (DynFlags, RdrName.GlobalRdrEnv))
+  deriving (Functor, Monad, MonadState IdMap, MonadReader (DynFlags, RdrName.GlobalRdrEnv))
 
 execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> ExtractIdsT m () -> m IdMap
 execExtractIdsT dynFlags rdrEnv (ExtractIdsT m) =
-  execWriterT $ runReaderT m (dynFlags, rdrEnv)
+  execStateT (runReaderT m (dynFlags, rdrEnv)) (IdMap Map.empty)
 
 instance MonadTrans ExtractIdsT where
   lift = ExtractIdsT . lift . lift
@@ -292,19 +286,10 @@ debugPP header val = do
 debugPP _ _ = return ()
 #endif
 
-record :: (MonadIO m, ConstructIdInfo id)
-       => SrcSpan -> IsBinder -> id -> ExtractIdsT m ()
-record span isBinder id =
-  case extractSourceSpan span of
-    ProperSpan sourceSpan -> do
-      idInfo <- constructIdInfo isBinder id
-      tell . IdMap $ Map.singleton sourceSpan idInfo
-    TextSpan _ ->
-      debugPP "Id without source span" id
-
 -- For debugging purposes, we also record information about the AST
 ast :: Monad m => Maybe SrcSpan -> String -> ExtractIdsT m a -> ExtractIdsT m a
-#if DEBUG
+-- #if DEBUG
+{-
 ast mspan info cont = do
     case extractSourceSpan <$> mspan of
       Just (ProperSpan sourceSpan) -> do
@@ -326,9 +311,10 @@ ast mspan info cont = do
       if idScope idInfo == Debug
         then idInfo { idName = info ++ "/" ++ idName idInfo }
         else idInfo
-#else
-ast _ _ cont = cond
-#endif
+-}
+-- #else
+ast _ _ cont = cont
+-- #endif
 
 unsupported :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m ()
 #if DEBUG
@@ -340,50 +326,60 @@ unsupported _ = return ()
 #endif
 
 {------------------------------------------------------------------------------
-  ConstructIdInfo
+  Record
 ------------------------------------------------------------------------------}
 
 type IsBinder = Bool
 
-class OutputableBndr id => ConstructIdInfo id where
-  constructIdInfo :: MonadIO m => IsBinder -> id -> ExtractIdsT m IdInfo
+class OutputableBndr id => Record id where
+  record :: MonadIO m => SrcSpan -> IsBinder -> id -> ExtractIdsT m ()
 
-instance ConstructIdInfo Id where
-  constructIdInfo idIsBinder id = do
-    idInfo <- constructIdInfo idIsBinder (Var.varName id)
-    typ    <- pretty False (Var.varType id)
-    return idInfo { idType = Just typ }
+instance Record Id where
+  record span _idIsBinder id = case extractSourceSpan span of
+    ProperSpan sourceSpan -> do
+      typ <- pretty False (Var.varType id)
+      let addType idInfo = Just $ idInfo { idType = Just typ }
+      modify $ \(IdMap idMap) -> IdMap (Map.update addType sourceSpan idMap)
+    TextSpan _ ->
+      return ()
 
-instance ConstructIdInfo Name where
-  constructIdInfo idIsBinder name = do
-      idScope <- constructScope
-      return IdInfo{..}
+instance Record Name where
+  record span idIsBinder name = case extractSourceSpan span of
+      ProperSpan sourceSpan -> do
+        mIdScope <- constructScope
+        case mIdScope of
+          Just idScope -> do
+            let idInfo = IdInfo{..}
+            modify $ \(IdMap idMap) -> IdMap (Map.insert sourceSpan idInfo idMap)
+          Nothing ->
+            -- TODO: This should never happen
+            return ()
+      TextSpan _ ->
+        debugPP "Name without source span" name
     where
       occ     = Name.nameOccName name
       idName  = Name.occNameString occ
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
       idType  = Nothing -- After renamer but before typechecker
 
-      constructScope :: MonadIO m => ExtractIdsT m IdScope
+      constructScope :: MonadIO m => ExtractIdsT m (Maybe IdScope)
       constructScope
-        | idIsBinder               = return Binder
-        | Name.isWiredInName  name = return WiredIn
-        | Name.isInternalName name = return Local {
+        | idIsBinder               = return $ Just Binder
+        | Name.isWiredInName  name = return $ Just WiredIn
+        | Name.isInternalName name = return $ Just Local {
               idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
             }
         | otherwise = do
             rdrElts <- lookupRdrEnv (Name.nameOccName name)
-            prov <- case rdrElts of
-              Just [gre] -> return $ RdrName.gre_prov gre
+            case rdrElts of
+              Just [gre] -> do
+                dflags <- asks fst
+                return (Just (scopeFromProv dflags (RdrName.gre_prov gre)))
               _ -> do
-#ifdef DEBUG
                 prettyName <- pretty True name
                 prettyOcc  <- pretty True (Name.nameOccName name)
-                liftIO . appendFile "/tmp/ghc.log" $ "Warning: missing entry " ++ show prettyOcc ++ " in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ "\n"
-#endif
-                return RdrName.LocalDef -- Assume local
-            dflags <- asks fst
-            return (scopeFromProv dflags prov)
+                liftIO . appendFile "/tmp/ghc.log" $ "Missing entry " ++ show prettyOcc ++ " in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ "\n"
+                return Nothing
 
       nameSort :: String
       nameSort | Name.isInternalName name = "internal"
@@ -466,20 +462,20 @@ instance ExtractIds a => ExtractIds (Maybe a) where
   extractIds Nothing  = return ()
   extractIds (Just x) = extractIds x
 
-instance ConstructIdInfo id => ExtractIds (HsGroup id) where
+instance Record id => ExtractIds (HsGroup id) where
   extractIds group = ast Nothing "HsGroup" $ do
     -- TODO: HsGroup has lots of other fields
     extractIds (hs_valds group)
     extractIds (hs_tyclds group)
 
-instance ConstructIdInfo id => ExtractIds (HsValBinds id) where
+instance Record id => ExtractIds (HsValBinds id) where
   extractIds (ValBindsIn {}) =
     fail "extractIds: Unexpected ValBindsIn"
   extractIds (ValBindsOut binds sigs) = ast Nothing "ValBindsOut" $ do
     extractIds (map snd binds)
     extractIds sigs
 
-instance ConstructIdInfo id => ExtractIds (LSig id) where
+instance Record id => ExtractIds (LSig id) where
   extractIds (L span (TypeSig names tp)) = ast (Just span) "TypeSig" $ do
     forM_ names $ \name -> record (getLoc name) False (unLoc name)
     extractIds tp
@@ -490,7 +486,7 @@ instance ConstructIdInfo id => ExtractIds (LSig id) where
   extractIds (L span (SpecSig _ _ _))  = unsupported (Just span) "SpecSig"
   extractIds (L span (SpecInstSig _))  = unsupported (Just span) "SpecInstSig"
 
-instance ConstructIdInfo id => ExtractIds (LHsType id) where
+instance Record id => ExtractIds (LHsType id) where
   extractIds (L span (HsFunTy arg res)) = ast (Just span) "HsFunTy" $
     extractIds [arg, res]
   extractIds (L span (HsTyVar name)) = ast (Just span) "HsTyVar" $
@@ -531,13 +527,13 @@ instance ConstructIdInfo id => ExtractIds (LHsType id) where
 #endif
 
 #if __GLASGOW_HASKELL__ >= 706
-instance ConstructIdInfo id => ExtractIds (LHsTyVarBndrs id) where
+instance Record id => ExtractIds (LHsTyVarBndrs id) where
   extractIds (HsQTvs _kvs tvs) = ast Nothing "HsQTvs" $ do
     -- We don't have location info for the kind variables
     extractIds tvs
 #endif
 
-instance ConstructIdInfo id => ExtractIds (LHsTyVarBndr id) where
+instance Record id => ExtractIds (LHsTyVarBndr id) where
 #if __GLASGOW_HASKELL__ >= 706
   extractIds (L span (UserTyVar name)) = ast (Just span) "UserTyVar" $
 #else
@@ -553,14 +549,14 @@ instance ConstructIdInfo id => ExtractIds (LHsTyVarBndr id) where
     -- TODO: deal with _kind
     record span True name
 
-instance ConstructIdInfo id => ExtractIds (LHsContext id) where
+instance Record id => ExtractIds (LHsContext id) where
   extractIds (L span typs) = ast (Just span) "LHsContext" $
     extractIds typs
 
-instance ConstructIdInfo id => ExtractIds (LHsBinds id) where
+instance Record id => ExtractIds (LHsBinds id) where
   extractIds = extractIds . bagToList
 
-instance ConstructIdInfo id => ExtractIds (LHsBind id) where
+instance Record id => ExtractIds (LHsBind id) where
   extractIds (L span bind@(FunBind {})) = ast (Just span) "FunBind" $ do
     record (getLoc (fun_id bind)) True (unLoc (fun_id bind))
     extractIds (fun_matches bind)
@@ -571,26 +567,26 @@ instance ConstructIdInfo id => ExtractIds (LHsBind id) where
   extractIds (L span bind@(AbsBinds {})) = ast (Just span) "AbsBinds" $
     extractIds (abs_binds bind)
 
-instance ConstructIdInfo id => ExtractIds (MatchGroup id) where
+instance Record id => ExtractIds (MatchGroup id) where
   extractIds (MatchGroup matches _postTcType) = ast Nothing "MatchGroup" $
     extractIds matches
     -- We ignore the postTcType, as it doesn't have location information
 
-instance ConstructIdInfo id => ExtractIds (LMatch id) where
+instance Record id => ExtractIds (LMatch id) where
   extractIds (L span (Match pats _type rhss)) = ast (Just span) "Match" $ do
     extractIds pats
     extractIds rhss
 
-instance ConstructIdInfo id => ExtractIds (GRHSs id) where
+instance Record id => ExtractIds (GRHSs id) where
   extractIds (GRHSs rhss binds) = ast Nothing "GRHSs" $ do
     extractIds rhss
     extractIds binds
 
-instance ConstructIdInfo id => ExtractIds (LGRHS id) where
+instance Record id => ExtractIds (LGRHS id) where
   extractIds (L span (GRHS _guards rhs)) = ast (Just span) "GRHS" $
     extractIds rhs
 
-instance ConstructIdInfo id => ExtractIds (HsLocalBinds id) where
+instance Record id => ExtractIds (HsLocalBinds id) where
   extractIds EmptyLocalBinds =
     return ()
   extractIds (HsValBinds (ValBindsIn _ _)) =
@@ -601,7 +597,7 @@ instance ConstructIdInfo id => ExtractIds (HsLocalBinds id) where
   extractIds (HsIPBinds _) =
     unsupported Nothing "HsIPBinds"
 
-instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
+instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsPar expr)) = ast (Just span) "HsPar" $
     extractIds expr
   extractIds (L span (ExprWithTySig expr _type)) = ast (Just span) "ExprWithTySig" $
@@ -677,18 +673,18 @@ instance ConstructIdInfo id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsMultiIf _ _))       = unsupported "HsMultiIf"
 #endif
 
-instance (ExtractIds a, ConstructIdInfo id) => ExtractIds (HsRecFields id a) where
+instance (ExtractIds a, Record id) => ExtractIds (HsRecFields id a) where
   extractIds (HsRecFields rec_flds _rec_dotdot) = ast Nothing "HsRecFields" $
     extractIds rec_flds
 
-instance (ExtractIds a, ConstructIdInfo id) => ExtractIds (HsRecField id a) where
+instance (ExtractIds a, Record id) => ExtractIds (HsRecField id a) where
   extractIds (HsRecField id arg _pun) = ast Nothing "HsRecField" $ do
     record (getLoc id) False (unLoc id)
     extractIds arg
 
 -- The meaning of the constructors of LStmt isn't so obvious; see various
 -- notes in ghc/compiler/hsSyn/HsExpr.lhs
-instance ConstructIdInfo id => ExtractIds (LStmt id) where
+instance Record id => ExtractIds (LStmt id) where
   extractIds (L span (ExprStmt expr _seq _guard _postTcType)) = ast (Just span) "ExprStmt" $
     -- Neither _seq nor _guard are located
     extractIds expr
@@ -710,7 +706,7 @@ instance ConstructIdInfo id => ExtractIds (LStmt id) where
   extractIds (L span (ParStmt _ _ _ _))  = unsupported (Just span) "ParStmt"
 #endif
 
-instance ConstructIdInfo id => ExtractIds (LPat id) where
+instance Record id => ExtractIds (LPat id) where
   extractIds (L span (WildPat _postTcType)) = ast (Just span) "WildPat" $
     return ()
   extractIds (L span (VarPat id)) = ast (Just span) "VarPat" $
@@ -747,7 +743,7 @@ instance ConstructIdInfo id => ExtractIds (LPat id) where
   extractIds (L span (SigPatOut _ _))     = unsupported (Just span) "SigPatOut"
   extractIds (L span (CoPat _ _ _))       = unsupported (Just span) "CoPat"
 
-instance ConstructIdInfo id => ExtractIds (HsConPatDetails id) where
+instance Record id => ExtractIds (HsConPatDetails id) where
   extractIds (PrefixCon args) = ast Nothing "PrefixCon" $
     extractIds args
   extractIds (RecCon rec) = ast Nothing "RecCon" $
@@ -755,7 +751,7 @@ instance ConstructIdInfo id => ExtractIds (HsConPatDetails id) where
   extractIds (InfixCon a b) = ast Nothing "InfixCon" $
     extractIds [a, b]
 
-instance ConstructIdInfo id => ExtractIds (LTyClDecl id) where
+instance Record id => ExtractIds (LTyClDecl id) where
   extractIds (L span (ForeignType {})) = unsupported (Just span) "ForeignType"
   extractIds (L span (TyFamily {}))    = unsupported (Just span) "TyFamily"
   extractIds (L span (TyData {}))      = unsupported (Just span) "TyData"

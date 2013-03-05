@@ -36,7 +36,6 @@ import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
-import Data.Monoid (mconcat)
 import System.Exit (ExitCode)
 
 import System.Directory (doesFileExist)
@@ -63,7 +62,7 @@ data GhcRequest
   deriving Show
 data GhcCompileResponse =
     GhcCompileProgress Progress
-  | GhcCompileDone ([SourceError], LoadedModules, IdMap)
+  | GhcCompileDone ([SourceError], LoadedModules, [IdMap])
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -131,15 +130,15 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 ghcHandleCompile :: RpcConversation
                  -> DynamicOpts        -- ^ startup dynamic flags
                  -> Maybe [String]     -- ^ new, user-submitted dynamic flags
-                 -> IORef [IdMap]      -- ^ ref holding id info
+                 -> IORef [IdMap]      -- ^ Ref for the generated IdMaps
                  -> FilePath           -- ^ source directory
                  -> Bool               -- ^ should we generate code
                  -> Ghc ()
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                  idMapRef configSourcesDir ideGenerateCode = do
     liftIO $ writeIORef idMapRef []
-    errsRef <- liftIO $ newIORef []
-    counter <- liftIO $ newIORef initialProgress
+    errsRef  <- liftIO $ newIORef []
+    counter  <- liftIO $ newIORef initialProgress
     (errs, loadedModules) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
@@ -150,7 +149,8 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                                        (\_ -> return ()) -- TODO: log?
     liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
     idMaps <- liftIO $ readIORef idMapRef
-    liftIO $ put $ GhcCompileDone (errs, loadedModules, mconcat idMaps)
+    -- TODO: combine the IdMaps somehow (rather than just returning the first :)
+    liftIO $ put $ GhcCompileDone (errs, loadedModules, idMaps)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -325,7 +325,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ([SourceError], LoadedModules, IdMap)
+           -> IO ([SourceError], LoadedModules, [IdMap])
 rpcCompile server opts dir genCode callback =
   rpcConversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)

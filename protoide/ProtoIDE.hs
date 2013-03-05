@@ -4,7 +4,6 @@ import Graphics.UI.Gtk
 import Data.IORef
 import System.IO.Temp (withSystemTempDirectory)
 import Data.ByteString.Lazy (fromChunks)
-import Data.Monoid (mempty)
 import Control.Monad.Reader
 import System.Process
 
@@ -88,7 +87,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
 
   -- Whenever the buffer changes, reload the module into ghc
   -- TODO: this is overkill..
-  idMapRef <- newIORef mempty
+  idMapRef <- newIORef []
   on textBuffer bufferChanged $ do
     (start, end) <- textBufferGetBounds textBuffer
     src <- textBufferGetByteString textBuffer start end False
@@ -111,7 +110,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     line   <- textIterGetLine iter
     col    <- textIterGetLineOffset iter
     idMap  <- readIORef idMapRef
-    let idInfos = idInfoAtLocation (line + 1) (col + 1) idMap
+    let idInfos = concatMap (idInfoAtLocation (line + 1) (col + 1)) idMap
         tagSpan sp tag = do
           iterStart <- textBufferGetIterAtLineOffset textBuffer
                          (spanFromLine   sp - 1)
@@ -148,7 +147,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     col  <- liftIO $ textIterGetLineOffset iter
     -- Find the IdInfo for the identifier under the tag.
     idMap <- liftIO $ readIORef idMapRef
-    let idInfos = idInfoAtLocation (line + 1) (col + 1) idMap
+    let idInfos = concatMap (idInfoAtLocation (line + 1) (col + 1)) idMap
         root = "http://hackage.haskell.org/packages/archive/"
         isImported (_, info) = case idScope info of
           Imported{} -> True

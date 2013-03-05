@@ -267,7 +267,9 @@ data Computed = Computed {
     -- | Modules that got loaded okay
   , computedLoadedModules :: LoadedModules
     -- | Mapping from source locations to information about identifiers there
-  , computedIdMap         :: IdMap
+    -- TODO: We should pair each IdMap with a ModuleName
+    -- (Maybe define LoadedModules = [(ModuleName, IdMap)] and combine)
+  , computedIdMap         :: [IdMap]
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -781,8 +783,7 @@ getAllDataFiles IdeSession{ideStaticInfo} =
 -- what is the type of this symbol and some more information.
 -- This information lets us, e.g, construct Haddock URLs for symbols,
 -- like @parallel-3.2.0.3/Control-Parallel.html#v:pseq@.
---
-getIdMap :: Query IdMap
+getIdMap :: Query [IdMap]
 getIdMap IdeSession{ideState, ideStaticInfo} =
   -- TODO: scrap all this boilerplate
   $withMVar ideState $ \st ->
@@ -791,7 +792,7 @@ getIdMap IdeSession{ideState, ideStaticInfo} =
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO IdMap
+    aux :: IdeIdleState -> IO [IdMap]
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} ->
         return (mkRelative (ideSourcesDir ideStaticInfo) computedIdMap)
