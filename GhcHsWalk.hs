@@ -378,7 +378,8 @@ instance ConstructIdInfo Name where
               _ -> do
 #ifdef DEBUG
                 prettyName <- pretty True name
-                liftIO . appendFile "/tmp/ghc.log" $ "Warning: missing entry in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ "\n"
+                prettyOcc  <- pretty True (Name.nameOccName name)
+                liftIO . appendFile "/tmp/ghc.log" $ "Warning: missing entry " ++ show prettyOcc ++ " in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ "\n"
 #endif
                 return RdrName.LocalDef -- Assume local
             dflags <- asks fst
