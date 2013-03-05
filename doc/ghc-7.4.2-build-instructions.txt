@@ -15,11 +15,11 @@ and make sure we're still in the experimental branch of ghc:
   
   git checkout ide-backend-experimental
 
-Now build as usual: 
+Now build as usual; select quick build flavour
 
-  cp mk/build.mk.sample mk/build.mk
+  sed -e 's/^#BuildFlavour = quick$/BuildFlavour = quick/' mk/build.mk.sample > mk/build.mk
 
-then edit mk/build.mk to use the quick build flavour, and finally
+and finally
 
   perl boot
   ./configure 
