@@ -346,7 +346,7 @@ unsupported _ = return ()
 type IsBinder = Bool
 
 class OutputableBndr id => ConstructIdInfo id where
-  constructIdInfo :: Monad m => IsBinder -> id -> ExtractIdsT m IdInfo
+  constructIdInfo :: MonadIO m => IsBinder -> id -> ExtractIdsT m IdInfo
 
 instance ConstructIdInfo Id where
   constructIdInfo idIsBinder id = do
@@ -364,17 +364,32 @@ instance ConstructIdInfo Name where
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
       idType  = Nothing -- After renamer but before typechecker
 
-      constructScope :: Monad m => ExtractIdsT m IdScope
+      constructScope :: MonadIO m => ExtractIdsT m IdScope
       constructScope
-        | idIsBinder              = return Binder
-        | Name.isWiredInName name = return WiredIn
+        | idIsBinder               = return Binder
+        | Name.isWiredInName  name = return WiredIn
+        | Name.isInternalName name = return Local {
+              idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
+            }
         | otherwise = do
             rdrElts <- lookupRdrEnv (Name.nameOccName name)
             prov <- case rdrElts of
               Just [gre] -> return $ RdrName.gre_prov gre
-              _ -> return RdrName.LocalDef -- Assume local
+              _ -> do
+#ifdef DEBUG
+                prettyName <- pretty name
+                liftIO . appendFile "/tmp/ghc.log" $ "Warning: missing entry in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ "\n"
+#endif
+                return RdrName.LocalDef -- Assume local
             dflags <- asks fst
             return (scopeFromProv dflags prov)
+
+      nameSort :: String
+      nameSort | Name.isInternalName name = "internal"
+               | Name.isExternalName name = "external"
+               | Name.isSystemName   name = "system"
+               | Name.isWiredInName  name = "wired-in"
+               | otherwise                = "unknown"
 
       scopeFromProv :: DynFlags -> RdrName.Provenance -> IdScope
       scopeFromProv _ RdrName.LocalDef = Local {
