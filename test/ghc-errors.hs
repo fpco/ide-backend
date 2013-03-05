@@ -1527,6 +1527,40 @@ syntheticTests =
         return ()
     )
 -}
+  , ( "Test internal consistency of local id markers"
+    , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
+        let upd = (updateModule "M.hs" . BSLC.pack . unlines $
+              [ "module M where"
+              , "import qualified Text.PrettyPrint as Disp"
+              , "class Text a where"
+              , "  disp  :: a -> Disp.Doc"
+              , "display :: Text a => a -> String"
+              , "display = Disp.renderStyle style . disp"
+              , "  where style = Disp.Style {}"
+              ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertOneError msgs
+    )
+  , ( "Test internal consistency of imported id markers"
+    , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
+        let upd = (updateModule "M.hs" . BSLC.pack . unlines $
+              [ "module M where"
+              , "import qualified Text.PrettyPrint as Disp"
+              , "class Text a where"
+              , "  disp  :: a -> Disp.Doc"
+              , "display :: Text a => a -> String"
+              , "display = Disp.renderStyle astyle . disp"
+              , "  where astyle = Disp.Style {"
+              , "          Disp.mode            = Disp.PageMode,"
+              , "          Disp.lineLength      = 79,"
+              , "          Disp.ribbonsPerLine  = 1.0"
+              , "        }"
+              ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
+    )
   ]
 
 assertSameList :: (Ord a, Show a) => [a] -> [a] -> Assertion
