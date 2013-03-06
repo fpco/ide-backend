@@ -192,7 +192,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                          log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
 #endif
                        }
-#if __GLASGOW_HASKELL__ < 708
+#if __GLASGOW_HASKELL__ < 707
   -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/1381.
                    `dopt_unset` Opt_GhciSandbox
 #endif

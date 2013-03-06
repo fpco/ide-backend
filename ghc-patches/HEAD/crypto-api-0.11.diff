@@ -1,0 +1,12 @@
+diff -ur orig/crypto-api-0.11/Crypto/Random.hs crypto-api-0.11/Crypto/Random.hs
+--- orig/crypto-api-0.11/Crypto/Random.hs	2013-03-06 13:13:35.000000000 +0000
++++ crypto-api-0.11/Crypto/Random.hs	2013-03-06 13:12:32.000000000 +0000
+@@ -38,7 +38,7 @@
+ import Data.Bits (xor, setBit, shiftR, shiftL, (.&.))
+ import Data.List (foldl')
+ import Data.Tagged
+-import Data.Typeable
++import Data.Typeable hiding (Proxy) 
+ import System.Entropy
+ import System.IO.Unsafe(unsafeInterleaveIO)
+ import qualified Data.ByteString as B

@@ -1,6 +1,6 @@
-From 1e702993d524ae97833a060c802434793752e895 Mon Sep 17 00:00:00 2001
+From c006f4123d8cd697c1daecf14e33f8acd3e08053 Mon Sep 17 00:00:00 2001
 From: Edsko de Vries <edsko@well-typed.com>
-Date: Fri, 22 Feb 2013 14:40:35 +0000
+Date: Wed, 6 Mar 2013 10:13:14 +0000
 Subject: [PATCH 2/2] Pass renamer result through typechecker
 
 ---
@@ -8,10 +8,10 @@ Subject: [PATCH 2/2] Pass renamer result through typechecker
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/compiler/main/HscMain.hs b/compiler/main/HscMain.hs
-index 22385ee..7f1ab8e 100644
+index 113fd66..3e44edb 100644
 --- a/compiler/main/HscMain.hs
 +++ b/compiler/main/HscMain.hs
-@@ -873,7 +873,7 @@ hscFileFrontEnd :: ModSummary -> Hsc TcGblEnv
+@@ -871,7 +871,7 @@ hscFileFrontEnd :: ModSummary -> Hsc TcGblEnv
  hscFileFrontEnd mod_summary = do
      hpm <- hscParse' mod_summary
      hsc_env <- getHscEnv

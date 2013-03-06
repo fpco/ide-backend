@@ -25,7 +25,6 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Version
 import Data.Generics
-import Debug.Trace
 
 import qualified Common as Common
 import Common hiding (ModuleName)
@@ -400,8 +399,7 @@ instance Record Name where
           idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
         }
       scopeFromProv dflags (RdrName.Imported spec) =
-        let mod               =
-              maybe (trace (concatMap showSDocDebug $ ppr name : map ppr spec) Nothing) Just $ Name.nameModule_maybe name
+        let mod               = Name.nameModule_maybe name
             (impMod, impSpan) = extractImportInfo spec
         in Imported {
           idDefSpan             = extractSourceSpan (Name.nameSrcSpan name)
@@ -574,22 +572,40 @@ instance Record id => ExtractIds (LHsBind id) where
   extractIds (L span bind@(AbsBinds {})) = ast (Just span) "AbsBinds" $
     extractIds (abs_binds bind)
 
+#if __GLASGOW_HASKELL__ >= 707
+instance (ExtractIds body, Record id) => ExtractIds (MatchGroup id body) where
+  extractIds (MG matches _argTys _resTy) = ast Nothing "MatchGroup" $
+    extractIds matches
+#else
 instance Record id => ExtractIds (MatchGroup id) where
+  -- We ignore the postTcType, as it doesn't have location information
   extractIds (MatchGroup matches _postTcType) = ast Nothing "MatchGroup" $
     extractIds matches
-    -- We ignore the postTcType, as it doesn't have location information
+#endif
 
+#if __GLASGOW_HASKELL__ >= 707
+instance (ExtractIds body, Record id) => ExtractIds (LMatch id body) where
+#else
 instance Record id => ExtractIds (LMatch id) where
+#endif
   extractIds (L span (Match pats _type rhss)) = ast (Just span) "Match" $ do
     extractIds pats
     extractIds rhss
 
+#if __GLASGOW_HASKELL__ >= 707
+instance (ExtractIds body, Record id) => ExtractIds (GRHSs id body) where
+#else
 instance Record id => ExtractIds (GRHSs id) where
+#endif
   extractIds (GRHSs rhss binds) = ast Nothing "GRHSs" $ do
     extractIds rhss
     extractIds binds
 
+#if __GLASGOW_HASKELL__ >= 707
+instance (ExtractIds body, Record id) => ExtractIds (LGRHS id body) where
+#else
 instance Record id => ExtractIds (LGRHS id) where
+#endif
   extractIds (L span (GRHS _guards rhs)) = ast (Just span) "GRHS" $
     extractIds rhs
 
@@ -638,8 +654,14 @@ instance Record id => ExtractIds (LHsExpr id) where
     -- useful information in it for us
     -- postTcType is not located
     extractIds stmts
+#if __GLASGOW_HASKELL__ >= 707
+  -- Middle argument is something to do with OverloadedLists
+  extractIds (L span (ExplicitList _postTcType _ exprs)) = ast (Just span) "ExplicitList" $
+    extractIds exprs
+#else
   extractIds (L span (ExplicitList _postTcType exprs)) = ast (Just span) "ExplicitList" $
     extractIds exprs
+#endif
   extractIds (L span (RecordCon con _postTcType recordBinds)) = ast (Just span) "RecordCon" $ do
     record (getLoc con) False (unLoc con)
     extractIds recordBinds
@@ -655,7 +677,6 @@ instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsIf _ _ _ _))        = unsupported (Just span) "HsIf"
   extractIds (L span (ExplicitPArr _ _))    = unsupported (Just span) "ExplicitPArr"
   extractIds (L span (RecordUpd _ _ _ _ _)) = unsupported (Just span) "RecordUpd"
-  extractIds (L span (ArithSeq _ _ ))       = unsupported (Just span) "ArithSeq"
   extractIds (L span (PArrSeq _ _))         = unsupported (Just span) "PArrSeq"
   extractIds (L span (HsSCC _ _))           = unsupported (Just span) "HsSCC"
   extractIds (L span (HsCoreAnn _ _))       = unsupported (Just span) "HsCoreAnn"
@@ -675,9 +696,20 @@ instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (ELazyPat _))          = unsupported (Just span) "ELazyPat"
   extractIds (L span (HsType _ ))           = unsupported (Just span) "HsType"
 
+#if __GLASGOW_HASKELL__ >= 707
+  -- Second argument is something to do with OverloadedLists
+  extractIds (L span (ArithSeq _ _ _))      = unsupported (Just span) "ArithSeq"
+#else
+  extractIds (L span (ArithSeq _ _ ))       = unsupported (Just span) "ArithSeq"
+#endif
+
 #if __GLASGOW_HASKELL__ >= 706
-  extractIds (L span (HsLamCase _ _ ))      = unsupported "HsLamCase"
-  extractIds (L span (HsMultiIf _ _))       = unsupported "HsMultiIf"
+  extractIds (L span (HsLamCase _ _ ))      = unsupported (Just span) "HsLamCase"
+  extractIds (L span (HsMultiIf _ _))       = unsupported (Just span) "HsMultiIf"
+#endif
+
+#if __GLASGOW_HASKELL__ >= 707
+  extractIds (L span (HsUnboundVar _))      = unsupported (Just span) "HsUnboundVar"
 #endif
 
 instance (ExtractIds a, Record id) => ExtractIds (HsRecFields id a) where
@@ -691,10 +723,16 @@ instance (ExtractIds a, Record id) => ExtractIds (HsRecField id a) where
 
 -- The meaning of the constructors of LStmt isn't so obvious; see various
 -- notes in ghc/compiler/hsSyn/HsExpr.lhs
+#if __GLASGOW_HASKELL__ >= 707
+instance (ExtractIds body, Record id) => ExtractIds (LStmt id body) where
+  extractIds (L span (BodyStmt body _seq _guard _postTcType)) = ast (Just span) "BodyStmt" $
+    extractIds body
+#else
 instance Record id => ExtractIds (LStmt id) where
   extractIds (L span (ExprStmt expr _seq _guard _postTcType)) = ast (Just span) "ExprStmt" $
     -- Neither _seq nor _guard are located
     extractIds expr
+#endif
   extractIds (L span (BindStmt pat expr _bind _fail)) = ast (Just span) "BindStmt" $ do
     -- Neither _bind or _fail are located
     extractIds pat
@@ -727,8 +765,14 @@ instance Record id => ExtractIds (LPat id) where
     extractIds pat
   extractIds (L span (BangPat pat)) = ast (Just span) "BangPat" $
     extractIds pat
+#if __GLASGOW_HASKELL__ >= 707
+  -- Third argument is something to do with rebindable syntax
+  extractIds (L span (ListPat pats _postTcType _)) = ast (Just span) "ListPat" $
+    extractIds pats
+#else
   extractIds (L span (ListPat pats _postTcType)) = ast (Just span) "ListPat" $
     extractIds pats
+#endif
   extractIds (L span (TuplePat pats _boxity _postTcType)) = ast (Just span) "TuplePat" $
     extractIds pats
   extractIds (L span (PArrPat pats _postTcType)) = ast (Just span) "PArrPat" $
@@ -760,7 +804,13 @@ instance Record id => ExtractIds (HsConPatDetails id) where
 
 instance Record id => ExtractIds (LTyClDecl id) where
   extractIds (L span (ForeignType {})) = unsupported (Just span) "ForeignType"
+  extractIds (L span (ClassDecl {}))   = unsupported (Just span) "ClassDecl"
+#if __GLASGOW_HASKELL__ >= 707
+  extractIds (L span (FamDecl {}))     = unsupported (Just span) "TyFamily"
+  extractIds (L span (SynDecl {}))     = unsupported (Just span) "TySynonym"
+  extractIds (L span (DataDecl {}))    = unsupported (Just span) "TyData"
+#else
   extractIds (L span (TyFamily {}))    = unsupported (Just span) "TyFamily"
   extractIds (L span (TyData {}))      = unsupported (Just span) "TyData"
   extractIds (L span (TySynonym {}))   = unsupported (Just span) "TySynonym"
-  extractIds (L span (ClassDecl {}))   = unsupported (Just span) "ClassDecl"
+#endif
