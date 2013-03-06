@@ -8,11 +8,8 @@
 -- and optionally compiles, links and executes code.
 -- Only this file should import the GHC-internals modules.
 module GhcRun
-  ( -- * Types
-    ModuleName
-  , LoadedModules
-    -- * Re-expored GHC API
-  , Ghc
+  ( -- * Re-expored GHC API
+    Ghc
   , runFromGhc
   , liftIO
   , GhcException
@@ -76,9 +73,6 @@ import System.Process
 
 import Common
 import Data.Aeson.TH (deriveJSON)
-
-type ModuleName    = String
-type LoadedModules = [ModuleName]
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -172,7 +166,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> IORef [SourceError] -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-             -> Ghc ([SourceError], LoadedModules)
+             -> Ghc ([SourceError], [ModuleName])
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
              errsRef handlerOutput handlerRemaining = do
@@ -230,7 +224,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         -- Recover all saved errors.
         prepareResult flags
   where
-    sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ([SourceError], LoadedModules)
+    sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ([SourceError], [ModuleName])
     sourceErrorHandler flags e = do
       liftIO $ debug dVerbosity $ "handleSourceError: " ++ show e
       (errs, context) <- prepareResult flags
@@ -238,7 +232,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 
     -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7430.
     -- Some errors are reported as exceptions instead.
-    ghcExceptionHandler :: DynFlags -> GhcException -> Ghc ([SourceError], LoadedModules)
+    ghcExceptionHandler :: DynFlags -> GhcException -> Ghc ([SourceError], [ModuleName])
     ghcExceptionHandler flags e = do
       let eText   = show e  -- no SrcSpan as a field in GhcException
           exError =
@@ -250,12 +244,12 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
       return (errs ++ [exError], context)
 
     handleErrors :: DynFlags
-                 -> Ghc ([SourceError], LoadedModules)
-                 -> Ghc ([SourceError], LoadedModules)
+                 -> Ghc ([SourceError], [ModuleName])
+                 -> Ghc ([SourceError], [ModuleName])
     handleErrors flags = ghandle (ghcExceptionHandler flags)
                        . handleSourceError (sourceErrorHandler flags)
 
-    prepareResult :: DynFlags -> Ghc ([SourceError], LoadedModules)
+    prepareResult :: DynFlags -> Ghc ([SourceError], [ModuleName])
     prepareResult _flags = do
       errs   <- liftIO $ readIORef errsRef
       graph  <- getModuleGraph

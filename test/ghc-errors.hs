@@ -246,7 +246,7 @@ syntheticTests =
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
               assertEqual name (sort goodMods)
-                =<< (liftM sort $ getLoadedModules session)
+                =<< (liftM Map.keys $ getLoadedModules session)
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
         assEq "XXX" ["XXX"]
         updateSessionD session (loadModule "A.hs" "a = 5") 1
@@ -269,7 +269,7 @@ syntheticTests =
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
               assertEqual name (sort goodMods)
-                =<< (liftM sort $ getLoadedModules session)
+                =<< (liftM Map.keys $ getLoadedModules session)
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
         assEq "XXX" ["XXX"]
         updateSessionD session (loadModule "A.hs" "a = 5") 1
@@ -296,7 +296,7 @@ syntheticTests =
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
               assertEqual name (sort goodMods)
-                =<< (liftM sort $ getLoadedModules session)
+                =<< (liftM Map.keys $ getLoadedModules session)
         updateSessionD session (loadModule "A.hs" "a = 5") 1
         assEq "1 [A]" ["A"]
         updateSessionD session (loadModule "A.hs" "a = 5 + True") 1
@@ -880,10 +880,10 @@ syntheticTests =
                     , "loop = loop"
                     ])
         updateSessionD session upd 1
-        mods <- getLoadedModules session
+        mods <- liftM Map.keys $ getLoadedModules session
         assertEqual "" ["M"] mods
         _runActions <- runStmt session "M" "loop"
-        mods' <- getLoadedModules session
+        mods' <- liftM Map.keys $ getLoadedModules session
         assertEqual "Running code does not affect getLoadedModules" mods mods'
     )
   , ( "Interrupt, then capture stdout"

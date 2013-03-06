@@ -4,6 +4,7 @@ module GhcHsWalk
   , IdInfo(..)
   , IdNameSpace(..)
   , IdScope(..)
+  , LoadedModules
   , extractIdsPlugin
   , haddockLink
   , idInfoAtLocation
@@ -26,7 +27,8 @@ import Data.Version
 import Data.Generics
 import Debug.Trace
 
-import Common
+import qualified Common as Common
+import Common hiding (ModuleName)
 import GhcRun (extractSourceSpan)
 
 import GHC hiding (idType)
@@ -129,6 +131,8 @@ data Package = Package {
 data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
   deriving (Show, Data, Typeable)
 
+type LoadedModules = Map Common.ModuleName IdMap
+
 $(deriveJSON (\x -> x) ''IdNameSpace)
 $(deriveJSON (\x -> x) ''IdScope)
 $(deriveJSON (\x -> x) ''Package)
@@ -216,10 +220,12 @@ idInfoAtLocation line col = filter inRange . idMapToList
   Extract an IdMap from information returned by the ghc type checker
 ------------------------------------------------------------------------------}
 
-extractIdsPlugin :: IORef [IdMap] -> HscPlugin
+extractIdsPlugin :: IORef LoadedModules -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
+  let processedModule = tcg_mod env
+      processedName = moduleNameString $ moduleName processedModule
   identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) $ do
-    pretty_mod     <- pretty False (tcg_mod env)
+    pretty_mod     <- pretty False processedModule
     pretty_rdr_env <- pretty False (tcg_rdr_env env)
     liftIO $ writeFile "/tmp/ghc.readerenv" pretty_rdr_env
     -- Information provided by the renamer
@@ -230,7 +236,7 @@ extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
     liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPED AST " ++ pretty_mod ++ ">>\n"
     extractIds (tcg_binds env)
   liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
-  liftIO $ modifyIORef symbolRef (identMap :)
+  liftIO $ modifyIORef symbolRef (Map.insert processedName identMap)
   return env
 
 {------------------------------------------------------------------------------

@@ -16,6 +16,7 @@ module GhcServer
     -- * Client-side operations
   , forkGhcServer
   , rpcCompile
+  , LoadedModules
   , RunActions(..)
   , runWaitAll
   , rpcRun
@@ -30,13 +31,15 @@ import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
 import qualified Control.Exception as Ex
-import Control.Monad (forM_, forever, unless)
+import Control.Monad (forM_, forever, unless, when)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
 import System.Exit (ExitCode)
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -62,7 +65,7 @@ data GhcRequest
   deriving Show
 data GhcCompileResponse =
     GhcCompileProgress Progress
-  | GhcCompileDone ([SourceError], LoadedModules, [IdMap])
+  | GhcCompileDone ([SourceError], LoadedModules)
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -99,7 +102,7 @@ ghcServerEngine :: [String] -> RpcConversation -> IO ()
 ghcServerEngine staticOpts conv@RpcConversation{..} = do
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
-  idMapRef <- newIORef []
+  idMapRef <- newIORef Map.empty
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
@@ -129,15 +132,18 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 
 -- | Handle a compile or type check request
 ghcHandleCompile :: RpcConversation
-                 -> DynamicOpts        -- ^ startup dynamic flags
-                 -> Maybe [String]     -- ^ new, user-submitted dynamic flags
-                 -> IORef [IdMap]      -- ^ Ref for the generated IdMaps
-                 -> FilePath           -- ^ source directory
-                 -> Bool               -- ^ should we generate code
+                 -> DynamicOpts          -- ^ startup dynamic flags
+                 -> Maybe [String]       -- ^ new, user-submitted dynamic flags
+                 -> IORef LoadedModules  -- ^ Ref for the generated IdMaps
+                 -> FilePath             -- ^ source directory
+                 -> Bool                 -- ^ should we generate code
                  -> Ghc ()
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                  idMapRef configSourcesDir ideGenerateCode = do
-    liftIO $ writeIORef idMapRef []
+    -- TODO: we will probably want to keep idMaps for all loaded modules,
+    -- while right now we only store it for modules from this compilation,
+    -- to mimic the behaviour of errors and warnings.
+    liftIO $ writeIORef idMapRef Map.empty
     errsRef  <- liftIO $ newIORef []
     counter  <- liftIO $ newIORef initialProgress
     (errs, loadedModules) <-
@@ -150,8 +156,18 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                                        (\_ -> return ()) -- TODO: log?
     liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
     idMaps <- liftIO $ readIORef idMapRef
-    -- TODO: combine the IdMaps somehow (rather than just returning the first :)
-    liftIO $ put $ GhcCompileDone (errs, loadedModules, idMaps)
+    let loadedModulesSet = Set.fromList loadedModules
+        -- TODO: (see above) Filter out modules that got unloaded.
+        -- filteredIdMaps =
+        --   Map.filterWithKey (\k _ -> k `Set.member` loadedModulesSet) idMaps
+        dummyIdList = map (\m -> (m, IdMap Map.empty)) loadedModules
+        filteredIdMaps = idMaps `Map.union` Map.fromList dummyIdList
+        filteredKeySet = Map.keysSet filteredIdMaps
+    -- Verify the plugin and @compileInGhc@ agree on which modules are loaded.
+    when (loadedModulesSet /= filteredKeySet) $ do
+      error $ "ghcHandleCompile: loaded modules do not match id info maps: "
+              ++ show (loadedModulesSet, filteredKeySet)
+    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -326,7 +342,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ([SourceError], LoadedModules, [IdMap])
+           -> IO ([SourceError], LoadedModules)
 rpcCompile server opts dir genCode callback =
   rpcConversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)

@@ -2,6 +2,7 @@
 -- | Common types and utilities
 module Common
   ( SourceSpan(..), EitherSpan (..), SourceErrorKind(..), SourceError(..)
+  , ModuleName
   , formatSourceError
   , hsExtentions
   , Progress
@@ -61,6 +62,8 @@ data SourceError = SourceError
 -- | Severity of an error.
 data SourceErrorKind = KindError | KindWarning
   deriving (Show, Eq, Data, Typeable)
+
+type ModuleName    = String
 
 formatSourceError :: SourceError -> String
 formatSourceError = show

@@ -122,17 +122,16 @@ module IdeSession (
   getSourceModule,
   getDataFile,
 
-  -- ** The list of managed files, loaded modules and all data files
-  getManagedFiles,
+  -- ** The list of managed files and all data files
   ManagedFiles(..),
-  getLoadedModules,
+  getManagedFiles,
   getAllDataFiles,
 
   -- ** Environment variables
   getEnv,
 
   -- ** Symbol definition maps
-  getIdMap,
+  getLoadedModules,
   IdMap(..),
   IdInfo(..),
   IdNameSpace(..),
@@ -221,6 +220,7 @@ import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString as BSS
 import Data.List (delete)
+import qualified Data.Map as Map
 import Data.Monoid (Monoid (..))
 import System.Directory
 import System.FilePath (splitFileName, takeDirectory, makeRelative, (<.>), (</>))
@@ -232,7 +232,7 @@ import System.Posix.Types (EpochTime)
 
 import Common
 import GhcServer
-import GhcRun (RunResult(..), RunBufferMode(..), LoadedModules, ModuleName)
+import GhcRun (RunResult(..), RunBufferMode(..))
 import GhcHsWalk
 
 import Control.Monad.IO.Class (liftIO)
@@ -263,12 +263,9 @@ data SessionConfig = SessionConfig {
 data Computed = Computed {
     -- | Last compilation and run errors
     computedErrors        :: [SourceError]
-    -- | Modules that got loaded okay
+    -- | Modules that got loaded okay together with their mappings
+    -- from source locations to information about identifiers there
   , computedLoadedModules :: LoadedModules
-    -- | Mapping from source locations to information about identifiers there
-    -- TODO: We should pair each IdMap with a ModuleName
-    -- (Maybe define LoadedModules = [(ModuleName, IdMap)] and combine)
-  , computedIdMap         :: [IdMap]
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -498,8 +495,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         -- Update code
         computed <- if (idleState' ^. ideUpdatedCode) then do
                       (computedErrors,
-                       computedLoadedModules,
-                       computedIdMap) <-
+                       computedLoadedModules) <-
                         rpcCompile (idleState ^. ideGhcServer)
                                    (idleState' ^. ideNewOpts)
                                    (ideSourcesDir ideStaticInfo)
@@ -738,9 +734,16 @@ getManagedFiles IdeSession{ideState} =
   plugLeaks files = ManagedFiles { sourceFiles = map fst $ _managedSource files
                                  , dataFiles = _managedData files }
 
--- | Get the list of correctly compiled modules, as reported by the compiler.
+-- | Get the list of correctly compiled modules, as reported by the compiler,
+-- together with a mapping from symbol uses to symbol info.
+-- That is, given a symbol used at a particular location in a source module
+-- the mapping tells us where that symbol is defined, either locally in a
+-- source module or a top-level symbol imported from another package,
+-- what is the type of this symbol and some more information.
+-- This information lets us, e.g, construct Haddock URLs for symbols,
+-- like @parallel-3.2.0.3/Control-Parallel.html#v:pseq@.
 getLoadedModules :: Query LoadedModules
-getLoadedModules IdeSession{ideState} =
+getLoadedModules IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
       IdeSessionIdle      idleState -> aux idleState
@@ -749,7 +752,8 @@ getLoadedModules IdeSession{ideState} =
   where
     aux :: IdeIdleState -> IO LoadedModules
     aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return computedLoadedModules
+      Just Computed{..} ->
+        return (mkRelative (ideSourcesDir ideStaticInfo) computedLoadedModules)
       Nothing -> fail "This session state does not admit queries."
 
 -- | Is code generation currently enabled?
@@ -771,28 +775,6 @@ getAllDataFiles IdeSession{ideStaticInfo} =
   Find.find Find.always
             (Find.fileType Find.==? Find.RegularFile)
             (ideDataDir ideStaticInfo)
-
--- | Get a mapping from symbol uses to symbol info.
--- That is, given a symbol used at a particular location in a source module
--- the mapping tells us where that symbol is defined, either locally in a
--- source module or a top-level symbol imported from another package,
--- what is the type of this symbol and some more information.
--- This information lets us, e.g, construct Haddock URLs for symbols,
--- like @parallel-3.2.0.3/Control-Parallel.html#v:pseq@.
-getIdMap :: Query [IdMap]
-getIdMap IdeSession{ideState, ideStaticInfo} =
-  -- TODO: scrap all this boilerplate
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
-  where
-    aux :: IdeIdleState -> IO [IdMap]
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} ->
-        return (mkRelative (ideSourcesDir ideStaticInfo) computedIdMap)
-      Nothing -> fail "This session state does not admit queries."
 
 -- | Get all current environment overrides
 getEnv :: Query [(String, Maybe String)]
@@ -818,7 +800,7 @@ runStmt IdeSession{ideState} m fun = do
        (Just comp, True) ->
           -- ideManagedFiles is irrelevant, because only the module name
           -- inside 'module .. where' counts.
-          if m `elem` computedLoadedModules comp
+          if m `Map.member` computedLoadedModules comp
           then do
             runActions <- rpcRun (idleState ^. ideGhcServer)
                                  m fun
