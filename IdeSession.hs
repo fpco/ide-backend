@@ -237,9 +237,8 @@ import GhcHsWalk
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT, execStateT)
-import Data.Accessor ((.>), (^.), (^=))
+import Data.Accessor (Accessor, accessor, (.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
-import Data.Accessor.Template (nameDeriveAccessors)
 
 import Crypto.Types (BitLength)
 import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
@@ -342,9 +341,6 @@ data ManagedFiles = ManagedFiles
   { sourceFiles :: [FilePath]
   , dataFiles   :: [FilePath]
   }
-
-$(nameDeriveAccessors ''IdeIdleState accessorName)
-$(nameDeriveAccessors ''ManagedFilesInternal accessorName)
 
 -- | Recover the fixed config the session was initialized with.
 getSessionConfig :: IdeSession -> SessionConfig
@@ -873,3 +869,37 @@ mkRelative path = everywhere (mkT aux)
     aux srcSpan = srcSpan {
         spanFilePath = makeRelative path (spanFilePath srcSpan)
       }
+
+{------------------------------------------------------------------------------
+  Accessors
+------------------------------------------------------------------------------}
+
+ideLogicalTimestamp :: Accessor IdeIdleState LogicalTimestamp
+ideComputed         :: Accessor IdeIdleState (Maybe Computed)
+ideNewOpts          :: Accessor IdeIdleState (Maybe [String])
+ideGenerateCode     :: Accessor IdeIdleState Bool
+ideManagedFiles     :: Accessor IdeIdleState ManagedFilesInternal
+ideEnv              :: Accessor IdeIdleState [(String, Maybe String)]
+ideGhcServer        :: Accessor IdeIdleState GhcServer
+ideStdoutBufferMode :: Accessor IdeIdleState RunBufferMode
+ideStderrBufferMode :: Accessor IdeIdleState RunBufferMode
+ideUpdatedEnv       :: Accessor IdeIdleState Bool
+ideUpdatedCode      :: Accessor IdeIdleState Bool
+
+ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
+ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
+ideNewOpts          = accessor _ideNewOpts          $ \x s -> s { _ideNewOpts          = x }
+ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCode     = x }
+ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }
+ideEnv              = accessor _ideEnv              $ \x s -> s { _ideEnv              = x }
+ideGhcServer        = accessor _ideGhcServer        $ \x s -> s { _ideGhcServer        = x }
+ideStdoutBufferMode = accessor _ideStdoutBufferMode $ \x s -> s { _ideStdoutBufferMode = x }
+ideStderrBufferMode = accessor _ideStderrBufferMode $ \x s -> s { _ideStderrBufferMode = x }
+ideUpdatedEnv       = accessor _ideUpdatedEnv       $ \x s -> s { _ideUpdatedEnv       = x }
+ideUpdatedCode      = accessor _ideUpdatedCode      $ \x s -> s { _ideUpdatedCode      = x }
+
+managedSource :: Accessor ManagedFilesInternal [(FilePath, (MD5Digest, LogicalTimestamp))]
+managedData   :: Accessor ManagedFilesInternal [FilePath]
+
+managedSource = accessor _managedSource $ \x s -> s { _managedSource = x }
+managedData   = accessor _managedData   $ \x s -> s { _managedData   = x }

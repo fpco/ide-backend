@@ -124,6 +124,7 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
     ideBackendRTSOpts = [
         -- Just in case the user specified -hide-all-packages
         "-package ide-backend-rts"
+      , "-i/Users/dev/wt/projects/fpco/ide-backend/test/Cabal"
       ]
 
 -- | Handle a compile or type check request
