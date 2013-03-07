@@ -161,7 +161,9 @@ test-suite ghc-errors
                       BangPatterns, RecordWildCards, NamedFieldPuns
   other-extensions:   CPP, TemplateHaskell, ScopedTypeVariables,
                       DeriveDataTypeable
-  ghc-options:        -Wall -fno-warn-unused-do-bind
+  ghc-options:        -Wall -fno-warn-unused-do-bind -threaded
+  ghc-options:        -with-rtsopts=-N
+
 
 test-suite rpc-server
   type:               exitcode-stdio-1.0
