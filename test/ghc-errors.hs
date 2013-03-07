@@ -4,8 +4,7 @@ module Main (main) where
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad (liftM, void, forM_)
-import qualified Data.ByteString as BSS (ByteString)
-import qualified Data.ByteString.Char8 as BSSC (pack)
+import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
 import Data.List (sort)
@@ -939,49 +938,22 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected result " ++ show result
     )
   , ( "Buffer modes: RunNoBuffering"
-    , testBufferMode RunNoBuffering $ map (BSSC.pack . return) "123\n456\n789\n"
+    , testBufferMode RunNoBuffering
     )
   , ( "Buffer modes: RunLineBuffering, no timeout"
-    , testBufferMode (RunLineBuffering Nothing) $ map BSSC.pack [
-          "123\n"
-        , "456\n"
-        , "789\n"
-        ]
+    , testBufferMode (RunLineBuffering Nothing)
     )
   , ( "Buffer modes: RunBlockBuffering, no timeout"
-    , testBufferMode (RunBlockBuffering (Just 5) Nothing) $ map BSSC.pack [
-          "123\n4"
-        , "56\n78"
-        , "9\n"
-        ]
+    , testBufferMode (RunBlockBuffering (Just 5) Nothing)
     )
   , ( "Buffer modes: RunLineBuffering, with timeout"
-    , testBufferMode (RunLineBuffering (Just (5 * 200000))) $ map BSSC.pack [
-          "123\n"
-        , "4"
-        , "56\n"
-        , "78"
-        , "9\n"
-        ]
+    , testBufferMode (RunLineBuffering (Just 1000000))
     )
   , ( "Buffer modes: RunBlockBuffering, with timeout"
-    , testBufferMode (RunBlockBuffering (Just 2) (Just (3 * 200000))) $ map BSSC.pack [
-         "12"
-       , "3"
-       , "\n4"
-       , "5"
-       , "6\n"
-       , "7"
-       , "89"
-       , "\n"
-       ]
+    , testBufferMode (RunBlockBuffering (Just 4) (Just 1000000))
     )
   , ( "Buffer modes: RunBlockBuffering, buffer never fills, with timeout"
-    , testBufferMode (RunBlockBuffering (Just 4096) (Just (5 * 200000))) $ map BSSC.pack [
-         "123\n4"
-       , "56\n78"
-       , "9\n"
-       ]
+    , testBufferMode (RunBlockBuffering (Just 4096) (Just 1000000))
     )
   , ( "Use relative path in SessionConfig"
     , do withTempDirectory "." "ide-backend-test." $ \fullPath -> do
@@ -1517,8 +1489,8 @@ restartRun code exitCode =
           Right RunForceCancelled -> return ()
           _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
 
-testBufferMode :: RunBufferMode -> [BSS.ByteString] -> Assertion
-testBufferMode bufferMode expected =
+testBufferMode :: RunBufferMode -> Assertion
+testBufferMode bufferMode =
   withConfiguredSession defOpts $ \session -> do
     let upd = (updateCodeGeneration True)
            <> (updateStdoutBufferMode bufferMode)
@@ -1529,23 +1501,13 @@ testBufferMode bufferMode expected =
                 , "import Control.Monad"
                 , "printCs :: IO ()"
                 , "printCs = do"
-                , "  threadDelay 100000 >> putChar '1'"
-                , "  threadDelay 200000 >> putChar '2'"
-                , "  threadDelay 200000 >> putChar '3'"
-
-                , "  threadDelay 200000 >> putChar '\\n'"
-                , ""
-                , "  threadDelay 200000 >> putChar '4'"
-                , "  threadDelay 200000 >> putChar '5'"
-
-                , "  threadDelay 200000 >> putChar '6'"
-                , "  threadDelay 200000 >> putChar '\\n'"
-                , ""
-                , "  threadDelay 200000 >> putChar '7'"
-
-                , "  threadDelay 200000 >> putChar '8'"
-                , "  threadDelay 200000 >> putChar '9'"
-                , "  threadDelay 200000 >> putChar '\\n'"
+                , "  threadDelay 500000"
+                , "  replicateM_ 5 $ do"
+                , "    forM_ ['1' .. '9'] $ \\ch -> do"
+                , "      threadDelay 100000"
+                , "      putChar ch"
+                , "    threadDelay 100000"
+                , "    putChar '\\n'"
                 ])
 
     updateSessionD session upd 1
@@ -1553,22 +1515,59 @@ testBufferMode bufferMode expected =
     assertNoErrors msgs
 
     runActions <- runStmt session (fromString "M") "printCs"
-    let go es = do ret <- runWait runActions
-                   case (es, ret) of
-                     (e : es', Left b) -> do
-                       assertEqual "" e b
-                       go es'
-                     ([], Right (RunOk _)) ->
-                       return ()
-                     (e : _, Right result) ->
-                       assertFailure $ "Program terminated with " ++ show result ++ " but expected " ++ show e
-                     ([], Left b) ->
-                       assertFailure $ "Expected program termination, but got " ++ show b
-                     ([], Right res) ->
-                       assertFailure $ "Program terminated abnormally: " ++ show res
-    go expected
+    let go acc = do ret <- runWait runActions
+                    case ret of
+                      Left bs -> do
+                        go (BSSC.unpack bs : acc)
+                      Right (RunOk _) ->
+                        verify bufferMode (reverse acc)
+                      Right res ->
+                        assertFailure $ "Program terminated abnormally: " ++ show res
+    go []
+  where
+    verify :: RunBufferMode -> [String] -> Assertion
+    verify RunNoBuffering outp =
+      assertEqual "" (chunk 1 total) outp
+    verify (RunLineBuffering Nothing) outp =
+      assertEqual "" (chunkOn '\n' total) outp
+    verify (RunBlockBuffering (Just blockSize) Nothing) outp =
+      assertEqual "" (chunk blockSize total) outp
+    verify (RunLineBuffering (Just 1000000)) outp = do
+      -- We don't want to be *too* precise, but we should expect 10 chunks,
+      -- half of which should end on a linebreak. And of course they should
+      -- total to the right thing :)
+      let (withBreak, withoutBreak) = List.partition ((== '\n') . last) outp
+      assertEqual "" 5 (length withBreak)
+      assertEqual "" 5 (length withoutBreak)
+      assertEqual "" total (concat outp)
+    verify (RunBlockBuffering (Just 4) (Just 1000000)) outp = do
+      -- As above, we don't want to be too precise. Certaily no chunks should
+      -- be larger than 4, and "some" should be smaller
+      assertBool "" (all ((<= 4) . length) outp)
+      assertBool "" (any ((< 4)  . length) outp)
+      assertEqual "" total (concat outp)
+    verify (RunBlockBuffering (Just 4096) (Just 1000000)) outp = do
+      assertEqual "" 6 (length outp)
+      assertEqual "" total (concat outp)
+    verify mode _outp =
+      assertFailure $ "Unsupported mode " ++ show mode
 
-{-------------------------------------------------------------------------------
+    total :: String
+    total = concat $ replicate 5 "123456789\n"
+
+    chunk :: Int -> [a] -> [[a]]
+    chunk _ [] = []
+    chunk n xs = let (firstChunk, rest) = splitAt n xs
+                 in firstChunk : chunk n rest
+
+    chunkOn :: Eq a => a -> [a] -> [[a]]
+    chunkOn _ [] = []
+    chunkOn x xs = let (firstChunk, rest) = span (/= x) xs
+                   in case rest of
+                        (x' : rest') -> (firstChunk ++ [x']) : chunkOn x rest'
+                        []           -> [firstChunk]
+
+{------------------------------------------------------------------------------[
   Aux
 -------------------------------------------------------------------------------}
 
