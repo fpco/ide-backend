@@ -1715,7 +1715,7 @@ testBufferMode bufferMode =
     msgs <- getSourceErrors session
     assertNoErrors msgs
 
-    runActions <- runStmt session (fromString "M") "printCs"
+    runActions <- runStmt session "M" "printCs"
     let go acc = do ret <- runWait runActions
                     case ret of
                       Left bs -> do
@@ -1763,7 +1763,7 @@ testBufferMode bufferMode =
 
     chunkOn :: Eq a => a -> [a] -> [[a]]
     chunkOn _ [] = []
-    chunkOn x xs = let (firstChunk, rest) = span (/= x) xs
+    chunkOn x xs = let (firstChunk, rest) = List.span (/= x) xs
                    in case rest of
                         (x' : rest') -> (firstChunk ++ [x']) : chunkOn x rest'
                         []           -> [firstChunk]
