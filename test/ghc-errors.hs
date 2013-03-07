@@ -342,9 +342,10 @@ syntheticTests =
     )
   , ( "Compile a project: A depends on B, error in A"
     , withConfiguredSession defOpts $ \session -> do
-        loadModulesFrom session "test/AerrorB"
+        loadModulesFrom session "../ide-backend/test/AerrorB"
         msgs <- getSourceErrors session
         case msgs of
+          [] -> assertFailure $ "Missing source errors"
           [SourceError _ (ProperSpan (SourceSpan fn _ _ _ _)) s] -> do
             assertBool "Wrong file reported for the error"
               $ isSuffixOf "A.hs" fn
@@ -354,9 +355,10 @@ syntheticTests =
      )
   , ( "Compile a project: A depends on B, error in B"
     , withConfiguredSession defOpts $ \session -> do
-        loadModulesFrom session "test/ABerror"
+        loadModulesFrom session "test/../test/ABerror/../ABerror"
         msgs <- getSourceErrors session
         case msgs of
+          [] -> assertFailure $ "Missing source errors"
           [SourceError _ (ProperSpan (SourceSpan fn _ _ _ _)) s] -> do
             assertBool "Wrong file reported for the error"
               $ isSuffixOf "B.hs" fn
