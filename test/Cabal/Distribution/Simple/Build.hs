@@ -3,7 +3,7 @@
 -- Module      :  Distribution.Simple.Build
 -- Copyright   :  Isaac Jones 2003-2005,
 --                Ross Paterson 2006,
---                Duncan Coutts 2007-2008, 2012
+--                Duncan Coutts 2007-2008
 --
 -- Maintainer  :  cabal-devel@haskell.org
 -- Portability :  portable
@@ -73,22 +73,15 @@ import Distribution.PackageDescription
          , BenchmarkInterface(..) )
 import qualified Distribution.InstalledPackageInfo as IPI
 import qualified Distribution.ModuleName as ModuleName
-import Distribution.ModuleName (ModuleName)
 
 import Distribution.Simple.Setup
          ( BuildFlags(..), fromFlag )
-import Distribution.Simple.BuildTarget 
-         ( BuildTarget(..), readBuildTargets )
 import Distribution.Simple.PreProcess
          ( preprocessComponent, PPSuffixHandler )
 import Distribution.Simple.LocalBuildInfo
          ( LocalBuildInfo(compiler, buildDir, withPackageDB, withPrograms)
-         , Component(..), componentName, getComponent, componentBuildInfo
-         , ComponentLocalBuildInfo(..), pkgEnabledComponents
-         , withComponentsInBuildOrder, componentsInBuildOrder
-         , ComponentName(..), showComponentName
-         , ComponentDisabledReason(..), componentDisabledReason
-         , inplacePackageId )
+         , Component(..), ComponentLocalBuildInfo(..), withComponentsLBI
+         , componentBuildInfo, inplacePackageId )
 import Distribution.Simple.Program.Types
 import Distribution.Simple.Program.Db
 import Distribution.Simple.BuildPaths
@@ -98,7 +91,7 @@ import Distribution.Simple.Register
 import Distribution.Simple.Test ( stubFilePath, stubName )
 import Distribution.Simple.Utils
          ( createDirectoryIfMissingVerbose, rewriteFile
-         , die, info, warn, setupMessage )
+         , die, info, setupMessage )
 
 import Distribution.Verbosity
          ( Verbosity )
@@ -107,12 +100,10 @@ import Distribution.Text
 
 import Data.Maybe
          ( maybeToList )
-import Data.Either
-         ( partitionEithers )
 import Data.List
-         ( intersect, intercalate )
+         ( intersect )
 import Control.Monad
-         ( when, unless, forM_ )
+         ( unless )
 import System.FilePath
          ( (</>), (<.>) )
 import System.Directory
@@ -129,21 +120,12 @@ build    :: PackageDescription  -- ^ Mostly information from the .cabal file
 build pkg_descr lbi flags suffixes = do
   let distPref  = fromFlag (buildDistPref flags)
       verbosity = fromFlag (buildVerbosity flags)
-
-  targets  <- readBuildTargets pkg_descr (buildArgs flags)
-  targets' <- checkBuildTargets verbosity pkg_descr targets
-  let componentsToBuild = map fst (componentsInBuildOrder lbi (map fst targets'))
-  info verbosity $ "Component build order: "
-                ++ intercalate ", " (map showComponentName componentsToBuild)
-
   initialBuildSteps distPref pkg_descr lbi verbosity
-  when (null targets) $
-    -- Only bother with this message if we're building the whole package
-    setupMessage verbosity "Building" (packageId pkg_descr)
+  setupMessage verbosity "Building" (packageId pkg_descr)
 
   internalPackageDB <- createInternalPackageDB distPref
 
-  withComponentsInBuildOrder pkg_descr lbi componentsToBuild $ \comp clbi ->
+  withComponentsLBI pkg_descr lbi $ \comp clbi ->
     let bi     = componentBuildInfo comp
         progs' = addInternalBuildTools pkg_descr lbi bi (withPrograms lbi)
         lbi'   = lbi {
@@ -365,48 +347,3 @@ writeAutogenFiles verbosity pkg lbi = do
 
   let cppHeaderPath = autogenModulesDir lbi </> cppHeaderName
   rewriteFile cppHeaderPath (Build.Macros.generate pkg lbi)
-
--- | Check that the given build targets are valid in the current context.
---
--- Also swizzle into a more convenient form.
---
-checkBuildTargets :: Verbosity -> PackageDescription -> [BuildTarget]
-                  -> IO [(ComponentName, Maybe (Either ModuleName FilePath))]
-checkBuildTargets _ pkg []      =
-    return [ (componentName c, Nothing) | c <- pkgEnabledComponents pkg ]
-
-checkBuildTargets verbosity pkg targets = do
-    
-    let (enabled, disabled) =
-          partitionEithers
-            [ case componentDisabledReason (getComponent pkg cname) of
-                Nothing     -> Left  target'
-                Just reason -> Right (cname, reason)
-            | target <- targets
-            , let target'@(cname,_) = swizzleTarget target ]
-
-    case disabled of
-      []                 -> return ()
-      ((cname,reason):_) -> die $ formatReason (showComponentName cname) reason
-
-    forM_ [ (c, t) | (c, Just t) <- enabled ] $ \(c, t) ->
-      warn verbosity $ "Ignoring '" ++ either display id t ++ ". The whole "
-                    ++ showComponentName c ++ " will be built. (Support for "
-                    ++ "module and file targets has not been implemented yet.)"
-
-    return enabled
-
-  where
-    swizzleTarget (BuildTargetComponent c)   = (c, Nothing)
-    swizzleTarget (BuildTargetModule    c m) = (c, Just (Left  m))
-    swizzleTarget (BuildTargetFile      c f) = (c, Just (Right f))
-
-    formatReason cn DisabledComponent =
-        "Cannot build the " ++ cn ++ " because the component is marked "
-     ++ "as disabled in the .cabal file."
-    formatReason cn DisabledAllTests =
-        "Cannot build the " ++ cn ++ " because test suites are not "
-     ++ "enabled. Run configure with the flag --enable-tests"
-    formatReason cn DisabledAllBenchmarks =
-        "Cannot build the " ++ cn ++ " because benchmarks are not "
-     ++ "enabled. Re-run configure with the flag --enable-benchmarks"

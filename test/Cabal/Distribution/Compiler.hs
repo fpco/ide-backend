@@ -62,7 +62,6 @@ module Distribution.Compiler (
   CompilerId(..),
   ) where
 
-import Data.Maybe (fromMaybe)
 import Distribution.Version (Version(..))
 
 import qualified System.Info (compilerName)
@@ -93,7 +92,9 @@ instance Text CompilerFlavor where
 
 classifyCompilerFlavor :: String -> CompilerFlavor
 classifyCompilerFlavor s =
-  fromMaybe (OtherCompiler s) $ lookup (lowercase s) compilerMap
+  case lookup (lowercase s) compilerMap of
+    Just compiler -> compiler
+    Nothing       -> OtherCompiler s
   where
     compilerMap = [ (display compiler, compiler)
                   | compiler <- knownCompilerFlavors ]

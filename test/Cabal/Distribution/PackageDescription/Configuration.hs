@@ -1,5 +1,10 @@
+{-# OPTIONS -cpp #-}
+-- OPTIONS required for ghc-6.4.x compat, and must appear first
+{-# LANGUAGE CPP #-}
 -- -fno-warn-deprecations for use of Map.foldWithKey
-{-# OPTIONS_GHC -fno-warn-deprecations #-}
+{-# OPTIONS_GHC -cpp -fno-warn-deprecations #-}
+{-# OPTIONS_NHC98 -cpp #-}
+{-# OPTIONS_JHC -fcpp #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Distribution.Configuration
@@ -85,6 +90,11 @@ import Data.Maybe ( catMaybes, maybeToList )
 import Data.Map ( Map, fromListWith, toList )
 import qualified Data.Map as Map
 import Data.Monoid
+
+#if defined(__GLASGOW_HASKELL__) && (__GLASGOW_HASKELL__ < 606)
+import qualified Text.Read as R
+import qualified Text.Read.Lex as L
+#endif
 
 ------------------------------------------------------------------------------
 
@@ -305,7 +315,34 @@ resolveWithFlags dom os arch impl constrs trees checkDeps =
 -- | A map of dependencies.  Newtyped since the default monoid instance is not
 --   appropriate.  The monoid instance uses 'intersectVersionRanges'.
 newtype DependencyMap = DependencyMap { unDependencyMap :: Map PackageName VersionRange }
+#if !defined(__GLASGOW_HASKELL__) || (__GLASGOW_HASKELL__ >= 606)
   deriving (Show, Read)
+#else
+-- The Show/Read instance for Data.Map in ghc-6.4 is useless
+-- so we have to re-implement it here:
+instance Show DependencyMap where
+  showsPrec d (DependencyMap m) =
+      showParen (d > 10) (showString "DependencyMap" . shows (M.toList m))
+
+instance Read DependencyMap where
+  readPrec = parens $ R.prec 10 $ do
+    R.Ident "DependencyMap" <- R.lexP
+    xs <- R.readPrec
+    return (DependencyMap (M.fromList xs))
+      where parens :: R.ReadPrec a -> R.ReadPrec a
+            parens p = optional
+             where
+               optional  = p R.+++ mandatory
+               mandatory = paren optional
+
+            paren :: R.ReadPrec a -> R.ReadPrec a
+            paren p = do L.Punc "(" <- R.lexP
+                         x          <- R.reset p
+                         L.Punc ")" <- R.lexP
+                         return x
+
+  readListPrec = R.readListPrecDefault
+#endif
 
 instance Monoid DependencyMap where
     mempty = DependencyMap Map.empty

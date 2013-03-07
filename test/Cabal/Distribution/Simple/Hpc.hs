@@ -60,13 +60,9 @@ import Distribution.PackageDescription
     , testModules
     )
 import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo(..) )
-import Distribution.Simple.Program
-    ( hpcProgram
-    , requireProgramVersion
-    )
+import Distribution.Simple.Program ( hpcProgram, requireProgram )
 import Distribution.Simple.Program.Hpc ( markup, union )
 import Distribution.Simple.Utils ( notice )
-import Distribution.Version ( anyVersion )
 import Distribution.Text
 import Distribution.Verbosity ( Verbosity() )
 import System.Directory ( createDirectoryIfMissing, doesFileExist )
@@ -142,19 +138,14 @@ markupTest :: Verbosity
 markupTest verbosity lbi distPref libName suite = do
     tixFileExists <- doesFileExist $ tixFilePath distPref $ testName suite
     when tixFileExists $ do
-        -- behaviour of 'markup' depends on version, so we need *a* version
-        -- but no particular one
-        (hpc, hpcVer, _) <- requireProgramVersion verbosity
-            hpcProgram anyVersion (withPrograms lbi)
-        markup hpc hpcVer verbosity
-            (tixFilePath distPref $ testName suite) mixDirs
-            (htmlDir distPref $ testName suite)
-            (testModules suite ++ [ main ])
+        (hpc, _) <- requireProgram verbosity hpcProgram $ withPrograms lbi
+        markup hpc verbosity (tixFilePath distPref $ testName suite)
+                             (mixDir distPref libName)
+                             (htmlDir distPref $ testName suite)
+                             (testModules suite ++ [ main ])
         notice verbosity $ "Test coverage report written to "
                             ++ htmlDir distPref (testName suite)
                             </> "hpc_index" <.> "html"
-  where
-    mixDirs = map (mixDir distPref) [ testName suite, libName ]
 
 -- | Generate the HTML markup for all of a package's test suites.
 markupPackage :: Verbosity
@@ -167,17 +158,13 @@ markupPackage verbosity lbi distPref libName suites = do
     let tixFiles = map (tixFilePath distPref . testName) suites
     tixFilesExist <- mapM doesFileExist tixFiles
     when (and tixFilesExist) $ do
-        -- behaviour of 'markup' depends on version, so we need *a* version
-        -- but no particular one
-        (hpc, hpcVer, _) <- requireProgramVersion verbosity
-            hpcProgram anyVersion (withPrograms lbi)
+        (hpc, _) <- requireProgram verbosity hpcProgram $ withPrograms lbi
         let outFile = tixFilePath distPref libName
+            mixDir' = mixDir distPref libName
             htmlDir' = htmlDir distPref libName
             excluded = concatMap testModules suites ++ [ main ]
         createDirectoryIfMissing True $ takeDirectory outFile
         union hpc verbosity tixFiles outFile excluded
-        markup hpc hpcVer verbosity outFile mixDirs htmlDir' excluded
+        markup hpc verbosity outFile mixDir' htmlDir' excluded
         notice verbosity $ "Package coverage report written to "
                            ++ htmlDir' </> "hpc_index.html"
-  where
-    mixDirs = map (mixDir distPref) $ libName : map testName suites

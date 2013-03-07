@@ -79,7 +79,7 @@ import Distribution.Simple.InstallDirs (InstallDirs(..), PathTemplateEnv, PathTe
                                         initialPathTemplateEnv)
 import Distribution.Simple.LocalBuildInfo
          ( LocalBuildInfo(..), Component(..), ComponentLocalBuildInfo(..)
-         , withAllComponentsInBuildOrder )
+         , withComponentsLBI )
 import Distribution.Simple.BuildPaths ( haddockName,
                                         hscolourPref, autogenModulesDir,
                                         )
@@ -201,28 +201,27 @@ haddock pkg_descr lbi suffixes flags = do
             , fromPackageDescription pkg_descr ]
 
     let pre c = preprocessComponent pkg_descr c lbi False verbosity suffixes
-    withAllComponentsInBuildOrder pkg_descr lbi $ \comp clbi -> do
+    withComponentsLBI pkg_descr lbi $ \comp clbi -> do
       pre comp
       case comp of
         CLib lib -> do
-          withTempDirectory verbosity keepTempFiles (buildDir lbi) "tmp" $ \tmp -> do
+          withTempDirectory verbosity (buildDir lbi) "tmp" $ \tmp -> do
             let bi = libBuildInfo lib
             libArgs  <- fromLibrary verbosity tmp lbi lib clbi htmlTemplate
             libArgs' <- prepareSources verbosity tmp
                           lbi isVersion2 bi (commonArgs `mappend` libArgs)
-            runHaddock verbosity keepTempFiles confHaddock libArgs'
+            runHaddock verbosity confHaddock libArgs'
         CExe exe -> when (flag haddockExecutables) $ do
-          withTempDirectory verbosity keepTempFiles (buildDir lbi) "tmp" $ \tmp -> do
+          withTempDirectory verbosity (buildDir lbi) "tmp" $ \tmp -> do
             let bi = buildInfo exe
             exeArgs  <- fromExecutable verbosity tmp lbi exe clbi htmlTemplate
             exeArgs' <- prepareSources verbosity tmp
                           lbi isVersion2 bi (commonArgs `mappend` exeArgs)
-            runHaddock verbosity keepTempFiles confHaddock exeArgs'
+            runHaddock verbosity confHaddock exeArgs'
         _ -> return ()
   where
-    verbosity     = flag haddockVerbosity
-    keepTempFiles = flag haddockKeepTempFiles
-    flag f        = fromFlag $ f flags
+    verbosity = flag haddockVerbosity
+    flag f    = fromFlag $ f flags
     htmlTemplate = fmap toPathTemplate . flagToMaybe . haddockHtmlLocation $ flags
 
 -- | performs cpp and unlit preprocessing where needed on the files in
@@ -309,30 +308,17 @@ fromLibrary :: Verbosity
 fromLibrary verbosity tmp lbi lib clbi htmlTemplate = do
     inFiles <- map snd `fmap` getLibSourceFiles lbi lib
     ifaceArgs <- getInterfaces verbosity lbi clbi htmlTemplate
-    let vanillaOpts = (componentGhcOptions normal lbi bi clbi (buildDir lbi)) {
-                          -- Noooooooooo!!!!!111
-                          -- haddock stomps on our precious .hi
-                          -- and .o files. Workaround by telling
-                          -- haddock to write them elsewhere.
-                          ghcOptObjDir  = toFlag tmp,
-                          ghcOptHiDir   = toFlag tmp,
-                          ghcOptStubDir = toFlag tmp
-                      }
-        sharedOpts = vanillaOpts {
-                         ghcOptDynamic   = toFlag True,
-                         ghcOptFPic      = toFlag True,
-                         ghcOptHiSuffix  = toFlag "dyn_hi",
-                         ghcOptObjSuffix = toFlag "dyn_o",
-                         ghcOptExtra     = ghcSharedOptions bi
-                     }
-    opts <- if withVanillaLib lbi
-            then return vanillaOpts
-            else if withSharedLib lbi
-            then return sharedOpts
-            else die "Must have vanilla or shared libraries enabled in order to run haddock"
     return ifaceArgs {
       argHideModules = (mempty,otherModules $ bi),
-      argGhcOptions  = toFlag (opts, ghcVersion),
+      argGhcOptions  = toFlag ((componentGhcOptions normal lbi bi clbi (buildDir lbi)) {
+                       -- Noooooooooo!!!!!111
+                       -- haddock stomps on our precious .hi
+                       -- and .o files. Workaround by telling
+                       -- haddock to write them elsewhere.
+                         ghcOptObjDir  = toFlag tmp,
+                         ghcOptHiDir   = toFlag tmp,
+                         ghcOptStubDir = toFlag tmp
+                       },ghcVersion),
       argTargets     = inFiles
     }
   where
@@ -347,29 +333,16 @@ fromExecutable :: Verbosity
 fromExecutable verbosity tmp lbi exe clbi htmlTemplate = do
     inFiles <- map snd `fmap` getExeSourceFiles lbi exe
     ifaceArgs <- getInterfaces verbosity lbi clbi htmlTemplate
-    let vanillaOpts = (componentGhcOptions normal lbi bi clbi (buildDir lbi)) {
-                          -- Noooooooooo!!!!!111
-                          -- haddock stomps on our precious .hi
-                          -- and .o files. Workaround by telling
-                          -- haddock to write them elsewhere.
-                          ghcOptObjDir  = toFlag tmp,
-                          ghcOptHiDir   = toFlag tmp,
-                          ghcOptStubDir = toFlag tmp
-                      }
-        sharedOpts = vanillaOpts {
-                         ghcOptDynamic   = toFlag True,
-                         ghcOptFPic      = toFlag True,
-                         ghcOptHiSuffix  = toFlag "dyn_hi",
-                         ghcOptObjSuffix = toFlag "dyn_o",
-                         ghcOptExtra     = ghcSharedOptions bi
-                     }
-    opts <- if withVanillaLib lbi
-            then return vanillaOpts
-            else if withSharedLib lbi
-            then return sharedOpts
-            else die "Must have vanilla or shared libraries enabled in order to run haddock"
     return ifaceArgs {
-      argGhcOptions = toFlag (opts, ghcVersion),
+      argGhcOptions = toFlag ((componentGhcOptions normal lbi bi clbi (buildDir lbi)) {
+                      -- Noooooooooo!!!!!111
+                      -- haddock stomps on our precious .hi
+                      -- and .o files. Workaround by telling
+                      -- haddock to write them elsewhere.
+                        ghcOptObjDir  = toFlag tmp,
+                        ghcOptHiDir   = toFlag tmp,
+                        ghcOptStubDir = toFlag tmp
+                      }, ghcVersion),
       argOutputDir  = Dir (exeName exe),
       argTitle      = Flag (exeName exe),
       argTargets    = inFiles
@@ -403,11 +376,11 @@ getGhcLibDir verbosity lbi isVersion2
 ----------------------------------------------------------------------------------------------
 
 -- | Call haddock with the specified arguments.
-runHaddock :: Verbosity -> Bool -> ConfiguredProgram -> HaddockArgs -> IO ()
-runHaddock verbosity keepTempFiles confHaddock args = do
+runHaddock :: Verbosity -> ConfiguredProgram -> HaddockArgs -> IO ()
+runHaddock verbosity confHaddock args = do
   let haddockVersion = fromMaybe (error "unable to determine haddock version")
                        (programVersion confHaddock)
-  renderArgs verbosity keepTempFiles haddockVersion args $ \(flags,result)-> do
+  renderArgs verbosity haddockVersion args $ \(flags,result)-> do
 
       rawSystemProgram verbosity confHaddock flags
 
@@ -415,19 +388,18 @@ runHaddock verbosity keepTempFiles confHaddock args = do
 
 
 renderArgs :: Verbosity
-              -> Bool
               -> Version
               -> HaddockArgs
               -> (([String], FilePath) -> IO a)
               -> IO a
-renderArgs verbosity keepTempFiles version args k = do
+renderArgs verbosity version args k = do
   createDirectoryIfMissingVerbose verbosity True outputDir
-  withTempFile keepTempFiles outputDir "haddock-prolog.txt" $ \prologFileName h -> do
+  withTempFile outputDir "haddock-prolog.txt" $ \prologFileName h -> do
           do
              hPutStrLn h $ fromFlag $ argPrologue args
              hClose h
-             let pflag = "--prologue=" ++ prologFileName
-             k (pflag : renderPureArgs version args, result)
+             let pflag = (:[]).("--prologue="++) $ prologFileName
+             k $ (pflag ++ renderPureArgs version args, result)
     where
       isVersion2 = version >= Version [2,0] []
       outputDir = (unDir $ argOutputDir args)
@@ -555,7 +527,7 @@ hscolour' pkg_descr lbi suffixes flags = do
     createDirectoryIfMissingVerbose verbosity True $ hscolourPref distPref pkg_descr
 
     let pre c = preprocessComponent pkg_descr c lbi False verbosity suffixes
-    withAllComponentsInBuildOrder pkg_descr lbi $ \comp _ -> do
+    withComponentsLBI pkg_descr lbi $ \comp _ -> do
       pre comp
       case comp of
         CLib lib -> do

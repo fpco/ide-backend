@@ -30,7 +30,6 @@ module Distribution.System (
 import qualified System.Info (os, arch)
 import qualified Data.Char as Char (toLower, isAlphaNum)
 
-import Data.Maybe (fromMaybe)
 import Distribution.Text (Text(..), display)
 import qualified Distribution.Compat.ReadP as Parse
 import qualified Text.PrettyPrint as Disp
@@ -93,7 +92,9 @@ instance Text OS where
 
 classifyOS :: ClassificationStrictness -> String -> OS
 classifyOS strictness s =
-  fromMaybe (OtherOS s) $ lookup (lowercase s) osMap
+  case lookup (lowercase s) osMap of
+    Just os -> os
+    Nothing -> OtherOS s
   where
     osMap = [ (name, os)
             | os <- knownOSs
@@ -139,7 +140,9 @@ instance Text Arch where
 
 classifyArch :: ClassificationStrictness -> String -> Arch
 classifyArch strictness s =
-  fromMaybe (OtherArch s) $ lookup (lowercase s) archMap
+  case lookup (lowercase s) archMap of
+    Just arch -> arch
+    Nothing   -> OtherArch s
   where
     archMap = [ (name, arch)
               | arch <- knownArches

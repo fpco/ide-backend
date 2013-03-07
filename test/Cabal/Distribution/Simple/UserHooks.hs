@@ -191,7 +191,7 @@ emptyUserHooks
       preConf   = rn,
       confHook  = (\_ _ -> return (error "No local build info generated during configure. Over-ride empty configure hook.")),
       postConf  = ru,
-      preBuild  = rn',
+      preBuild  = rn,
       buildHook = ru,
       postBuild = ru,
       preClean  = rn,
@@ -218,13 +218,14 @@ emptyUserHooks
       preHaddock   = rn,
       haddockHook  = ru,
       postHaddock  = ru,
-      preTest  = rn',
+      preTest = \_ _ -> return emptyHookedBuildInfo, -- same as rn, but without
+                                                     -- noExtraFlags
       testHook = ru,
       postTest = ru,
-      preBench = rn',
+      preBench = \_ _ -> return emptyHookedBuildInfo, -- same as rn, but without
+                                                      -- noExtraFlags
       benchHook = \_ -> ru,
       postBench = ru
     }
-    where rn  args _ = noExtraFlags args >> return emptyHookedBuildInfo
-          rn' _    _ = return emptyHookedBuildInfo
+    where rn args  _ = noExtraFlags args >> return emptyHookedBuildInfo
           ru _ _ _ _ = return ()

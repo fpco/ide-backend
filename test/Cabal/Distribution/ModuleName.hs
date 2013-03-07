@@ -57,7 +57,7 @@ import qualified Data.Char as Char
 import System.FilePath
          ( pathSeparator )
 import Data.List
-         ( intercalate, intersperse )
+         ( intersperse )
 
 -- | A valid Haskell module name.
 --
@@ -127,4 +127,4 @@ components (ModuleName ms) = ms
 -- > toFilePath (fromString "A.B.C") = "A/B/C"
 --
 toFilePath :: ModuleName -> FilePath
-toFilePath = intercalate [pathSeparator] . components
+toFilePath = concat . intersperse [pathSeparator] . components

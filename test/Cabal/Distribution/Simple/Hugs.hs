@@ -119,8 +119,6 @@ import System.Exit
          ( ExitCode(ExitSuccess) )
 import Distribution.Compat.Exception
 
-import qualified Data.ByteString.Lazy.Char8 as BS.Char8
-
 -- -----------------------------------------------------------------------------
 -- Configuring
 
@@ -599,7 +597,7 @@ install verbosity lbi libDir installProgDir binDir targetProgDir buildPref (prog
                              let args = hugsOptions ++ [targetName, "\"$@\""]
                              in unlines ["#! /bin/sh",
                                          unwords ("runhugs" : args)]
-        writeFileAtomic exeFile (BS.Char8.pack script)
+        writeFileAtomic exeFile script
         setFileExecutable exeFile
 
 hugsInstallSuffixes :: [String]

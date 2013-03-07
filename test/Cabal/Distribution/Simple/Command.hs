@@ -55,7 +55,6 @@ module Distribution.Simple.Command (
   -- ** Constructing commands
   ShowOrParseArgs(..),
   makeCommand,
-  hiddenCommand,
 
   -- ** Associating actions with commands
   Command,
@@ -103,8 +102,7 @@ data CommandUI flags = CommandUI {
     commandName        :: String,
     -- | A short, one line description of the command to use in help texts.
     commandSynopsis :: String,
-    -- | A function that maps a program name to a usage summary for this
-    -- command.
+    -- | The useage line summary for this command
     commandUsage    :: String -> String,
     -- | Additional explanation of the command to use in help texts.
     commandDescription :: Maybe (String -> String),
@@ -115,6 +113,7 @@ data CommandUI flags = CommandUI {
   }
 
 data ShowOrParseArgs = ShowArgs | ParseArgs
+
 type Name        = String
 type Description = String
 
@@ -450,15 +449,7 @@ instance Functor CommandParse where
   fmap f (CommandReadyToGo flags) = CommandReadyToGo (f flags)
 
 
-data CommandType = NormalCommand | HiddenCommand
-data Command action =
-  Command String String ([String] -> CommandParse action) CommandType
-
--- | Mark command as hidden. Hidden commands don't show up in the 'progname
--- help' or 'progname --help' output.
-hiddenCommand :: Command action -> Command action
-hiddenCommand (Command name synopsys f _cmdType) =
-  Command name synopsys f HiddenCommand
+data Command action = Command String String ([String] -> CommandParse action)
 
 commandAddAction :: CommandUI flags
                  -> (flags -> [String] -> action)
@@ -466,8 +457,8 @@ commandAddAction :: CommandUI flags
 commandAddAction command action =
   Command (commandName command)
           (commandSynopsis command)
-          (fmap (uncurry applyDefaultArgs) . commandParseArgs command False)
-          NormalCommand
+          (fmap (uncurry applyDefaultArgs)
+         . commandParseArgs command False)
 
   where applyDefaultArgs mkflags args =
           let flags = mkflags (commandDefaultFlags command)
@@ -484,21 +475,20 @@ commandsRun globalCommand commands args =
     CommandErrors    errs          -> CommandErrors errs
     CommandReadyToGo (mkflags, args') -> case args' of
       ("help":cmdArgs) -> handleHelpCommand cmdArgs
-      (name:cmdArgs)   -> case lookupCommand name of
-        [Command _ _ action _]
-          -> CommandReadyToGo (flags, action cmdArgs)
-        _ -> CommandReadyToGo (flags, badCommand name)
-      []               -> CommandReadyToGo (flags, noCommand)
+      (name:cmdArgs) -> case lookupCommand name of
+        [Command _ _ action] -> CommandReadyToGo (flags, action cmdArgs)
+        _                    -> CommandReadyToGo (flags, badCommand name)
+      []                     -> CommandReadyToGo (flags, noCommand)
      where flags = mkflags (commandDefaultFlags globalCommand)
 
  where
-    lookupCommand cname = [ cmd | cmd@(Command cname' _ _ _) <- commands'
-                                , cname' == cname ]
+    lookupCommand cname = [ cmd | cmd@(Command cname' _ _) <- commands'
+                          , cname'==cname ]
     noCommand        = CommandErrors ["no command given (try --help)\n"]
     badCommand cname = CommandErrors ["unrecognised command: " ++ cname
                                    ++ " (try --help)\n"]
     commands'      = commands ++ [commandAddAction helpCommandUI undefined]
-    commandNames   = [ name | (Command name _ _ _) <- commands' ]
+    commandNames   = [ name | Command name _ _ <- commands' ]
     globalCommand' = globalCommand {
       commandUsage = \pname ->
            (case commandUsage globalCommand pname of
@@ -510,13 +500,12 @@ commandsRun globalCommand commands args =
       commandDescription = Just $ \pname ->
            "Commands:\n"
         ++ unlines [ "  " ++ align name ++ "    " ++ description
-                   | Command name description _ NormalCommand <- commands' ]
+                   | Command name description _ <- commands' ]
         ++ case commandDescription globalCommand of
              Nothing   -> ""
              Just desc -> '\n': desc pname
     }
-      where maxlen = maximum
-                    [ length name | Command name _ _ NormalCommand <- commands' ]
+      where maxlen = maximum [ length name | Command name _ _ <- commands' ]
             align str = str ++ replicate (maxlen - length str) ' '
 
     -- A bit of a hack: support "prog help" as a synonym of "prog --help"
@@ -529,7 +518,7 @@ commandsRun globalCommand commands args =
         CommandReadyToGo (_,[])  -> CommandHelp globalHelp
         CommandReadyToGo (_,(name:cmdArgs')) ->
           case lookupCommand name of
-            [Command _ _ action _] ->
+            [Command _ _ action] ->
               case action ("--help":cmdArgs') of
                 CommandHelp help -> CommandHelp help
                 CommandList _    -> CommandList []

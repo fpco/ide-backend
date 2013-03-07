@@ -110,7 +110,8 @@ classifyLanguage = \str -> case lookup str langTable of
 -- in some special mode.
 --
 -- Where applicable, references are given to an implementation's
--- official documentation.
+-- official documentation, e.g. \"GHC &#xa7; 7.2.1\" for an extension
+-- documented in section 7.2.1 of the GHC User's Guide.
 
 data Extension =
   -- | Enable a known extension
@@ -127,395 +128,257 @@ data Extension =
 
 data KnownExtension =
 
-  -- | Allow overlapping class instances, provided there is a unique
-  -- most specific instance for each use.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#instance-overlap>
+  -- | [GHC &#xa7; 7.6.3.4] Allow overlapping class instances,
+  -- provided there is a unique most specific instance for each use.
     OverlappingInstances
 
-  -- | Ignore structural rules guaranteeing the termination of class
-  -- instance resolution.  Termination is guaranteed by a fixed-depth
-  -- recursion stack, and compilation may fail if this depth is
-  -- exceeded.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#undecidable-instances>
+  -- | [GHC &#xa7; 7.6.3.3] Ignore structural rules guaranteeing the
+  -- termination of class instance resolution.  Termination is
+  -- guaranteed by a fixed-depth recursion stack, and compilation
+  -- may fail if this depth is exceeded.
   | UndecidableInstances
 
-  -- | Implies 'OverlappingInstances'.  Allow the implementation to
-  -- choose an instance even when it is possible that further
-  -- instantiation of types will lead to a more specific instance
-  -- being applicable.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#instance-overlap>
+  -- | [GHC &#xa7; 7.6.3.4] Implies 'OverlappingInstances'.  Allow the
+  -- implementation to choose an instance even when it is possible
+  -- that further instantiation of types will lead to a more specific
+  -- instance being applicable.
   | IncoherentInstances
 
-  -- | /(deprecated)/ Allows recursive bindings in @do@ blocks, using the @rec@
-  -- keyword. See also 'RecursiveDo'.
+  -- | [GHC &#xa7; 7.3.8] Allows recursive bindings in @do@ blocks,
+  -- using the @rec@ keyword.
   | DoRec
 
-  -- | Allows recursive bindings using @mdo@, a variant of @do@.
-  -- @DoRec@ provides a different, preferred syntax.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#recursive-do-notation>
+  -- | [GHC &#xa7; 7.3.8.2] Deprecated in GHC.  Allows recursive bindings
+  -- using @mdo@, a variant of @do@.  @DoRec@ provides a different,
+  -- preferred syntax.
   | RecursiveDo
 
-  -- | Provide syntax for writing list comprehensions which iterate
-  -- over several lists together, like the 'zipWith' family of
-  -- functions.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#parallel-list-comprehensions>
+  -- | [GHC &#xa7; 7.3.9] Provide syntax for writing list
+  -- comprehensions which iterate over several lists together, like
+  -- the 'zipWith' family of functions.
   | ParallelListComp
 
-  -- | Allow multiple parameters in a type class.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#multi-param-type-classes>
+  -- | [GHC &#xa7; 7.6.1.1] Allow multiple parameters in a type class.
   | MultiParamTypeClasses
 
-  -- | Enable the dreaded monomorphism restriction.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/monomorphism.html>
+  -- | [GHC &#xa7; 7.17] Enable the dreaded monomorphism restriction.
   | MonomorphismRestriction
 
-  -- | Allow a specification attached to a multi-parameter type class
-  -- which indicates that some parameters are entirely determined by
-  -- others. The implementation will check that this property holds
-  -- for the declared instances, and will use this property to reduce
-  -- ambiguity in instance resolution.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#functional-dependencies>
+  -- | [GHC &#xa7; 7.6.2] Allow a specification attached to a
+  -- multi-parameter type class which indicates that some parameters
+  -- are entirely determined by others. The implementation will check
+  -- that this property holds for the declared instances, and will use
+  -- this property to reduce ambiguity in instance resolution.
   | FunctionalDependencies
 
-  -- | Like 'RankNTypes' but does not allow a higher-rank type to
-  -- itself appear on the left of a function arrow.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/other-type-extensions.html#universal-quantification>
+  -- | [GHC &#xa7; 7.8.5] Like 'RankNTypes' but does not allow a
+  -- higher-rank type to itself appear on the left of a function
+  -- arrow.
   | Rank2Types
 
-  -- | Allow a universally-quantified type to occur on the left of a
-  -- function arrow.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/other-type-extensions.html#universal-quantification>
+  -- | [GHC &#xa7; 7.8.5] Allow a universally-quantified type to occur on
+  -- the left of a function arrow.
   | RankNTypes
 
-  -- | Allow data constructors to have polymorphic arguments.  Unlike
-  -- 'RankNTypes', does not allow this for ordinary functions.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/other-type-extensions.html#universal-quantification>
+  -- | [GHC &#xa7; 7.8.5] Allow data constructors to have polymorphic
+  -- arguments.  Unlike 'RankNTypes', does not allow this for ordinary
+  -- functions.
   | PolymorphicComponents
 
-  -- | Allow existentially-quantified data constructors.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/data-type-extensions.html#existential-quantification>
+  -- | [GHC &#xa7; 7.4.4] Allow existentially-quantified data constructors.
   | ExistentialQuantification
 
-  -- | Cause a type variable in a signature, which has an explicit
-  -- @forall@ quantifier, to scope over the definition of the
+  -- | [GHC &#xa7; 7.8.7] Cause a type variable in a signature, which has an
+  -- explicit @forall@ quantifier, to scope over the definition of the
   -- accompanying value declaration.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/other-type-extensions.html#scoped-type-variables>
   | ScopedTypeVariables
 
   -- | Deprecated, use 'ScopedTypeVariables' instead.
   | PatternSignatures
 
-  -- | Enable implicit function parameters with dynamic scope.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/other-type-extensions.html#implicit-parameters>
+  -- | [GHC &#xa7; 7.8.3] Enable implicit function parameters with dynamic
+  -- scope.
   | ImplicitParams
 
-  -- | Relax some restrictions on the form of the context of a type
-  -- signature.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/other-type-extensions.html#flexible-contexts>
+  -- | [GHC &#xa7; 7.8.2] Relax some restrictions on the form of the context
+  -- of a type signature.
   | FlexibleContexts
 
-  -- | Relax some restrictions on the form of the context of an
-  -- instance declaration.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#instance-rules>
+  -- | [GHC &#xa7; 7.6.3.2] Relax some restrictions on the form of the
+  -- context of an instance declaration.
   | FlexibleInstances
 
-  -- | Allow data type declarations with no constructors.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/data-type-extensions.html#nullary-types>
+  -- | [GHC &#xa7; 7.4.1] Allow data type declarations with no constructors.
   | EmptyDataDecls
 
-  -- | Run the C preprocessor on Haskell source code.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/options-phases.html#c-pre-processor>
+  -- | [GHC &#xa7; 4.10.3] Run the C preprocessor on Haskell source code.
   | CPP
 
-  -- | Allow an explicit kind signature giving the kind of types over
-  -- which a type variable ranges.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/other-type-extensions.html#kinding>
+  -- | [GHC &#xa7; 7.8.4] Allow an explicit kind signature giving the kind of
+  -- types over which a type variable ranges.
   | KindSignatures
 
-  -- | Enable a form of pattern which forces evaluation before an
-  -- attempted match, and a form of strict @let@/@where@ binding.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/bang-patterns.html>
+  -- | [GHC &#xa7; 7.11] Enable a form of pattern which forces evaluation
+  -- before an attempted match, and a form of strict @let@/@where@
+  -- binding.
   | BangPatterns
 
-  -- | Allow type synonyms in instance heads.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#flexible-instance-head>
+  -- | [GHC &#xa7; 7.6.3.1] Allow type synonyms in instance heads.
   | TypeSynonymInstances
 
-  -- | Enable Template Haskell, a system for compile-time
+  -- | [GHC &#xa7; 7.9] Enable Template Haskell, a system for compile-time
   -- metaprogramming.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/template-haskell.html>
   | TemplateHaskell
 
-  -- | Enable the Foreign Function Interface.  In GHC, implements the
-  -- standard Haskell 98 Foreign Function Interface Addendum, plus
-  -- some GHC-specific extensions.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/ffi.html>
+  -- | [GHC &#xa7; 8] Enable the Foreign Function Interface.  In GHC,
+  -- implements the standard Haskell 98 Foreign Function Interface
+  -- Addendum, plus some GHC-specific extensions.
   | ForeignFunctionInterface
 
-  -- | Enable arrow notation.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/arrow-notation.html>
+  -- | [GHC &#xa7; 7.10] Enable arrow notation.
   | Arrows
 
-  -- | /(deprecated)/ Enable generic type classes, with default instances defined in
-  -- terms of the algebraic structure of a type.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/generic-classes.html>
+  -- | [GHC &#xa7; 7.16] Enable generic type classes, with default instances
+  -- defined in terms of the algebraic structure of a type.
   | Generics
 
-  -- | Enable the implicit importing of the module "Prelude".  When
-  -- disabled, when desugaring certain built-in syntax into ordinary
-  -- identifiers, use whatever is in scope rather than the "Prelude"
-  -- -- version.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#rebindable-syntax>
+  -- | [GHC &#xa7; 7.3.11] Enable the implicit importing of the module
+  -- @Prelude@.  When disabled, when desugaring certain built-in syntax
+  -- into ordinary identifiers, use whatever is in scope rather than the
+  -- @Prelude@ -- version.
   | ImplicitPrelude
 
-  -- | Enable syntax for implicitly binding local names corresponding
-  -- to the field names of a record.  Puns bind specific names, unlike
-  -- 'RecordWildCards'.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#record-puns>
+  -- | [GHC &#xa7; 7.3.15] Enable syntax for implicitly binding local names
+  -- corresponding to the field names of a record.  Puns bind specific
+  -- names, unlike 'RecordWildCards'.
   | NamedFieldPuns
 
-  -- | Enable a form of guard which matches a pattern and binds
-  -- variables.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#pattern-guards>
+  -- | [GHC &#xa7; 7.3.5] Enable a form of guard which matches a pattern and
+  -- binds variables.
   | PatternGuards
 
-  -- | Allow a type declared with @newtype@ to use @deriving@ for any
-  -- class with an instance for the underlying type.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/deriving.html#newtype-deriving>
+  -- | [GHC &#xa7; 7.5.4] Allow a type declared with @newtype@ to use
+  -- @deriving@ for any class with an instance for the underlying type.
   | GeneralizedNewtypeDeriving
 
-  -- | Enable the \"Trex\" extensible records system.
-  --
-  -- * <http://cvs.haskell.org/Hugs/pages/users_guide/hugs-only.html#TREX>
+  -- | [Hugs &#xa7; 7.1] Enable the \"Trex\" extensible records system.
   | ExtensibleRecords
 
-  -- | Enable type synonyms which are transparent in some definitions
-  -- and opaque elsewhere, as a way of implementing abstract
-  -- datatypes.
-  --
-  -- * <http://cvs.haskell.org/Hugs/pages/users_guide/restricted-synonyms.html>
+  -- | [Hugs &#xa7; 7.2] Enable type synonyms which are transparent in
+  -- some definitions and opaque elsewhere, as a way of implementing 
+  -- abstract datatypes.
   | RestrictedTypeSynonyms
 
-  -- | Enable an alternate syntax for string literals,
+  -- | [Hugs &#xa7; 7.3] Enable an alternate syntax for string literals,
   -- with string templating.
-  --
-  -- * <http://cvs.haskell.org/Hugs/pages/users_guide/here-documents.html>
   | HereDocuments
 
-  -- | Allow the character @#@ as a postfix modifier on identifiers.
-  -- Also enables literal syntax for unboxed values.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#magic-hash>
+  -- | [GHC &#xa7; 7.3.2] Allow the character @#@ as a postfix modifier on
+  -- identifiers.  Also enables literal syntax for unboxed values.
   | MagicHash
 
-  -- | Allow data types and type synonyms which are indexed by types,
-  -- i.e. ad-hoc polymorphism for types.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-families.html>
+  -- | [GHC &#xa7; 7.7] Allow data types and type synonyms which are
+  -- indexed by types, i.e. ad-hoc polymorphism for types.
   | TypeFamilies
 
-  -- | Allow a standalone declaration which invokes the type class
-  -- @deriving@ mechanism.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/deriving.html#stand-alone-deriving>
+  -- | [GHC &#xa7; 7.5.2] Allow a standalone declaration which invokes the
+  -- type class @deriving@ mechanism.
   | StandaloneDeriving
 
-  -- | Allow certain Unicode characters to stand for certain ASCII
-  -- character sequences, e.g. keywords and punctuation.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#unicode-syntax>
+  -- | [GHC &#xa7; 7.3.1] Allow certain Unicode characters to stand for
+  -- certain ASCII character sequences, e.g. keywords and punctuation.
   | UnicodeSyntax
 
-  -- | Allow the use of unboxed types as foreign types, e.g. in
-  -- @foreign import@ and @foreign export@.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/ffi.html#id681687>
+  -- | [GHC &#xa7; 8.1.1] Allow the use of unboxed types as foreign types,
+  -- e.g. in @foreign import@ and @foreign export@.
   | UnliftedFFITypes
 
-  -- | Enable interruptible FFI.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/ffi.html#ffi-interruptible>
-  | InterruptibleFFI
-
-  -- | Allow use of CAPI FFI calling convention (@foreign import capi@).
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/ffi.html#ffi-capi>
-  | CApiFFI
-
-  -- | Defer validity checking of types until after expanding type
-  -- synonyms, relaxing the constraints on how synonyms may be used.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/data-type-extensions.html#type-synonyms>
+  -- | [GHC &#xa7; 7.4.3] Defer validity checking of types until after
+  -- expanding type synonyms, relaxing the constraints on how synonyms
+  -- may be used.
   | LiberalTypeSynonyms
 
-  -- | Allow the name of a type constructor, type class, or type
-  -- variable to be an infix operator.
+  -- | [GHC &#xa7; 7.4.2] Allow the name of a type constructor, type class,
+  -- or type variable to be an infix operator.
   | TypeOperators
 
-  -- | Enable syntax for implicitly binding local names corresponding
-  -- to the field names of a record.  A wildcard binds all unmentioned
-  -- names, unlike 'NamedFieldPuns'.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#record-wildcards>
+--PArr -- not ready yet, and will probably be renamed to ParallelArrays
+
+  -- | [GHC &#xa7; 7.3.16] Enable syntax for implicitly binding local names
+  -- corresponding to the field names of a record.  A wildcard binds
+  -- all unmentioned names, unlike 'NamedFieldPuns'.
   | RecordWildCards
 
   -- | Deprecated, use 'NamedFieldPuns' instead.
   | RecordPuns
 
-  -- | Allow a record field name to be disambiguated by the type of
-  -- the record it's in.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#disambiguate-fields>
+  -- | [GHC &#xa7; 7.3.14] Allow a record field name to be disambiguated
+  -- by the type of the record it's in.
   | DisambiguateRecordFields
 
-  -- | Enable traditional record syntax (as supported by Haskell 98)
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#traditional-record-syntax>
-  | TraditionalRecordSyntax
-
-  -- | Enable overloading of string literals using a type class, much
-  -- like integer literals.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#overloaded-strings>
+  -- | [GHC &#xa7; 7.6.4] Enable overloading of string literals using a
+  -- type class, much like integer literals.
   | OverloadedStrings
 
-  -- | Enable generalized algebraic data types, in which type
-  -- variables may be instantiated on a per-constructor basis. Implies
-  -- 'GADTSyntax'.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/data-type-extensions.html#gadt>
+  -- | [GHC &#xa7; 7.4.6] Enable generalized algebraic data types, in
+  -- which type variables may be instantiated on a per-constructor
+  -- basis. Implies GADTSyntax.
   | GADTs
 
   -- | Enable GADT syntax for declaring ordinary algebraic datatypes.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/data-type-extensions.html#gadt-style>
   | GADTSyntax
 
-  -- | Make pattern bindings monomorphic.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/monomorphism.html#id630981>
+  -- | [GHC &#xa7; 7.17.2] Make pattern bindings monomorphic.
   | MonoPatBinds
 
-  -- | Relax the requirements on mutually-recursive polymorphic
-  -- functions.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/other-type-extensions.html#typing-binds>
+  -- | [GHC &#xa7; 7.8.8] Relax the requirements on mutually-recursive
+  -- polymorphic functions.
   | RelaxedPolyRec
 
-  -- | Allow default instantiation of polymorphic types in more
-  -- situations.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/interactive-evaluation.html#extended-default-rules>
+  -- | [GHC &#xa7; 2.4.5] Allow default instantiation of polymorphic
+  -- types in more situations.
   | ExtendedDefaultRules
 
-  -- | Enable unboxed tuples.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/primitives.html#unboxed-tuples>
+  -- | [GHC &#xa7; 7.2.2] Enable unboxed tuples.
   | UnboxedTuples
 
-  -- | Enable @deriving@ for classes 'Data.Typeable.Typeable' and
-  -- 'Data.Generics.Data'.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/deriving.html#deriving-typeable>
+  -- | [GHC &#xa7; 7.5.3] Enable @deriving@ for classes
+  -- @Data.Typeable.Typeable@ and @Data.Generics.Data@.
   | DeriveDataTypeable
 
-  -- | Enable @deriving@ for 'GHC.Generics.Generic' and 'GHC.Generics.Generic1'.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/deriving.html#deriving-typeable>
-  | DeriveGeneric
-
-  -- | Enable support for default signatures.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#class-default-signatures>
-  | DefaultSignatures
-
-  -- | Allow type signatures to be specified in instance declarations.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#instance-sigs>
-  | InstanceSigs
-
-  -- | Allow a class method's type to place additional constraints on
-  -- a class type variable.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/type-class-extensions.html#class-method-types>
+  -- | [GHC &#xa7; 7.6.1.3] Allow a class method's type to place
+  -- additional constraints on a class type variable.
   | ConstrainedClassMethods
 
-  -- | Allow imports to be qualified by the package name the module is
-  -- intended to be imported from, e.g.
+  -- | [GHC &#xa7; 7.3.18] Allow imports to be qualified by the package
+  -- name the module is intended to be imported from, e.g.
   --
   -- > import "network" Network.Socket
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#package-imports>
   | PackageImports
 
-  -- | /(deprecated)/ Allow a type variable to be instantiated at a
+  -- | [GHC &#xa7; 7.8.6] Deprecated in GHC 6.12 and will be removed in
+  -- GHC 7.  Allow a type variable to be instantiated at a
   -- polymorphic type.
-  --
-  -- * <http://www.haskell.org/ghc/docs/6.12.3/html/users_guide/other-type-extensions.html#impredicative-polymorphism>
   | ImpredicativeTypes
 
-  -- | /(deprecated)/ Change the syntax for qualified infix operators.
-  --
-  -- * <http://www.haskell.org/ghc/docs/6.12.3/html/users_guide/syntax-extns.html#new-qualified-operators>
+  -- | [GHC &#xa7; 7.3.3] Change the syntax for qualified infix
+  -- operators.
   | NewQualifiedOperators
 
-  -- | Relax the interpretation of left operator sections to allow
-  -- unary postfix operators.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#postfix-operators>
+  -- | [GHC &#xa7; 7.3.12] Relax the interpretation of left operator
+  -- sections to allow unary postfix operators.
   | PostfixOperators
 
-  -- | Enable quasi-quotation, a mechanism for defining new concrete
-  -- syntax for expressions and patterns.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/template-haskell.html#th-quasiquotation>
+  -- | [GHC &#xa7; 7.9.5] Enable quasi-quotation, a mechanism for defining
+  -- new concrete syntax for expressions and patterns.
   | QuasiQuotes
 
-  -- | Enable generalized list comprehensions, supporting operations
-  -- such as sorting and grouping.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#generalised-list-comprehensions>
+  -- | [GHC &#xa7; 7.3.10] Enable generalized list comprehensions,
+  -- supporting operations such as sorting and grouping.
   | TransformListComp
 
-  -- | Enable monad comprehensions, which generalise the list
-  -- comprehension syntax to work for any monad.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#monad-comprehensions>
-  | MonadComprehensions
-
-  -- | Enable view patterns, which match a value by applying a
-  -- function and matching on the result.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#view-patterns>
+  -- | [GHC &#xa7; 7.3.6] Enable view patterns, which match a value by
+  -- applying a function and matching on the result.
   | ViewPatterns
 
   -- | Allow concrete XML syntax to be used in expressions and patterns,
@@ -532,8 +395,6 @@ data KnownExtension =
 
   -- | Enables the use of tuple sections, e.g. @(, True)@ desugars into
   -- @\x -> (x, True)@.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#tuple-sections>
   | TupleSections
 
   -- | Allows GHC primops, written in C--, to be imported into a Haskell
@@ -542,117 +403,62 @@ data KnownExtension =
 
   -- | Support for patterns of the form @n + k@, where @k@ is an
   -- integer literal.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#n-k-patterns>
   | NPlusKPatterns
 
   -- | Improve the layout rule when @if@ expressions are used in a @do@
   -- block.
   | DoAndIfThenElse
 
-  -- | Enable support for multi-way @if@-expressions.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#multi-way-if>
-  | MultiWayIf
-
-  -- | Enable support lambda-@case@ expressions.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#lambda-case>
-  | LambdaCase
-
   -- | Makes much of the Haskell sugar be desugared into calls to the
   -- function with a particular name that is in scope.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/syntax-extns.html#rebindable-syntax>
   | RebindableSyntax
 
   -- | Make @forall@ a keyword in types, which can be used to give the
   -- generalisation explicitly.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/other-type-extensions.html#explicit-foralls>
   | ExplicitForAll
 
   -- | Allow contexts to be put on datatypes, e.g. the @Eq a@ in
   -- @data Eq a => Set a = NilSet | ConsSet a (Set a)@.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/data-type-extensions.html#datatype-contexts>
   | DatatypeContexts
 
   -- | Local (@let@ and @where@) bindings are monomorphic.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/other-type-extensions.html#mono-local-binds>
   | MonoLocalBinds
 
-  -- | Enable @deriving@ for the 'Data.Functor.Functor' class.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/deriving.html#deriving-typeable>
+  -- | Enable @deriving@ for the @Data.Functor.Functor@ class.
   | DeriveFunctor
 
-  -- | Enable @deriving@ for the 'Data.Traversable.Traversable' class.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/deriving.html#deriving-typeable>
+  -- | Enable @deriving@ for the @Data.Traversable.Traversable@ class.
   | DeriveTraversable
 
-  -- | Enable @deriving@ for the 'Data.Foldable.Foldable' class.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/deriving.html#deriving-typeable>
+  -- | Enable @deriving@ for the @Data.Foldable.Foldable@ class.
   | DeriveFoldable
 
-  -- | Enable non-decreasing indentation for @do@ blocks.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/bugs-and-infelicities.html#infelicities-syntax>
+  -- | Enable non-decreasing indentation for 'do' blocks.
   | NondecreasingIndentation
 
-  -- | Allow imports to be qualified with a safe keyword that requires
-  -- the imported module be trusted as according to the Safe Haskell
-  -- definition of trust.
+  -- | [GHC &#xa7; 7.20.3] Allow imports to be qualified with a safe
+  -- keyword that requires the imported module be trusted as according
+  -- to the Safe Haskell definition of trust.
   --
   -- > import safe Network.Socket
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/safe-haskell.html#safe-imports>
   | SafeImports
 
-  -- | Compile a module in the Safe, Safe Haskell mode -- a restricted
-  -- form of the Haskell language to ensure type safety.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/safe-haskell.html#safe-trust>
+  -- | [GHC &#xa7; 7.20] Compile a module in the Safe, Safe Haskell
+  -- mode -- a restricted form of the Haskell language to ensure
+  -- type safety.
   | Safe
 
-  -- | Compile a module in the Trustworthy, Safe Haskell mode -- no
-  -- restrictions apply but the module is marked as trusted as long as
-  -- the package the module resides in is trusted.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/safe-haskell.html#safe-trust>
+  -- | [GHC &#xa7; 7.20] Compile a module in the Trustworthy, Safe
+  -- Haskell mode -- no restrictions apply but the module is marked
+  -- as trusted as long as the package the module resides in is
+  -- trusted.
   | Trustworthy
 
-  -- | Compile a module in the Unsafe, Safe Haskell mode so that
-  -- modules compiled using Safe, Safe Haskell mode can't import it.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/safe-haskell.html#safe-trust>
-  | Unsafe
-
-  -- | Allow type class/implicit parameter/equality constraints to be
-  -- used as types with the special kind constraint.  Also generalise
-  -- the @(ctxt => ty)@ syntax so that any type of kind constraint can
-  -- occur before the arrow.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/constraint-kind.html>
+  -- | [GHC &#xa7; 7.40] Allow type class/implicit parameter/equality
+  -- constraints to be used as types with the special kind Constraint.
+  -- Also generalise the (ctxt => ty) syntax so that any type of kind
+  -- Constraint can occur before the arrow.
   | ConstraintKinds
-
-  -- | Enable kind polymorphism.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/kind-polymorphism.html>
-  | PolyKinds
-
-  -- | Enable datatype promotion.
-  --
-  -- * <http://www.haskell.org/ghc/docs/latest/html/users_guide/promotion.html>
-  | DataKinds
-
-  -- | Enable parallel arrays syntax (@[:@, @:]@) for /Data Parallel Haskell/.
-  --
-  -- * <http://www.haskell.org/haskellwiki/GHC/Data_Parallel_Haskell>
-  | ParallelArrays
 
   deriving (Show, Read, Eq, Enum, Bounded)
 

@@ -61,16 +61,13 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. -}
 
 module Distribution.Simple.GHC (
-        getGhcInfo,
         configure, getInstalledPackages,
         buildLib, buildExe,
         installLib, installExe,
         libAbiHash,
-        initPackageDB,
         registerPackage,
         componentGhcOptions,
         ghcLibDir,
-        ghcDynamicByDefault,
 
         -- * Deprecated
         ghcVerbosityOptions,
@@ -81,7 +78,7 @@ import qualified Distribution.Simple.GHC.IPI641 as IPI641
 import qualified Distribution.Simple.GHC.IPI642 as IPI642
 import Distribution.PackageDescription as PD
          ( PackageDescription(..), BuildInfo(..), Executable(..)
-         , Library(..), libModules, exeModules, hcOptions, usedExtensions, allExtensions )
+         , Library(..), libModules, hcOptions, usedExtensions, allExtensions )
 import Distribution.InstalledPackageInfo
          ( InstalledPackageInfo )
 import qualified Distribution.InstalledPackageInfo as InstalledPackageInfo
@@ -139,21 +136,6 @@ import System.IO (hClose, hPutStrLn)
 import System.Environment (getEnv)
 import Distribution.Compat.Exception (catchExit, catchIO)
 
-getGhcInfo :: Verbosity -> ConfiguredProgram -> IO [(String, String)]
-getGhcInfo verbosity ghcProg =
-    case programVersion ghcProg of
-    Just ghcVersion
-     | ghcVersion >= Version [6,7] [] ->
-        do xs <- getProgramOutput verbosity ghcProg ["--info"]
-           case reads xs of
-               [(i, ss)]
-                | all isSpace ss ->
-                   return i
-               _ ->
-                   die "Can't parse --info output of GHC"
-    _ ->
-        return []
-
 -- -----------------------------------------------------------------------------
 -- Configuring
 
@@ -189,7 +171,15 @@ configure verbosity hcPath hcPkgPath conf0 = do
   languages  <- getLanguages verbosity ghcProg
   extensions <- getExtensions verbosity ghcProg
 
-  ghcInfo <- getGhcInfo verbosity ghcProg
+  ghcInfo <- if ghcVersion >= Version [6,7] []
+             then do xs <- getProgramOutput verbosity ghcProg ["--info"]
+                     case reads xs of
+                         [(i, ss)]
+                          | all isSpace ss ->
+                             return i
+                         _ ->
+                             die "Can't parse --info output of GHC"
+             else return []
 
   let comp = Compiler {
         compilerId             = CompilerId GHC ghcVersion,
@@ -223,8 +213,7 @@ guessToolFromGhcPath tool ghcProg verbosity
        info verbosity $ "looking for tool " ++ show tool ++ " near compiler in " ++ dir
        exists <- mapM doesFileExist guesses
        case [ file | (file, True) <- zip guesses exists ] of
-                   -- If we can't find it near ghc, fall back to the usual method.
-         []     -> findProgramLocation verbosity tool
+         [] -> return Nothing
          (fp:_) -> do info verbosity $ "found " ++ tool ++ " in " ++ fp
                       return (Just fp)
 
@@ -351,13 +340,13 @@ configureToolchain ghcProg ghcInfo =
     configureLd' :: Verbosity -> ConfiguredProgram -> IO [ProgArg]
     configureLd' verbosity ldProg = do
       tempDir <- getTemporaryDirectory
-      ldx <- withTempFile False tempDir ".c" $ \testcfile testchnd ->
-             withTempFile False tempDir ".o" $ \testofile testohnd -> do
+      ldx <- withTempFile tempDir ".c" $ \testcfile testchnd ->
+             withTempFile tempDir ".o" $ \testofile testohnd -> do
                hPutStrLn testchnd "int foo() {}"
                hClose testchnd; hClose testohnd
                rawSystemProgram verbosity ghcProg ["-c", testcfile,
                                                    "-o", testofile]
-               withTempFile False tempDir ".o" $ \testofile' testohnd' ->
+               withTempFile tempDir ".o" $ \testofile' testohnd' ->
                  do
                    hClose testohnd'
                    _ <- rawSystemProgramStdout verbosity ldProg
@@ -624,7 +613,7 @@ buildLib verbosity pkg_descr lbi lib clbi = do
       pkgid = packageId pkg_descr
       ifVanillaLib forceVanilla = when (forceVanilla || withVanillaLib lbi)
       ifProfLib = when (withProfLib lbi)
-      ifSharedLib forceShared = when (forceShared || withSharedLib lbi)
+      ifSharedLib = when (withSharedLib lbi)
       ifGHCiLib = when (withGHCiLib lbi && withVanillaLib lbi)
       comp = compiler lbi
       ghcVersion = compilerVersion comp
@@ -635,12 +624,9 @@ buildLib verbosity pkg_descr lbi lib clbi = do
   libBi <- hackThreadedFlag verbosity
              comp (withProfLib lbi) (libBuildInfo lib)
 
-  dynamicByDefault <- ghcDynamicByDefault verbosity ghcProg
   let libTargetDir = pref
-      doingTH = EnableExtension TemplateHaskell `elem` allExtensions libBi
-      forceVanillaLib = doingTH && not dynamicByDefault
-      forceSharedLib  = doingTH &&     dynamicByDefault
-      -- TH always needs default libs, even when building for profiling
+      forceVanillaLib = EnableExtension TemplateHaskell `elem` allExtensions libBi
+      -- TH always needs vanilla libs, even when building for profiling
 
   createDirectoryIfMissingVerbose verbosity True libTargetDir
   -- TODO: do we need to put hs-boot files into place for mutually recurive modules?
@@ -667,11 +653,9 @@ buildLib verbosity pkg_descr lbi lib clbi = do
                     }
 
   unless (null (libModules lib)) $
-    do let vanilla = ifVanillaLib forceVanillaLib (runGhcProg vanillaOpts)
-           shared  = ifSharedLib  forceSharedLib  (runGhcProg sharedOpts)
-       if dynamicByDefault then do shared;  vanilla
-                           else do vanilla; shared
+    do ifVanillaLib forceVanillaLib (runGhcProg vanillaOpts)
        ifProfLib (runGhcProg profOpts)
+       ifSharedLib (runGhcProg sharedOpts)
 
   -- build any C sources
   unless (null (cSources libBi)) $ do
@@ -689,7 +673,7 @@ buildLib verbosity pkg_descr lbi lib clbi = do
                 odir          = fromFlag (ghcOptObjDir vanillaCcOpts)
             createDirectoryIfMissingVerbose verbosity True odir
             runGhcProg vanillaCcOpts
-            ifSharedLib forceSharedLib (runGhcProg sharedCcOpts)
+            ifSharedLib (runGhcProg sharedCcOpts)
        | filename <- cSources libBi]
 
   -- link:
@@ -794,7 +778,7 @@ buildLib verbosity pkg_descr lbi lib clbi = do
       Ld.combineObjectFiles verbosity ldProg
         ghciLibFilePath ghciObjFiles
 
-    ifSharedLib False $
+    ifSharedLib $
       runGhcProg ghcSharedLinkArgs
 
 
@@ -824,63 +808,8 @@ buildExe verbosity _pkg_descr lbi
   -- FIX: what about exeName.hi-boot?
 
   -- build executables
-
-  srcMainFile <- findFile (exeDir : hsSourceDirs exeBi) modPath
-
-  let isHaskellMain = elem (takeExtension srcMainFile) [".hs", ".lhs"]
-      cSrcs         = cSources exeBi ++ [srcMainFile | not isHaskellMain]
-      cObjs         = map (`replaceExtension` objExtension) cSrcs
-      baseOpts   = (componentGhcOptions verbosity lbi exeBi clbi exeDir)
-                    `mappend` mempty {
-                      ghcOptMode           = toFlag GhcModeMake,
-                      ghcOptInputFiles     = [ srcMainFile  |     isHaskellMain],
-                      ghcOptInputModules   = [ m            | not isHaskellMain
-                                                            , m <- exeModules exe]
-                    }
-      staticOpts = baseOpts `mappend` mempty {
-                      ghcOptDynamic        = toFlag False
-                   }
-      profOpts   = baseOpts `mappend` mempty {
-                      ghcOptProfilingMode  = toFlag True,
-                      ghcOptHiSuffix       = toFlag "p_hi",
-                      ghcOptObjSuffix      = toFlag "p_o",
-                      ghcOptExtra          = ghcProfOptions exeBi
-                    }
-      dynOpts    = baseOpts `mappend` mempty {
-                      ghcOptDynamic        = toFlag True,
-                      ghcOptHiSuffix       = toFlag "dyn_hi",
-                      ghcOptObjSuffix      = toFlag "dyn_o",
-                      ghcOptExtra          = ghcSharedOptions exeBi
-                    }
-
-      compileOpts | withProfExe lbi = profOpts
-                  | withDynExe  lbi = dynOpts
-                  | otherwise       = staticOpts
-      
-      linkOpts = compileOpts `mappend` mempty {
-                      ghcOptLinkOptions    = PD.ldOptions exeBi,
-                      ghcOptLinkLibs       = extraLibs exeBi,
-                      ghcOptLinkLibPath    = extraLibDirs exeBi,
-                      ghcOptLinkFrameworks = PD.frameworks exeBi,
-                      ghcOptInputFiles     = [exeDir </> x | x <- cObjs],
-                      ghcOptExtra          = ["-no-hs-main" | not isHaskellMain ]
-                 }
-
-  -- For building exe's for profiling that use TH we actually
-  -- have to build twice, once without profiling and the again
-  -- with profiling. This is because the code that TH needs to
-  -- run at compile time needs to be the vanilla ABI so it can
-  -- be loaded up and run by the compiler.
-  when ((withProfExe lbi || withDynExe lbi) &&
-        EnableExtension TemplateHaskell `elem` allExtensions exeBi) $
-    runGhcProg compileOpts { ghcOptNoLink = toFlag True }
-    --TODO: do we also need to play the static vs dynamic games here?
-
-  runGhcProg compileOpts { ghcOptNoLink = toFlag True }
-
-  -- build any C sources
-  unless (null cSrcs) $ do
-   info verbosity "Building C Sources..."
+  unless (null (cSources exeBi)) $ do
+   info verbosity "Building C Sources."
    sequence_
      [ do let opts = (componentCcGhcOptions verbosity lbi exeBi clbi
                          exeDir filename) `mappend` mempty {
@@ -890,11 +819,46 @@ buildExe verbosity _pkg_descr lbi
               odir = fromFlag (ghcOptObjDir opts)
           createDirectoryIfMissingVerbose verbosity True odir
           runGhcProg opts
-     | filename <- cSrcs ]
+     | filename <- cSources exeBi]
 
-  -- link:
-  info verbosity "Linking..."
-  runGhcProg linkOpts { ghcOptOutputFile = toFlag (targetDir </> exeNameReal) }
+  srcMainFile <- findFile (exeDir : hsSourceDirs exeBi) modPath
+
+  let cObjs = map (`replaceExtension` objExtension) (cSources exeBi)
+  let vanillaOpts = (componentGhcOptions verbosity lbi exeBi clbi exeDir)
+                    `mappend` mempty {
+                      ghcOptMode           = toFlag GhcModeMake,
+                      ghcOptInputFiles     = [exeDir </> x | x <- cObjs]
+                                          ++ [srcMainFile],
+                      ghcOptLinkOptions    = PD.ldOptions exeBi,
+                      ghcOptLinkLibs       = extraLibs exeBi,
+                      ghcOptLinkLibPath    = extraLibDirs exeBi,
+                      ghcOptLinkFrameworks = PD.frameworks exeBi
+                    }
+
+      exeOpts     | withProfExe lbi = vanillaOpts `mappend` mempty {
+                      ghcOptProfilingMode  = toFlag True,
+                      ghcOptHiSuffix       = toFlag "p_hi",
+                      ghcOptObjSuffix      = toFlag "p_o",
+                      ghcOptExtra          = ghcProfOptions exeBi
+                    }
+                  | withDynExe lbi = vanillaOpts `mappend` mempty {
+                      ghcOptDynamic        = toFlag True,
+                      ghcOptHiSuffix       = toFlag "dyn_hi",
+                      ghcOptObjSuffix      = toFlag "dyn_o",
+                      ghcOptExtra          = ghcSharedOptions exeBi
+                    }
+                  | otherwise = vanillaOpts
+
+  -- For building exe's for profiling that use TH we actually
+  -- have to build twice, once without profiling and the again
+  -- with profiling. This is because the code that TH needs to
+  -- run at compile time needs to be the vanilla ABI so it can
+  -- be loaded up and run by the compiler.
+  when ((withProfExe lbi || withDynExe lbi) &&
+        EnableExtension TemplateHaskell `elem` allExtensions exeBi) $
+    runGhcProg vanillaOpts { ghcOptNoLink = toFlag True }
+
+  runGhcProg exeOpts { ghcOptOutputFile = toFlag (targetDir </> exeNameReal) }
 
 
 -- | Filter the "-threaded" flag when profiling as it does not
@@ -944,30 +908,13 @@ libAbiHash verbosity pkg_descr lbi lib clbi = do
   libBi <- hackThreadedFlag verbosity
              (compiler lbi) (withProfLib lbi) (libBuildInfo lib)
   let
-      vanillaArgs =
+      ghcArgs =
         (componentGhcOptions verbosity lbi libBi clbi (buildDir lbi))
         `mappend` mempty {
           ghcOptMode         = toFlag GhcModeAbiHash,
           ghcOptPackageName  = toFlag (packageId pkg_descr),
           ghcOptInputModules = exposedModules lib
         }
-      sharedArgs = vanillaArgs `mappend` mempty {
-                       ghcOptDynamic   = toFlag True,
-                       ghcOptFPic      = toFlag True,
-                       ghcOptHiSuffix  = toFlag "dyn_hi",
-                       ghcOptObjSuffix = toFlag "dyn_o",
-                       ghcOptExtra     = ghcSharedOptions libBi
-                   }
-      profArgs = vanillaArgs `mappend` mempty {
-                     ghcOptProfilingMode = toFlag True,
-                     ghcOptHiSuffix      = toFlag "p_hi",
-                     ghcOptObjSuffix     = toFlag "p_o",
-                     ghcOptExtra         = ghcProfOptions libBi
-                 }
-      ghcArgs = if withVanillaLib lbi then vanillaArgs
-           else if withSharedLib  lbi then sharedArgs
-           else if withProfLib    lbi then profArgs
-           else error "libAbiHash: Can't find an enabled library way"
   --
   (ghcProg, _) <- requireProgram verbosity ghcProgram (withPrograms lbi)
   getProgramInvocationOutput verbosity (ghcInvocation ghcProg ghcArgs)
@@ -1157,14 +1104,9 @@ updateLibArchive verbosity lbi path
     rawSystemProgram verbosity ranlib [path]
   | otherwise = return ()
 
+
 -- -----------------------------------------------------------------------------
 -- Registering
-
--- | Create an empty package DB at the specified location.
-initPackageDB :: Verbosity -> ProgramConfiguration -> FilePath -> IO ()
-initPackageDB verbosity conf dbPath = HcPkg.init verbosity ghcPkgProg dbPath
-  where
-    Just ghcPkgProg = lookupProgram ghcPkgProgram conf
 
 registerPackage
   :: Verbosity
@@ -1177,14 +1119,3 @@ registerPackage
 registerPackage verbosity installedPkgInfo _pkg lbi _inplace packageDbs = do
   let Just ghcPkg = lookupProgram ghcPkgProgram (withPrograms lbi)
   HcPkg.reregister verbosity ghcPkg packageDbs (Right installedPkgInfo)
-
--- -----------------------------------------------------------------------------
--- Utils
-
-ghcDynamicByDefault :: Verbosity -> ConfiguredProgram -> IO Bool
-ghcDynamicByDefault verbosity ghcProg
-    = do xs <- getGhcInfo verbosity ghcProg
-         return $ case lookup "Dynamic by default" xs of
-                  Just "YES" -> True
-                  _          -> False
-

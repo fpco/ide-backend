@@ -86,8 +86,7 @@ import Distribution.Simple.Utils
          , die, warn, notice, setupMessage )
 import Distribution.Simple.Setup (SDistFlags(..), fromFlag, flagToMaybe)
 import Distribution.Simple.PreProcess (PPSuffixHandler, ppSuffixes, preprocessComponent)
-import Distribution.Simple.LocalBuildInfo
-         ( LocalBuildInfo(..), withAllComponentsInBuildOrder )
+import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo(..), withComponentsLBI )
 import Distribution.Simple.BuildPaths ( autogenModuleName )
 import Distribution.Simple.Program ( defaultProgramConfiguration, requireProgram,
                               rawSystemProgram, tarProgram )
@@ -98,7 +97,7 @@ import Control.Monad(when, unless)
 import Data.Char (toLower)
 import Data.List (partition, isPrefixOf)
 import Data.Maybe (isNothing, catMaybes)
-import Data.Time (UTCTime, getCurrentTime, toGregorian, utctDay)
+import System.Time (getClockTime, toCalendarTime, CalendarTime(..))
 import System.Directory
          ( doesFileExist, Permissions(executable), getPermissions )
 import Distribution.Verbosity (Verbosity)
@@ -120,7 +119,7 @@ sdist pkg mb_lbi flags mkTmpDir pps = do
   when (isNothing mb_lbi) $
     warn verbosity "Cannot run preprocessors. Run 'configure' command first."
 
-  date <- getCurrentTime
+  date <- toCalendarTime =<< getClockTime
   let pkg' | snapshot  = snapshotPackage date pkg
            | otherwise = pkg
 
@@ -131,7 +130,7 @@ sdist pkg mb_lbi flags mkTmpDir pps = do
 
     Nothing -> do
       createDirectoryIfMissingVerbose verbosity True tmpTargetDir
-      withTempDirectory verbosity False tmpTargetDir "sdist." $ \tmpDir -> do
+      withTempDirectory verbosity tmpTargetDir "sdist." $ \tmpDir -> do
         let targetDir = tmpDir </> tarBallName pkg'
         generateSourceDir targetDir pkg'
         targzFile <- createArchive verbosity pkg' mb_lbi tmpDir targetPref
@@ -245,8 +244,8 @@ prepareTree verbosity pkg_descr0 mb_lbi distPref targetDir pps = do
   -- pre-processors and include those generated files
   case mb_lbi of
     Just lbi | not (null pps) -> do
-      let lbi' = lbi{ buildDir = targetDir </> buildDir lbi }
-      withAllComponentsInBuildOrder pkg_descr lbi' $ \c _ ->
+      let lbi' = lbi{ buildDir = targetDir </> buildDir lbi }   
+      withComponentsLBI pkg_descr lbi' $ \c _ ->
         preprocessComponent pkg_descr c lbi' True verbosity pps
     _ -> return ()
 
@@ -263,13 +262,9 @@ prepareTree verbosity pkg_descr0 mb_lbi distPref targetDir pps = do
   installOrdinaryFile verbosity descFile (targetDir </> descFile)
 
   where
-    pkg_descr = mapLib filterAutogenModuleLib $ mapAllBuildInfo filterAutogenModuleBI pkg_descr0
-    mapLib f pkg = pkg { library = fmap f (library pkg) }
-    filterAutogenModuleLib lib = lib {
-      exposedModules = filter (/=autogenModule) (exposedModules lib)
-    }
-    filterAutogenModuleBI bi = bi {
-      otherModules   = filter (/=autogenModule) (otherModules bi)
+    pkg_descr = mapAllBuildInfo filterAutogenModule pkg_descr0
+    filterAutogenModule bi = bi {
+      otherModules = filter (/=autogenModule) (otherModules bi)
     }
     autogenModule = autogenModuleName pkg_descr0
 
@@ -323,7 +318,7 @@ overwriteSnapshotPackageDesc verbosity pkg targetDir = do
 -- | Modifies a 'PackageDescription' by appending a snapshot number
 -- corresponding to the given date.
 --
-snapshotPackage :: UTCTime -> PackageDescription -> PackageDescription
+snapshotPackage :: CalendarTime -> PackageDescription -> PackageDescription
 snapshotPackage date pkg =
   pkg {
     package = pkgid { pkgVersion = snapshotVersion date (pkgVersion pkgid) }
@@ -333,7 +328,7 @@ snapshotPackage date pkg =
 -- | Modifies a 'Version' by appending a snapshot number corresponding
 -- to the given date.
 --
-snapshotVersion :: UTCTime -> Version -> Version
+snapshotVersion :: CalendarTime -> Version -> Version
 snapshotVersion date version = version {
     versionBranch = versionBranch version
                  ++ [dateToSnapshotNumber date]
@@ -342,12 +337,14 @@ snapshotVersion date version = version {
 -- | Given a date produce a corresponding integer representation.
 -- For example given a date @18/03/2008@ produce the number @20080318@.
 --
-dateToSnapshotNumber :: UTCTime -> Int
-dateToSnapshotNumber date = case toGregorian (utctDay date) of
-                            (year, month, day) ->
-                                fromIntegral year * 10000
-                              + month             * 100
-                              + day
+dateToSnapshotNumber :: CalendarTime -> Int
+dateToSnapshotNumber date = year  * 10000
+                          + month * 100
+                          + day
+  where
+    year  = ctYear date
+    month = fromEnum (ctMonth date) + 1
+    day   = ctDay date
 
 -- |Create an archive from a tree of source files, and clean up the tree.
 createArchive :: Verbosity            -- ^verbosity

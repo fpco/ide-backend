@@ -57,7 +57,6 @@ module Distribution.Simple.Register (
     register,
     unregister,
 
-    initPackageDB,
     registerPackage,
     generateRegistrationInfo,
     inplaceInstalledPackageInfo,
@@ -67,7 +66,6 @@ module Distribution.Simple.Register (
 
 import Distribution.Simple.LocalBuildInfo
          ( LocalBuildInfo(..), ComponentLocalBuildInfo(..)
-         , ComponentName(..), getComponentLocalBuildInfo
          , InstallDirs(..), absoluteInstallDirs )
 import Distribution.Simple.BuildPaths (haddockName)
 import qualified Distribution.Simple.GHC  as GHC
@@ -75,12 +73,11 @@ import qualified Distribution.Simple.LHC  as LHC
 import qualified Distribution.Simple.Hugs as Hugs
 import qualified Distribution.Simple.UHC  as UHC
 import Distribution.Simple.Compiler
-         ( compilerVersion, Compiler, CompilerFlavor(..), compilerFlavor
+         ( compilerVersion, CompilerFlavor(..), compilerFlavor
          , PackageDBStack, registrationPackageDB )
 import Distribution.Simple.Program
-         ( ProgramConfiguration, ConfiguredProgram
-         , runProgramInvocation, requireProgram, lookupProgram
-         , ghcPkgProgram, lhcPkgProgram )
+         ( ConfiguredProgram, runProgramInvocation
+         , requireProgram, lookupProgram, ghcPkgProgram, lhcPkgProgram )
 import Distribution.Simple.Program.Script
          ( invocationAsSystemScript )
 import qualified Distribution.Simple.Program.HcPkg as HcPkg
@@ -116,7 +113,7 @@ import Data.Maybe
          ( isJust, fromMaybe, maybeToList )
 import Data.List
          ( partition, nub )
-import qualified Data.ByteString.Lazy.Char8 as BS.Char8
+
 
 -- -----------------------------------------------------------------------------
 -- Registration
@@ -124,9 +121,10 @@ import qualified Data.ByteString.Lazy.Char8 as BS.Char8
 register :: PackageDescription -> LocalBuildInfo
          -> RegisterFlags -- ^Install in the user's database?; verbose
          -> IO ()
-register pkg@PackageDescription { library       = Just lib  } lbi regFlags
+register pkg@PackageDescription { library       = Just lib  }
+         lbi@LocalBuildInfo     { libraryConfig = Just clbi } regFlags
   = do
-    let clbi = getComponentLocalBuildInfo lbi CLibName
+
     installedPkgInfo <- generateRegistrationInfo
                            verbosity pkg lib lbi clbi inplace distPref
 
@@ -205,14 +203,6 @@ generateRegistrationInfo verbosity pkg lib lbi clbi inplace distPref = do
 
   return installedPkgInfo{ IPI.installedPackageId = ipid }
 
-
--- | Create an empty package DB at the specified location.
-initPackageDB :: Verbosity -> Compiler -> ProgramConfiguration -> FilePath
-                 -> IO ()
-initPackageDB verbosity comp conf dbPath =
-  case (compilerFlavor comp) of
-    GHC -> GHC.initPackageDB verbosity conf dbPath
-    _   -> die "initPackageDB is not implemented for this compiler"
 
 registerPackage :: Verbosity
                 -> InstalledPackageInfo
@@ -387,7 +377,7 @@ unregister pkg lbi regFlags = do
                          packageDb pkgid
       in if genScript
            then writeFileAtomic unregScriptFileName
-                  (BS.Char8.pack $ invocationAsSystemScript buildOS invocation)
+                  (invocationAsSystemScript buildOS invocation)
             else runProgramInvocation verbosity invocation
     Hugs -> do
         _ <- tryIO $ removeDirectoryRecursive (libdir installDirs)

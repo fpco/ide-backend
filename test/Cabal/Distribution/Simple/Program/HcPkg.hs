@@ -10,7 +10,6 @@
 -- Currently only GHC and LHC have hc-pkg programs.
 
 module Distribution.Simple.Program.HcPkg (
-    init,
     register,
     reregister,
     unregister,
@@ -19,7 +18,6 @@ module Distribution.Simple.Program.HcPkg (
     dump,
 
     -- * Program invocations
-    initInvocation,
     registerInvocation,
     reregisterInvocation,
     unregisterInvocation,
@@ -28,7 +26,6 @@ module Distribution.Simple.Program.HcPkg (
     dumpInvocation,
   ) where
 
-import Prelude hiding (init)
 import Distribution.Package
          ( PackageId, InstalledPackageId(..) )
 import Distribution.InstalledPackageInfo
@@ -64,15 +61,6 @@ import System.FilePath as FilePath
          ( (</>), splitPath, splitDirectories, joinPath, isPathSeparator )
 import qualified System.FilePath.Posix as FilePath.Posix
 
-
--- | Call @hc-pkg@ to initialise a package database at the location {path}.
---
--- > hc-pkg init {path}
---
-init :: Verbosity -> ConfiguredProgram -> FilePath -> IO ()
-init verbosity hcPkg path =
-  runProgramInvocation verbosity
-    (initInvocation hcPkg verbosity path)
 
 -- | Call @hc-pkg@ to register a package.
 --
@@ -239,14 +227,6 @@ setInstalledPackageId pkginfo = pkginfo
 --------------------------
 -- The program invocations
 --
-
-initInvocation :: ConfiguredProgram
-               -> Verbosity -> FilePath -> ProgramInvocation
-initInvocation hcPkg verbosity path =
-    programInvocation hcPkg args
-  where
-    args = ["init", path]
-        ++ verbosityOpts hcPkg verbosity
 
 registerInvocation, reregisterInvocation
   :: ConfiguredProgram -> Verbosity -> PackageDBStack

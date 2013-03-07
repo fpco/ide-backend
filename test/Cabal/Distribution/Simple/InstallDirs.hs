@@ -1,4 +1,6 @@
 {-# LANGUAGE CPP, ForeignFunctionInterface #-}
+{-# OPTIONS_NHC98 -cpp #-}
+{-# OPTIONS_JHC -fcpp -fffi #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Distribution.Simple.InstallDirs
@@ -75,7 +77,9 @@ import Data.Maybe (fromMaybe)
 import Data.Monoid (Monoid(..))
 import System.Directory (getAppUserDataDirectory)
 import System.FilePath ((</>), isPathSeparator, pathSeparator)
+#if __HUGS__ || __GLASGOW_HASKELL__ > 606
 import System.FilePath (dropDrive)
+#endif
 
 import Distribution.Package
          ( PackageIdentifier, packageName, packageVersion )
@@ -557,6 +561,9 @@ getWindowsProgramFilesDir = do
 #if mingw32_HOST_OS
 shGetFolderPath :: CInt -> IO (Maybe FilePath)
 shGetFolderPath n =
+# if __HUGS__
+  return Nothing
+# else
   allocaArray long_path_size $ \pPath -> do
      r <- c_SHGetFolderPath nullPtr n nullPtr 0 pPath
      if (r /= 0)
@@ -564,6 +571,7 @@ shGetFolderPath n =
         else do s <- peekCWString pPath; return (Just s)
   where
     long_path_size      = 1024 -- MAX_PATH is 260, this should be plenty
+# endif
 
 csidl_PROGRAM_FILES :: CInt
 csidl_PROGRAM_FILES = 0x0026
@@ -577,4 +585,20 @@ foreign import stdcall unsafe "shlobj.h SHGetFolderPathW"
                               -> CInt
                               -> CWString
                               -> IO CInt
+#endif
+
+#if !(__HUGS__ || __GLASGOW_HASKELL__ > 606)
+-- Compat: this function only appears in FilePath > 1.0
+-- (which at the time of writing is unreleased)
+dropDrive :: FilePath -> FilePath
+dropDrive (c:cs) | isPathSeparator c = cs
+dropDrive (_:':':c:cs) | isWindows
+                      && isPathSeparator c = cs  -- path with drive letter
+dropDrive (_:':':cs)   | isWindows         = cs
+dropDrive cs = cs
+
+isWindows :: Bool
+isWindows = case buildOS of
+  Windows -> True
+  _       -> False
 #endif

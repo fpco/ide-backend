@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveDataTypeable #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Distribution.Version
@@ -92,7 +91,6 @@ module Distribution.Version (
 
  ) where
 
-import Data.Typeable    ( Typeable )
 import Data.Version     ( Version(..) )
 
 import Distribution.Text ( Text(..) )
@@ -118,7 +116,7 @@ data VersionRange
   | UnionVersionRanges     VersionRange VersionRange
   | IntersectVersionRanges VersionRange VersionRange
   | VersionRangeParens     VersionRange -- just '(exp)' parentheses syntax
-  deriving (Show,Read,Eq,Typeable)
+  deriving (Show,Read,Eq)
 
 {-# DEPRECATED AnyVersion "Use 'anyVersion', 'foldVersionRange' or 'asVersionIntervals'" #-}
 {-# DEPRECATED ThisVersion "use 'thisVersion', 'foldVersionRange' or 'asVersionIntervals'" #-}
@@ -410,7 +408,7 @@ simplifyVersionRange vr
 --
 
 wildcardUpperBound :: Version -> Version
-wildcardUpperBound (Version lowerBound ts) = Version upperBound ts
+wildcardUpperBound (Version lowerBound ts) = (Version upperBound ts)
   where
     upperBound = init lowerBound ++ [last lowerBound + 1]
 

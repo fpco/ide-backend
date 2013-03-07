@@ -5,6 +5,7 @@ import Prelude hiding (span)
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad (liftM, void, forM_)
+import Control.Applicative ((<|>))
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
@@ -94,8 +95,7 @@ multipleTests =
         assertNoErrors msgs
         -- Overwrite one of the copied files.
         (_, ms) <- getModules session
---        let update = loadModule (head ms) "a = unknownX"
-        let update = updateModule (head ms) $ BSLC.pack "a = unknownX"
+        let update = loadModule (head ms) "a = unknownX"
         updateSessionD session update 1  -- at most 1 recompiled
         msgs2 <- getSourceErrors session
         -- Error reported due to the overwrite.
@@ -1596,7 +1596,7 @@ projects =
       , "-package filepath"
       , "-package directory"
       , "-package process"
-      , "-package time"
+      , "-package old-time"
       , "-package containers"
       , "-package array"
       , "-package pretty"
@@ -1659,10 +1659,31 @@ updateSessionD session update i = do
 
 loadModule :: FilePath -> String -> IdeSessionUpdate
 loadModule file contents =
-  -- This is a hack: construct a module name from a filename
-  let mod = takeBaseName file
-  in updateModule file . BSLC.pack
-     $ "module " ++ mod ++ " where\n" ++ contents
+    let mod =  "module " ++ mname file ++ " where\n" ++ contents
+    in updateModule file (BSLC.pack mod)
+  where
+    -- This is a hack: construct a module name from a filename
+    mname :: FilePath -> ModuleName
+    mname path = case "/test/" `substr` path of
+      Just file -> dotToSlash . dropExtension . dropFirstPathComponent $ file
+      Nothing   -> error $ "Don't know how to construct module name for " ++ path
+
+    dropFirstPathComponent :: FilePath -> FilePath
+    dropFirstPathComponent = tail . dropWhile (/= '/')
+
+    dotToSlash :: String -> String
+    dotToSlash = map $ \c -> if c == '/' then '.' else c
+
+    -- | Specification:
+    --
+    -- > bs `substr` (as ++ bs ++ cs) == Just cs
+    -- > bs `substr` _                == Nothing
+    substr :: Eq a => [a] -> [a] -> Maybe [a]
+    substr needle haystack
+      | needle `isPrefixOf` haystack = Just $ drop (length needle) haystack
+      | otherwise = case haystack of
+                      []              -> Nothing
+                      (_ : haystack') -> substr needle haystack'
 
 assertNoErrors :: [SourceError] -> Assertion
 assertNoErrors msgs =

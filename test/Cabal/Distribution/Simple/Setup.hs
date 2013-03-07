@@ -75,7 +75,7 @@ module Distribution.Simple.Setup (
   BenchmarkFlags(..), emptyBenchmarkFlags, defaultBenchmarkFlags, benchmarkCommand,
   CopyDest(..),
   configureArgs, configureOptions, configureCCompiler, configureLinker,
-  buildOptions, installDirsOptions,
+  installDirsOptions,
 
   defaultDistPref,
 
@@ -304,8 +304,8 @@ defaultConfigFlags progConf = emptyConfigFlags {
     configHcFlavor     = maybe NoFlag Flag defaultCompilerFlavor,
     configVanillaLib   = Flag True,
     configProfLib      = Flag False,
-    configSharedLib    = NoFlag,
-    configDynExe       = NoFlag,
+    configSharedLib    = Flag False,
+    configDynExe       = Flag False,
     configProfExe      = Flag False,
     configOptimization = Flag NormalOptimisation,
     configProgPrefix   = Flag (toPathTemplate ""),
@@ -313,7 +313,7 @@ defaultConfigFlags progConf = emptyConfigFlags {
     configDistPref     = Flag defaultDistPref,
     configVerbosity    = Flag normal,
     configUserInstall  = Flag False,           --TODO: reverse this
-    configGHCiLib      = Flag False,
+    configGHCiLib      = Flag True,
     configSplitObjs    = Flag False, -- takes longer, so turn off by default
     configStripExes    = Flag True,
     configTests  = Flag False,
@@ -1024,7 +1024,6 @@ data HaddockFlags = HaddockFlags {
     haddockHscolourCss  :: Flag FilePath,
     haddockContents     :: Flag PathTemplate,
     haddockDistPref     :: Flag FilePath,
-    haddockKeepTempFiles:: Flag Bool,
     haddockVerbosity    :: Flag Verbosity
   }
   deriving Show
@@ -1043,7 +1042,6 @@ defaultHaddockFlags  = HaddockFlags {
     haddockHscolourCss  = NoFlag,
     haddockContents     = NoFlag,
     haddockDistPref     = Flag defaultDistPref,
-    haddockKeepTempFiles= Flag False,
     haddockVerbosity    = Flag normal
   }
 
@@ -1058,11 +1056,6 @@ haddockCommand = makeCommand name shortDesc longDesc defaultHaddockFlags options
       ,optionDistPref
          haddockDistPref (\d flags -> flags { haddockDistPref = d })
          showOrParseArgs
-
-      ,option "" ["keep-temp-files"]
-         "Keep temporary files"
-         haddockKeepTempFiles (\b flags -> flags { haddockKeepTempFiles = b })
-         trueArg
 
       ,option "" ["hoogle"]
          "Generate a hoogle database"
@@ -1136,7 +1129,6 @@ instance Monoid HaddockFlags where
     haddockHscolourCss  = mempty,
     haddockContents     = mempty,
     haddockDistPref     = mempty,
-    haddockKeepTempFiles= mempty,
     haddockVerbosity    = mempty
   }
   mappend a b = HaddockFlags {
@@ -1152,7 +1144,6 @@ instance Monoid HaddockFlags where
     haddockHscolourCss  = combine haddockHscolourCss,
     haddockContents     = combine haddockContents,
     haddockDistPref     = combine haddockDistPref,
-    haddockKeepTempFiles= combine haddockKeepTempFiles,
     haddockVerbosity    = combine haddockVerbosity
   }
     where combine field = field a `mappend` field b
@@ -1217,10 +1208,7 @@ data BuildFlags = BuildFlags {
     buildProgramPaths :: [(String, FilePath)],
     buildProgramArgs :: [(String, [String])],
     buildDistPref    :: Flag FilePath,
-    buildVerbosity   :: Flag Verbosity,
-    -- TODO: this one should not be here, it's just that the silly
-    -- UserHooks stop us from passing extra info in other ways
-    buildArgs :: [String]
+    buildVerbosity   :: Flag Verbosity
   }
   deriving Show
 
@@ -1233,31 +1221,26 @@ defaultBuildFlags  = BuildFlags {
     buildProgramPaths = mempty,
     buildProgramArgs = [],
     buildDistPref    = Flag defaultDistPref,
-    buildVerbosity   = Flag normal,
-    buildArgs        = []
+    buildVerbosity   = Flag normal
   }
 
 buildCommand :: ProgramConfiguration -> CommandUI BuildFlags
-buildCommand progConf = makeCommand name shortDesc longDesc
-                        defaultBuildFlags (buildOptions progConf)
+buildCommand progConf = makeCommand name shortDesc longDesc defaultBuildFlags options
   where
     name       = "build"
     shortDesc  = "Make this package ready for installation."
     longDesc   = Nothing
+    options showOrParseArgs =
+      optionVerbosity buildVerbosity (\v flags -> flags { buildVerbosity = v })
+      : optionDistPref
+          buildDistPref (\d flags -> flags { buildDistPref = d })
+          showOrParseArgs
 
-buildOptions :: ProgramConfiguration -> ShowOrParseArgs
-                -> [OptionField BuildFlags]
-buildOptions progConf showOrParseArgs =
-  optionVerbosity buildVerbosity (\v flags -> flags { buildVerbosity = v })
-  : optionDistPref
-  buildDistPref (\d flags -> flags { buildDistPref = d })
-  showOrParseArgs
+      : programConfigurationPaths   progConf showOrParseArgs
+          buildProgramPaths (\v flags -> flags { buildProgramPaths = v})
 
-  : programConfigurationPaths   progConf showOrParseArgs
-  buildProgramPaths (\v flags -> flags { buildProgramPaths = v})
-
-  ++ programConfigurationOptions progConf showOrParseArgs
-  buildProgramArgs (\v flags -> flags { buildProgramArgs = v})
+     ++ programConfigurationOptions progConf showOrParseArgs
+          buildProgramArgs (\v flags -> flags { buildProgramArgs = v})
 
 emptyBuildFlags :: BuildFlags
 emptyBuildFlags = mempty
@@ -1267,15 +1250,13 @@ instance Monoid BuildFlags where
     buildProgramPaths = mempty,
     buildProgramArgs = mempty,
     buildVerbosity   = mempty,
-    buildDistPref    = mempty,
-    buildArgs        = mempty
+    buildDistPref    = mempty
   }
   mappend a b = BuildFlags {
     buildProgramPaths = combine buildProgramPaths,
     buildProgramArgs = combine buildProgramArgs,
     buildVerbosity   = combine buildVerbosity,
-    buildDistPref    = combine buildDistPref,
-    buildArgs        = combine buildArgs
+    buildDistPref    = combine buildDistPref
   }
     where combine field = field a `mappend` field b
 
