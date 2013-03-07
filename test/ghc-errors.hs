@@ -1664,7 +1664,7 @@ loadModule file contents =
   where
     -- This is a hack: construct a module name from a filename
     mname :: FilePath -> ModuleName
-    mname path = case "/test/" `substr` path of
+    mname path = case "test/" `substr` path of
       Just file -> dotToSlash . dropExtension . dropFirstPathComponent $ file
       Nothing   -> takeBaseName path
 
