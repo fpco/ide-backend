@@ -1666,7 +1666,7 @@ loadModule file contents =
     mname :: FilePath -> ModuleName
     mname path = case "/test/" `substr` path of
       Just file -> dotToSlash . dropExtension . dropFirstPathComponent $ file
-      Nothing   -> error $ "Don't know how to construct module name for " ++ path
+      Nothing   -> takeBaseName path
 
     dropFirstPathComponent :: FilePath -> FilePath
     dropFirstPathComponent = tail . dropWhile (/= '/')
