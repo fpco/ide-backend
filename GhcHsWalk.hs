@@ -573,8 +573,10 @@ instance Record id => ExtractIds (LHsBind id) where
   extractIds (L span bind@(PatBind {})) = ast (Just span) "PatBind" $ do
     extractIds (pat_lhs bind)
     extractIds (pat_rhs bind)
-  extractIds (L span _bind@(VarBind {})) =
-    unsupported (Just span) "VarBind"
+  extractIds (L span _bind@(VarBind {})) = ast (Just span) "VarBind" $ do
+    -- These are only introduced by the type checker, and don't involve user
+    -- written code. The ghc comments says "located 'only for consistency'"
+    return ()
   extractIds (L span bind@(AbsBinds {})) = ast (Just span) "AbsBinds" $
     extractIds (abs_binds bind)
 
@@ -679,12 +681,13 @@ instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsIf _ cond true false)) = ast (Just span) "HsIf" $
     -- First argument is something to do with rebindable syntax
     extractIds [cond, true, false]
-
+  extractIds (L span (SectionL arg op)) = ast (Just span) "SectionL" $
+    extractIds [arg, op]
+  extractIds (L span (SectionR op arg)) = ast (Just span) "SectionR" $
+    extractIds [op, arg]
 
   extractIds (L span (HsIPVar _ ))          = unsupported (Just span) "HsIPVar"
   extractIds (L span (NegApp _ _))          = unsupported (Just span) "NegApp"
-  extractIds (L span (SectionL _ _))        = unsupported (Just span) "SectionL"
-  extractIds (L span (SectionR _ _))        = unsupported (Just span) "SectionR"
   extractIds (L span (ExplicitPArr _ _))    = unsupported (Just span) "ExplicitPArr"
   extractIds (L span (RecordUpd _ _ _ _ _)) = unsupported (Just span) "RecordUpd"
   extractIds (L span (PArrSeq _ _))         = unsupported (Just span) "PArrSeq"
