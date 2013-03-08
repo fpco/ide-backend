@@ -157,17 +157,19 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
     liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
     idMaps <- liftIO $ readIORef idMapRef
     let loadedModulesSet = Set.fromList loadedModules
-        -- TODO: (see above) Filter out modules that got unloaded.
-        -- filteredIdMaps =
-        --   Map.filterWithKey (\k _ -> k `Set.member` loadedModulesSet) idMaps
+        -- Filter out modules that got unloaded.
+        filteredIdMaps =
+          Map.filterWithKey (\k _ -> k `Set.member` loadedModulesSet) idMaps
+        -- TODO: get rid of the dummy maps (see TODO above)
         dummyIdList = map (\m -> (m, IdMap Map.empty)) loadedModules
-        filteredIdMaps = idMaps `Map.union` Map.fromList dummyIdList
-        filteredKeySet = Map.keysSet filteredIdMaps
+        filteredAndDummyIdMaps =
+          filteredIdMaps `Map.union` Map.fromList dummyIdList
+        filteredKeySet = Map.keysSet filteredAndDummyIdMaps
     -- Verify the plugin and @compileInGhc@ agree on which modules are loaded.
     when (loadedModulesSet /= filteredKeySet) $ do
       error $ "ghcHandleCompile: loaded modules do not match id info maps: "
               ++ show (loadedModulesSet, filteredKeySet)
-    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps)
+    liftIO $ put $ GhcCompileDone (errs, filteredAndDummyIdMaps)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
