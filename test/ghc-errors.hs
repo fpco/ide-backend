@@ -366,6 +366,21 @@ syntheticTests =
               $ isPrefixOf "No instance for (Num (IO ()))" s
           _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
     )
+  , ( "Compile and run a project with some .lhs files"
+    , withConfiguredSession defOpts $ \session -> do
+        loadModulesFrom session "test/compiler/utils"
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
+        let update2 = updateCodeGeneration True
+        updateSessionD session update2 3
+        msgs2 <- getSourceErrors session
+        assertNoErrors msgs2
+        runActions <- runStmt session "Maybes" "main"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk _ -> assertEqual "" output (BSLC.pack "False\n")
+          _ -> assertFailure "Unexpected snippet run result"
+    )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package mtl"
