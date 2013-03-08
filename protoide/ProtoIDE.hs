@@ -6,6 +6,7 @@ import System.IO.Temp (withSystemTempDirectory)
 import Data.ByteString.Lazy (fromChunks)
 import Control.Monad.Reader
 import System.Process
+import qualified Data.Map as Map
 
 #ifndef darwin_HOST_OS
 import System.GIO.File.AppInfo
@@ -87,7 +88,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
 
   -- Whenever the buffer changes, reload the module into ghc
   -- TODO: this is overkill..
-  idMapRef <- newIORef []
+  idMapRef <- newIORef (error "no ID maps loaded")
   on textBuffer bufferChanged $ do
     (start, end) <- textBufferGetBounds textBuffer
     src <- textBufferGetByteString textBuffer start end False
@@ -95,9 +96,9 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     let upd = updateModule "M.hs" (fromChunks [src])
     updateSession ideSession upd (const $ return ())
     errors <- getSourceErrors ideSession
-    idMap  <- getIdMap ideSession
+    idMaps <- getLoadedModules ideSession
     textBufferSetText errorsBuff (show errors)
-    writeIORef idMapRef idMap
+    writeIORef idMapRef (Map.elems idMaps)
 
   -- Highlight the identifier under the cursor
   on textBuffer markSet $ \iter _mark -> do

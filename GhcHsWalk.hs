@@ -267,10 +267,15 @@ getDynFlags = asks fst
 getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
 getGlobalRdrEnv = asks snd
 
-lookupRdrEnv :: Monad m => OccName -> ExtractIdsT m (Maybe [RdrName.GlobalRdrElt])
+lookupRdrEnv :: Monad m => Name -> ExtractIdsT m (Maybe RdrName.GlobalRdrElt)
 lookupRdrEnv name = do
   rdrEnv <- getGlobalRdrEnv
-  return (lookupOccEnv rdrEnv name)
+  case lookupOccEnv rdrEnv (Name.nameOccName name) of
+    Nothing   -> return Nothing
+    Just elts -> case filter ((== name) . RdrName.gre_name) elts of
+                   []    -> return Nothing
+                   [elt] -> return (Just elt)
+                   _     -> fail "ghc invariant violated"
 
 -- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
 -- it does
@@ -376,15 +381,15 @@ instance Record Name where
               idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
             }
         | otherwise = do
-            rdrElts <- lookupRdrEnv (Name.nameOccName name)
+            rdrElts <- lookupRdrEnv name
             case rdrElts of
-              Just [gre] -> do
+              Just gre -> do
                 dflags <- asks fst
                 return (Just (scopeFromProv dflags (RdrName.gre_prov gre)))
-              _ -> do
+              Nothing -> do
                 prettyName <- pretty True name
                 prettyOcc  <- pretty True (Name.nameOccName name)
-                liftIO . appendFile "/tmp/ghc.log" $ "Missing entry " ++ show prettyOcc ++ " in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ " at location " ++ show span ++ "\n"
+                liftIO . appendFile "/tmp/ghc.log" $ "No entry " ++ show prettyOcc ++ " in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ " at location " ++ show span ++ "\n"
                 return Nothing
 
       nameSort :: String
