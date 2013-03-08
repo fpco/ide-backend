@@ -570,8 +570,9 @@ instance Record id => ExtractIds (LHsBind id) where
   extractIds (L span bind@(FunBind {})) = ast (Just span) "FunBind" $ do
     record (getLoc (fun_id bind)) True (unLoc (fun_id bind))
     extractIds (fun_matches bind)
-  extractIds (L span _bind@(PatBind {})) = ast (Just span) "PatBind" $
-    unsupported (Just span) "PatBind"
+  extractIds (L span bind@(PatBind {})) = ast (Just span) "PatBind" $ do
+    extractIds (pat_lhs bind)
+    extractIds (pat_rhs bind)
   extractIds (L span _bind@(VarBind {})) =
     unsupported (Just span) "VarBind"
   extractIds (L span bind@(AbsBinds {})) = ast (Just span) "AbsBinds" $
@@ -673,13 +674,17 @@ instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsCase expr matches)) = ast (Just span) "HsCase" $ do
     extractIds expr
     extractIds matches
+  extractIds (L span (ExplicitTuple args _boxity)) = ast (Just span) "ExplicitTuple" $
+    extractIds args
+  extractIds (L span (HsIf _ cond true false)) = ast (Just span) "HsIf" $
+    -- First argument is something to do with rebindable syntax
+    extractIds [cond, true, false]
+
 
   extractIds (L span (HsIPVar _ ))          = unsupported (Just span) "HsIPVar"
   extractIds (L span (NegApp _ _))          = unsupported (Just span) "NegApp"
   extractIds (L span (SectionL _ _))        = unsupported (Just span) "SectionL"
   extractIds (L span (SectionR _ _))        = unsupported (Just span) "SectionR"
-  extractIds (L span (ExplicitTuple _ _))   = unsupported (Just span) "ExplicitTuple"
-  extractIds (L span (HsIf _ _ _ _))        = unsupported (Just span) "HsIf"
   extractIds (L span (ExplicitPArr _ _))    = unsupported (Just span) "ExplicitPArr"
   extractIds (L span (RecordUpd _ _ _ _ _)) = unsupported (Just span) "RecordUpd"
   extractIds (L span (PArrSeq _ _))         = unsupported (Just span) "PArrSeq"
@@ -716,6 +721,12 @@ instance Record id => ExtractIds (LHsExpr id) where
 #if __GLASGOW_HASKELL__ >= 707
   extractIds (L span (HsUnboundVar _))      = unsupported (Just span) "HsUnboundVar"
 #endif
+
+instance Record id => ExtractIds (HsTupArg id) where
+  extractIds (Present arg) =
+    extractIds arg
+  extractIds (Missing _postTcType) =
+    return ()
 
 instance (ExtractIds a, Record id) => ExtractIds (HsRecFields id a) where
   extractIds (HsRecFields rec_flds _rec_dotdot) = ast Nothing "HsRecFields" $
@@ -783,23 +794,28 @@ instance Record id => ExtractIds (LPat id) where
   extractIds (L span (PArrPat pats _postTcType)) = ast (Just span) "PArrPat" $
     extractIds pats
   extractIds (L span (ConPatIn con details)) = ast (Just span) "ConPatIn" $ do
+    -- Unlike ValBindsIn and HsValBindsIn, we *do* get ConPatIn
     record (getLoc con) False (unLoc con) -- the constructor name is non-binding
     extractIds details
   extractIds (L span (ConPatOut {pat_con, pat_args})) = ast (Just span) "ConPatOut" $ do
     record (getLoc pat_con) False (dataConName (unLoc pat_con))
     extractIds pat_args
+  extractIds (L span (LitPat _)) = ast (Just span) "LitPat" $
+    return ()
+  extractIds (L span (NPat _ _ _)) = ast (Just span) "NPat" $
+    return ()
+
+
 
   -- View patterns
   extractIds (L span (ViewPat _ _ _))     = unsupported (Just span) "ViewPat"
   extractIds (L span (QuasiQuotePat _))   = unsupported (Just span) "QuasiQuotePat"
-  extractIds (L span (LitPat _))          = unsupported (Just span) "LitPat"
-  extractIds (L span (NPat _ _ _))        = unsupported (Just span) "NPat"
   extractIds (L span (NPlusKPat _ _ _ _)) = unsupported (Just span) "NPlusKPat"
   extractIds (L span (SigPatIn _ _))      = unsupported (Just span) "SigPatIn"
   extractIds (L span (SigPatOut _ _))     = unsupported (Just span) "SigPatOut"
   extractIds (L span (CoPat _ _ _))       = unsupported (Just span) "CoPat"
 
-instance Record id => ExtractIds (HsConPatDetails id) where
+instance (ExtractIds arg, ExtractIds rec) => ExtractIds (HsConDetails arg rec) where
   extractIds (PrefixCon args) = ast Nothing "PrefixCon" $
     extractIds args
   extractIds (RecCon rec) = ast Nothing "RecCon" $
@@ -808,14 +824,35 @@ instance Record id => ExtractIds (HsConPatDetails id) where
     extractIds [a, b]
 
 instance Record id => ExtractIds (LTyClDecl id) where
-  extractIds (L span (ForeignType {})) = unsupported (Just span) "ForeignType"
-  extractIds (L span (ClassDecl {}))   = unsupported (Just span) "ClassDecl"
+  extractIds (L span decl@(TyData {})) = ast (Just span) "TyData" $ do
+    extractIds (tcdCtxt decl)
+    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    extractIds (tcdTyVars decl)
+    extractIds (tcdTyPats decl)
+    -- TODO: deal with tcdKindSig
+    extractIds (tcdCons decl)
+    extractIds (tcdDerivs decl)
+
+  extractIds (L span _decl@(ForeignType {})) = unsupported (Just span) "ForeignType"
+  extractIds (L span _decl@(ClassDecl {}))   = unsupported (Just span) "ClassDecl"
 #if __GLASGOW_HASKELL__ >= 707
-  extractIds (L span (FamDecl {}))     = unsupported (Just span) "TyFamily"
-  extractIds (L span (SynDecl {}))     = unsupported (Just span) "TySynonym"
-  extractIds (L span (DataDecl {}))    = unsupported (Just span) "TyData"
+  extractIds (L span _decl@(FamDecl {}))     = unsupported (Just span) "TyFamily"
+  extractIds (L span _decl@(SynDecl {}))     = unsupported (Just span) "TySynonym"
+  extractIds (L span _decl@(DataDecl {}))    = unsupported (Just span) "DataDecl"
 #else
-  extractIds (L span (TyFamily {}))    = unsupported (Just span) "TyFamily"
-  extractIds (L span (TyData {}))      = unsupported (Just span) "TyData"
-  extractIds (L span (TySynonym {}))   = unsupported (Just span) "TySynonym"
+  extractIds (L span _decl@(TyFamily {}))    = unsupported (Just span) "TyFamily"
+  extractIds (L span _decl@(TySynonym {}))   = unsupported (Just span) "TySynonym"
 #endif
+
+instance Record id => ExtractIds (LConDecl id) where
+  extractIds (L span decl@(ConDecl {})) = ast (Just span) "ConDecl" $ do
+    record (getLoc (con_name decl)) True (unLoc (con_name decl))
+    extractIds (con_qvars decl)
+    extractIds (con_cxt decl)
+    extractIds (con_details decl)
+    -- TODO: deal with con_res
+
+instance Record id => ExtractIds (ConDeclField id) where
+  extractIds (ConDeclField name typ _doc) = do
+    record (getLoc name) True (unLoc name)
+    extractIds typ
