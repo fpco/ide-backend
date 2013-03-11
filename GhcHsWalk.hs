@@ -49,22 +49,6 @@ import OccName
 #define DEBUG 1
 
 {------------------------------------------------------------------------------
-  TODO: Current known problems:
-
-  - RECORDS
-
-    Given
-
-    > data T = MkT { a :: Bool, b :: Int }
-    > someT = MkT { a = True, b = 5 }
-
-    the record declaration does not have any source info at all for MkT, a or b;
-    the record definition as 'a' point to the record definition rather than the
-    record declaration.
-------------------------------------------------------------------------------}
-
-
-{------------------------------------------------------------------------------
   Environment mapping source locations to info
 ------------------------------------------------------------------------------}
 
