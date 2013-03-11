@@ -1,26 +1,24 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Main (main) where
 
-import Prelude hiding (span)
+import Prelude hiding (span, mod)
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad (liftM, void, forM_)
-import Control.Applicative ((<|>))
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
 import Data.List (sort, isPrefixOf, isSuffixOf)
 import qualified Data.List as List
-import Data.Maybe (catMaybes)
 import Data.Monoid (mconcat, mempty, (<>))
 import Data.IORef (IORef, newIORef, writeIORef, readIORef)
 import System.Directory
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..))
-import System.FilePath (dropExtension, makeRelative, (</>), takeBaseName)
+import System.FilePath (dropExtension, (</>), takeBaseName)
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
-import System.Random (randomIO)
+import System.Random (randomRIO)
 import qualified Data.Map as Map
 
 import Test.Framework (Test, defaultMain, testGroup)
@@ -916,8 +914,7 @@ syntheticTests =
         do updateSessionD session upd1 1
            runActions <- runStmt session "Main" "main"
            interrupt runActions
-           delay <- randomIO :: IO Int
-           threadDelay (delay `mod` 1000000) -- Between 0 and 1 sec
+           randomRIO (0, 1000000) >>= threadDelay -- Wait between 0 and 1sec
            void $ runWaitAll runActions
 
         do updateSessionD session upd2 1
@@ -1419,7 +1416,6 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
         -}
     )
-{-
   , ( "Type information 1"
     , let opts = defOpts ++ [
                      "-package parallel"
@@ -1470,80 +1466,85 @@ syntheticTests =
         updateSessionD session upd 2
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        idMap <- getIdMap session
-        let expectedIdMap =
-              [ "A.hs:3:1 (VarName, binder): a :: GHC.Types.Int (A.hs:3:1)"
-              , "A.hs:4:1 (VarName, binder): b :: GHC.Types.Int (A.hs:4:1)"
-              , "A.hs:4:5 (VarName): main/A.a :: GHC.Types.Int (A.hs:3:1)"
-              , "A.hs:4:7 (VarName): base/GHC.Num.+ :: forall a. GHC.Num.Num a => a -> a -> a (<no location info>)"
-              , "B.hs:4:1 (VarName, binder): c :: GHC.Types.Int (B.hs:4:1)"
-              , "B.hs:4:9 (VarName, binder): e :: GHC.Types.Int (B.hs:4:9)"
-              , "B.hs:5:8 (VarName): main/A.b :: GHC.Types.Int (A.hs:4:1)"
-              , "B.hs:5:10 (VarName): base/GHC.Num.+ :: forall a. GHC.Num.Num a => a -> a -> a (<no location info>)"
-              , "B.hs:5:14 (VarName): base/GHC.Num.+ :: forall a. GHC.Num.Num a => a -> a -> a (<no location info>)"
-              , "B.hs:5:16 (VarName): d :: GHC.Types.Int (B.hs:6:9)"
-              , "B.hs:5:18 (VarName): base/GHC.Num.+ :: forall a. GHC.Num.Num a => a -> a -> a (<no location info>)"
-              , "B.hs:5:20 (VarName): e :: GHC.Types.Int (B.hs:4:9)"
-              , "B.hs:6:9 (VarName, binder): d :: GHC.Types.Int (B.hs:6:9)"
-              , "B.hs:7:1 (VarName): main/B.d :: <unknown type> (B.hs:8:1)"
-              , "B.hs:7:6-8 (TcClsName): ghc-prim/GHC.Types.Int :: <unknown type> (<wired into compiler>)"
-              , "B.hs:7:13 (TcClsName): main/A.T :: <unknown type> (A.hs:2:6)"
-              , "B.hs:8:1 (VarName, binder): d :: GHC.Types.Int -> A.T (B.hs:8:1)"
-              , "B.hs:8:7-9 (VarName): main/A.MkT :: A.T (A.hs:2:10-12)"
-              , "B.hs:9:1 (VarName, binder): e :: GHC.Types.Bool (B.hs:9:1)"
-              , "B.hs:9:5-8 (VarName): ghc-prim/GHC.Types.True :: GHC.Types.Bool (<wired into compiler>)"
-              , "B.hs:9:10-15 (VarName): parallel-3.2.0.3/Control.Parallel.pseq :: forall a b. a -> b -> b (<no location info>)"
-              , "B.hs:9:17-21 (VarName): ghc-prim/GHC.Types.False :: GHC.Types.Bool (<wired into compiler>)"
-              , "B.hs:10:1 (VarName): main/B.f :: <unknown type> (B.hs:11:1)"
-              , "B.hs:10:6 (TvName): a :: <unknown type> (B.hs:10:6)"
-              , "B.hs:10:11 (TvName): a :: <unknown type> (B.hs:10:6)"
-              , "B.hs:11:1 (VarName, binder): f :: a -> a (B.hs:11:1)"
-              , "B.hs:11:3 (VarName, binder): x :: a (B.hs:11:3)"
-              , "B.hs:11:7 (VarName): x :: a (B.hs:11:3)"
-              , "B.hs:12:1 (VarName): main/B.g :: <unknown type> (B.hs:13:1)"
-              , "B.hs:12:13 (TvName, binder): a :: <unknown type> (B.hs:12:13)"
-              , "B.hs:12:16 (TvName): a :: <unknown type> (B.hs:12:13)"
-              , "B.hs:12:21 (TvName): a :: <unknown type> (B.hs:12:13)"
-              , "B.hs:13:1 (VarName, binder): g :: a -> a (B.hs:13:1)"
-              , "B.hs:13:3 (VarName, binder): x :: a (B.hs:13:3)"
-              , "B.hs:13:7 (VarName): x :: a (B.hs:13:3)"
-              , "B.hs:14:1 (VarName): main/B.h :: <unknown type> (B.hs:15:1)"
-              , "B.hs:14:13 (TvName, binder): a :: <unknown type> (B.hs:14:13)"
-              , "B.hs:14:16 (TvName): a :: <unknown type> (B.hs:14:13)"
-              , "B.hs:14:21 (TvName): a :: <unknown type> (B.hs:14:13)"
-              , "B.hs:15:1 (VarName, binder): h :: a -> a (B.hs:15:1)"
-              , "B.hs:15:3 (VarName, binder): x :: a (B.hs:15:3)"
-              , "B.hs:15:7 (VarName): y :: a (B.hs:18:5)"
-              , "B.hs:17:5 (VarName): y :: <unknown type> (B.hs:18:5)"
-              , "B.hs:17:10 (TvName): a :: <unknown type> (B.hs:14:13)"
-              , "B.hs:18:5 (VarName, binder): y :: a (B.hs:18:5)"
-              , "B.hs:18:9 (VarName): x :: a (B.hs:15:3)"
-              , "B.hs:19:1 (VarName): main/B.i :: <unknown type> (B.hs:20:1)"
-              , "B.hs:19:13-25 (TvName, binder): t :: <unknown type> (B.hs:19:13-25)"
-              , "B.hs:19:27 (TvName, binder): a :: <unknown type> (B.hs:19:27)"
-              , "B.hs:19:30 (TvName): t :: <unknown type> (B.hs:19:13-25)"
-              , "B.hs:19:32 (TvName): a :: <unknown type> (B.hs:19:27)"
-              , "B.hs:19:37 (TvName): t :: <unknown type> (B.hs:19:13-25)"
-              , "B.hs:19:39 (TvName): a :: <unknown type> (B.hs:19:27)"
-              , "B.hs:20:1 (VarName, binder): i :: t a -> t a (B.hs:20:1)"
-              , "B.hs:20:3 (VarName, binder): x :: t a (B.hs:20:3)"
-              , "B.hs:20:7 (VarName): x :: t a (B.hs:20:3)"
-              , "B.hs:21:1-5 (VarName): main/B.hello :: <unknown type> (B.hs:22:1-5)"
-              , "B.hs:21:10-11 (TcClsName): ghc-prim/GHC.Types.IO :: <unknown type> (<no location info>)"
-              , "B.hs:21:13-14 (TcClsName): ghc-prim/GHC.Tuple.() :: <unknown type> (<wired into compiler>)"
-              , "B.hs:22:1-5 (VarName, binder): hello :: GHC.Types.IO () (B.hs:22:1-5)"
-              , "B.hs:22:9-16 (VarName): base/System.IO.putStrLn :: GHC.Base.String -> GHC.Types.IO () (<no location info>)"
+        idMaps <- getLoadedModules session
+        let idMapA = idMaps Map.! "A"
+        let idMapB = idMaps Map.! "B"
+        let expectedIdMapA = [
+                "(A.hs@2:6-2:7,T (TcClsName) (binding occurrence))"
+              , "(A.hs@2:10-2:13,MkT (DataName) (binding occurrence))"
+              , "(A.hs@3:1-3:2,a (VarName) :: GHC.Types.Int (binding occurrence))"
+              , "(A.hs@4:1-4:2,b (VarName) :: GHC.Types.Int (binding occurrence))"
+              , "(A.hs@4:5-4:6,a (VarName) :: GHC.Types.Int (defined at A.hs@3:1-3:2))"
+              , "(A.hs@4:7-4:8,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base:GHC.Num at <no location info>; imported from base:Prelude at A.hs@1:8-1:9))"
               ]
-        let actualIdMap = lines (show idMap )
-        assertSameList expectedIdMap actualIdMap
-        let configSourcesDir = getSourcesDir session
-        let span = SourceSpan (configSourcesDir </> "B.hs") 5 8 5 9
+        let expectedIdMapB = [
+                "(B.hs@4:1-4:2,c (VarName) :: GHC.Types.Int (binding occurrence))"
+              , "(B.hs@4:9-4:10,e (VarName) :: GHC.Types.Int (binding occurrence))"
+              , "(B.hs@5:8-5:9,b (VarName) :: GHC.Types.Int (defined in main:A at A.hs@4:1-4:2; imported from main:A at B.hs@2:1-2:9))"
+              , "(B.hs@5:10-5:11,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base:GHC.Num at <no location info>; imported from base:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@5:14-5:15,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base:GHC.Num at <no location info>; imported from base:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@5:16-5:17,d (VarName) :: GHC.Types.Int (defined at B.hs@6:9-6:10))"
+              , "(B.hs@5:18-5:19,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base:GHC.Num at <no location info>; imported from base:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@5:20-5:21,e (VarName) :: GHC.Types.Int (defined at B.hs@4:9-4:10))"
+              , "(B.hs@6:9-6:10,d (VarName) :: GHC.Types.Int (binding occurrence))"
+              , "(B.hs@7:1-7:2,d (VarName) (defined at B.hs@8:1-8:2))"
+              , "(B.hs@7:6-7:9,Int (TcClsName) (wired in to the compiler))"
+              , "(B.hs@7:13-7:14,T (TcClsName) (defined in main:A at A.hs@2:6-2:7; imported from main:A at B.hs@2:1-2:9))"
+              , "(B.hs@8:1-8:2,d (VarName) :: GHC.Types.Int -> A.T (binding occurrence))"
+              , "(B.hs@8:7-8:10,MkT (DataName) :: A.T (defined in main:A at A.hs@2:10-2:13; imported from main:A at B.hs@2:1-2:9))"
+              , "(B.hs@9:1-9:2,e (VarName) :: GHC.Types.Bool (binding occurrence))"
+              , "(B.hs@9:5-9:9,True (DataName) :: GHC.Types.Bool (wired in to the compiler))"
+              , "(B.hs@9:10-9:16,pseq (VarName) :: forall a b. a -> b -> b (defined in parallel-3.2.0.3:Control.Parallel at <no location info>; imported from parallel-3.2.0.3:Control.Parallel at B.hs@3:1-3:24))"
+              , "(B.hs@9:17-9:22,False (DataName) :: GHC.Types.Bool (wired in to the compiler))"
+              , "(B.hs@10:1-10:2,f (VarName) (defined at B.hs@11:1-11:2))"
+              , "(B.hs@10:6-10:7,a (TvName) (defined at B.hs@10:6-10:7))"
+              , "(B.hs@10:11-10:12,a (TvName) (defined at B.hs@10:6-10:7))"
+              , "(B.hs@11:1-11:2,f (VarName) :: a -> a (binding occurrence))"
+              , "(B.hs@11:3-11:4,x (VarName) :: a (binding occurrence))"
+              , "(B.hs@11:7-11:8,x (VarName) :: a (defined at B.hs@11:3-11:4))"
+              , "(B.hs@12:1-12:2,g (VarName) (defined at B.hs@13:1-13:2))"
+              , "(B.hs@12:13-12:14,a (TvName) (binding occurrence))"
+              , "(B.hs@12:16-12:17,a (TvName) (defined at B.hs@12:13-12:14))"
+              , "(B.hs@12:21-12:22,a (TvName) (defined at B.hs@12:13-12:14))"
+              , "(B.hs@13:1-13:2,g (VarName) :: a -> a (binding occurrence))"
+              , "(B.hs@13:3-13:4,x (VarName) :: a (binding occurrence))"
+              , "(B.hs@13:7-13:8,x (VarName) :: a (defined at B.hs@13:3-13:4))"
+              , "(B.hs@14:1-14:2,h (VarName) (defined at B.hs@15:1-15:2))"
+              , "(B.hs@14:13-14:14,a (TvName) (binding occurrence))"
+              , "(B.hs@14:16-14:17,a (TvName) (defined at B.hs@14:13-14:14))"
+              , "(B.hs@14:21-14:22,a (TvName) (defined at B.hs@14:13-14:14))"
+              , "(B.hs@15:1-15:2,h (VarName) :: a -> a (binding occurrence))"
+              , "(B.hs@15:3-15:4,x (VarName) :: a (binding occurrence))"
+              , "(B.hs@15:7-15:8,y (VarName) :: a (defined at B.hs@18:5-18:6))"
+              , "(B.hs@17:5-17:6,y (VarName) (defined at B.hs@18:5-18:6))"
+              , "(B.hs@17:10-17:11,a (TvName) (defined at B.hs@14:13-14:14))"
+              , "(B.hs@18:5-18:6,y (VarName) :: a (binding occurrence))"
+              , "(B.hs@18:9-18:10,x (VarName) :: a (defined at B.hs@15:3-15:4))"
+              , "(B.hs@19:1-19:2,i (VarName) (defined at B.hs@20:1-20:2))"
+              , "(B.hs@19:13-19:26,t (TvName) (binding occurrence))"
+              , "(B.hs@19:27-19:28,a (TvName) (binding occurrence))"
+              , "(B.hs@19:30-19:31,t (TvName) (defined at B.hs@19:13-19:26))"
+              , "(B.hs@19:32-19:33,a (TvName) (defined at B.hs@19:27-19:28))"
+              , "(B.hs@19:37-19:38,t (TvName) (defined at B.hs@19:13-19:26))"
+              , "(B.hs@19:39-19:40,a (TvName) (defined at B.hs@19:27-19:28))"
+              , "(B.hs@20:1-20:2,i (VarName) :: t a -> t a (binding occurrence))"
+              , "(B.hs@20:3-20:4,x (VarName) :: t a (binding occurrence))"
+              , "(B.hs@20:7-20:8,x (VarName) :: t a (defined at B.hs@20:3-20:4))"
+              , "(B.hs@21:1-21:6,hello (VarName) (defined at B.hs@22:1-22:6))"
+              , "(B.hs@21:10-21:12,IO (TcClsName) (defined in ghc-prim:GHC.Types at <no location info>; imported from base:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@21:13-21:15,() (TcClsName) (wired in to the compiler))"
+              , "(B.hs@22:1-22:6,hello (VarName) :: GHC.Types.IO () (binding occurrence))"
+              , "(B.hs@22:9-22:17,putStrLn (VarName) :: GHC.Base.String -> GHC.Types.IO () (defined in base:System.IO at <no location info>; imported from base:Prelude at B.hs@1:8-1:9))"
+              ]
+        let actualIdMapA = lines (show idMapA)
+        let actualIdMapB = lines (show idMapB)
+        assertSameList expectedIdMapA actualIdMapA
+        assertSameList expectedIdMapB actualIdMapB
         assertEqual "Haddock link for A.b should be correct"
-                    "main/A.html#v:b"
-                    $ haddockLink (idMapToMap idMap Map.! span)
+                    "main/latest/doc/html/A.html#v:b" $
+                    haddockLink (idMapToMap idMapB Map.! SourceSpan "B.hs" 5 8 5 9)
         return ()
     )
--}
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
@@ -1682,7 +1683,7 @@ loadModule file contents =
     -- This is a hack: construct a module name from a filename
     mname :: FilePath -> ModuleName
     mname path = case "test/" `substr` path of
-      Just file -> dotToSlash . dropExtension . dropFirstPathComponent $ file
+      Just rest -> dotToSlash . dropExtension . dropFirstPathComponent $ rest
       Nothing   -> takeBaseName path
 
     dropFirstPathComponent :: FilePath -> FilePath

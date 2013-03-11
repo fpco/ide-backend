@@ -74,7 +74,7 @@ data IdInfo = IdInfo
     -- | Scope
   , idScope :: IdScope
   }
-  deriving (Show, Eq, Data, Typeable)
+  deriving (Eq, Data, Typeable)
 
 -- TODO: Ideally, we would have
 -- 1. SourceSpan for Local rather than EitherSpan
@@ -103,21 +103,22 @@ data IdScope =
 #ifdef DEBUG
   | Debug
 #endif
-  deriving (Show, Eq, Data, Typeable)
+  deriving (Eq, Data, Typeable)
 
 data ModuleId = ModuleId
   { moduleName    :: Common.ModuleName
-  , modulePackage :: PackageId }
-  deriving (Show, Eq, Data, Typeable)
+  , modulePackage :: PackageId
+  }
+  deriving (Eq, Data, Typeable)
 
 data PackageId = PackageId
   { packageName    :: String
   , packageVersion :: Maybe String
   }
-  deriving (Show, Eq, Data, Typeable)
+  deriving (Eq, Data, Typeable)
 
 data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
-  deriving (Show, Data, Typeable)
+  deriving (Data, Typeable)
 
 type LoadedModules = Map Common.ModuleName IdMap
 
@@ -139,27 +140,36 @@ idMapToList = Map.toList . idMapToMap
 idMapFromList :: [(SourceSpan, IdInfo)] -> IdMap
 idMapFromList = IdMap . Map.fromList
 
-{-
 instance Show IdMap where
-  show = unlines . map pp . idMapToList
-    where
-      ppDash n m | m - n <= 1 = show n
-                 | otherwise = show n ++ "-" ++ show (m - 1)
-      ppSpan (SourceSpan fn stL stC endL endC) =
-        fn ++ ":" ++ ppDash stL endL ++ ":" ++ ppDash stC endC
-      ppEitherSpan (ProperSpan sp) = ppSpan sp
-      ppEitherSpan (TextSpan s) = s
+  show = unlines . map show . idMapToList
 
-      pp (sp, IdInfo{..}) =
-        takeFileName (ppSpan sp)
-        ++ " (" ++ show idSpace
-        ++ (case idIsBinder of True -> ", binder): " ; _ -> "): ")
-        ++ maybe "" (++ "/") idPackage
-        ++ maybe "" (++ ".") idModule
-        ++ idName ++ " :: "
-        ++ fromMaybe "<unknown type>" idType
-        ++ " (" ++ takeFileName (ppEitherSpan idDefSpan) ++ ")"
--}
+instance Show IdInfo where
+  show (IdInfo {..}) = idName ++ " "
+                    ++ "(" ++ show idSpace ++ ") "
+                    ++ (case idType of Just typ -> ":: " ++ typ ++ " "; Nothing -> [])
+                    ++ "(" ++ show idScope ++ ")"
+
+-- TODO: If these Maybes stay, we should have a prettier Show instance
+-- (but hopefully they will go)
+instance Show IdScope where
+  show Binder          = "binding occurrence"
+  show (Local {..})    = "defined at " ++ show idDefSpan
+  show WiredIn         = "wired in to the compiler"
+  show (Imported {..}) = "defined in "
+                      ++ show idDefinedIn ++ " at "
+                      ++ show idDefSpan ++ "; imported from "
+                      ++ show idImportedFrom ++ " at "
+                      ++ show idImportSpan
+#ifdef DEBUG
+  show Debug           = "<debugging entry>"
+#endif
+
+instance Show ModuleId where
+  show (ModuleId mod pkg) = show pkg ++ ":" ++ mod
+
+instance Show PackageId where
+  show (PackageId name (Just version)) = name ++ "-" ++ version
+  show (PackageId name Nothing)        = name
 
 fromGhcNameSpace :: Name.NameSpace -> IdNameSpace
 fromGhcNameSpace ns
