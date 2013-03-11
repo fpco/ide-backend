@@ -25,12 +25,14 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Version
 import Data.Generics
+import Data.Maybe (fromMaybe)
 
 import qualified Common as Common
 import Common hiding (ModuleName)
 import GhcRun (extractSourceSpan)
 
-import GHC hiding (idType)
+import qualified GHC
+import GHC hiding (idType, PackageId, moduleName)
 import TcRnTypes
 import Outputable
 import HscPlugin
@@ -107,12 +109,10 @@ data IdScope =
       }
     -- | Imported from a different module
   | Imported {
-        idDefSpan             :: EitherSpan
-      , idDefinedInModule     :: Maybe String
-      , idDefinedInPackage    :: Maybe Package
-      , idImportedFromModule  :: String
-      , idImportedFromPackage :: Maybe Package
-      , idImportSpan          :: EitherSpan
+        idDefSpan      :: EitherSpan
+      , idDefinedIn    :: ModuleId
+      , idImportedFrom :: ModuleId
+      , idImportSpan   :: EitherSpan
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
@@ -121,10 +121,15 @@ data IdScope =
 #endif
   deriving (Show, Eq, Data, Typeable)
 
-data Package = Package {
-                   packageName :: String
-                 , packageVersion :: Maybe String
-                 }
+data ModuleId = ModuleId
+  { moduleName    :: Common.ModuleName
+  , modulePackage :: PackageId }
+  deriving (Show, Eq, Data, Typeable)
+
+data PackageId = PackageId
+  { packageName    :: String
+  , packageVersion :: Maybe String
+  }
   deriving (Show, Eq, Data, Typeable)
 
 data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
@@ -134,7 +139,8 @@ type LoadedModules = Map Common.ModuleName IdMap
 
 $(deriveJSON (\x -> x) ''IdNameSpace)
 $(deriveJSON (\x -> x) ''IdScope)
-$(deriveJSON (\x -> x) ''Package)
+$(deriveJSON (\x -> x) ''ModuleId)
+$(deriveJSON (\x -> x) ''PackageId)
 $(deriveJSON (\x -> x) ''IdInfo)
 
 instance FromJSON IdMap where
@@ -193,19 +199,18 @@ haddockSpaceMarks TcClsName = "t"
 haddockLink :: IdInfo -> String
 haddockLink IdInfo{..} =
   case idScope of
-    Imported{idImportedFromPackage, idImportedFromModule} ->
-         dashToSlash idImportedFromPackage
+    Imported{idImportedFrom} ->
+         dashToSlash (modulePackage idImportedFrom)
       ++ "/doc/html/"
-      ++ dotToDash idImportedFromModule ++ ".html#"
+      ++ dotToDash (moduleName idImportedFrom) ++ ".html#"
       ++ haddockSpaceMarks idSpace ++ ":"
       ++ idName
     _ -> "<local identifier>"
  where
    dotToDash = map (\c -> if c == '.' then '-' else c)
-   dashToSlash (Just p) = case packageVersion p of
+   dashToSlash p = case packageVersion p of
      Nothing -> packageName p ++ "/latest"
      Just version -> packageName p ++ "/" ++ version
-   dashToSlash Nothing = "<unknown package>" -- TODO
 
 idInfoAtLocation :: Int -> Int -> IdMap -> [(SourceSpan, IdInfo)]
 idInfoAtLocation line col = filter inRange . idMapToList
@@ -222,7 +227,7 @@ idInfoAtLocation line col = filter inRange . idMapToList
 extractIdsPlugin :: IORef LoadedModules -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
   let processedModule = tcg_mod env
-      processedName = moduleNameString $ moduleName processedModule
+      processedName = moduleNameString $ GHC.moduleName processedModule
   identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) $ do
     pretty_mod     <- pretty False processedModule
     pretty_rdr_env <- pretty False (tcg_rdr_env env)
@@ -404,18 +409,22 @@ instance Record Name where
           idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
         }
       scopeFromProv dflags (RdrName.Imported spec) =
-        let mod               = Name.nameModule_maybe name
+        let mod = fromMaybe
+                    (error (concatMap showSDocDebug $ ppr name : map ppr spec))
+                    $ Name.nameModule_maybe name
             (impMod, impSpan) = extractImportInfo spec
         in Imported {
-          idDefSpan             = extractSourceSpan (Name.nameSrcSpan name)
-        , idDefinedInModule     = fmap (moduleNameString . Module.moduleName) mod
-        , idDefinedInPackage    = fmap Module.modulePackageId mod >>= (Just . fillVersion dflags)
-        , idImportedFromModule  = moduleNameString impMod
-        , idImportedFromPackage = Just $ modToPkg dflags impMod
-        , idImportSpan          = impSpan
+          idDefSpan      = extractSourceSpan (Name.nameSrcSpan name)
+        , idDefinedIn    = ModuleId
+            { moduleName = moduleNameString $ Module.moduleName mod
+            , modulePackage = fillVersion dflags $ Module.modulePackageId mod }
+        , idImportedFrom = ModuleId
+            { moduleName = moduleNameString impMod
+            , modulePackage = modToPkg dflags impMod }
+        , idImportSpan   = impSpan
         }
 
-      modToPkg :: DynFlags -> ModuleName -> Package
+      modToPkg :: DynFlags -> ModuleName -> PackageId
       modToPkg dflags impMod =
         let pkgAll = Packages.lookupModuleInAllPackages dflags impMod
             pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
@@ -427,7 +436,7 @@ instance Record Name where
                in error $ "modToPkg: " ++ moduleNameString impMod
                           ++ ": " ++ show pkgIds
 
-      fillVersion :: DynFlags -> PackageId -> Package
+      fillVersion :: DynFlags -> Module.PackageId -> PackageId
       fillVersion dflags p =
         case Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) p of
           Nothing -> if p == Module.mainPackageId
@@ -442,12 +451,12 @@ instance Record Name where
                 packageName = -- a hack to avoid importing Distribution.Package
                           tail $ init $ unwords $ tail $ words $ show
                           $ Packages.pkgName sourcePkgId
-            in Package {..}
+            in PackageId {..}
 
-      mainPackage :: Package
+      mainPackage :: PackageId
       mainPackage =
-        Package { packageName = Module.packageIdString Module.mainPackageId
-                , packageVersion = Nothing }
+        PackageId { packageName = Module.packageIdString Module.mainPackageId
+                  , packageVersion = Nothing }
 
       extractImportInfo :: [RdrName.ImportSpec] -> (ModuleName, EitherSpan)
       extractImportInfo (RdrName.ImpSpec decl item:_) =
