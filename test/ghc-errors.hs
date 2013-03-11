@@ -464,6 +464,24 @@ syntheticTests =
           (== userError "Session already shut down.")
           (runStmt session "Main" "main")
     )
+  , ( "Test TH"
+    , let packageOpts = defOpts ++ ["-package template-haskell"]
+      in withConfiguredSession packageOpts $ \session -> do
+        loadModulesFrom session "test/TH"
+        msgs <- getSourceErrors session
+        -- Typing of both modules must succedd. The error below is linking.
+        case msgs of
+          [] -> assertFailure $ "Missing source errors"
+          [SourceError _ _ "\nByteCodeLink.lookupCE\nDuring interactive linking, GHCi couldn't find the following symbol:\n  BlockingOps_putMVar_closure\nThis may be due to you not asking GHCi to load extra object files,\narchives or DLLs needed by your current session.  Restart GHCi, specifying\nthe missing library using the -L/path/to/object/dir and -lmissinglibname\nflags, or simply by naming the relevant files on the GHCi command line.\nAlternatively, this link failure might indicate a bug in GHCi.\nIf you suspect the latter, please send a bug report to:\n  glasgow-haskell-bugs@haskell.org\n"] -> return ()
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
+    )
+  , ( "Test TH; complex path"
+    , let packageOpts = defOpts ++ ["-package template-haskell"]
+      in withConfiguredSession packageOpts $ \session -> do
+        loadModulesFrom session "../ide-backend/test/TH"
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
+    )
   , ( "Test CPP: ifdefed module header"
     , let packageOpts = defOpts ++ ["-XCPP"]
       in withConfiguredSession packageOpts $ \session -> do
