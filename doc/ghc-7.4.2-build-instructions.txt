@@ -19,6 +19,8 @@ Now build as usual; select quick build flavour
 
   sed -e 's/^#BuildFlavour = quick$/BuildFlavour = quick/' mk/build.mk.sample > mk/build.mk
 
+(If you need profiling libraries, enable that in mk/build.mk.)
+
 and finally
 
   perl boot
