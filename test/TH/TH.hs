@@ -2,11 +2,17 @@
 module TH where
 
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
-import BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar)
+import BlockingOps (modifyMVar, modifyMVar_, putMVar, readMVar, takeMVar)
 
 main = do
   mv <- newEmptyMVar
-  $putMVar mv mv
-  mv <- $readMVar mv
-  $putMVar mv mv
-  $modifyMVar_ (\mv -> $modifyMVar_ (const undefined) mv >> return mv) mv
+  mv2 <- newEmptyMVar
+  $putMVar mv mv2
+  $putMVar mv2 42
+  mv3 <- $takeMVar mv
+  $putMVar mv mv3
+  $modifyMVar_ mv $ \mv3 -> $modifyMVar_ mv3 (\i -> return $ i + 1)
+                            >> return mv2
+  mv4 <- $takeMVar mv
+  i <- $readMVar mv3
+  print $ (mv2 == mv4, i)

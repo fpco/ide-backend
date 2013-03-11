@@ -280,7 +280,7 @@ syntheticTests =
         assEq "[m1, m2, m3]" ["A", "A2", "A3", "XXX"]
         updateSessionD session (loadModule "Wrong.hs" "import A4\na2 = A4.a + 1") 1
         assEq "wrong1" ["A", "A2", "A3", "XXX"]
-        -- THis has to be disabled to get the different outcome below:
+        -- This has to be disabled to get the different outcome below:
           -- updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
           -- assEq "wrong2" [m1, m2, m3, xxx]
         -- We get this differemnt outcome both in original 7.4.2
@@ -465,7 +465,7 @@ syntheticTests =
           (== userError "Session already shut down.")
           (runStmt session "Main" "main")
     )
-  , ( "Test TH"
+  , ( "Test TH: no code generation"
     , let packageOpts = defOpts ++ ["-package template-haskell"]
       in withConfiguredSession packageOpts $ \session -> do
         loadModulesFrom session "test/TH"
@@ -476,12 +476,19 @@ syntheticTests =
           [SourceError _ _ "\nByteCodeLink.lookupCE\nDuring interactive linking, GHCi couldn't find the following symbol:\n  BlockingOps_putMVar_closure\nThis may be due to you not asking GHCi to load extra object files,\narchives or DLLs needed by your current session.  Restart GHCi, specifying\nthe missing library using the -L/path/to/object/dir and -lmissinglibname\nflags, or simply by naming the relevant files on the GHCi command line.\nAlternatively, this link failure might indicate a bug in GHCi.\nIf you suspect the latter, please send a bug report to:\n  glasgow-haskell-bugs@haskell.org\n"] -> return ()
           _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
     )
-  , ( "Test TH; complex path"
+  , ( "Test TH; code generation on"
     , let packageOpts = defOpts ++ ["-package template-haskell"]
       in withConfiguredSession packageOpts $ \session -> do
-        loadModulesFrom session "../ide-backend/test/TH"
+        (originalUpdate, lm) <- getModulesFrom session "test/TH"
+        let update = originalUpdate <> updateCodeGeneration True
+        updateSessionD session update (length lm)
         msgs <- getSourceErrors session
         assertNoErrors msgs
+        runActions <- runStmt session "TH" "main"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk _ -> assertEqual "" output (BSLC.pack "(True,43)\n")
+          _ -> assertFailure "Unexpected snippet run result"
     )
   , ( "Test CPP: ifdefed module header"
     , let packageOpts = defOpts ++ ["-XCPP"]
