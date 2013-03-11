@@ -20,6 +20,7 @@ import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
 import System.Random (randomRIO)
 import qualified Data.Map as Map
+import Data.Maybe (isNothing)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -462,6 +463,29 @@ syntheticTests =
         assertRaises "runStmt session Main main"
           (== userError "Session already shut down.")
           (runStmt session "Main" "main")
+    )
+  , ( "Test CPP: ifdefed module header"
+    , let packageOpts = defOpts ++ ["-XCPP"]
+      in withConfiguredSession packageOpts $ \session -> do
+        let update = updateModule "M.hs" $ BSLC.pack $ unlines
+              [ "#if __GLASGOW_HASKELL__ >= 600"
+              , "module Good where"
+              , "import Data.Monoid"
+              , "#else"
+              , "module Bad where"
+              , "import Data.List"
+              , "#endif"
+              , "x = mappend [] []"
+              ]
+        updateSessionD session update 1
+        msgs <- getSourceErrors session
+        assertNoErrors msgs
+        idMaps <- getLoadedModules session
+        let idMapGood = idMaps Map.! "Good"
+        assertBool "Good header accepted" $
+          not $ Map.null $ idMapToMap idMapGood
+        let idMapBad = Map.lookup "Bad" idMaps
+        assertBool "Bad header ignored" $ isNothing idMapBad
     )
   , ( "Reject a wrong CPP directive"
     , let packageOpts = [ "-hide-all-packages"
