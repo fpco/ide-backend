@@ -57,6 +57,7 @@ module IdeSession (
   -- ** Initialisation and shutdown
   -- | Sessions are stateful and must be initialised and shut down so that
   -- resources can be released.
+  InProcess,
   initSession,
   shutdownSession,
   SessionConfig(..),
@@ -258,6 +259,8 @@ data SessionConfig = SessionConfig {
     -- | GHC static options. Can also contain default dynamic options,
     -- that are overridden via session update.
   , configStaticOpts :: [String]
+    -- | Should the GHC client run in-process?
+  , configInProcess  :: InProcess
   }
 
 data Computed = Computed {
@@ -354,12 +357,12 @@ getDataDir = ideDataDir . ideStaticInfo
 -- | Create a fresh session, using some initial configuration.
 --
 initSession :: SessionConfig -> IO IdeSession
-initSession ideConfig'@SessionConfig{configStaticOpts} = do
+initSession ideConfig'@SessionConfig{configStaticOpts,configInProcess} = do
   configDir <- canonicalizePath $ configDir ideConfig'
   let ideConfig = SessionConfig {..}
   ideSourcesDir <- createTempDirectory configDir "src."
   ideDataDir    <- createTempDirectory configDir "data."
-  _ideGhcServer <- forkGhcServer configStaticOpts (Just ideDataDir)
+  _ideGhcServer <- forkGhcServer configStaticOpts (Just ideDataDir) configInProcess
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
   -- a workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
@@ -447,7 +450,7 @@ restartSession session@IdeSession{ideStaticInfo, ideState} = do
     restart :: IdeIdleState -> IO IdeSessionState
     restart idleState = do
       forceShutdownGhcServer $ _ideGhcServer idleState
-      server <- forkGhcServer opts workingDir
+      server <- forkGhcServer opts workingDir (configInProcess config)
       return . IdeSessionIdle
              . (ideComputed    ^= Nothing)
              . (ideUpdatedEnv  ^= True)
@@ -456,7 +459,8 @@ restartSession session@IdeSession{ideStaticInfo, ideState} = do
              $ idleState
 
     workingDir = Just (ideDataDir ideStaticInfo)
-    opts       = configStaticOpts (ideConfig ideStaticInfo)
+    config     = ideConfig ideStaticInfo
+    opts       = configStaticOpts config
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
 -- bunch of updates.

@@ -64,6 +64,7 @@ withConfiguredSession opts io = do
   withTempDirectory slashTmp "ide-backend-test." $ \configDir -> do
     let sessionConfig = SessionConfig{ configDir
                                      , configStaticOpts = opts
+                                     , configInProcess  = False
                                      }
     withSession sessionConfig io
 
@@ -1078,6 +1079,7 @@ syntheticTests =
            relativePath <- makeRelativeToCurrentDirectory fullPath
            let sessionConfig = SessionConfig{ configDir        = relativePath
                                             , configStaticOpts = defOpts
+                                            , configInProcess  = False
                                             }
            withSession sessionConfig $ \session -> do
              let upd = (updateCodeGeneration True)

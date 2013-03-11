@@ -72,6 +72,7 @@ check opts what configDir = do
   -- Init session.
   let sessionConfig = SessionConfig{ configDir
                                    , configStaticOpts = opts
+                                   , configInProcess  = True
                                    }
   session     <- initSession sessionConfig
   isFile      <- doesFileExist      what

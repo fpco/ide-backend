@@ -14,6 +14,7 @@ module GhcServer
     -- * Server-side operations
   , ghcServer
     -- * Client-side operations
+  , InProcess
   , forkGhcServer
   , rpcCompile
   , LoadedModules
@@ -26,12 +27,13 @@ module GhcServer
   , getGhcExitCode
   ) where
 
-import Control.Concurrent (ThreadId, myThreadId, throwTo)
+import Control.Concurrent (ThreadId, myThreadId, throwTo, forkIO, killThread)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
 import qualified Control.Exception as Ex
 import Control.Monad (forM_, forever, unless, when)
+import Data.Aeson (decode', encode)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
@@ -82,7 +84,12 @@ $(deriveJSON id ''GhcCompileResponse)
 $(deriveJSON id ''GhcRunResponse)
 $(deriveJSON id ''GhcRunRequest)
 
-type GhcServer = RpcServer
+data GhcServer = OutProcess RpcServer
+               | InProcess RpcConversation ThreadId
+
+conversation :: GhcServer -> (RpcConversation -> IO a) -> IO a
+conversation (OutProcess server) = rpcConversation server
+conversation (InProcess conv _)  = ($ conv)
 
 --------------------------------------------------------------------------------
 -- Server-side operations                                                     --
@@ -326,8 +333,10 @@ ghcHandleSetEnv RpcConversation{put} env = liftIO $ do
 -- Client-side operations                                                     --
 --------------------------------------------------------------------------------
 
-forkGhcServer :: [String] -> Maybe String -> IO GhcServer
-forkGhcServer opts workingDir = do
+type InProcess = Bool
+
+forkGhcServer :: [String] -> Maybe String -> InProcess -> IO GhcServer
+forkGhcServer opts workingDir False = do
   bindir <- getBinDir
   let prog = bindir </> "ide-backend-server"
 
@@ -336,7 +345,20 @@ forkGhcServer opts workingDir = do
     fail $ "The 'ide-backend-server' program was expected to "
         ++ "be at location " ++ prog ++ " but it is not."
 
-  forkRpcServer prog (opts ++ ["--ghc-opts-end"]) workingDir
+  server <- forkRpcServer prog (opts ++ ["--ghc-opts-end"]) workingDir
+  return (OutProcess server)
+forkGhcServer opts workingDir True = do
+  let conv a b = RpcConversation {
+                   get = do bs <- $readChan a
+                            case decode' bs of
+                              Just x  -> return x
+                              Nothing -> fail "JSON failure"
+                 , put = writeChan b . encode
+                 }
+  a   <- newChan
+  b   <- newChan
+  tid <- forkIO $ ghcServerEngine opts (conv a b)
+  return $ InProcess (conv b a) tid
 
 -- | Compile or typecheck
 rpcCompile :: GhcServer           -- ^ GHC server
@@ -346,7 +368,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ([SourceError], LoadedModules)
 rpcCompile server opts dir genCode callback =
-  rpcConversation server $ \RpcConversation{..} -> do
+  conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
 
     let go = do response <- get
@@ -406,7 +428,7 @@ rpcRun server m fun outBMode errBMode = do
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
   conv <- async . Ex.handle (handleExternalException runWaitChan) $
-    rpcConversation server $ \RpcConversation{..} -> do
+    conversation server $ \RpcConversation{..} -> do
       put (ReqRun m fun outBMode errBMode)
       withAsync (sendRequests put reqChan) $ \sentAck -> do
         let go = do resp <- get
@@ -471,16 +493,18 @@ rpcRun server m fun outBMode errBMode = do
 
 -- | Set the environment
 rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()
-rpcSetEnv server env = rpc server (ReqSetEnv env)
+rpcSetEnv (OutProcess server) env = rpc server (ReqSetEnv env)
 
 shutdownGhcServer :: GhcServer -> IO ()
-shutdownGhcServer = shutdown
+shutdownGhcServer (OutProcess server) = shutdown server
+shutdownGhcServer (InProcess _ tid)   = killThread tid
 
 forceShutdownGhcServer :: GhcServer -> IO ()
-forceShutdownGhcServer = forceShutdown
+forceShutdownGhcServer (OutProcess server) = forceShutdown server
+forceShutdownGhcServer (InProcess _ tid)   = killThread tid
 
 getGhcExitCode :: GhcServer -> IO (Maybe ExitCode)
-getGhcExitCode = getRpcExitCode
+getGhcExitCode (OutProcess server) = getRpcExitCode server
 
 --------------------------------------------------------------------------------
 -- Auxiliary                                                                  --
