@@ -340,7 +340,7 @@ syntheticTests =
     )
   , ( "Compile a project: A depends on B, error in A"
     , withConfiguredSession defOpts $ \session -> do
-        loadModulesFrom session "../ide-backend/test/AerrorB"
+        loadModulesFrom session "test/AerrorB"
         msgs <- getSourceErrors session
         case msgs of
           [] -> assertFailure $ "Missing source errors"
@@ -353,7 +353,7 @@ syntheticTests =
      )
   , ( "Compile a project: A depends on B, error in B"
     , withConfiguredSession defOpts $ \session -> do
-        loadModulesFrom session "test/../test/ABerror/../ABerror"
+        loadModulesFrom session "test/ABerror"
         msgs <- getSourceErrors session
         case msgs of
           [] -> assertFailure $ "Missing source errors"
