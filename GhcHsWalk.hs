@@ -26,6 +26,7 @@ import qualified Data.Map as Map
 import Data.Version
 import Data.Generics
 import Data.Maybe (fromMaybe)
+import Data.List (stripPrefix)
 
 import qualified Common as Common
 import Common hiding (ModuleName)
@@ -438,19 +439,38 @@ instance Record Name where
                      else error $ "fillVersion:" ++ Module.packageIdString p
           Just pkgCfg ->
             let sourcePkgId = Packages.sourcePackageId pkgCfg
+                pkgName = Packages.pkgName sourcePkgId
+                prefixPN = "PackageName "
+                showPN = show pkgName
+                -- A hack to avoid importing Distribution.Package.
+                errPN = fromMaybe (error $ "stripPrefixPN "
+                                           ++ prefixPN ++ " "
+                                           ++ showPN)
+                        $ stripPrefix prefixPN showPN
+                packageName = init $ tail errPN
                 pkgVersion  = Packages.pkgVersion sourcePkgId
-                packageVersion = case showVersion pkgVersion of
-                                   "" -> Nothing
-                                   s  -> Just s
-                packageName = -- a hack to avoid importing Distribution.Package
-                          tail $ init $ unwords $ tail $ words $ show
-                          $ Packages.pkgName sourcePkgId
+                packageVersion = Just $ case showVersion pkgVersion of
+                  -- See http://www.haskell.org/ghc/docs/7.4.2//html/libraries/ghc/Module.html#g:3.
+                  -- The version of wired-in packages is completely wiped out,
+                  -- but we use a leak in the form of a Cabal package id
+                  -- for the same package, which still contains a version.
+                  "" -> let installedPkgId = Packages.installedPackageId pkgCfg
+                            prefixPV = "InstalledPackageId "
+                                       ++ "\"" ++ packageName ++ "-"
+                            showPV = show installedPkgId
+                            -- A hack to avoid cabal dependency, in particular.
+                            errPV = fromMaybe (error $ "stripPrefixPV "
+                                                       ++ prefixPV ++ " "
+                                                       ++ showPV)
+                                    $ stripPrefix prefixPV showPV
+                        in reverse $ tail $ snd $ break (=='-') $ reverse errPV
+                  s  -> s
             in PackageId {..}
 
       mainPackage :: PackageId
       mainPackage =
         PackageId { packageName = Module.packageIdString Module.mainPackageId
-                  , packageVersion = Nothing }
+                  , packageVersion = Nothing }  -- the only case of no version
 
       extractImportInfo :: [RdrName.ImportSpec] -> (ModuleName, EitherSpan)
       extractImportInfo (RdrName.ImpSpec decl item:_) =

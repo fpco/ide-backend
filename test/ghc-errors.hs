@@ -1524,16 +1524,16 @@ syntheticTests =
               , "(A.hs@3:1-3:2,a (VarName) :: GHC.Types.Int (binding occurrence))"
               , "(A.hs@4:1-4:2,b (VarName) :: GHC.Types.Int (binding occurrence))"
               , "(A.hs@4:5-4:6,a (VarName) :: GHC.Types.Int (defined at A.hs@3:1-3:2))"
-              , "(A.hs@4:7-4:8,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base:GHC.Num at <no location info>; imported from base:Prelude at A.hs@1:8-1:9))"
+              , "(A.hs@4:7-4:8,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9))"
               ]
         let expectedIdMapB = [
                 "(B.hs@4:1-4:2,c (VarName) :: GHC.Types.Int (binding occurrence))"
               , "(B.hs@4:9-4:10,e (VarName) :: GHC.Types.Int (binding occurrence))"
               , "(B.hs@5:8-5:9,b (VarName) :: GHC.Types.Int (defined in main:A at A.hs@4:1-4:2; imported from main:A at B.hs@2:1-2:9))"
-              , "(B.hs@5:10-5:11,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base:GHC.Num at <no location info>; imported from base:Prelude at B.hs@1:8-1:9))"
-              , "(B.hs@5:14-5:15,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base:GHC.Num at <no location info>; imported from base:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@5:10-5:11,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@5:14-5:15,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
               , "(B.hs@5:16-5:17,d (VarName) :: GHC.Types.Int (defined at B.hs@6:9-6:10))"
-              , "(B.hs@5:18-5:19,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base:GHC.Num at <no location info>; imported from base:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@5:18-5:19,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
               , "(B.hs@5:20-5:21,e (VarName) :: GHC.Types.Int (defined at B.hs@4:9-4:10))"
               , "(B.hs@6:9-6:10,d (VarName) :: GHC.Types.Int (binding occurrence))"
               , "(B.hs@7:1-7:2,d (VarName) (defined at B.hs@8:1-8:2))"
@@ -1580,10 +1580,10 @@ syntheticTests =
               , "(B.hs@20:3-20:4,x (VarName) :: t a (binding occurrence))"
               , "(B.hs@20:7-20:8,x (VarName) :: t a (defined at B.hs@20:3-20:4))"
               , "(B.hs@21:1-21:6,hello (VarName) (defined at B.hs@22:1-22:6))"
-              , "(B.hs@21:10-21:12,IO (TcClsName) (defined in ghc-prim:GHC.Types at <no location info>; imported from base:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@21:10-21:12,IO (TcClsName) (defined in ghc-prim-0.2.0.0:GHC.Types at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
               , "(B.hs@21:13-21:15,() (TcClsName) (wired in to the compiler))"
               , "(B.hs@22:1-22:6,hello (VarName) :: GHC.Types.IO () (binding occurrence))"
-              , "(B.hs@22:9-22:17,putStrLn (VarName) :: GHC.Base.String -> GHC.Types.IO () (defined in base:System.IO at <no location info>; imported from base:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@22:9-22:17,putStrLn (VarName) :: GHC.Base.String -> GHC.Types.IO () (defined in base-4.5.1.0:System.IO at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
               ]
         let actualIdMapA = lines (show idMapA)
         let actualIdMapB = lines (show idMapB)
