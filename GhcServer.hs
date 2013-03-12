@@ -147,10 +147,6 @@ ghcHandleCompile :: RpcConversation
                  -> Ghc ()
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                  idMapRef configSourcesDir ideGenerateCode = do
-    -- TODO: we will probably want to keep idMaps for all loaded modules,
-    -- while right now we only store it for modules from this compilation,
-    -- to mimic the behaviour of errors and warnings.
-    liftIO $ writeIORef idMapRef Map.empty
     errsRef  <- liftIO $ newIORef []
     counter  <- liftIO $ newIORef initialProgress
     (errs, loadedModules) <-
@@ -167,16 +163,13 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
         -- Filter out modules that got unloaded.
         filteredIdMaps =
           Map.filterWithKey (\k _ -> k `Set.member` loadedModulesSet) idMaps
-        -- TODO: get rid of the dummy maps (see TODO above)
-        dummyIdList = map (\m -> (m, IdMap Map.empty)) loadedModules
-        filteredAndDummyIdMaps =
-          filteredIdMaps `Map.union` Map.fromList dummyIdList
-        filteredKeySet = Map.keysSet filteredAndDummyIdMaps
+        filteredKeySet = Map.keysSet filteredIdMaps
+    liftIO $ writeIORef idMapRef filteredIdMaps
     -- Verify the plugin and @compileInGhc@ agree on which modules are loaded.
     when (loadedModulesSet /= filteredKeySet) $ do
       error $ "ghcHandleCompile: loaded modules do not match id info maps: "
               ++ show (loadedModulesSet, filteredKeySet)
-    liftIO $ put $ GhcCompileDone (errs, filteredAndDummyIdMaps)
+    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
