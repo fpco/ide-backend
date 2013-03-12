@@ -21,7 +21,7 @@ import IdeSession
 defOpts :: [String]
 defOpts = [ "-hide-all-packages"
           , "-XCPP"
-          , "-XTemplateHaskell"
+          , "-XNoTemplateHaskell"  -- TH not available when profiling
           , "-XBangPatterns"
           , "-XRecordWildCards"
           , "-XNamedFieldPuns"
