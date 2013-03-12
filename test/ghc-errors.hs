@@ -494,12 +494,12 @@ syntheticTests =
     , let packageOpts = defOpts ++ ["-XCPP"]
       in withConfiguredSession packageOpts $ \session -> do
         let update = updateModule "M.hs" $ BSLC.pack $ unlines
-              [ "#if __GLASGOW_HASKELL__ >= 600"
-              , "module Good where"
-              , "import Data.Monoid"
-              , "#else"
+              [ "#if __GLASGOW_HASKELL__ < 600"
               , "module Bad where"
               , "import Data.List"
+              , "#else"
+              , "module Good where"
+              , "import Data.Monoid"
               , "#endif"
               , "x = mappend [] []"
               ]
