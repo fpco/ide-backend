@@ -83,6 +83,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   let cfg = SessionConfig {
                 configDir        = tempDir
               , configStaticOpts = []
+              , configInProcess = False
               }
   ideSession <- initSession cfg
 
