@@ -71,6 +71,9 @@ formatSourceError = show
 -- | These source files are type-checked.
 hsExtentions:: [FilePath]
 hsExtentions = [".hs", ".lhs"]
+-- Boot files are not so simple. They should probably be copied to the src dir,
+-- but not made proper targets. This is probably similar to .h files.
+-- hsExtentions = [".hs", ".lhs", ".hs-boot", ".lhs-boot", ".hi-boot"]
 
 -- | This type represents intermediate progress information during compilation.
 newtype Progress = Progress Int
