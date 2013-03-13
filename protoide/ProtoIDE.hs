@@ -89,7 +89,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
 
   -- Whenever the buffer changes, reload the module into ghc
   -- TODO: this is overkill..
-  idMapRef <- newIORef (error "no ID maps loaded")
+  idMapRef <- newIORef []
   on textBuffer bufferChanged $ do
     (start, end) <- textBufferGetBounds textBuffer
     src <- textBufferGetByteString textBuffer start end False
