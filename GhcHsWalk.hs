@@ -47,7 +47,7 @@ import qualified Packages
 import qualified RdrName
 import OccName
 
-#define DEBUG 1
+#define DEBUG 0
 
 {------------------------------------------------------------------------------
   Environment mapping source locations to info
@@ -224,17 +224,25 @@ extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
   let processedModule = tcg_mod env
       processedName = moduleNameString $ GHC.moduleName processedModule
   identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) $ do
+#if DEBUG
     pretty_mod     <- pretty False processedModule
     pretty_rdr_env <- pretty False (tcg_rdr_env env)
     liftIO $ writeFile "/tmp/ghc.readerenv" pretty_rdr_env
+#endif
     -- Information provided by the renamer
     -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
+#if DEBUG
     liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING RENAMED AST " ++ pretty_mod ++ ">>\n"
+#endif
     extractIds (tcg_rn_decls env)
     -- Information provided by the type checker
+#if DEBUG
     liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPED AST " ++ pretty_mod ++ ">>\n"
+#endif
     extractIds (tcg_binds env)
+#if DEBUG
   liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
+#endif
   liftIO $ modifyIORef symbolRef (Map.insert processedName identMap)
   return env
 
@@ -333,7 +341,7 @@ unsupported mspan c = ast mspan c $ do
   prettySpan <- pretty False mspan
   liftIO . appendFile "/tmp/ghc.log" $ "extractIds: unsupported " ++ c ++ " at " ++ prettySpan ++ "\n"
 #else
-unsupported _ = return ()
+unsupported _ _ = return ()
 #endif
 
 {------------------------------------------------------------------------------
@@ -387,17 +395,20 @@ instance Record Name where
                 dflags <- asks fst
                 return (Just (scopeFromProv dflags (RdrName.gre_prov gre)))
               Nothing -> do
+#if DEBUG
                 prettyName <- pretty True name
                 prettyOcc  <- pretty True (Name.nameOccName name)
                 liftIO . appendFile "/tmp/ghc.log" $ "No entry " ++ show prettyOcc ++ " in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ " at location " ++ show span ++ "\n"
+#endif
                 return Nothing
-
+#if DEBUG
       nameSort :: String
       nameSort | Name.isInternalName name = "internal"
                | Name.isExternalName name = "external"
                | Name.isSystemName   name = "system"
                | Name.isWiredInName  name = "wired-in"
                | otherwise                = "unknown"
+#endif
 
       scopeFromProv :: DynFlags -> RdrName.Provenance -> IdScope
       scopeFromProv _ RdrName.LocalDef = Local {
