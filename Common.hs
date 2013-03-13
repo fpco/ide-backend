@@ -2,7 +2,7 @@
 -- | Common types and utilities
 module Common
   ( SourceSpan(..), EitherSpan (..), SourceErrorKind(..), SourceError(..)
-  , ModuleName
+  , ModuleName, ModuleId (..), PackageId (..)
   , formatSourceError
   , hsExtentions
   , Progress
@@ -65,6 +65,25 @@ data SourceErrorKind = KindError | KindWarning
 
 type ModuleName    = String
 
+data ModuleId = ModuleId
+  { moduleName    :: ModuleName
+  , modulePackage :: PackageId
+  }
+  deriving (Eq, Data, Typeable)
+
+data PackageId = PackageId
+  { packageName    :: String
+  , packageVersion :: Maybe String
+  }
+  deriving (Eq, Data, Typeable)
+
+instance Show ModuleId where
+  show (ModuleId mo pkg) = show pkg ++ ":" ++ mo
+
+instance Show PackageId where
+  show (PackageId name (Just version)) = name ++ "-" ++ version
+  show (PackageId name Nothing)        = name
+
 formatSourceError :: SourceError -> String
 formatSourceError = show
 
@@ -94,6 +113,8 @@ $(deriveJSON id ''SourceSpan)
 $(deriveJSON id ''EitherSpan)
 $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''SourceError)
+$(deriveJSON (\x -> x) ''ModuleId)
+$(deriveJSON (\x -> x) ''PackageId)
 $(deriveJSON id ''Progress)
 
 -- | Show an exception together with its most precise type tag.

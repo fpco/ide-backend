@@ -137,6 +137,8 @@ module IdeSession (
   IdInfo(..),
   IdNameSpace(..),
   IdScope(..),
+  ModuleId (..),
+  PackageId (..),
   haddockLink,
   idInfoAtLocation,
 

@@ -106,18 +106,6 @@ data IdScope =
   | WiredIn
   deriving (Eq, Data, Typeable)
 
-data ModuleId = ModuleId
-  { moduleName    :: Common.ModuleName
-  , modulePackage :: PackageId
-  }
-  deriving (Eq, Data, Typeable)
-
-data PackageId = PackageId
-  { packageName    :: String
-  , packageVersion :: Maybe String
-  }
-  deriving (Eq, Data, Typeable)
-
 data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
   deriving (Data, Typeable)
 
@@ -125,8 +113,6 @@ type LoadedModules = Map Common.ModuleName IdMap
 
 $(deriveJSON (\x -> x) ''IdNameSpace)
 $(deriveJSON (\x -> x) ''IdScope)
-$(deriveJSON (\x -> x) ''ModuleId)
-$(deriveJSON (\x -> x) ''PackageId)
 $(deriveJSON (\x -> x) ''IdInfo)
 
 instance FromJSON IdMap where
@@ -161,13 +147,6 @@ instance Show IdScope where
                       ++ show idDefSpan ++ "; imported from "
                       ++ show idImportedFrom ++ " at "
                       ++ show idImportSpan
-
-instance Show ModuleId where
-  show (ModuleId mod pkg) = show pkg ++ ":" ++ mod
-
-instance Show PackageId where
-  show (PackageId name (Just version)) = name ++ "-" ++ version
-  show (PackageId name Nothing)        = name
 
 fromGhcNameSpace :: Name.NameSpace -> IdNameSpace
 fromGhcNameSpace ns
