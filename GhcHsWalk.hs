@@ -13,9 +13,9 @@ module GhcHsWalk
   ) where
 
 import Prelude hiding (span, id, mod)
-import Control.Arrow (first)
+import Control.Arrow (first, second)
 import Control.Monad (forM_)
-import Control.Monad.State (MonadState, StateT, execStateT, modify)
+import Control.Monad.State (MonadState, StateT, execStateT, modify, state, get, put)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Data.IORef
@@ -48,7 +48,7 @@ import qualified RdrName
 import OccName
 import PprTyThing (pprTypeForUser)
 import TcType (tidyOpenType)
-import VarEnv (emptyTidyEnv)
+import VarEnv (TidyEnv, emptyTidyEnv)
 
 #define DEBUG 1
 
@@ -104,9 +104,6 @@ data IdScope =
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
-#ifdef DEBUG
-  | Debug
-#endif
   deriving (Eq, Data, Typeable)
 
 data ModuleId = ModuleId
@@ -164,9 +161,6 @@ instance Show IdScope where
                       ++ show idDefSpan ++ "; imported from "
                       ++ show idImportedFrom ++ " at "
                       ++ show idImportSpan
-#ifdef DEBUG
-  show Debug           = "<debugging entry>"
-#endif
 
 instance Show ModuleId where
   show (ModuleId mod pkg) = show pkg ++ ":" ++ mod
@@ -257,13 +251,14 @@ extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
 
 -- Define type synonym to avoid orphan instances
 newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StateT IdMap m) a
+      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StateT (TidyEnv, IdMap) m) a
     )
-  deriving (Functor, Monad, MonadState IdMap, MonadReader (DynFlags, RdrName.GlobalRdrEnv))
+  deriving (Functor, Monad, MonadState (TidyEnv, IdMap), MonadReader (DynFlags, RdrName.GlobalRdrEnv))
 
 execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> ExtractIdsT m () -> m IdMap
-execExtractIdsT dynFlags rdrEnv (ExtractIdsT m) =
-  execStateT (runReaderT m (dynFlags, rdrEnv)) (IdMap Map.empty)
+execExtractIdsT dynFlags rdrEnv (ExtractIdsT m) = do
+  (_, idMap) <- execStateT (runReaderT m (dynFlags, rdrEnv)) (emptyTidyEnv, IdMap Map.empty)
+  return idMap
 
 instance MonadTrans ExtractIdsT where
   lift = ExtractIdsT . lift . lift
@@ -277,6 +272,14 @@ getDynFlags = asks fst
 
 getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
 getGlobalRdrEnv = asks snd
+
+modifyIdMap :: Monad m => (Map SourceSpan IdInfo -> Map SourceSpan IdInfo) -> ExtractIdsT m ()
+modifyIdMap f = modify . second $ IdMap . f . idMapToMap
+
+prettyType :: Monad m => Type -> ExtractIdsT m Type
+prettyType typ = state $ \(tidyEnv, idMap) ->
+  let (tidyEnv', typ') = tidyOpenType tidyEnv typ
+  in (typ', (tidyEnv', idMap))
 
 lookupRdrEnv :: Monad m => Name -> ExtractIdsT m (Maybe RdrName.GlobalRdrElt)
 lookupRdrEnv name = do
@@ -308,35 +311,24 @@ debugPP header val = do
 debugPP _ _ = return ()
 #endif
 
--- For debugging purposes, we also record information about the AST
+-- We mark every node in the AST with 'ast'. This is necessary so that we can
+-- restore the TidyEnv at every node, so that we can reuse type variables. For
+-- instance
+--
+-- > foo (x, y) = x
+-- > bar (x, y) = y
+--
+-- In this case, we can assign (t, t1) -> t and (t, t1) -> t1 as types, reusing
+-- 't' and 't1', but we can only do this because they are not nested.
+--
+-- For debugging purposes, we also take in two arguments describing the AST.
 ast :: Monad m => Maybe SrcSpan -> String -> ExtractIdsT m a -> ExtractIdsT m a
--- #if DEBUG
-{-
-ast mspan info cont = do
-    case extractSourceSpan <$> mspan of
-      Just (ProperSpan sourceSpan) -> do
-        let idInfo = IdInfo { idName  = info
-                            , idSpace = VarName
-                            , idType  = Nothing
-                            , idScope = Debug
-                            }
-        tell . IdMap $ Map.singleton sourceSpan idInfo
-      _ ->
-       return ()
-    censor addInfo cont
-  where
-    addInfo :: IdMap -> IdMap
-    addInfo = IdMap . Map.map addInfo' . idMapToMap
-
-    addInfo' :: IdInfo -> IdInfo
-    addInfo' idInfo =
-      if idScope idInfo == Debug
-        then idInfo { idName = info ++ "/" ++ idName idInfo }
-        else idInfo
--}
--- #else
-ast _ _ cont = cont
--- #endif
+ast _mspan _info cont = do
+  (tidyEnv, _) <- get
+  r <- cont
+  (_, idMap') <- get
+  put (tidyEnv, idMap')
+  return r
 
 unsupported :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m ()
 #if DEBUG
@@ -359,10 +351,10 @@ class OutputableBndr id => Record id where
 instance Record Id where
   record span _idIsBinder id = case extractSourceSpan span of
     ProperSpan sourceSpan -> do
-      let (_env, typ) = tidyOpenType emptyTidyEnv (Var.varType id)
-      let typDoc      = pprTypeForUser True typ
+      typ <- prettyType (Var.varType id)
+      let typDoc = pprTypeForUser True typ
       let addType idInfo = Just $ idInfo { idType = Just (showSDoc typDoc) }
-      modify $ \(IdMap idMap) -> IdMap (Map.update addType sourceSpan idMap)
+      modifyIdMap $ Map.update addType sourceSpan
     TextSpan _ ->
       return ()
 
@@ -373,7 +365,7 @@ instance Record Name where
         case mIdScope of
           Just idScope -> do
             let idInfo = IdInfo{..}
-            modify $ \(IdMap idMap) -> IdMap (Map.insert sourceSpan idInfo idMap)
+            modifyIdMap $ Map.insert sourceSpan idInfo
           Nothing ->
             -- TODO: This should never happen
             return ()

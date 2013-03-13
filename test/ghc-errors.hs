@@ -1519,35 +1519,17 @@ syntheticTests =
         let idMapA = idMaps Map.! "A"
         let idMapB = idMaps Map.! "B"
         let expectedIdMapA = [
-                "(A.hs@2:6-2:7,T (TcClsName) (binding occurrence))"
-              , "(A.hs@2:10-2:13,MkT (DataName) (binding occurrence))"
+                "(A.hs@2:10-2:13,MkT (DataName) (binding occurrence))"
+              , "(A.hs@2:6-2:7,T (TcClsName) (binding occurrence))"
               , "(A.hs@3:1-3:2,a (VarName) :: GHC.Types.Int (binding occurrence))"
               , "(A.hs@4:1-4:2,b (VarName) :: GHC.Types.Int (binding occurrence))"
               , "(A.hs@4:5-4:6,a (VarName) :: GHC.Types.Int (defined at A.hs@3:1-3:2))"
               , "(A.hs@4:7-4:8,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9))"
               ]
         let expectedIdMapB = [
-                "(B.hs@4:1-4:2,c (VarName) :: GHC.Types.Int (binding occurrence))"
-              , "(B.hs@4:9-4:10,e (VarName) :: GHC.Types.Int (binding occurrence))"
-              , "(B.hs@5:8-5:9,b (VarName) :: GHC.Types.Int (defined in main:A at A.hs@4:1-4:2; imported from main:A at B.hs@2:1-2:9))"
-              , "(B.hs@5:10-5:11,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
-              , "(B.hs@5:14-5:15,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
-              , "(B.hs@5:16-5:17,d (VarName) :: GHC.Types.Int (defined at B.hs@6:9-6:10))"
-              , "(B.hs@5:18-5:19,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
-              , "(B.hs@5:20-5:21,e (VarName) :: GHC.Types.Int (defined at B.hs@4:9-4:10))"
-              , "(B.hs@6:9-6:10,d (VarName) :: GHC.Types.Int (binding occurrence))"
-              , "(B.hs@7:1-7:2,d (VarName) (defined at B.hs@8:1-8:2))"
-              , "(B.hs@7:6-7:9,Int (TcClsName) (wired in to the compiler))"
-              , "(B.hs@7:13-7:14,T (TcClsName) (defined in main:A at A.hs@2:6-2:7; imported from main:A at B.hs@2:1-2:9))"
-              , "(B.hs@8:1-8:2,d (VarName) :: GHC.Types.Int -> A.T (binding occurrence))"
-              , "(B.hs@8:7-8:10,MkT (DataName) :: A.T (defined in main:A at A.hs@2:10-2:13; imported from main:A at B.hs@2:1-2:9))"
-              , "(B.hs@9:1-9:2,e (VarName) :: GHC.Types.Bool (binding occurrence))"
-              , "(B.hs@9:5-9:9,True (DataName) :: GHC.Types.Bool (wired in to the compiler))"
-              , "(B.hs@9:10-9:16,pseq (VarName) :: forall a b. a -> b -> b (defined in parallel-3.2.0.3:Control.Parallel at <no location info>; imported from parallel-3.2.0.3:Control.Parallel at B.hs@3:1-3:24))"
-              , "(B.hs@9:17-9:22,False (DataName) :: GHC.Types.Bool (wired in to the compiler))"
-              , "(B.hs@10:1-10:2,f (VarName) (defined at B.hs@11:1-11:2))"
-              , "(B.hs@10:6-10:7,a (TvName) (defined at B.hs@10:6-10:7))"
+                "(B.hs@10:1-10:2,f (VarName) (defined at B.hs@11:1-11:2))"
               , "(B.hs@10:11-10:12,a (TvName) (defined at B.hs@10:6-10:7))"
+              , "(B.hs@10:6-10:7,a (TvName) (defined at B.hs@10:6-10:7))"
               , "(B.hs@11:1-11:2,f (VarName) :: a -> a (binding occurrence))"
               , "(B.hs@11:3-11:4,x (VarName) :: a (binding occurrence))"
               , "(B.hs@11:7-11:8,x (VarName) :: a (defined at B.hs@11:3-11:4))"
@@ -1565,8 +1547,8 @@ syntheticTests =
               , "(B.hs@15:1-15:2,h (VarName) :: a -> a (binding occurrence))"
               , "(B.hs@15:3-15:4,x (VarName) :: a (binding occurrence))"
               , "(B.hs@15:7-15:8,y (VarName) :: a (defined at B.hs@18:5-18:6))"
-              , "(B.hs@17:5-17:6,y (VarName) (defined at B.hs@18:5-18:6))"
               , "(B.hs@17:10-17:11,a (TvName) (defined at B.hs@14:13-14:14))"
+              , "(B.hs@17:5-17:6,y (VarName) (defined at B.hs@18:5-18:6))"
               , "(B.hs@18:5-18:6,y (VarName) :: a (binding occurrence))"
               , "(B.hs@18:9-18:10,x (VarName) :: a (defined at B.hs@15:3-15:4))"
               , "(B.hs@19:1-19:2,i (VarName) (defined at B.hs@20:1-20:2))"
@@ -1584,6 +1566,24 @@ syntheticTests =
               , "(B.hs@21:13-21:15,() (TcClsName) (wired in to the compiler))"
               , "(B.hs@22:1-22:6,hello (VarName) :: GHC.Types.IO () (binding occurrence))"
               , "(B.hs@22:9-22:17,putStrLn (VarName) :: GHC.Base.String -> GHC.Types.IO () (defined in base-4.5.1.0:System.IO at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@4:1-4:2,c (VarName) :: GHC.Types.Int (binding occurrence))"
+              , "(B.hs@4:9-4:10,e (VarName) :: GHC.Types.Int (binding occurrence))"
+              , "(B.hs@5:10-5:11,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@5:14-5:15,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@5:16-5:17,d (VarName) :: GHC.Types.Int (defined at B.hs@6:9-6:10))"
+              , "(B.hs@5:18-5:19,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
+              , "(B.hs@5:20-5:21,e (VarName) :: GHC.Types.Int (defined at B.hs@4:9-4:10))"
+              , "(B.hs@5:8-5:9,b (VarName) :: GHC.Types.Int (defined in main:A at A.hs@4:1-4:2; imported from main:A at B.hs@2:1-2:9))"
+              , "(B.hs@6:9-6:10,d (VarName) :: GHC.Types.Int (binding occurrence))"
+              , "(B.hs@7:1-7:2,d (VarName) (defined at B.hs@8:1-8:2))"
+              , "(B.hs@7:13-7:14,T (TcClsName) (defined in main:A at A.hs@2:6-2:7; imported from main:A at B.hs@2:1-2:9))"
+              , "(B.hs@7:6-7:9,Int (TcClsName) (wired in to the compiler))"
+              , "(B.hs@8:1-8:2,d (VarName) :: GHC.Types.Int -> A.T (binding occurrence))"
+              , "(B.hs@8:7-8:10,MkT (DataName) :: A.T (defined in main:A at A.hs@2:10-2:13; imported from main:A at B.hs@2:1-2:9))"
+              , "(B.hs@9:1-9:2,e (VarName) :: GHC.Types.Bool (binding occurrence))"
+              , "(B.hs@9:10-9:16,pseq (VarName) :: forall a b. a -> b -> b (defined in parallel-3.2.0.3:Control.Parallel at <no location info>; imported from parallel-3.2.0.3:Control.Parallel at B.hs@3:1-3:24))"
+              , "(B.hs@9:17-9:22,False (DataName) :: GHC.Types.Bool (wired in to the compiler))"
+              , "(B.hs@9:5-9:9,True (DataName) :: GHC.Types.Bool (wired in to the compiler))"
               ]
         let actualIdMapA = lines (show idMapA)
         let actualIdMapB = lines (show idMapB)
@@ -1598,6 +1598,7 @@ syntheticTests =
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "foo (x, y) = x"
+                    , "bar (x, y) = x"
                     ])
         updateSessionD session upd 2
         msgs <- getSourceErrors session
@@ -1605,10 +1606,15 @@ syntheticTests =
         idMaps <- getLoadedModules session
         let idMap = idMaps Map.! "A"
         let expectedIdMap = [
+              -- TODO: We are getting a monotype here, but we really should
                 "(A.hs@2:1-2:4,foo (VarName) :: (t, t1) -> t (binding occurrence))"
+              , "(A.hs@2:14-2:15,x (VarName) :: t (defined at A.hs@2:6-2:7))"
               , "(A.hs@2:6-2:7,x (VarName) :: t (binding occurrence))"
               , "(A.hs@2:9-2:10,y (VarName) :: t1 (binding occurrence))"
-              , "(A.hs@2:14-2:15,x (VarName) :: t (defined at A.hs@2:6-2:7))"
+              , "(A.hs@3:1-3:4,bar (VarName) :: (t, t1) -> t (binding occurrence))"
+              , "(A.hs@3:14-3:15,x (VarName) :: t (defined at A.hs@3:6-3:7))"
+              , "(A.hs@3:6-3:7,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@3:9-3:10,y (VarName) :: t1 (binding occurrence))"
               ]
         let actualIdMap = lines (show idMap)
         assertSameSet expectedIdMap actualIdMap
@@ -1637,20 +1643,20 @@ syntheticTests =
               , "(A.hs@3:25-3:27,t1 (TvName) (defined at A.hs@3:17-3:19))"
               , "(A.hs@3:32-3:33,t (TvName) (defined at A.hs@3:15-3:16))"
               , "(A.hs@4:1-4:4,foo (VarName) :: (t, t1) -> t (binding occurrence))"
-              , "(A.hs@4:6-4:7,x (VarName) :: t (binding occurrence))"
-              , "(A.hs@4:9-4:10,y (VarName) :: t1 (binding occurrence))"
               , "(A.hs@4:14-4:17,bar (VarName) :: forall t2. (t, t2) -> t (defined at A.hs@7:5-7:8))"
               , "(A.hs@4:19-4:20,x (VarName) :: t (defined at A.hs@4:6-4:7))"
               , "(A.hs@4:21-4:22,y (VarName) :: t1 (defined at A.hs@4:9-4:10))"
-              , "(A.hs@6:5-6:8,bar (VarName) (defined at A.hs@7:5-7:8))"
+              , "(A.hs@4:6-4:7,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@4:9-4:10,y (VarName) :: t1 (binding occurrence))"
               , "(A.hs@6:19-6:21,t2 (TvName) (binding occurrence))"
               , "(A.hs@6:24-6:25,t (TvName) (defined at A.hs@3:15-3:16))"
               , "(A.hs@6:27-6:29,t2 (TvName) (defined at A.hs@6:19-6:21))"
               , "(A.hs@6:34-6:35,t (TvName) (defined at A.hs@3:15-3:16))"
-              , "(A.hs@7:5-7:8,bar (VarName) :: (t, t2) -> t (binding occurrence))"
+              , "(A.hs@6:5-6:8,bar (VarName) (defined at A.hs@7:5-7:8))"
               , "(A.hs@7:10-7:11,a (VarName) :: t (binding occurrence))"
               , "(A.hs@7:13-7:14,b (VarName) :: t2 (binding occurrence))"
               , "(A.hs@7:18-7:19,a (VarName) :: t (defined at A.hs@7:10-7:11))"
+              , "(A.hs@7:5-7:8,bar (VarName) :: (t, t2) -> t (binding occurrence))"
               ]
         let actualIdMap = lines (show idMap)
         assertSameSet expectedIdMap actualIdMap
