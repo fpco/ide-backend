@@ -1592,7 +1592,26 @@ syntheticTests =
         assertEqual "Haddock link for A.b should be correct"
                     "main/latest/doc/html/A.html#v:b" $
                     haddockLink (idMapToMap idMapB Map.! SourceSpan "B.hs" 5 8 5 9)
-        return ()
+    )
+  , ( "Type information 2"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "foo (x, y) = x"
+                    ])
+        updateSessionD session upd 2
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        idMaps <- getLoadedModules session
+        let idMap = idMaps Map.! "A"
+        let expectedIdMap = [
+                "(A.hs@2:1-2:4,foo (VarName) :: (t1, t2) -> t1 (binding occurrence))"
+              , "(A.hs@2:6-2:7,x (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@2:9-2:10,y (VarName) :: t2 (binding occurrence))"
+              , "(A.hs@2:14-2:15,x (VarName) :: t1 (defined at A.hs@2:6-2:7))"
+              ]
+        let actualIdMap = lines (show idMap)
+        assertSameList expectedIdMap actualIdMap
     )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
