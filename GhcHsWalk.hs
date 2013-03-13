@@ -46,8 +46,11 @@ import DataCon (dataConName)
 import qualified Packages
 import qualified RdrName
 import OccName
+import PprTyThing (pprTypeForUser)
+import TcType (tidyOpenType)
+import VarEnv (emptyTidyEnv)
 
-#define DEBUG 0
+#define DEBUG 1
 
 {------------------------------------------------------------------------------
   Environment mapping source locations to info
@@ -356,8 +359,9 @@ class OutputableBndr id => Record id where
 instance Record Id where
   record span _idIsBinder id = case extractSourceSpan span of
     ProperSpan sourceSpan -> do
-      typ <- pretty False (Var.varType id)
-      let addType idInfo = Just $ idInfo { idType = Just typ }
+      let (_env, typ) = tidyOpenType emptyTidyEnv (Var.varType id)
+      let typDoc      = pprTypeForUser True typ
+      let addType idInfo = Just $ idInfo { idType = Just (showSDoc typDoc) }
       modify $ \(IdMap idMap) -> IdMap (Map.update addType sourceSpan idMap)
     TextSpan _ ->
       return ()

@@ -1587,8 +1587,8 @@ syntheticTests =
               ]
         let actualIdMapA = lines (show idMapA)
         let actualIdMapB = lines (show idMapB)
-        assertSameList expectedIdMapA actualIdMapA
-        assertSameList expectedIdMapB actualIdMapB
+        assertSameSet expectedIdMapA actualIdMapA
+        assertSameSet expectedIdMapB actualIdMapB
         assertEqual "Haddock link for A.b should be correct"
                     "main/latest/doc/html/A.html#v:b" $
                     haddockLink (idMapToMap idMapB Map.! SourceSpan "B.hs" 5 8 5 9)
@@ -1605,13 +1605,55 @@ syntheticTests =
         idMaps <- getLoadedModules session
         let idMap = idMaps Map.! "A"
         let expectedIdMap = [
-                "(A.hs@2:1-2:4,foo (VarName) :: (t1, t2) -> t1 (binding occurrence))"
-              , "(A.hs@2:6-2:7,x (VarName) :: t1 (binding occurrence))"
-              , "(A.hs@2:9-2:10,y (VarName) :: t2 (binding occurrence))"
-              , "(A.hs@2:14-2:15,x (VarName) :: t1 (defined at A.hs@2:6-2:7))"
+                "(A.hs@2:1-2:4,foo (VarName) :: (t, t1) -> t (binding occurrence))"
+              , "(A.hs@2:6-2:7,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@2:9-2:10,y (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@2:14-2:15,x (VarName) :: t (defined at A.hs@2:6-2:7))"
               ]
         let actualIdMap = lines (show idMap)
-        assertSameList expectedIdMap actualIdMap
+        assertSameSet expectedIdMap actualIdMap
+    )
+  , ( "Type information 3"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE ScopedTypeVariables #-}"
+                    , "module A where"
+                    , "foo :: forall t t1. (t, t1) -> t"
+                    , "foo (x, y) = bar (x,y)"
+                    , "  where"
+                    , "    bar :: forall t2. (t, t2) -> t"
+                    , "    bar (a, b) = a"
+                    ])
+        updateSessionD session upd 2
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        idMaps <- getLoadedModules session
+        let idMap = idMaps Map.! "A"
+        let expectedIdMap = [
+                "(A.hs@3:1-3:4,foo (VarName) (defined at A.hs@4:1-4:4))"
+              , "(A.hs@3:15-3:16,t (TvName) (binding occurrence))"
+              , "(A.hs@3:17-3:19,t1 (TvName) (binding occurrence))"
+              , "(A.hs@3:22-3:23,t (TvName) (defined at A.hs@3:15-3:16))"
+              , "(A.hs@3:25-3:27,t1 (TvName) (defined at A.hs@3:17-3:19))"
+              , "(A.hs@3:32-3:33,t (TvName) (defined at A.hs@3:15-3:16))"
+              , "(A.hs@4:1-4:4,foo (VarName) :: (t, t1) -> t (binding occurrence))"
+              , "(A.hs@4:6-4:7,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@4:9-4:10,y (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@4:14-4:17,bar (VarName) :: forall t2. (t, t2) -> t (defined at A.hs@7:5-7:8))"
+              , "(A.hs@4:19-4:20,x (VarName) :: t (defined at A.hs@4:6-4:7))"
+              , "(A.hs@4:21-4:22,y (VarName) :: t1 (defined at A.hs@4:9-4:10))"
+              , "(A.hs@6:5-6:8,bar (VarName) (defined at A.hs@7:5-7:8))"
+              , "(A.hs@6:19-6:21,t2 (TvName) (binding occurrence))"
+              , "(A.hs@6:24-6:25,t (TvName) (defined at A.hs@3:15-3:16))"
+              , "(A.hs@6:27-6:29,t2 (TvName) (defined at A.hs@6:19-6:21))"
+              , "(A.hs@6:34-6:35,t (TvName) (defined at A.hs@3:15-3:16))"
+              , "(A.hs@7:5-7:8,bar (VarName) :: (t, t2) -> t (binding occurrence))"
+              , "(A.hs@7:10-7:11,a (VarName) :: t (binding occurrence))"
+              , "(A.hs@7:13-7:14,b (VarName) :: t2 (binding occurrence))"
+              , "(A.hs@7:18-7:19,a (VarName) :: t (defined at A.hs@7:10-7:11))"
+              ]
+        let actualIdMap = lines (show idMap)
+        assertSameSet expectedIdMap actualIdMap
     )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
@@ -1648,6 +1690,9 @@ syntheticTests =
         assertNoErrors msgs
     )
   ]
+
+assertSameSet :: (Ord a, Show a) => [a] -> [a] -> Assertion
+assertSameSet xs ys = assertSameList (sort xs) (sort ys)
 
 assertSameList :: (Ord a, Show a) => [a] -> [a] -> Assertion
 assertSameList xs ys = case diff xs ys of
