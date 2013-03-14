@@ -115,6 +115,7 @@ data RunBufferMode =
 
 data Import = Import {
     importModule    :: ModuleName
+  -- | Used only for ghc's PackageImports extension
   , importPackage   :: Maybe String
   , importQualified :: Bool
   , importImplicit  :: Bool
