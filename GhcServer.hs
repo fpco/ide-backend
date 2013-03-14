@@ -40,6 +40,7 @@ import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
 import System.Exit (ExitCode)
+import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
@@ -67,7 +68,7 @@ data GhcRequest
   deriving Show
 data GhcCompileResponse =
     GhcCompileProgress Progress
-  | GhcCompileDone ([SourceError], LoadedModules)
+  | GhcCompileDone ([SourceError], LoadedModules, [(ModuleName, [Import])])
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -149,7 +150,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                  idMapRef configSourcesDir ideGenerateCode = do
     errsRef  <- liftIO $ newIORef []
     counter  <- liftIO $ newIORef initialProgress
-    (errs, loadedModules) <-
+    (errs, loadedModules, imports) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
@@ -169,7 +170,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
     when (loadedModulesSet /= filteredKeySet) $ do
       error $ "ghcHandleCompile: loaded modules do not match id info maps: "
               ++ show (loadedModulesSet, filteredKeySet)
-    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps)
+    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, imports)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -318,9 +319,14 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
 -- | Handle a set-environment request
 ghcHandleSetEnv :: RpcConversation -> [(String, Maybe String)] -> Ghc ()
 ghcHandleSetEnv RpcConversation{put} env = liftIO $ do
-  forM_ env $ \(var, mVal) -> case mVal of Just val -> setEnv var val True
-                                           Nothing  -> unsetEnv var
+  setupEnv env
   put ()
+
+setupEnv :: [(String, Maybe String)] -> IO ()
+setupEnv env = forM_ env $ \(var, mVal) ->
+  case mVal of Just val -> setEnv var val True
+               Nothing  -> unsetEnv var
+
 
 --------------------------------------------------------------------------------
 -- Client-side operations                                                     --
@@ -359,15 +365,17 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ([SourceError], LoadedModules)
+           -> IO ([SourceError], LoadedModules, Map ModuleName [Import])
 rpcCompile server opts dir genCode callback =
   conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
 
     let go = do response <- get
                 case response of
-                  GhcCompileProgress pcounter -> callback pcounter >> go
-                  GhcCompileDone     res      -> return res
+                  GhcCompileProgress pcounter ->
+                    callback pcounter >> go
+                  GhcCompileDone (errs, loaded, imports) ->
+                    return (errs, loaded, Map.fromList imports)
 
     go
 
@@ -487,6 +495,7 @@ rpcRun server m fun outBMode errBMode = do
 -- | Set the environment
 rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()
 rpcSetEnv (OutProcess server) env = rpc server (ReqSetEnv env)
+rpcSetEnv (InProcess _ _)     env = setupEnv env
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer (OutProcess server) = shutdown server

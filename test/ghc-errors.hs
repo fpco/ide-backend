@@ -1695,6 +1695,65 @@ syntheticTests =
         msgs <- getSourceErrors session
         assertNoErrors msgs
     )
+  , ( "Autocomplete 1: Imports for partial module"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "M.hs" . BSLC.pack . unlines $
+              [ "module M where"
+              , "import Control.Monad"
+              , "import Control.Category hiding (id)"
+              , "import Control.Arrow (second)"
+              , "import \"base\" Data.List"
+              , "foo ="
+              ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        case msgs of
+          [SourceError KindError _ msg] | "parse error" `isPrefixOf` msg -> return ()
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
+        imports <- getImports session
+        assertSameSet (imports Map.! "M") [
+            Import {
+                importModule    = "Prelude"
+              , importPackage   = Nothing
+              , importQualified = False
+              , importImplicit  = True
+              , importAs        = Nothing
+              , importHiding    = Nothing
+              }
+          , Import {
+                importModule    = "Control.Monad"
+              , importPackage   = Nothing
+              , importQualified = False
+              , importImplicit  = False
+              , importAs        = Nothing
+              , importHiding    = Nothing
+              }
+          , Import {
+                importModule    = "Control.Category"
+              , importPackage   = Nothing
+              , importQualified = False
+              , importImplicit  = False
+              , importAs        = Nothing
+              , importHiding    = Just (True, ["id"])
+              }
+          , Import {
+                importModule     = "Control.Arrow"
+              , importPackage    = Nothing
+              , importQualified  = False
+              , importImplicit   = False
+              , importAs         = Nothing
+              , importHiding     = Just (False, ["second"])
+              }
+          , Import {
+                importModule    = "Data.List"
+              , importPackage   = Just "base"
+              , importQualified = False
+              , importImplicit  = False
+              , importAs        = Nothing
+              , importHiding    = Nothing
+              }
+          ]
+    )
   ]
 
 assertSameSet :: (Ord a, Show a) => [a] -> [a] -> Assertion

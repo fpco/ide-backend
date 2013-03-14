@@ -29,6 +29,8 @@ module GhcRun
   , runInGhc
   , RunResult(..)
   , RunBufferMode(..)
+    -- * Information about imports
+  , Import(..)
   ) where
 
 import Bag (bagToList)
@@ -66,6 +68,8 @@ import GHC hiding (flags, ModuleName, RunResult(..))
 
 import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM)
+import Control.Applicative ((<$>))
+import Control.Arrow (second)
 import Data.IORef
 import Data.List ((\\))
 import System.FilePath.Find (find, always, extension)
@@ -109,8 +113,22 @@ data RunBufferMode =
                       }
   deriving Show
 
+data Import = Import {
+    importModule    :: ModuleName
+  , importPackage   :: Maybe String
+  , importQualified :: Bool
+  , importImplicit  :: Bool
+  , importAs        :: Maybe ModuleName
+  -- | @Just (True, ..)@ for @import M hiding (..)@,
+  -- @Just (False, --)@ for @import M (..)@, or
+  -- @Nothing@ otherwise.
+  , importHiding    :: Maybe (Bool, [String])
+  }
+  deriving (Show, Eq, Ord)
+
 $(deriveJSON id ''RunResult)
 $(deriveJSON id ''RunBufferMode)
+$(deriveJSON id ''Import)
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
@@ -166,7 +184,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> IORef [SourceError] -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-             -> Ghc ([SourceError], [ModuleName])
+             -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
              errsRef handlerOutput handlerRemaining = do
@@ -224,15 +242,19 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         -- Recover all saved errors.
         prepareResult flags
   where
-    sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ([SourceError], [ModuleName])
+    sourceErrorHandler :: DynFlags
+                       -> HscTypes.SourceError
+                       -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
     sourceErrorHandler flags e = do
       liftIO $ debug dVerbosity $ "handleSourceError: " ++ show e
-      (errs, context) <- prepareResult flags
-      return (errs ++ [fromHscSourceError e], context)
+      (errs, context, imports) <- prepareResult flags
+      return (errs ++ [fromHscSourceError e], context, imports)
 
     -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7430.
     -- Some errors are reported as exceptions instead.
-    ghcExceptionHandler :: DynFlags -> GhcException -> Ghc ([SourceError], [ModuleName])
+    ghcExceptionHandler :: DynFlags
+                        -> GhcException
+                        -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
     ghcExceptionHandler flags e = do
       let eText   = show e  -- no SrcSpan as a field in GhcException
           exError =
@@ -240,21 +262,44 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
             -- though it may be embedded in string
       liftIO $ debug dVerbosity $ "handleOtherErrors: " ++ eText
       -- In case of an exception, don't lose saved errors.
-      (errs, context) <- prepareResult flags
-      return (errs ++ [exError], context)
+      (errs, context, imports) <- prepareResult flags
+      return (errs ++ [exError], context, imports)
 
     handleErrors :: DynFlags
-                 -> Ghc ([SourceError], [ModuleName])
-                 -> Ghc ([SourceError], [ModuleName])
+                 -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
+                 -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
     handleErrors flags = ghandle (ghcExceptionHandler flags)
                        . handleSourceError (sourceErrorHandler flags)
 
-    prepareResult :: DynFlags -> Ghc ([SourceError], [ModuleName])
+    prepareResult :: DynFlags -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
     prepareResult _flags = do
       errs   <- liftIO $ readIORef errsRef
       graph  <- getModuleGraph
       loaded <- filterM isLoaded (map ms_mod_name graph)
-      return (reverse errs, map moduleNameString loaded)
+      return (reverse errs, map moduleNameString loaded, extractImports graph)
+
+extractImports :: ModuleGraph -> [(ModuleName, [Import])]
+extractImports = map goMod
+  where
+    goMod :: ModSummary -> (ModuleName, [Import])
+    goMod summary =
+      ( moduleNameString (ms_mod_name summary)
+      , map goImp (ms_srcimps summary) ++ map goImp (ms_textual_imps summary)
+      )
+
+    goImp :: Located (ImportDecl RdrName) -> Import
+    goImp (L _ decl) = Import {
+        importModule    = moduleNameString (unLoc (ideclName decl))
+      , importPackage   = unpackFS <$> ideclPkgQual decl
+      , importQualified = ideclQualified decl
+      , importImplicit  = ideclImplicit decl
+      , importAs        = moduleNameString <$> ideclAs decl
+      , importHiding    = second (map unLIE) <$> ideclHiding decl
+      }
+
+    -- TODO: This is lossy. We might want a more accurate data type.
+    unLIE :: LIE RdrName -> String
+    unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
 -- | Run a snippet.
 runInGhc :: (ModuleName, String)  -- ^ module and function to execute
