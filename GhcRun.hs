@@ -121,7 +121,7 @@ data Import = Import {
   , importImplicit  :: Bool
   , importAs        :: Maybe ModuleName
   -- | @Just (True, ..)@ for @import M hiding (..)@,
-  -- @Just (False, --)@ for @import M (..)@, or
+  -- @Just (False, ..)@ for @import M (..)@, or
   -- @Nothing@ otherwise.
   , importHiding    :: Maybe (Bool, [String])
   }
