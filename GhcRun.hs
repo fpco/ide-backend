@@ -67,7 +67,7 @@ import GHC hiding (flags, ModuleName, RunResult(..))
 #endif
 
 import qualified Control.Exception as Ex
-import Control.Monad (filterM, liftM)
+import Control.Monad (filterM, liftM, void)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
 import Data.IORef
@@ -239,45 +239,35 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         mapM_ addSingle (targets \\ oldFiles)
         mapM_ removeTarget $ map targetIdFromFile $ oldFiles \\ targets
         -- Load modules to typecheck and perhaps generate code, too.
-        _loadRes <- load LoadAllTargets
-        -- Recover all saved errors.
-        prepareResult flags
+        void $ load LoadAllTargets
+
+    -- Collect info
+    errs   <- liftIO $ readIORef errsRef
+    graph  <- getModuleGraph
+    loaded <- filterM isLoaded (map ms_mod_name graph)
+    return (reverse errs, map moduleNameString loaded, extractImports graph)
   where
-    sourceErrorHandler :: DynFlags
-                       -> HscTypes.SourceError
-                       -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
-    sourceErrorHandler flags e = do
-      liftIO $ debug dVerbosity $ "handleSourceError: " ++ show e
-      (errs, context, imports) <- prepareResult flags
-      return (errs ++ [fromHscSourceError e], context, imports)
+    sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ()
+    sourceErrorHandler flags e = liftIO $ do
+      debug dVerbosity $ "handleSourceError: " ++ show e
+      errs <- readIORef errsRef
+      writeIORef errsRef (fromHscSourceError e : errs)
 
     -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7430.
     -- Some errors are reported as exceptions instead.
-    ghcExceptionHandler :: DynFlags
-                        -> GhcException
-                        -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
-    ghcExceptionHandler flags e = do
+    ghcExceptionHandler :: DynFlags -> GhcException -> Ghc ()
+    ghcExceptionHandler flags e = liftIO $ do
       let eText   = show e  -- no SrcSpan as a field in GhcException
           exError =
             SourceError KindError (TextSpan "<from GhcException>") eText
             -- though it may be embedded in string
-      liftIO $ debug dVerbosity $ "handleOtherErrors: " ++ eText
-      -- In case of an exception, don't lose saved errors.
-      (errs, context, imports) <- prepareResult flags
-      return (errs ++ [exError], context, imports)
+      debug dVerbosity $ "handleOtherErrors: " ++ eText
+      errs <- readIORef errsRef
+      writeIORef errsRef (exError : errs)
 
-    handleErrors :: DynFlags
-                 -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
-                 -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
+    handleErrors :: DynFlags -> Ghc () -> Ghc ()
     handleErrors flags = ghandle (ghcExceptionHandler flags)
                        . handleSourceError (sourceErrorHandler flags)
-
-    prepareResult :: DynFlags -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
-    prepareResult _flags = do
-      errs   <- liftIO $ readIORef errsRef
-      graph  <- getModuleGraph
-      loaded <- filterM isLoaded (map ms_mod_name graph)
-      return (reverse errs, map moduleNameString loaded, extractImports graph)
 
 extractImports :: ModuleGraph -> [(ModuleName, [Import])]
 extractImports = map goMod
