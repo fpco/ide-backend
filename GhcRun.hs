@@ -251,16 +251,18 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     session <- getSession
     forM_ graph $ \ModSummary{ms_mod, ms_hsc_src, ms_srcimps, ms_textual_imps} -> liftIO $ do
       let go = initTc session ms_hsc_src False ms_mod
+      appendFile "/tmp/ghc.foobar" (GHC.showSDoc $ GHC.ppr ms_srcimps)
       ((errs1, warns1), mfoo) <- go $ rnImports ms_srcimps
-      appendFile "/tmp/ghc.foobar" (unlines . map GHC.showSDoc $ ErrUtils.pprErrMsgBag errs1)
+      appendFile "/tmp/ghc.foobar" (show . map GHC.showSDoc $ ErrUtils.pprErrMsgBag errs1)
       case mfoo of
         Just (_, foo, _, _) -> do
           let foo' = GHC.showSDoc (GHC.ppr foo)
           appendFile "/tmp/ghc.foobar" $ foo'
         Nothing ->
           appendFile "/tmp/ghc.foobar" "Nothing"
+      appendFile "/tmp/ghc.foobar" (GHC.showSDoc $ GHC.ppr ms_textual_imps)
       ((errs2, warns2), mbar) <- go $ rnImports ms_textual_imps
-      appendFile "/tmp/ghc.foobar" (unlines . map GHC.showSDoc $ ErrUtils.pprErrMsgBag errs2)
+      appendFile "/tmp/ghc.foobar" (show . map GHC.showSDoc $ ErrUtils.pprErrMsgBag errs2)
       case mbar of
         Just (_, bar, _, _) -> do
           let bar' = GHC.showSDoc (GHC.ppr bar)
