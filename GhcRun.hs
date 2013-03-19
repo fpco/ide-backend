@@ -58,6 +58,8 @@ import GHC hiding (flags, ModuleName, RunResult(..), load)
 import GhcMonad (modifySession)
 import HscTypes (HscEnv(hsc_mod_graph))
 import System.Time
+import RnNames (rnImports)
+import TcRnMonad (initTc)
 #elif __GLASGOW_HASKELL__ >= 706 && !defined(GHC_761)
 -- Use the default tools. They are fixed in these GHC versions.
 import GHC hiding (flags, ModuleName, RunResult(..))
@@ -67,7 +69,7 @@ import GHC hiding (flags, ModuleName, RunResult(..))
 #endif
 
 import qualified Control.Exception as Ex
-import Control.Monad (filterM, liftM, void)
+import Control.Monad (filterM, liftM, void, forM_)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
 import Data.IORef
@@ -245,10 +247,31 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     errs   <- liftIO $ readIORef errsRef
     graph  <- getModuleGraph
     loaded <- filterM isLoaded (map ms_mod_name graph)
+
+    session <- getSession
+    forM_ graph $ \ModSummary{ms_mod, ms_hsc_src, ms_srcimps, ms_textual_imps} -> liftIO $ do
+      let go = initTc session ms_hsc_src False ms_mod
+      ((errs1, warns1), mfoo) <- go $ rnImports ms_srcimps
+      appendFile "/tmp/ghc.foobar" (unlines . map GHC.showSDoc $ ErrUtils.pprErrMsgBag errs1)
+      case mfoo of
+        Just (_, foo, _, _) -> do
+          let foo' = GHC.showSDoc (GHC.ppr foo)
+          appendFile "/tmp/ghc.foobar" $ foo'
+        Nothing ->
+          appendFile "/tmp/ghc.foobar" "Nothing"
+      ((errs2, warns2), mbar) <- go $ rnImports ms_textual_imps
+      appendFile "/tmp/ghc.foobar" (unlines . map GHC.showSDoc $ ErrUtils.pprErrMsgBag errs2)
+      case mbar of
+        Just (_, bar, _, _) -> do
+          let bar' = GHC.showSDoc (GHC.ppr bar)
+          appendFile "/tmp/ghc.foobar" $ bar'
+        Nothing ->
+          appendFile "/tmp/ghc.foobar" "Nothing"
+
     return (reverse errs, map moduleNameString loaded, extractImports graph)
   where
     sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ()
-    sourceErrorHandler flags e = liftIO $ do
+    sourceErrorHandler _flags e = liftIO $ do
       debug dVerbosity $ "handleSourceError: " ++ show e
       errs <- readIORef errsRef
       writeIORef errsRef (fromHscSourceError e : errs)
@@ -256,7 +279,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7430.
     -- Some errors are reported as exceptions instead.
     ghcExceptionHandler :: DynFlags -> GhcException -> Ghc ()
-    ghcExceptionHandler flags e = liftIO $ do
+    ghcExceptionHandler _flags e = liftIO $ do
       let eText   = show e  -- no SrcSpan as a field in GhcException
           exError =
             SourceError KindError (TextSpan "<from GhcException>") eText
