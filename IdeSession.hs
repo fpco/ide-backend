@@ -145,7 +145,7 @@ module IdeSession (
   -- ** Import information and autocompletion
   Import(..),
   getImports,
-  autocomplete,
+  getAutocompletion,
 
   -- ** Run code
   runStmt,
@@ -227,6 +227,7 @@ import Control.Monad
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString as BSS
+import qualified Data.ByteString.Char8 as BSSC
 import Data.List (delete)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -283,7 +284,12 @@ data Computed = Computed {
     -- with parsing or type errors
   , computedImports :: Map ModuleName [Import]
     -- | Autocompletion map
-  , computedAutocompletionMap :: Trie ()
+    --
+    -- Mapping from prefixes to fully qualified names
+    -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
+    -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
+    -- was imported qualified as @M@).
+  , computedAutocompletionMap :: Trie [BSS.ByteString]
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -794,20 +800,28 @@ getImports IdeSession{ideState, ideStaticInfo} =
       Nothing -> fail "This session state does not admit queries."
 
 -- | Autocompletion
-autocomplete :: BSS.ByteString -> Query [BSS.ByteString]
-autocomplete prefix IdeSession{ideState, ideStaticInfo} =
+getAutocompletion :: Query (String -> [String])
+getAutocompletion IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
       IdeSessionIdle      idleState -> aux idleState
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO [BSS.ByteString]
+    aux :: IdeIdleState -> IO (String -> [String])
     aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} ->
-        return . Trie.keys $ Trie.submap prefix computedAutocompletionMap
-      Nothing ->
-        fail "This session state does not admit queries."
+      Just Computed{..} -> return (autocomplete computedAutocompletionMap)
+      Nothing           -> fail "This session state does not admit queries."
+
+    autocomplete :: Trie [BSS.ByteString] -> String -> [String]
+    autocomplete trie name =
+      let name' = BSSC.pack name
+          n     = last (BSSC.split '.' name') in
+      map BSSC.unpack $ filter (name' `BSS.isInfixOf`)
+                      . concat
+                      . Trie.elems
+                      . Trie.submap n
+                      $ trie
 
 -- | Is code generation currently enabled?
 getCodeGeneration :: Query Bool

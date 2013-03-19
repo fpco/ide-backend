@@ -1753,8 +1753,23 @@ syntheticTests =
               , importHiding    = Nothing
               }
           ]
-        completeFo <- autocomplete (BSSC.pack "Control.Monad.fo") session
-        assertSameSet completeFo $ map BSSC.pack [
+        autocomplete <- getAutocompletion session
+        let completeFo = autocomplete "fo"
+        assertSameSet completeFo [
+            "Control.Monad.foldM"
+          , "Control.Monad.foldM_"
+          , "Control.Monad.forM"
+          , "Control.Monad.forM_"
+          , "Control.Monad.forever"
+          , "Data.List.foldl'"
+          , "Data.List.foldl1"
+          , "Data.List.foldl1'"
+          , "GHC.Base.foldr"
+          , "GHC.List.foldl"
+          , "GHC.List.foldr1"
+          ]
+        let completeControlMonadFo = autocomplete "Control.Monad.fo"
+        assertSameSet completeControlMonadFo [
             "Control.Monad.foldM"
           , "Control.Monad.foldM_"
           , "Control.Monad.forM"

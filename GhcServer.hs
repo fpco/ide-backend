@@ -36,7 +36,7 @@ import Control.Monad (forM_, forever, unless, when)
 import Data.Aeson (decode', encode)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
-import qualified Data.ByteString.Char8 as BSSC (pack)
+import qualified Data.ByteString.Char8 as BSSC (pack, split)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
 import System.Exit (ExitCode)
@@ -44,7 +44,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Trie (Trie)
-import qualified Data.Trie as Trie
+import qualified Data.Trie.Convenience as Trie
 
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -367,7 +367,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ([SourceError], LoadedModules, Map ModuleName [Import], Trie ())
+           -> IO ([SourceError], LoadedModules, Map ModuleName [Import], Trie [BSS.ByteString])
 rpcCompile server opts dir genCode callback =
   conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
@@ -380,10 +380,16 @@ rpcCompile server opts dir genCode callback =
                     return ( errs
                            , loaded
                            , Map.fromList imports
-                           , Trie.fromList (map (\x -> (BSSC.pack x, ())) autocompletion)
+                           , constructAutocorrectionMap autocompletion
                            )
 
     go
+
+constructAutocorrectionMap :: [String] -> Trie [BSS.ByteString]
+constructAutocorrectionMap = Trie.fromListWith (++) . map (aux . BSSC.pack)
+  where
+    aux :: BSS.ByteString -> (BSS.ByteString, [BSS.ByteString])
+    aux name = let n = last (BSSC.split '.' name) in (n, [name])
 
 -- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {
