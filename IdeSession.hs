@@ -145,6 +145,7 @@ module IdeSession (
   -- ** Import information and autocompletion
   Import(..),
   getImports,
+  autocomplete,
 
   -- ** Run code
   runStmt,
@@ -229,6 +230,8 @@ import qualified Data.ByteString as BSS
 import Data.List (delete)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Trie (Trie)
+import qualified Data.Trie as Trie
 import Data.Monoid (Monoid (..))
 import System.Directory
 import System.FilePath (splitFileName, takeDirectory, makeRelative, (<.>), (</>))
@@ -272,13 +275,15 @@ data SessionConfig = SessionConfig {
 
 data Computed = Computed {
     -- | Last compilation and run errors
-    computedErrors        :: [SourceError]
+    computedErrors :: [SourceError]
     -- | Modules that got loaded okay together with their mappings
     -- from source locations to information about identifiers there
   , computedLoadedModules :: LoadedModules
     -- | Import information. This is (usually) available even for modules
     -- with parsing or type errors
-  , computedImports       :: Map ModuleName [Import]
+  , computedImports :: Map ModuleName [Import]
+    -- | Autocompletion map
+  , computedAutocompletionMap :: Trie ()
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -508,12 +513,15 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
 
         -- Update code
         computed <- if (idleState' ^. ideUpdatedCode) then do
-                      (computedErrors, computedLoadedModules, computedImports)
-                        <- rpcCompile (idleState ^. ideGhcServer)
-                                      (idleState' ^. ideNewOpts)
-                                      (ideSourcesDir ideStaticInfo)
-                                      (idleState' ^. ideGenerateCode)
-                                      callback
+                      (  computedErrors
+                       , computedLoadedModules
+                       , computedImports
+                       , computedAutocompletionMap
+                       ) <- rpcCompile (idleState ^. ideGhcServer)
+                                       (idleState' ^. ideNewOpts)
+                                       (ideSourcesDir ideStaticInfo)
+                                       (idleState' ^. ideGenerateCode)
+                                       callback
                       return $ Just Computed{..}
                     else return $ idleState' ^. ideComputed
 
@@ -784,6 +792,22 @@ getImports IdeSession{ideState, ideStaticInfo} =
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} -> return computedImports
       Nothing -> fail "This session state does not admit queries."
+
+-- | Autocompletion
+autocomplete :: BSS.ByteString -> Query [BSS.ByteString]
+autocomplete prefix IdeSession{ideState, ideStaticInfo} =
+  $withMVar ideState $ \st ->
+    case st of
+      IdeSessionIdle      idleState -> aux idleState
+      IdeSessionRunning _ idleState -> aux idleState
+      IdeSessionShutdown            -> fail "Session already shut down."
+  where
+    aux :: IdeIdleState -> IO [BSS.ByteString]
+    aux idleState = case idleState ^. ideComputed of
+      Just Computed{..} ->
+        return . Trie.keys $ Trie.submap prefix computedAutocompletionMap
+      Nothing ->
+        fail "This session state does not admit queries."
 
 -- | Is code generation currently enabled?
 getCodeGeneration :: Query Bool

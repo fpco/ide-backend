@@ -1753,6 +1753,14 @@ syntheticTests =
               , importHiding    = Nothing
               }
           ]
+        completeFo <- autocomplete (BSSC.pack "Control.Monad.fo") session
+        assertSameSet completeFo $ map BSSC.pack [
+            "Control.Monad.foldM"
+          , "Control.Monad.foldM_"
+          , "Control.Monad.forM"
+          , "Control.Monad.forM_"
+          , "Control.Monad.forever"
+          ]
     )
     -- TODO: Autocomplete test that checks import errors
     -- - Explicitly importing somthing that wasn't exported

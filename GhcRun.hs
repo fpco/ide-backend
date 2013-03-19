@@ -33,6 +33,8 @@ module GhcRun
   , Import(..)
   ) where
 
+#define DEBUG 1
+
 import Bag (bagToList)
 import qualified Config as GHC
 import DynFlags (dopt_unset, defaultDynFlags)
@@ -62,7 +64,7 @@ import RnNames (rnImports)
 import TcRnMonad (initTc)
 import TcRnTypes (RnM)
 import OccName (occEnvElts)
-import RdrName (GlobalRdrEnv, GlobalRdrElt)
+import RdrName (GlobalRdrEnv, GlobalRdrElt, gre_name)
 #elif __GLASGOW_HASKELL__ >= 706 && !defined(GHC_761)
 -- Use the default tools. They are fixed in these GHC versions.
 import GHC hiding (flags, ModuleName, RunResult(..))
@@ -190,7 +192,11 @@ compileInGhc :: FilePath            -- ^ target directory
              -> IORef [SourceError] -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-             -> Ghc ([SourceError], [ModuleName], [(ModuleName, [Import])])
+             -> Ghc ( [SourceError]
+                    , [ModuleName]
+                    , [(ModuleName, [Import])]
+                    , [String]
+                    )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
              errsRef handlerOutput handlerRemaining = do
@@ -273,15 +279,18 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
       env1 <- go $ rnImports ms_srcimps
       env2 <- go $ rnImports ms_textual_imps
       return $ env1 ++ env2
-    liftIO $ eltsToAutocompleteMap (concat envs)
 
     errs   <- liftIO $ readIORef errsRef
     loaded <- filterM isLoaded (map ms_mod_name graph)
-    return (reverse errs, map moduleNameString loaded, extractImports graph)
+    return ( reverse errs
+           , map moduleNameString loaded
+           , extractImports graph
+           , eltsToAutocompleteMap (concat envs)
+           )
   where
-    eltsToAutocompleteMap :: [GlobalRdrElt] -> IO ()
-    eltsToAutocompleteMap elts =
-      appendFile "/tmp/ghc.autocomplete" (GHC.showSDoc $ GHC.ppr elts)
+    eltsToAutocompleteMap :: [GlobalRdrElt] -> [String]
+    eltsToAutocompleteMap =
+       map (GHC.showSDoc . GHC.ppr . gre_name)
 
     sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ()
     sourceErrorHandler _flags e = liftIO $ do
