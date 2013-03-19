@@ -60,6 +60,9 @@ import HscTypes (HscEnv(hsc_mod_graph))
 import System.Time
 import RnNames (rnImports)
 import TcRnMonad (initTc)
+import TcRnTypes (RnM)
+import OccName (occEnvElts)
+import RdrName (GlobalRdrEnv, GlobalRdrElt)
 #elif __GLASGOW_HASKELL__ >= 706 && !defined(GHC_761)
 -- Use the default tools. They are fixed in these GHC versions.
 import GHC hiding (flags, ModuleName, RunResult(..))
@@ -69,7 +72,7 @@ import GHC hiding (flags, ModuleName, RunResult(..))
 #endif
 
 import qualified Control.Exception as Ex
-import Control.Monad (filterM, liftM, void, forM_)
+import Control.Monad (filterM, liftM, void, forM)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
 import Data.IORef
@@ -247,24 +250,39 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     session <- getSession
     graph   <- getModuleGraph
 
-    forM_ graph $ \ModSummary{ms_mod, ms_hsc_src, ms_srcimps, ms_textual_imps} -> liftIO $ do
-      let go imps = do
-            ((_warns, errs), res) <- initTc session ms_hsc_src False ms_mod imps
+    envs <- forM graph $ \ModSummary{ ms_mod
+                                    , ms_hsc_src
+                                    , ms_srcimps
+                                    , ms_textual_imps
+                                    } -> liftIO $ do
+      let go :: RnM (a, GlobalRdrEnv, b, c) -> IO [GlobalRdrElt]
+          go op = do
+            ((_warns, errs), res) <- initTc session ms_hsc_src False ms_mod op
             case res of
-              Nothing -> -- TODO: deal with import errors
+              Nothing -> do
+                -- TODO: deal with import errors
+#if DEBUG
                 appendFile "/tmp/ghc.importerrors" $ show
                                                    . map GHC.showSDoc
                                                    $ ErrUtils.pprErrMsgBag errs
+#endif
+                return []
               Just (_, elts, _, _) ->
-                appendFile "/tmp/ghc.foobar" $ GHC.showSDoc (GHC.ppr elts)
+                return . concat $ occEnvElts elts
 
-      go $ rnImports ms_srcimps
-      go $ rnImports ms_textual_imps
+      env1 <- go $ rnImports ms_srcimps
+      env2 <- go $ rnImports ms_textual_imps
+      return $ env1 ++ env2
+    liftIO $ eltsToAutocompleteMap (concat envs)
 
     errs   <- liftIO $ readIORef errsRef
     loaded <- filterM isLoaded (map ms_mod_name graph)
     return (reverse errs, map moduleNameString loaded, extractImports graph)
   where
+    eltsToAutocompleteMap :: [GlobalRdrElt] -> IO ()
+    eltsToAutocompleteMap elts =
+      appendFile "/tmp/ghc.autocomplete" (GHC.showSDoc $ GHC.ppr elts)
+
     sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ()
     sourceErrorHandler _flags e = liftIO $ do
       debug dVerbosity $ "handleSourceError: " ++ show e
