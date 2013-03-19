@@ -244,32 +244,25 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         void $ load LoadAllTargets
 
     -- Collect info
-    errs   <- liftIO $ readIORef errsRef
-    graph  <- getModuleGraph
-    loaded <- filterM isLoaded (map ms_mod_name graph)
-
     session <- getSession
-    forM_ graph $ \ModSummary{ms_mod, ms_hsc_src, ms_srcimps, ms_textual_imps} -> liftIO $ do
-      let go = initTc session ms_hsc_src False ms_mod
-      appendFile "/tmp/ghc.foobar" (GHC.showSDoc $ GHC.ppr ms_srcimps)
-      ((errs1, warns1), mfoo) <- go $ rnImports ms_srcimps
-      appendFile "/tmp/ghc.foobar" (show . map GHC.showSDoc $ ErrUtils.pprErrMsgBag errs1)
-      case mfoo of
-        Just (_, foo, _, _) -> do
-          let foo' = GHC.showSDoc (GHC.ppr foo)
-          appendFile "/tmp/ghc.foobar" $ foo'
-        Nothing ->
-          appendFile "/tmp/ghc.foobar" "Nothing"
-      appendFile "/tmp/ghc.foobar" (GHC.showSDoc $ GHC.ppr ms_textual_imps)
-      ((errs2, warns2), mbar) <- go $ rnImports ms_textual_imps
-      appendFile "/tmp/ghc.foobar" (show . map GHC.showSDoc $ ErrUtils.pprErrMsgBag errs2)
-      case mbar of
-        Just (_, bar, _, _) -> do
-          let bar' = GHC.showSDoc (GHC.ppr bar)
-          appendFile "/tmp/ghc.foobar" $ bar'
-        Nothing ->
-          appendFile "/tmp/ghc.foobar" "Nothing"
+    graph   <- getModuleGraph
 
+    forM_ graph $ \ModSummary{ms_mod, ms_hsc_src, ms_srcimps, ms_textual_imps} -> liftIO $ do
+      let go imps = do
+            ((_warns, errs), res) <- initTc session ms_hsc_src False ms_mod imps
+            case res of
+              Nothing -> -- TODO: deal with import errors
+                appendFile "/tmp/ghc.importerrors" $ show
+                                                   . map GHC.showSDoc
+                                                   $ ErrUtils.pprErrMsgBag errs
+              Just (_, elts, _, _) ->
+                appendFile "/tmp/ghc.foobar" $ GHC.showSDoc (GHC.ppr elts)
+
+      go $ rnImports ms_srcimps
+      go $ rnImports ms_textual_imps
+
+    errs   <- liftIO $ readIORef errsRef
+    loaded <- filterM isLoaded (map ms_mod_name graph)
     return (reverse errs, map moduleNameString loaded, extractImports graph)
   where
     sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ()

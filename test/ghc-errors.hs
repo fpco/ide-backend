@@ -1696,7 +1696,7 @@ syntheticTests =
         assertNoErrors msgs
     )
   , ( "Autocomplete 1: Imports for partial module"
-    , withConfiguredSession defOpts $ \session -> do
+    , withConfiguredSession ("-XPackageImports" : defOpts) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import Control.Monad"
@@ -1754,6 +1754,10 @@ syntheticTests =
               }
           ]
     )
+    -- TODO: Autocomplete test that checks import errors
+    -- - Explicitly importing somthing that wasn't exported
+    -- - Explicitly hiding something that wasn't exported
+    -- - Use of PackageImports without the flag
   ]
 
 assertSameSet :: (Ord a, Show a) => [a] -> [a] -> Assertion
