@@ -561,23 +561,49 @@ instance Record id => ExtractIds (LHsType id) where
     extractIds typ
   extractIds (L span (HsEqTy a b)) = ast (Just span) "HsEqTy" $
     extractIds [a, b]
-
-  extractIds (L span (HsOpTy _ _ _))          = unsupported (Just span) "HsOpTy"
-  extractIds (L span (HsIParamTy _ _))        = unsupported (Just span) "HsIParamTy"
-  extractIds (L span (HsKindSig _ _))         = unsupported (Just span) "HsKindSig"
-  extractIds (L span (HsQuasiQuoteTy _))      = unsupported (Just span) "HsQuasiQuoteTy"
-  extractIds (L span (HsSpliceTy _ _ _))      = unsupported (Just span) "HsSpliceTy"
-  extractIds (L span (HsDocTy _ _))           = unsupported (Just span) "HsDocTy"
-  extractIds (L span (HsBangTy _ _))          = unsupported (Just span) "HsBangTy"
-  extractIds (L span (HsRecTy _))             = unsupported (Just span) "HsRecTy"
-  extractIds (L span (HsCoreTy _))            = unsupported (Just span) "HsCoreTy"
-  extractIds (L span (HsExplicitListTy _ _))  = unsupported (Just span) "HsExplicitListTy"
-  extractIds (L span (HsExplicitTupleTy _ _)) = unsupported (Just span) "HsExplicitTupleTy"
-  extractIds (L span (HsWrapTy _ _))          = unsupported (Just span) "HsWrapTy"
+  extractIds (L span (HsDocTy typ _doc)) = ast (Just span) "HsDocTy" $
+    -- I don't think HsDocTy actually makes it through the renamer
+    extractIds typ
+  extractIds (L span (HsWrapTy _wrapper _typ)) = ast (Just span) "HsWrapTy" $
+    -- This is returned only by the type checker, and _typ is not located
+    return ()
+  extractIds (L span (HsRecTy fields)) = ast (Just span) "HsRecTy" $
+    extractIds fields
+  extractIds (L span (HsKindSig typ kind)) = ast (Just span) "HsKindSig" $
+    extractIds [typ, kind]
+  extractIds (L span (HsBangTy _bang typ)) = ast (Just span) "HsBangTy" $
+    extractIds typ
+  extractIds (L span (HsOpTy left (_wrapper, op) right)) = ast (Just span) "HsOpTy" $ do
+    extractIds [left, right]
+    record (getLoc op) False (unLoc op)
+  extractIds (L span (HsIParamTy _var typ)) = ast (Just span) "HsIParamTy" $
+    -- _var is not located
+    extractIds typ
+  extractIds (L span (HsSpliceTy splice _freevars _postTcKind)) = ast (Just span) "HsSpliceTy" $
+    extractIds splice
+  extractIds (L span (HsCoreTy _)) = ast (Just span) "HsCoreTy" $
+    -- Not important: doesn't arise until later in the compiler pipeline
+    return ()
+  extractIds (L span (HsQuasiQuoteTy qquote))  = ast (Just span) "HsQuasiQuoteTy" $
+    extractIds qquote
+  extractIds (L span (HsExplicitListTy _postTcKind typs)) = ast (Just span) "HsExplicitListTy" $
+    extractIds typs
+  extractIds (L span (HsExplicitTupleTy _postTcKind typs)) = ast (Just span) "HsExplicitTupleTy" $
+    extractIds typs
 
 #if __GLASGOW_HASKELL__ >= 706
+  -- TODO: Type literals
   extractIds (L span (HsTyLit _))             = unsupported (Just span) "HsTyLit"
 #endif
+
+instance Record id => ExtractIds (HsSplice id) where
+  extractIds (HsSplice _id expr) = ast Nothing "HsSplice" $
+    extractIds expr
+
+instance Record id => ExtractIds (HsQuasiQuote id) where
+  extractIds (HsQuasiQuote _id _srcSpan _enclosed) = ast Nothing "HsQuasiQuote" $
+    -- Unfortunately, no location information is stored within HsQuasiQuote at all
+    return ()
 
 #if __GLASGOW_HASKELL__ >= 706
 instance Record id => ExtractIds (LHsTyVarBndrs id) where
