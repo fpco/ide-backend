@@ -103,6 +103,13 @@ data IdScope =
       , idDefinedIn    :: ModuleId
       , idImportedFrom :: ModuleId
       , idImportSpan   :: EitherSpan
+        -- | Qualifier used for the import
+        --
+        -- > IMPORTED AS                       idImportQual
+        -- > import Data.List                  ""
+        -- > import qualified Data.List        "Data.List."
+        -- > import qualified Data.List as L   "L."
+      , idImportQual   :: String
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
@@ -145,10 +152,12 @@ instance Show IdScope where
   show (Local {..})    = "defined at " ++ show idDefSpan
   show WiredIn         = "wired in to the compiler"
   show (Imported {..}) = "defined in "
-                      ++ show idDefinedIn ++ " at "
-                      ++ show idDefSpan ++ "; imported from "
-                      ++ show idImportedFrom ++ " at "
-                      ++ show idImportSpan
+                      ++ show idDefinedIn
+                      ++ " at " ++ show idDefSpan ++ ";"
+                      ++ " imported from " ++ show idImportedFrom
+                      ++ (if null idImportQual then [] else " as '" ++ idImportQual ++ "'")
+                      ++ " at "++ show idImportSpan
+
 
 fromGhcNameSpace :: Name.NameSpace -> IdNameSpace
 fromGhcNameSpace ns
@@ -376,7 +385,7 @@ idInfoForName dflags name idIsBinder mElt =
         let mod = fromMaybe
                     (error (concatMap showSDocDebug $ ppr name : map ppr spec))
                     $ Name.nameModule_maybe name
-            (impMod, impSpan) = extractImportInfo spec
+            (impMod, impSpan, impQual) = extractImportInfo spec
         in Imported {
           idDefSpan      = extractSourceSpan (Name.nameSrcSpan name)
         , idDefinedIn    = ModuleId
@@ -388,6 +397,7 @@ idInfoForName dflags name idIsBinder mElt =
             , modulePackage = modToPkg impMod
             }
         , idImportSpan   = impSpan
+        , idImportQual   = impQual
         }
 
       modToPkg :: ModuleName -> PackageId
@@ -443,12 +453,15 @@ idInfoForName dflags name idIsBinder mElt =
         PackageId { packageName = Module.packageIdString Module.mainPackageId
                   , packageVersion = Nothing }  -- the only case of no version
 
-      extractImportInfo :: [RdrName.ImportSpec] -> (ModuleName, EitherSpan)
+      extractImportInfo :: [RdrName.ImportSpec] -> (ModuleName, EitherSpan, String)
       extractImportInfo (RdrName.ImpSpec decl item:_) =
         ( RdrName.is_mod decl
         , case item of
             RdrName.ImpAll -> extractSourceSpan (RdrName.is_dloc decl)
             RdrName.ImpSome _explicit loc -> extractSourceSpan loc
+        , if RdrName.is_qual decl
+            then moduleNameString (RdrName.is_as decl) ++ "."
+            else ""
         )
       extractImportInfo _ = error "ghc invariant violated"
 

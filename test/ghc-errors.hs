@@ -1661,6 +1661,31 @@ syntheticTests =
         let actualIdMap = lines (show idMap)
         assertSameSet expectedIdMap actualIdMap
     )
+  , ( "Type information 4"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "import Data.Maybe"
+                    , "import qualified Data.List"
+                    , "import qualified Data.Function as F"
+                    , "foo = (fromJust, Data.List.and, F.on)"
+                    ])
+        updateSessionD session upd 2
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        idMaps <- getLoadedModules session
+        let idMap = idMaps Map.! "A"
+        let expectedIdMap = [
+                "(A.hs@5:1-5:4,foo (VarName) :: (Data.Maybe.Maybe a -> a,"
+              , " [GHC.Types.Bool] -> GHC.Types.Bool,"
+              , " (b -> b -> c) -> (a1 -> b) -> a1 -> a1 -> c) (binding occurrence))"
+              , "(A.hs@5:8-5:16,fromJust (VarName) :: forall a2. Data.Maybe.Maybe a2 -> a2 (defined in base-4.5.1.0:Data.Maybe at <no location info>; imported from base-4.5.1.0:Data.Maybe at A.hs@2:1-2:18))"
+              , "(A.hs@5:18-5:31,and (VarName) :: [GHC.Types.Bool] -> GHC.Types.Bool (defined in base-4.5.1.0:GHC.List at <no location info>; imported from base-4.5.1.0:Data.List as 'Data.List.' at A.hs@3:1-3:27))"
+              , "(A.hs@5:33-5:37,on (VarName) :: forall b1 c1 a2. (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 (defined in base-4.5.1.0:Data.Function at <no location info>; imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36))"
+              ]
+        let actualIdMap = lines (show idMap)
+        assertSameSet expectedIdMap actualIdMap
+    )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
@@ -1702,7 +1727,7 @@ syntheticTests =
               , "import Control.Monad"
               , "import Control.Category hiding (id)"
               , "import qualified Control.Arrow as A (second)"
-              , "import \"base\" Data.List"
+              , "import qualified \"base\" Data.List"
               , "foo ="
               ])
         updateSessionD session upd 1
@@ -1747,7 +1772,7 @@ syntheticTests =
           , Import {
                 importModule    = "Data.List"
               , importPackage   = Just "base"
-              , importQualified = False
+              , importQualified = True
               , importImplicit  = False
               , importAs        = Nothing
               , importHiding    = Nothing
