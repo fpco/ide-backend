@@ -286,11 +286,12 @@ data Computed = Computed {
   , computedImports :: Map ModuleName [Import]
     -- | Autocompletion map
     --
-    -- Mapping from prefixes to fully qualified names
+    -- Mapping, per module, from prefixes to fully qualified names
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
-    -- was imported qualified as @M@).
-  , computedAutoMap :: Trie [(String, IdInfo)]
+    -- was imported qualified as @M@). If a module is absent from the @Map@,
+    -- it means its @Trie@ is empty.
+  , computedAutoMap :: Map ModuleName (Trie [(String, IdInfo)])
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -523,7 +524,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         -- the initial values of IORefs in GhcServer.
         let usePrevious idleSt =
               ( maybe Map.empty computedImports $ idleSt ^. ideComputed
-              , maybe Trie.empty computedAutoMap $ idleSt ^. ideComputed
+              , maybe Map.empty computedAutoMap $ idleSt ^. ideComputed
               )
         -- Update code
         computed <- if (idleState' ^. ideUpdatedCode) then do
@@ -809,7 +810,7 @@ getImports IdeSession{ideState, ideStaticInfo} =
       Nothing -> fail "This session state does not admit queries."
 
 -- | Autocompletion
-getAutocompletion :: Query (String -> [(String, IdInfo)])
+getAutocompletion :: Query (ModuleName -> String -> [(String, IdInfo)])
 getAutocompletion IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
@@ -817,20 +818,21 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO (String -> [(String, IdInfo)])
+    aux :: IdeIdleState -> IO (ModuleName -> String -> [(String, IdInfo)])
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} -> return (autocomplete computedAutoMap)
       Nothing           -> fail "This session state does not admit queries."
 
-    autocomplete :: Trie [(String, IdInfo)] -> String -> [(String, IdInfo)]
-    autocomplete trie name =
+    autocomplete :: Map ModuleName (Trie [(String, IdInfo)])
+                 -> ModuleName -> String -> [(String, IdInfo)]
+    autocomplete mapOfTries modName name =
       let name' = BSSC.pack name
           n     = last (BSSC.split '.' name') in
       filter (\(name'', _) -> name `isInfixOf` name'')
         $ concat
         . Trie.elems
         . Trie.submap n
-        $ trie
+        $ mapOfTries Map.! modName
 
 -- | Is code generation currently enabled?
 getCodeGeneration :: Query Bool

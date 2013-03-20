@@ -196,7 +196,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> Ghc ( [SourceError]
                     , [ModuleName]
                     , [(ModuleName, [Import])]
-                    , [(String, IdInfo)]
+                    , [(ModuleName, [(String, IdInfo)])]
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -279,14 +279,14 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 
       env1 <- go $ rnImports ms_srcimps
       env2 <- go $ rnImports ms_textual_imps
-      return $ env1 ++ env2
+      return (moduleNameString (GHC.moduleName ms_mod), env1 ++ env2)
 
     errs   <- liftIO $ readIORef errsRef
     loaded <- filterM isLoaded (map ms_mod_name graph)
     return ( reverse errs
            , map moduleNameString loaded
            , extractImports graph
-           , map (eltsToAutocompleteMap flags) (concat envs)
+           , map (second $ map $ eltsToAutocompleteMap flags) envs
            )
   where
     eltsToAutocompleteMap :: DynFlags -> GlobalRdrElt -> (String, IdInfo)

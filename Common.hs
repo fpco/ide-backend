@@ -63,7 +63,7 @@ data SourceError = SourceError
 data SourceErrorKind = KindError | KindWarning
   deriving (Show, Eq, Data, Typeable)
 
-type ModuleName    = String
+type ModuleName = String
 
 data ModuleId = ModuleId
   { moduleName    :: ModuleName

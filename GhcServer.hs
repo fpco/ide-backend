@@ -27,7 +27,7 @@ module GhcServer
   , getGhcExitCode
   ) where
 
-import Control.Arrow ((***))
+import Control.Arrow ((***), second)
 import Control.Concurrent (ThreadId, myThreadId, throwTo, forkIO, killThread)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
@@ -73,7 +73,8 @@ data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone ( [SourceError]
                    , LoadedModules
-                   , Maybe ([(ModuleName, [Import])], [(String, IdInfo)]) )
+                   , Maybe ( [(ModuleName, [Import])]
+                           , [(ModuleName, [(String, IdInfo)])] ) )
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -384,7 +385,8 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ( [SourceError]
                  , LoadedModules
-                 , Maybe (Map ModuleName [Import], Trie [(String, IdInfo)]) )
+                 , Maybe ( Map ModuleName [Import]
+                         , Map ModuleName (Trie [(String, IdInfo)]) ))
 rpcCompile server opts dir genCode callback =
   conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
@@ -400,8 +402,10 @@ rpcCompile server opts dir genCode callback =
                            )
     go
 
-constructAutoMap :: [(String, IdInfo)] -> Trie [(String, IdInfo)]
-constructAutoMap = Trie.fromListWith (++) . map aux
+constructAutoMap :: [(ModuleName, [(String, IdInfo)])]
+                 -> Map ModuleName (Trie [(String, IdInfo)])
+constructAutoMap =
+  Map.fromList . map (second (Trie.fromListWith (++) . map aux))
   where
     aux (name, idInfo) =
       let name' = BSSC.pack name
