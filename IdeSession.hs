@@ -290,8 +290,7 @@ data Computed = Computed {
     -- Mapping, per module, from prefixes to fully qualified names
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
-    -- was imported qualified as @M@). If a module is absent from the @Map@,
-    -- it means its @Trie@ is empty.
+    -- was imported qualified as @M@).
   , computedAutoMap :: Map ModuleName (Trie [IdInfo])
   }
 
@@ -523,22 +522,22 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         -- Determine imports and completion map.
         -- The defaults are legit (if ugly and fragile), because they match
         -- the initial values of IORefs in GhcServer.
-        let usePrevious idleSt =
-              ( maybe Map.empty computedImports $ idleSt ^. ideComputed
-              , maybe Map.empty computedAutoMap $ idleSt ^. ideComputed
+        let usePrevious idleSt importsAuto =
+              ( Map.map fst importsAuto  -- computedImports $ idleSt ^. ideComputed
+              , Map.map snd importsAuto  -- computedAutoMap $ idleSt ^. ideComputed
               )
         -- Update code
         computed <- if (idleState' ^. ideUpdatedCode) then do
                       ( computedErrors
                        , computedLoadedModules
-                       , mIA
+                       , importsAuto
                        ) <- rpcCompile (idleState ^. ideGhcServer)
                                        (idleState' ^. ideNewOpts)
                                        (ideSourcesDir ideStaticInfo)
                                        (idleState' ^. ideGenerateCode)
                                        callback
                       let (computedImports, computedAutoMap) =
-                            fromMaybe (usePrevious idleState') mIA
+                            usePrevious idleState' importsAuto
                       return $ Just Computed{..}
                     else return $ idleState' ^. ideComputed
 

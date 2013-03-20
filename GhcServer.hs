@@ -27,7 +27,7 @@ module GhcServer
   , getGhcExitCode
   ) where
 
-import Control.Arrow ((***), second)
+import Control.Arrow (second)
 import Control.Concurrent (ThreadId, myThreadId, throwTo, forkIO, killThread)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
@@ -73,8 +73,7 @@ data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone ( [SourceError]
                    , LoadedModules
-                   , Maybe ( [(ModuleName, [Import])]
-                           , [(ModuleName, [IdInfo])] ) )
+                   , Map ModuleName ([Import], [IdInfo]) )
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -119,7 +118,7 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
   -- Set up references for the current session of Ghc monad computations.
   pluginRef <- newIORef Map.empty
   idMapRef <- newIORef Map.empty
-  importsRef <- newIORef []
+  importsAutoRef <- newIORef Map.empty
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
@@ -136,7 +135,7 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
       case req of
         ReqCompile opts dir genCode ->
           ghcHandleCompile
-            conv dOpts opts pluginRef idMapRef importsRef dir genCode
+            conv dOpts opts pluginRef idMapRef importsAutoRef dir genCode
         ReqRun m fun outBMode errBMode ->
           ghcHandleRun conv m fun outBMode errBMode
         ReqSetEnv env ->
@@ -154,15 +153,16 @@ ghcHandleCompile :: RpcConversation
                  -> Maybe [String]       -- ^ new, user-submitted dynamic flags
                  -> IORef LoadedModules  -- ^ ref for newly generated IdMaps
                  -> IORef LoadedModules  -- ^ ref for accumulated IdMaps
-                 -> IORef [(ModuleName, [Import])]  -- ref for previous imports
+                 -> IORef (Map ModuleName ([Import], [IdInfo]))
+                                         -- ref for previous imports and auto
                  -> FilePath             -- ^ source directory
                  -> Bool                 -- ^ should we generate code
                  -> Ghc ()
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
-                 importsRef configSourcesDir ideGenerateCode = do
+                 importsAutoRef configSourcesDir ideGenerateCode = do
     errsRef  <- liftIO $ newIORef []
     counter  <- liftIO $ newIORef initialProgress
-    (errs, loadedModules, imports, autocompletion) <-
+    (errs, loadedModules, importsAutoList) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
@@ -186,16 +186,15 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     when (loadedModulesSet /= filteredKeySet) $ do
       error $ "ghcHandleCompile: loaded modules do not match id info maps: "
               ++ show (loadedModulesSet, filteredKeySet)
+    -- TODO: reimplement:
     -- Don't reconstruct the autocompletion map and don't send stuff
     -- if imports not changed since last update.
     -- TODO: compare (and even generate) only imports for changed modules
-    previousImports <- liftIO $ readIORef importsRef
-    let mIA = if imports == previousImports
-              then Nothing
-              else Just (imports, autocompletion)
-    liftIO $ writeIORef importsRef imports
+    let importsAutoMap = Map.fromList importsAutoList
+    previousImportsAuto <- liftIO $ readIORef importsAutoRef
+    liftIO $ writeIORef importsAutoRef importsAutoMap
     -- Ship the results.
-    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, mIA)
+    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, importsAutoMap)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -392,8 +391,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ( [SourceError]
                  , LoadedModules
-                 , Maybe ( Map ModuleName [Import]
-                         , Map ModuleName (Trie [IdInfo]) ))
+                 , Map ModuleName ([Import], Trie [IdInfo]) )
 rpcCompile server opts dir genCode callback =
   conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
@@ -402,16 +400,15 @@ rpcCompile server opts dir genCode callback =
                 case response of
                   GhcCompileProgress pcounter ->
                     callback pcounter >> go
-                  GhcCompileDone (errs, loaded, mIA) ->
+                  GhcCompileDone (errs, loaded, importsAuto) ->
                     return ( errs
                            , loaded
-                           , fmap (Map.fromList *** constructAutoMap) mIA
+                           , Map.map (second constructAuto) importsAuto
                            )
     go
 
-constructAutoMap :: [(ModuleName, [IdInfo])] -> Map ModuleName (Trie [IdInfo])
-constructAutoMap =
-    Map.fromList . map (second (Trie.fromListWith (++) . map aux))
+constructAuto :: [IdInfo] -> Trie [IdInfo]
+constructAuto = Trie.fromListWith (++) . map aux
   where
     aux idInfo = (BSSC.pack (idName idInfo), [idInfo])
 
