@@ -1701,7 +1701,7 @@ syntheticTests =
               [ "module M where"
               , "import Control.Monad"
               , "import Control.Category hiding (id)"
-              , "import Control.Arrow (second)"
+              , "import qualified Control.Arrow as A (second)"
               , "import \"base\" Data.List"
               , "foo ="
               ])
@@ -1739,9 +1739,9 @@ syntheticTests =
           , Import {
                 importModule     = "Control.Arrow"
               , importPackage    = Nothing
-              , importQualified  = False
+              , importQualified  = True
               , importImplicit   = False
-              , importAs         = Nothing
+              , importAs         = Just "A"
               , importHiding     = Just (False, ["second"])
               }
           , Import {

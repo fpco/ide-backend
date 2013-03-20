@@ -28,7 +28,7 @@ import Data.Generics
 import Data.Maybe (fromMaybe)
 import Data.List (stripPrefix)
 
-import qualified Common as Common
+import qualified Common
 import Common hiding (ModuleName)
 import GhcRun (extractSourceSpan)
 
@@ -260,15 +260,14 @@ prettyType typ = state $ \(tidyEnv, idMap) ->
   let (tidyEnv', typ') = tidyOpenType tidyEnv typ
   in (typ', (tidyEnv', idMap))
 
-lookupRdrEnv :: Monad m => Name -> ExtractIdsT m (Maybe RdrName.GlobalRdrElt)
-lookupRdrEnv name = do
-  rdrEnv <- getGlobalRdrEnv
+lookupRdrEnv :: RdrName.GlobalRdrEnv -> Name -> Maybe RdrName.GlobalRdrElt
+lookupRdrEnv rdrEnv name =
   case lookupOccEnv rdrEnv (Name.nameOccName name) of
-    Nothing   -> return Nothing
+    Nothing   -> Nothing
     Just elts -> case filter ((== name) . RdrName.gre_name) elts of
-                   []    -> return Nothing
-                   [elt] -> return (Just elt)
-                   _     -> fail "ghc invariant violated"
+                   []    -> Nothing
+                   [elt] -> Just elt
+                   _     -> error "ghc invariant violated"
 
 -- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
 -- it does
@@ -301,6 +300,9 @@ debugPP _ _ = return ()
 -- 't' and 't1', but we can only do this because they are not nested.
 --
 -- For debugging purposes, we also take in two arguments describing the AST.
+--
+-- TODO: This assumes that the structure of the AST follows Haskell scoping
+-- rules.  If this is not the case, this will break.
 ast :: Monad m => Maybe SrcSpan -> String -> ExtractIdsT m a -> ExtractIdsT m a
 ast _mspan _info cont = do
   (tidyEnv, _) <- get
@@ -337,59 +339,38 @@ instance Record Id where
     TextSpan _ ->
       return ()
 
-instance Record Name where
-  record span idIsBinder name = case extractSourceSpan span of
-      ProperSpan sourceSpan -> do
-        mIdScope <- constructScope
-        case mIdScope of
-          Just idScope -> do
-            let idInfo = IdInfo{..}
-            modifyIdMap $ Map.insert sourceSpan idInfo
-          Nothing ->
-            -- TODO: This should never happen
-            return ()
-      TextSpan _ ->
-        debugPP "Name without source span" name
-    where
+-- | Construct IdInfo for a 'Name'
+idInfoForName :: DynFlags                   -- ^ The usual dynflags
+              -> Name                       -- ^ The name in question
+              -> Bool                       -- ^ Is this a binding occurrence?
+              -> Maybe RdrName.GlobalRdrElt -- ^ GlobalRdrElt for imported names
+              -> Maybe IdInfo               -- ^ Nothing if imported but no GlobalRdrElt
+idInfoForName dflags name idIsBinder mElt =
+    case constructScope of
+      Just idScope -> Just IdInfo{..}
+      Nothing      -> Nothing
+  where
       occ     = Name.nameOccName name
       idName  = Name.occNameString occ
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
       idType  = Nothing -- After renamer but before typechecker
 
-      constructScope :: MonadIO m => ExtractIdsT m (Maybe IdScope)
+      constructScope :: Maybe IdScope
       constructScope
-        | idIsBinder               = return $ Just Binder
-        | Name.isWiredInName  name = return $ Just WiredIn
-        | Name.isInternalName name = return $ Just Local {
+        | idIsBinder               = Just Binder
+        | Name.isWiredInName  name = Just WiredIn
+        | Name.isInternalName name = Just Local {
               idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
             }
-        | otherwise = do
-            rdrElts <- lookupRdrEnv name
-            case rdrElts of
-              Just gre -> do
-                dflags <- asks fst
-                return (Just (scopeFromProv dflags (RdrName.gre_prov gre)))
-              Nothing -> do
-#if DEBUG
-                prettyName <- pretty True name
-                prettyOcc  <- pretty True (Name.nameOccName name)
-                liftIO . appendFile "/tmp/ghc.log" $ "No entry " ++ show prettyOcc ++ " in global type environment for " ++ nameSort ++ " name " ++ show prettyName ++ " at location " ++ show span ++ "\n"
-#endif
-                return Nothing
-#if DEBUG
-      nameSort :: String
-      nameSort | Name.isInternalName name = "internal"
-               | Name.isExternalName name = "external"
-               | Name.isSystemName   name = "system"
-               | Name.isWiredInName  name = "wired-in"
-               | otherwise                = "unknown"
-#endif
+        | otherwise = case mElt of
+              Just gre -> Just $ scopeFromProv (RdrName.gre_prov gre)
+              Nothing  -> Nothing
 
-      scopeFromProv :: DynFlags -> RdrName.Provenance -> IdScope
-      scopeFromProv _ RdrName.LocalDef = Local {
+      scopeFromProv :: RdrName.Provenance -> IdScope
+      scopeFromProv RdrName.LocalDef = Local {
           idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
         }
-      scopeFromProv dflags (RdrName.Imported spec) =
+      scopeFromProv (RdrName.Imported spec) =
         let mod = fromMaybe
                     (error (concatMap showSDocDebug $ ppr name : map ppr spec))
                     $ Name.nameModule_maybe name
@@ -397,28 +378,30 @@ instance Record Name where
         in Imported {
           idDefSpan      = extractSourceSpan (Name.nameSrcSpan name)
         , idDefinedIn    = ModuleId
-            { moduleName = moduleNameString $ Module.moduleName mod
-            , modulePackage = fillVersion dflags $ Module.modulePackageId mod }
+            { moduleName    = moduleNameString $ Module.moduleName mod
+            , modulePackage = fillVersion $ Module.modulePackageId mod
+            }
         , idImportedFrom = ModuleId
-            { moduleName = moduleNameString impMod
-            , modulePackage = modToPkg dflags impMod }
+            { moduleName    = moduleNameString impMod
+            , modulePackage = modToPkg impMod
+            }
         , idImportSpan   = impSpan
         }
 
-      modToPkg :: DynFlags -> ModuleName -> PackageId
-      modToPkg dflags impMod =
+      modToPkg :: ModuleName -> PackageId
+      modToPkg impMod =
         let pkgAll = Packages.lookupModuleInAllPackages dflags impMod
             pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
         in case pkgExposed of
           [] -> mainPackage  -- we assume otherwise GHC would signal an error
-          [p] -> fillVersion dflags $ Packages.packageConfigId $ fst p
+          [p] -> fillVersion $ Packages.packageConfigId $ fst p
           _ -> let pkgIds = map (first (Module.packageIdString
                                         . Packages.packageConfigId)) pkgExposed
                in error $ "modToPkg: " ++ moduleNameString impMod
                           ++ ": " ++ show pkgIds
 
-      fillVersion :: DynFlags -> Module.PackageId -> PackageId
-      fillVersion dflags p =
+      fillVersion :: Module.PackageId -> PackageId
+      fillVersion p =
         case Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) p of
           Nothing -> if p == Module.mainPackageId
                      then mainPackage
@@ -466,6 +449,24 @@ instance Record Name where
             RdrName.ImpSome _explicit loc -> extractSourceSpan loc
         )
       extractImportInfo _ = error "ghc invariant violated"
+
+instance Record Name where
+  record span idIsBinder name = case extractSourceSpan span of
+      ProperSpan sourceSpan -> do
+        dflags <- getDynFlags
+        rdrEnv <- getGlobalRdrEnv
+        -- The lookup into the rdr env will only be used for imported names
+        case idInfoForName dflags name idIsBinder (lookupRdrEnv rdrEnv name) of
+          Just idInfo ->
+            modifyIdMap $ Map.insert sourceSpan idInfo
+          Nothing ->
+            -- This only happens for some special cases ('assert' being
+            -- the prime example; it gets reported as 'assertError' from
+            -- 'GHC.IO.Exception' but there is no corresponding entry in the
+            -- GlobalRdrEnv.
+            return ()
+      TextSpan _ ->
+        debugPP "Name without source span" name
 
 {------------------------------------------------------------------------------
   ExtractIds
@@ -582,7 +583,7 @@ instance Record id => ExtractIds (LHsBind id) where
   extractIds (L span bind@(PatBind {})) = ast (Just span) "PatBind" $ do
     extractIds (pat_lhs bind)
     extractIds (pat_rhs bind)
-  extractIds (L span _bind@(VarBind {})) = ast (Just span) "VarBind" $ do
+  extractIds (L span _bind@(VarBind {})) = ast (Just span) "VarBind" $
     -- These are only introduced by the type checker, and don't involve user
     -- written code. The ghc comments says "located 'only for consistency'"
     return ()
