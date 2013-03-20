@@ -117,6 +117,7 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
   -- Set up references for the current session of Ghc monad computations.
+  pluginRef <- newIORef Map.empty
   idMapRef <- newIORef Map.empty
   importsRef <- newIORef []
 
@@ -125,7 +126,7 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
     -- Initialize the dynamic flags
     dynFlags <- getSessionDynFlags
     let dynFlags' = dynFlags {
-          sourcePlugins = extractIdsPlugin idMapRef : sourcePlugins dynFlags
+          sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins dynFlags
         }
     setSessionDynFlags dynFlags'
 
@@ -134,7 +135,8 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
       req <- liftIO get
       case req of
         ReqCompile opts dir genCode ->
-          ghcHandleCompile conv dOpts opts idMapRef importsRef dir genCode
+          ghcHandleCompile
+            conv dOpts opts pluginRef idMapRef importsRef dir genCode
         ReqRun m fun outBMode errBMode ->
           ghcHandleRun conv m fun outBMode errBMode
         ReqSetEnv env ->
@@ -150,13 +152,14 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 ghcHandleCompile :: RpcConversation
                  -> DynamicOpts          -- ^ startup dynamic flags
                  -> Maybe [String]       -- ^ new, user-submitted dynamic flags
-                 -> IORef LoadedModules  -- ^ ref for the generated IdMaps
+                 -> IORef LoadedModules  -- ^ ref for newly generated IdMaps
+                 -> IORef LoadedModules  -- ^ ref for accumulated IdMaps
                  -> IORef [(ModuleName, [Import])]  -- ref for previous imports
                  -> FilePath             -- ^ source directory
                  -> Bool                 -- ^ should we generate code
                  -> Ghc ()
-ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
-                 idMapRef importsRef configSourcesDir ideGenerateCode = do
+ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
+                 importsRef configSourcesDir ideGenerateCode = do
     errsRef  <- liftIO $ newIORef []
     counter  <- liftIO $ newIORef initialProgress
     (errs, loadedModules, imports, autocompletion) <-
@@ -168,12 +171,16 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                                        (progressCallback counter)
                                        (\_ -> return ()) -- TODO: log?
     liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ show errs
-    idMaps <- liftIO $ readIORef idMapRef
-    let loadedModulesSet = Set.fromList loadedModules
+    -- Kyes of @pluginIdMaps@ are the modules changed in this GHC call.
+    pluginIdMaps <- liftIO $ readIORef pluginRef
+    accIdMaps <- liftIO $ readIORef idMapRef
+    let idMaps = pluginIdMaps `Map.union` accIdMaps
+        loadedModulesSet = Set.fromList loadedModules
         -- Filter out modules that got unloaded.
         filteredIdMaps =
           Map.filterWithKey (\k _ -> k `Set.member` loadedModulesSet) idMaps
         filteredKeySet = Map.keysSet filteredIdMaps
+    liftIO $ writeIORef pluginRef Map.empty
     liftIO $ writeIORef idMapRef filteredIdMaps
     -- Verify the plugin and @compileInGhc@ agree on which modules are loaded.
     when (loadedModulesSet /= filteredKeySet) $ do
