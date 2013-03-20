@@ -10,6 +10,8 @@ module GhcHsWalk
   , idInfoAtLocation
   , idMapToList
   , idMapFromList
+  , idInfoForName
+  , extractSourceSpan
   ) where
 
 import Prelude hiding (span, id, mod)
@@ -30,7 +32,6 @@ import Data.List (stripPrefix)
 
 import qualified Common
 import Common hiding (ModuleName)
-import GhcRun (extractSourceSpan)
 
 import qualified GHC
 import GHC hiding (idType, PackageId, moduleName)
@@ -49,6 +50,7 @@ import OccName
 import PprTyThing (pprTypeForUser)
 import TcType (tidyOpenType)
 import VarEnv (TidyEnv, emptyTidyEnv)
+import FastString ( unpackFS )
 
 #define DEBUG 1
 
@@ -449,6 +451,14 @@ idInfoForName dflags name idIsBinder mElt =
             RdrName.ImpSome _explicit loc -> extractSourceSpan loc
         )
       extractImportInfo _ = error "ghc invariant violated"
+
+extractSourceSpan :: SrcSpan -> EitherSpan
+extractSourceSpan (RealSrcSpan srcspan) =
+  ProperSpan $ SourceSpan
+    (unpackFS (srcSpanFile srcspan))
+    (srcSpanStartLine srcspan) (srcSpanStartCol srcspan)
+    (srcSpanEndLine srcspan)   (srcSpanEndCol   srcspan)
+extractSourceSpan (UnhelpfulSpan s) = TextSpan $ unpackFS s
 
 instance Record Name where
   record span idIsBinder name = case extractSourceSpan span of

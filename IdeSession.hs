@@ -228,7 +228,7 @@ import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString as BSS
 import qualified Data.ByteString.Char8 as BSSC
-import Data.List (delete)
+import Data.List (delete, isInfixOf)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
@@ -290,7 +290,7 @@ data Computed = Computed {
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
-  , computedAutoMap :: Trie [BSS.ByteString]
+  , computedAutoMap :: Trie [(String, IdInfo)]
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -809,7 +809,7 @@ getImports IdeSession{ideState, ideStaticInfo} =
       Nothing -> fail "This session state does not admit queries."
 
 -- | Autocompletion
-getAutocompletion :: Query (String -> [String])
+getAutocompletion :: Query (String -> [(String, IdInfo)])
 getAutocompletion IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
@@ -817,20 +817,20 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO (String -> [String])
+    aux :: IdeIdleState -> IO (String -> [(String, IdInfo)])
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} -> return (autocomplete computedAutoMap)
       Nothing           -> fail "This session state does not admit queries."
 
-    autocomplete :: Trie [BSS.ByteString] -> String -> [String]
+    autocomplete :: Trie [(String, IdInfo)] -> String -> [(String, IdInfo)]
     autocomplete trie name =
       let name' = BSSC.pack name
           n     = last (BSSC.split '.' name') in
-      map BSSC.unpack $ filter (name' `BSS.isInfixOf`)
-                      . concat
-                      . Trie.elems
-                      . Trie.submap n
-                      $ trie
+      filter (\(name'', _) -> name `isInfixOf` name'')
+        $ concat
+        . Trie.elems
+        . Trie.submap n
+        $ trie
 
 -- | Is code generation currently enabled?
 getCodeGeneration :: Query Bool

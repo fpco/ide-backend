@@ -24,7 +24,6 @@ module GhcRun
   , defaultDynFlags
   , getSessionDynFlags
   , setSessionDynFlags
-  , extractSourceSpan
     -- * Executing snippets
   , runInGhc
   , RunResult(..)
@@ -79,11 +78,13 @@ import Control.Applicative ((<$>))
 import Control.Arrow (second)
 import Data.IORef
 import Data.List ((\\))
+import Data.Maybe (fromJust)
 import System.FilePath.Find (find, always, extension)
 import System.Process
 
 import Common
 import Data.Aeson.TH (deriveJSON)
+import GhcHsWalk (extractSourceSpan, IdInfo, idInfoForName)
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -195,7 +196,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> Ghc ( [SourceError]
                     , [ModuleName]
                     , [(ModuleName, [Import])]
-                    , [String]
+                    , [(String, IdInfo)]
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -285,12 +286,16 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     return ( reverse errs
            , map moduleNameString loaded
            , extractImports graph
-           , eltsToAutocompleteMap (concat envs)
+           , map (eltsToAutocompleteMap flags) (concat envs)
            )
   where
-    eltsToAutocompleteMap :: [GlobalRdrElt] -> [String]
-    eltsToAutocompleteMap =
-       map (GHC.showSDoc . GHC.ppr . gre_name)
+    eltsToAutocompleteMap :: DynFlags -> GlobalRdrElt -> (String, IdInfo)
+    eltsToAutocompleteMap dflags elt =
+      let name = gre_name elt in
+        ( -- TODO: this is not correct. We need to follow Haskell scoping rules
+          GHC.showSDoc (GHC.ppr name)
+        , fromJust $ idInfoForName dflags name False (Just elt)
+        )
 
     sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ()
     sourceErrorHandler _flags e = liftIO $ do
@@ -452,14 +457,6 @@ collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
 collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in handlerRemaining msgstr
-
-extractSourceSpan :: SrcSpan -> EitherSpan
-extractSourceSpan (RealSrcSpan srcspan) =
-  ProperSpan $ SourceSpan
-    (unpackFS (srcSpanFile srcspan))
-    (srcSpanStartLine srcspan) (srcSpanStartCol srcspan)
-    (srcSpanEndLine srcspan)   (srcSpanEndCol   srcspan)
-extractSourceSpan (UnhelpfulSpan s) = TextSpan $ unpackFS s
 
 -- TODO: perhaps make a honest SrcError from the first span from the first
 -- error message and put the rest into the message string? That probably

@@ -73,7 +73,7 @@ data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone ( [SourceError]
                    , LoadedModules
-                   , Maybe ([(ModuleName, [Import])], [String]) )
+                   , Maybe ([(ModuleName, [Import])], [(String, IdInfo)]) )
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -384,7 +384,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ( [SourceError]
                  , LoadedModules
-                 , Maybe (Map ModuleName [Import], Trie [BSS.ByteString]) )
+                 , Maybe (Map ModuleName [Import], Trie [(String, IdInfo)]) )
 rpcCompile server opts dir genCode callback =
   conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
@@ -400,11 +400,13 @@ rpcCompile server opts dir genCode callback =
                            )
     go
 
-constructAutoMap :: [String] -> Trie [BSS.ByteString]
-constructAutoMap = Trie.fromListWith (++) . map (aux . BSSC.pack)
+constructAutoMap :: [(String, IdInfo)] -> Trie [(String, IdInfo)]
+constructAutoMap = Trie.fromListWith (++) . map aux
   where
-    aux :: BSS.ByteString -> (BSS.ByteString, [BSS.ByteString])
-    aux name = let n = last (BSSC.split '.' name) in (n, [name])
+    aux (name, idInfo) =
+      let name' = BSSC.pack name
+          n     = last (BSSC.split '.' name')
+      in (n, [(name, idInfo)])
 
 -- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {

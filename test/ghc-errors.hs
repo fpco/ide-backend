@@ -1755,7 +1755,7 @@ syntheticTests =
           ]
         autocomplete <- getAutocompletion session
         let completeFo = autocomplete "fo"
-        assertSameSet completeFo [
+        assertSameSet (map fst completeFo) [
             "Control.Monad.foldM"
           , "Control.Monad.foldM_"
           , "Control.Monad.forM"
@@ -1769,7 +1769,7 @@ syntheticTests =
           , "GHC.List.foldr1"
           ]
         let completeControlMonadFo = autocomplete "Control.Monad.fo"
-        assertSameSet completeControlMonadFo [
+        assertSameSet (map fst completeControlMonadFo) [
             "Control.Monad.foldM"
           , "Control.Monad.foldM_"
           , "Control.Monad.forM"
