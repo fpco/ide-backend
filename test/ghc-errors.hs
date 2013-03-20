@@ -1587,8 +1587,8 @@ syntheticTests =
               ]
         let actualIdMapA = lines (show idMapA)
         let actualIdMapB = lines (show idMapB)
-        assertSameSet expectedIdMapA actualIdMapA
-        assertSameSet expectedIdMapB actualIdMapB
+        assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
+        assertSameSet "actualIdMapB" expectedIdMapB actualIdMapB
         assertEqual "Haddock link for A.b should be correct"
                     "main/latest/doc/html/A.html#v:b" $
                     haddockLink (idMapToMap idMapB Map.! SourceSpan "B.hs" 5 8 5 9)
@@ -1617,7 +1617,7 @@ syntheticTests =
               , "(A.hs@3:9-3:10,y (VarName) :: t1 (binding occurrence))"
               ]
         let actualIdMap = lines (show idMap)
-        assertSameSet expectedIdMap actualIdMap
+        assertSameSet "" expectedIdMap actualIdMap
     )
   , ( "Type information 3"
     , withConfiguredSession defOpts $ \session -> do
@@ -1659,7 +1659,7 @@ syntheticTests =
               , "(A.hs@7:5-7:8,bar (VarName) :: (t, t2) -> t (binding occurrence))"
               ]
         let actualIdMap = lines (show idMap)
-        assertSameSet expectedIdMap actualIdMap
+        assertSameSet "" expectedIdMap actualIdMap
     )
   , ( "Type information 4"
     , withConfiguredSession defOpts $ \session -> do
@@ -1684,7 +1684,7 @@ syntheticTests =
               , "(A.hs@5:33-5:37,on (VarName) :: forall b1 c1 a2. (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 (defined in base-4.5.1.0:Data.Function at <no location info>; imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36))"
               ]
         let actualIdMap = lines (show idMap)
-        assertSameSet expectedIdMap actualIdMap
+        assertSameSet "" expectedIdMap actualIdMap
     )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
@@ -1736,7 +1736,7 @@ syntheticTests =
           [SourceError KindError _ msg] | "parse error" `isPrefixOf` msg -> return ()
           _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
         imports <- getImports session
-        assertSameSet (imports Map.! "M") [
+        assertSameSet "imports: " (imports Map.! "M") [
             Import {
                 importModule    = "Prelude"
               , importPackage   = Nothing
@@ -1780,26 +1780,31 @@ syntheticTests =
           ]
         autocomplete <- getAutocompletion session
         let completeFo = autocomplete "M" "fo"
-        assertSameSet (map fst completeFo) [
-            "Control.Monad.foldM"
-          , "Control.Monad.foldM_"
-          , "Control.Monad.forM"
-          , "Control.Monad.forM_"
-          , "Control.Monad.forever"
+        assertSameSet "fo: " (map idInfoQN completeFo) [
+            "foldM"
+          , "foldM_"
+          , "forM"
+          , "forM_"
+          , "forever"
           , "Data.List.foldl'"
           , "Data.List.foldl1"
           , "Data.List.foldl1'"
-          , "GHC.Base.foldr"
-          , "GHC.List.foldl"
-          , "GHC.List.foldr1"
+          , "Data.List.foldr"
+          , "Data.List.foldl"
+          , "Data.List.foldr1"
           ]
-        let completeControlMonadFo = autocomplete "M" "Control.Monad.fo"
-        assertSameSet (map fst completeControlMonadFo) [
-            "Control.Monad.foldM"
-          , "Control.Monad.foldM_"
-          , "Control.Monad.forM"
-          , "Control.Monad.forM_"
-          , "Control.Monad.forever"
+        let completeControlMonadFo = autocomplete "M" "Data.List.fo"
+        assertSameSet "Data.List.fo: " (map idInfoQN completeControlMonadFo) [
+            "Data.List.foldl'"
+          , "Data.List.foldl1"
+          , "Data.List.foldl1'"
+          , "Data.List.foldr"
+          , "Data.List.foldl"
+          , "Data.List.foldr1"
+          ]
+        let completeSec = autocomplete "M" "sec"
+        assertSameSet "sec: " (map idInfoQN completeSec) [
+            "A.second"
           ]
     )
     -- TODO: Autocomplete test that checks import errors
@@ -1808,13 +1813,14 @@ syntheticTests =
     -- - Use of PackageImports without the flag
   ]
 
-assertSameSet :: (Ord a, Show a) => [a] -> [a] -> Assertion
-assertSameSet xs ys = assertSameList (sort xs) (sort ys)
+assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
+assertSameSet header xs ys = assertSameList header (sort xs) (sort ys)
 
-assertSameList :: (Ord a, Show a) => [a] -> [a] -> Assertion
-assertSameList xs ys = case diff xs ys of
-                         [] -> return ()
-                         ds -> assertFailure (unlines ds)
+assertSameList :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
+assertSameList header xs ys =
+  case diff xs ys of
+    [] -> return ()
+    ds -> assertFailure (header ++ unlines ds)
 
 -- | Compare two lists, both assumed sorted
 --

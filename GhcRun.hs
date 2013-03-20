@@ -84,7 +84,7 @@ import System.Process
 
 import Common
 import Data.Aeson.TH (deriveJSON)
-import GhcHsWalk (extractSourceSpan, IdInfo, idInfoForName)
+import GhcHsWalk (extractSourceSpan, IdInfo(..), idInfoForName)
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -196,7 +196,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> Ghc ( [SourceError]
                     , [ModuleName]
                     , [(ModuleName, [Import])]
-                    , [(ModuleName, [(String, IdInfo)])]
+                    , [(ModuleName, [IdInfo])]
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -289,13 +289,9 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
            , map (second $ map $ eltsToAutocompleteMap flags) envs
            )
   where
-    eltsToAutocompleteMap :: DynFlags -> GlobalRdrElt -> (String, IdInfo)
+    eltsToAutocompleteMap :: DynFlags -> GlobalRdrElt -> IdInfo
     eltsToAutocompleteMap dflags elt =
-      let name = gre_name elt in
-        ( -- TODO: this is not correct. We need to follow Haskell scoping rules
-          GHC.showSDoc (GHC.ppr name)
-        , fromJust $ idInfoForName dflags name False (Just elt)
-        )
+      fromJust $ idInfoForName dflags (gre_name elt) False (Just elt)
 
     sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ()
     sourceErrorHandler _flags e = liftIO $ do

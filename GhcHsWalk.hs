@@ -12,6 +12,7 @@ module GhcHsWalk
   , idMapFromList
   , idInfoForName
   , extractSourceSpan
+  , idInfoQN
   ) where
 
 import Prelude hiding (span, id, mod)
@@ -71,7 +72,7 @@ data IdInfo = IdInfo
   { -- | The base name of the identifer at this location. Module prefix
     -- is not included.
     idName :: String
-    -- | The module prefix of the identifier. Empty, if a local variable.
+    -- | Namespace this identifier is drawn from
   , idSpace :: IdNameSpace
     -- | The type
     -- We don't always know this; in particular, we don't know kinds because
@@ -114,6 +115,15 @@ data IdScope =
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
   deriving (Eq, Data, Typeable)
+
+-- | Construct qualified name following Haskell's scoping rules
+idInfoQN :: IdInfo -> String
+idInfoQN IdInfo{idName, idScope} =
+  case idScope of
+    Binder                 -> idName
+    Local{}                -> idName
+    Imported{idImportQual} -> idImportQual ++ idName
+    WiredIn                -> idName
 
 data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
   deriving (Data, Typeable)

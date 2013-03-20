@@ -37,7 +37,7 @@ import Control.Monad (forM_, forever, unless, when)
 import Data.Aeson (decode', encode)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
-import qualified Data.ByteString.Char8 as BSSC (pack, split)
+import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
 import System.Exit (ExitCode)
@@ -74,7 +74,7 @@ data GhcCompileResponse =
   | GhcCompileDone ( [SourceError]
                    , LoadedModules
                    , Maybe ( [(ModuleName, [Import])]
-                           , [(ModuleName, [(String, IdInfo)])] ) )
+                           , [(ModuleName, [IdInfo])] ) )
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -386,7 +386,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> IO ( [SourceError]
                  , LoadedModules
                  , Maybe ( Map ModuleName [Import]
-                         , Map ModuleName (Trie [(String, IdInfo)]) ))
+                         , Map ModuleName (Trie [IdInfo]) ))
 rpcCompile server opts dir genCode callback =
   conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
@@ -402,15 +402,11 @@ rpcCompile server opts dir genCode callback =
                            )
     go
 
-constructAutoMap :: [(ModuleName, [(String, IdInfo)])]
-                 -> Map ModuleName (Trie [(String, IdInfo)])
+constructAutoMap :: [(ModuleName, [IdInfo])] -> Map ModuleName (Trie [IdInfo])
 constructAutoMap =
-  Map.fromList . map (second (Trie.fromListWith (++) . map aux))
+    Map.fromList . map (second (Trie.fromListWith (++) . map aux))
   where
-    aux (name, idInfo) =
-      let name' = BSSC.pack name
-          n     = last (BSSC.split '.' name')
-      in (n, [(name, idInfo)])
+    aux idInfo = (BSSC.pack (idName idInfo), [idInfo])
 
 -- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {

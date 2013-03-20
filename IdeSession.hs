@@ -146,6 +146,7 @@ module IdeSession (
   Import(..),
   getImports,
   getAutocompletion,
+  idInfoQN,
 
   -- ** Run code
   runStmt,
@@ -291,7 +292,7 @@ data Computed = Computed {
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@). If a module is absent from the @Map@,
     -- it means its @Trie@ is empty.
-  , computedAutoMap :: Map ModuleName (Trie [(String, IdInfo)])
+  , computedAutoMap :: Map ModuleName (Trie [IdInfo])
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -810,7 +811,7 @@ getImports IdeSession{ideState, ideStaticInfo} =
       Nothing -> fail "This session state does not admit queries."
 
 -- | Autocompletion
-getAutocompletion :: Query (ModuleName -> String -> [(String, IdInfo)])
+getAutocompletion :: Query (ModuleName -> String -> [IdInfo])
 getAutocompletion IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
@@ -818,21 +819,21 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO (ModuleName -> String -> [(String, IdInfo)])
+    aux :: IdeIdleState -> IO (ModuleName -> String -> [IdInfo])
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} -> return (autocomplete computedAutoMap)
       Nothing           -> fail "This session state does not admit queries."
 
-    autocomplete :: Map ModuleName (Trie [(String, IdInfo)])
-                 -> ModuleName -> String -> [(String, IdInfo)]
+    autocomplete :: Map ModuleName (Trie [IdInfo])
+                 -> ModuleName -> String -> [IdInfo]
     autocomplete mapOfTries modName name =
       let name' = BSSC.pack name
-          n     = last (BSSC.split '.' name') in
-      filter (\(name'', _) -> name `isInfixOf` name'')
-        $ concat
-        . Trie.elems
-        . Trie.submap n
-        $ mapOfTries Map.! modName
+          n     = last (BSSC.split '.' name')
+      in filter (\idInfo -> name `isInfixOf` idInfoQN idInfo)
+           $ concat
+           . Trie.elems
+           . Trie.submap n
+           $ mapOfTries Map.! modName
 
 -- | Is code generation currently enabled?
 getCodeGeneration :: Query Bool
