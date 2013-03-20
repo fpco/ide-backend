@@ -231,6 +231,7 @@ import qualified Data.ByteString.Char8 as BSSC
 import Data.List (delete)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
 import Data.Trie (Trie)
 import qualified Data.Trie as Trie
 import Data.Monoid (Monoid (..))
@@ -289,7 +290,7 @@ data Computed = Computed {
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
-  , computedAutocompletionMap :: Trie [BSS.ByteString]
+  , computedAutoMap :: Trie [BSS.ByteString]
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -517,17 +518,25 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         when (idleState' ^. ideUpdatedEnv) $
           rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
 
+        -- Determine imports and completion map.
+        -- The defaults are legit (if ugly and fragile), because they match
+        -- the initial values of IORefs in GhcServer.
+        let usePrevious idleSt =
+              ( maybe Map.empty computedImports $ idleSt ^. ideComputed
+              , maybe Trie.empty computedAutoMap $ idleSt ^. ideComputed
+              )
         -- Update code
         computed <- if (idleState' ^. ideUpdatedCode) then do
-                      (  computedErrors
+                      ( computedErrors
                        , computedLoadedModules
-                       , computedImports
-                       , computedAutocompletionMap
+                       , mIA
                        ) <- rpcCompile (idleState ^. ideGhcServer)
                                        (idleState' ^. ideNewOpts)
                                        (ideSourcesDir ideStaticInfo)
                                        (idleState' ^. ideGenerateCode)
                                        callback
+                      let (computedImports, computedAutoMap) =
+                            fromMaybe (usePrevious idleState') mIA
                       return $ Just Computed{..}
                     else return $ idleState' ^. ideComputed
 
@@ -810,7 +819,7 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
   where
     aux :: IdeIdleState -> IO (String -> [String])
     aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return (autocomplete computedAutocompletionMap)
+      Just Computed{..} -> return (autocomplete computedAutoMap)
       Nothing           -> fail "This session state does not admit queries."
 
     autocomplete :: Trie [BSS.ByteString] -> String -> [String]
