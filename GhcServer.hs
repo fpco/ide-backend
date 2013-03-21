@@ -40,6 +40,7 @@ import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
+import Data.Maybe (mapMaybe)
 import System.Exit (ExitCode)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -73,7 +74,7 @@ data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone ( [SourceError]
                    , LoadedModules
-                   , Map ModuleName ([Import], [IdInfo]) )
+                   , Map ModuleName (Maybe ([Import], [IdInfo])) )
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -186,15 +187,41 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     when (loadedModulesSet /= filteredKeySet) $ do
       error $ "ghcHandleCompile: loaded modules do not match id info maps: "
               ++ show (loadedModulesSet, filteredKeySet)
-    -- TODO: reimplement:
-    -- Don't reconstruct the autocompletion map and don't send stuff
-    -- if imports not changed since last update.
-    -- TODO: compare (and even generate) only imports for changed modules
-    let importsAutoMap = Map.fromList importsAutoList
+    -- Compute and send only diffs (encoded as Maybes) of the map of imports
+    -- and autocompletion data. The data for a module does not need to be sent
+    -- if the imports of the module are unchanged (even if the module is)
+    -- and the modules it imports are not recompiled. (It's not enough
+    -- to determine that their exports are unchanged (which would be
+    -- reasonably fast using @mi_exp_hash@) because the types
+    -- could have changed and we send full idMaps, including types.)
+    -- Note that we really don't recompute the unneeded autocompletion
+    -- data, because it's generated in a lazy way and we don't force it
+    -- (we don't force unneeded elements of @currentImportsAuto@).
     previousImportsAuto <- liftIO $ readIORef importsAutoRef
-    liftIO $ writeIORef importsAutoRef importsAutoMap
+    let currentImportsAuto = Map.fromList importsAutoList
+        changedModuleSet = Map.keysSet pluginIdMaps
+        diff :: (ModuleName, ([Import], [IdInfo]))
+             -> Maybe (ModuleName, Maybe ([Import], [IdInfo]))
+        diff (m, ia) =
+          case Map.lookup m previousImportsAuto of
+            Nothing -> Just (m, Just ia)  -- add a new module
+            Just iaOld ->
+              if m `Set.member` changedModuleSet  -- changed
+                 && fst iaOld /= fst ia  -- imports changed
+              then Just (m, Just ia)  -- include in the diff
+              else  -- imports equal, now check if imported modules changed
+                let imports = map importModule $ fst ia
+                in if all (`Set.notMember` changedModuleSet) imports
+                   then Nothing  -- old info still good, don't include
+                   else Just (m, Just ia)  -- imported modules changed
+        diffList = mapMaybe diff importsAutoList
+        removedModules = previousImportsAuto Map.\\ currentImportsAuto
+        diffMap = Map.fromList diffList
+                  `Map.union` Map.map (const Nothing) removedModules
+    liftIO $ writeIORef importsAutoRef
+           $ applyMapDiff diffMap previousImportsAuto
     -- Ship the results.
-    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, importsAutoMap)
+    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, diffMap)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -391,7 +418,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ( [SourceError]
                  , LoadedModules
-                 , Map ModuleName ([Import], Trie [IdInfo]) )
+                 , Map ModuleName (Maybe ([Import], Trie [IdInfo])) )
 rpcCompile server opts dir genCode callback =
   conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
@@ -403,7 +430,7 @@ rpcCompile server opts dir genCode callback =
                   GhcCompileDone (errs, loaded, importsAuto) ->
                     return ( errs
                            , loaded
-                           , Map.map (second constructAuto) importsAuto
+                           , Map.map (fmap (second constructAuto)) importsAuto
                            )
     go
 

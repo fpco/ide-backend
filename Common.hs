@@ -9,6 +9,7 @@ module Common
   , initialProgress
   , updateProgress
   , progressStep
+  , applyMapDiff
   , showExWithClass
   , dVerbosity, debug
   , accessorName
@@ -22,6 +23,9 @@ import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString.Char8 as BS
 import System.IO (hFlush, stderr)
 import Data.Generics
+import Data.Map (Map)
+import qualified Data.Map as Map
+import qualified Data.List as List
 
 import Data.Accessor (Accessor, accessor)
 
@@ -116,6 +120,11 @@ $(deriveJSON id ''SourceError)
 $(deriveJSON (\x -> x) ''ModuleId)
 $(deriveJSON (\x -> x) ''PackageId)
 $(deriveJSON id ''Progress)
+
+applyMapDiff :: Ord k => Map k (Maybe v) -> Map k v -> Map k v
+applyMapDiff diff m =
+  let f m2 (k, v) = Map.alter (const v) k m2
+  in List.foldl' f m $ Map.toList diff
 
 -- | Show an exception together with its most precise type tag.
 showExWithClass :: Ex.SomeException -> String

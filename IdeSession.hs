@@ -232,7 +232,6 @@ import qualified Data.ByteString.Char8 as BSSC
 import Data.List (delete, isInfixOf)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
 import Data.Trie (Trie)
 import qualified Data.Trie as Trie
 import Data.Monoid (Monoid (..))
@@ -519,12 +518,17 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         when (idleState' ^. ideUpdatedEnv) $
           rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
 
-        -- Determine imports and completion map.
-        -- The defaults are legit (if ugly and fragile), because they match
-        -- the initial values of IORefs in GhcServer.
-        let usePrevious idleSt importsAuto =
-              ( Map.map fst importsAuto  -- computedImports $ idleSt ^. ideComputed
-              , Map.map snd importsAuto  -- computedAutoMap $ idleSt ^. ideComputed
+        -- Determine imports and completion map from the diffs sent
+        -- from the RPC compilationi process.
+        let usePrevious :: IdeIdleState
+                        -> Map ModuleName (Maybe ([Import], Trie [IdInfo]))
+                        -> ( Map ModuleName [Import]
+                           , Map ModuleName (Trie [IdInfo]) )
+            usePrevious idleSt importsAuto =
+              ( applyMapDiff (Map.map (fmap fst) importsAuto)
+                $ maybe Map.empty computedImports $ idleSt ^. ideComputed
+              , applyMapDiff (Map.map (fmap snd) importsAuto)
+                $ maybe Map.empty computedAutoMap $ idleSt ^. ideComputed
               )
         -- Update code
         computed <- if (idleState' ^. ideUpdatedCode) then do
