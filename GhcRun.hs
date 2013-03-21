@@ -43,7 +43,6 @@ import FastString ( unpackFS )
 import qualified GHC
 import GhcMonad (liftIO)
 import qualified HscTypes
-import qualified Unique as Unique
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
 #if __GLASGOW_HASKELL__ >= 706
@@ -78,7 +77,6 @@ import Control.Monad (filterM, liftM, void)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
 import Data.IntMap (IntMap)
-import qualified Data.IntMap as IM
 import Data.IORef
 import Data.List ((\\))
 import Data.Maybe (fromJust)
@@ -87,7 +85,7 @@ import System.Process
 
 import Common
 import Data.Aeson.TH (deriveJSON)
-import GhcHsWalk (extractSourceSpan, IdInfo(..), idInfoForName)
+import GhcHsWalk (extractSourceSpan, IdInfo(..), idInfoForName, wipeIdInfoCache)
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -198,7 +196,8 @@ compileInGhc :: FilePath            -- ^ target directory
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc ( [SourceError]
                     , [ModuleName]
-                    , ([(ModuleName, ([Import], [Int]))], IntMap IdInfo)
+                    , ( [(ModuleName, ([Import], [Either Int IdInfo]))]
+                      , IntMap IdInfo )
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -289,19 +288,17 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                        . handleSourceError (sourceErrorHandler flags)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
-                   -> IO ( [(ModuleName, ([Import], [Int]))]
+                   -> IO ( [(ModuleName, ([Import], [Either Int IdInfo]))]
                          , IntMap IdInfo )
 extractImportsAuto dflags session graph = do
-  idInfoCacheRef <- newIORef IM.empty
-  assocs <- mapM (goMod idInfoCacheRef) graph
-  cache <- readIORef idInfoCacheRef
+  assocs <- mapM goMod graph
+  cache <- wipeIdInfoCache
   return (assocs, cache)
   where
-    goMod :: IORef (IntMap IdInfo) -> ModSummary
-          -> IO (ModuleName, ([Import], [Int]))
-    goMod idInfoCacheRef summary = do
+    goMod :: ModSummary -> IO (ModuleName, ([Import], [Either Int IdInfo]))
+    goMod summary = do
       envs <- autoEnvs summary
-      idIs <- mapM (eltsToAutocompleteMap idInfoCacheRef) envs
+      idIs <- mapM eltsToAutocompleteMap envs
       return ( moduleNameString (ms_mod_name summary)
              , ( map goImp (ms_srcimps summary)
                  ++ map goImp (ms_textual_imps summary)
@@ -323,18 +320,11 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: IORef (IntMap IdInfo) -> GlobalRdrElt -> IO Int
-    eltsToAutocompleteMap idInfoCacheRef elt = do
-      cache <- readIORef idInfoCacheRef
+    eltsToAutocompleteMap :: GlobalRdrElt -> IO (Either Int IdInfo)
+    eltsToAutocompleteMap elt = do
       let name = gre_name elt
-          k = Unique.getKey $ Unique.getUnique name
-      case IM.lookup k cache of
-        Nothing -> do
-          let idInfo = fromJust $ idInfoForName dflags name False (Just elt)
-              ncache = IM.insert k idInfo cache
-          writeIORef idInfoCacheRef ncache
-          return k
-        Just _ -> return k
+      mk <- idInfoForName dflags name False (Just elt)
+      return $ fromJust mk
 
     autoEnvs :: ModSummary -> IO [GlobalRdrElt]
     autoEnvs ModSummary{ ms_mod

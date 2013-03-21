@@ -11,6 +11,7 @@ module GhcHsWalk
   , idMapToList
   , idMapFromList
   , idInfoForName
+  , wipeIdInfoCache
   , extractSourceSpan
   , idInfoQN
   ) where
@@ -24,12 +25,15 @@ import Control.Monad.Trans.Class (MonadTrans, lift)
 import Data.IORef
 import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Aeson.TH (deriveJSON)
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as IM
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Version
 import Data.Generics
 import Data.Maybe (fromMaybe)
 import Data.List (stripPrefix)
+import System.IO.Unsafe (unsafePerformIO)
 
 import qualified Common
 import Common hiding (ModuleName)
@@ -52,6 +56,7 @@ import PprTyThing (pprTypeForUser)
 import TcType (tidyOpenType)
 import VarEnv (TidyEnv, emptyTidyEnv)
 import FastString ( unpackFS )
+import qualified Unique as Unique
 
 #define DEBUG 1
 
@@ -126,6 +131,12 @@ idInfoQN IdInfo{idName, idScope} =
     WiredIn                -> idName
 
 data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
+  deriving (Data, Typeable)
+
+-- TODO: use and pass through JSON
+-- The integers are keys in the @IdInfo@ cache.
+data IdCachedMap = IdCachedMap
+  { _idCachedMapToMap :: Map SourceSpan (Either Int IdInfo) }
   deriving (Data, Typeable)
 
 type LoadedModules = Map Common.ModuleName IdMap
@@ -360,16 +371,41 @@ instance Record Id where
     TextSpan _ ->
       return ()
 
--- | Construct IdInfo for a 'Name'
+idInfoCacheRef :: IORef (IntMap IdInfo)
+{-# NOINLINE idInfoCacheRef #-}
+idInfoCacheRef = unsafePerformIO $ newIORef IM.empty
+
+wipeIdInfoCache :: IO (IntMap IdInfo)
+wipeIdInfoCache = do
+  -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
+  -- for long-running sessions with many added and removed definitions.
+  cache <- readIORef idInfoCacheRef
+  liftIO $ writeIORef idInfoCacheRef IM.empty
+  return cache
+
+-- | Construct an IdInfo for a 'Name'. We assume the @GlobalRdrElt@ is
+-- uniquely determined by the @Name@ and the @DynFlags@ do not change
+-- in a bad way.
 idInfoForName :: DynFlags                   -- ^ The usual dynflags
               -> Name                       -- ^ The name in question
               -> Bool                       -- ^ Is this a binding occurrence?
               -> Maybe RdrName.GlobalRdrElt -- ^ GlobalRdrElt for imported names
-              -> Maybe IdInfo               -- ^ Nothing if imported but no GlobalRdrElt
-idInfoForName dflags name idIsBinder mElt =
-    case constructScope of
-      Just idScope -> Just IdInfo{..}
-      Nothing      -> Nothing
+              -> IO (Maybe (Either Int IdInfo))
+                   -- ^ Nothing if imported but no GlobalRdrElt
+idInfoForName dflags name idIsBinder mElt = do
+  cache <- readIORef idInfoCacheRef
+  let k = Unique.getKey $ Unique.getUnique name
+  case IM.lookup k cache of
+    Just _ | not idIsBinder -> return $ Just $ Left k
+    _ -> case constructScope of
+      Nothing      -> return Nothing
+      Just idScope -> do
+        let idInfo = IdInfo{..}
+        if idIsBinder then return $ Just $ Right idInfo
+        else do
+          let ncache = IM.insert k idInfo cache
+          writeIORef idInfoCacheRef ncache
+          return $ Just $ Left k
   where
       occ     = Name.nameOccName name
       idName  = Name.occNameString occ
@@ -489,8 +525,16 @@ instance Record Name where
         dflags <- getDynFlags
         rdrEnv <- getGlobalRdrEnv
         -- The lookup into the rdr env will only be used for imported names
-        case idInfoForName dflags name idIsBinder (lookupRdrEnv rdrEnv name) of
-          Just idInfo ->
+        iFN <- liftIO $ idInfoForName
+                          dflags name idIsBinder (lookupRdrEnv rdrEnv name)
+        case iFN of
+          Just (Right idInfo) ->
+            modifyIdMap $ Map.insert sourceSpan idInfo
+          Just (Left k) -> do
+            cache <- liftIO $ readIORef idInfoCacheRef
+            let idInfo = fromMaybe (error "instance Record Name")
+                         $ IM.lookup k cache
+            -- TODO: insert k instead of idInfo and don't look up
             modifyIdMap $ Map.insert sourceSpan idInfo
           Nothing ->
             -- This only happens for some special cases ('assert' being

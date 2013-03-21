@@ -76,7 +76,7 @@ data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone ( [SourceError]
                    , LoadedModules
-                   , ( Map ModuleName (Maybe ([Import], [Int]))
+                   , ( Map ModuleName (Maybe ([Import], [Either Int IdInfo]))
                      , IntMap IdInfo ) )
   deriving Show
 data GhcRunResponse =
@@ -157,7 +157,7 @@ ghcHandleCompile :: RpcConversation
                  -> Maybe [String]       -- ^ new, user-submitted dynamic flags
                  -> IORef LoadedModules  -- ^ ref for newly generated IdMaps
                  -> IORef LoadedModules  -- ^ ref for accumulated IdMaps
-                 -> IORef (Map ModuleName ([Import], [Int]))
+                 -> IORef (Map ModuleName ([Import], [Either Int IdInfo]))
                                          -- ref for previous imports and auto
                  -> FilePath             -- ^ source directory
                  -> Bool                 -- ^ should we generate code
@@ -203,8 +203,8 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     previousImportsAuto <- liftIO $ readIORef importsAutoRef
     let currentImportsAuto = Map.fromList importsAutoList
         changedModuleSet = Map.keysSet pluginIdMaps
-        diff :: (ModuleName, ([Import], [Int]))
-             -> Maybe (ModuleName, Maybe ([Import], [Int]))
+        diff :: (ModuleName, ([Import], [Either Int IdInfo]))
+             -> Maybe (ModuleName, Maybe ([Import], [Either Int IdInfo]))
         diff (m, ia) =
           case Map.lookup m previousImportsAuto of
             Nothing -> Just (m, Just ia)  -- add a new module
@@ -438,10 +438,11 @@ rpcCompile server opts dir genCode callback =
                            )
     go
 
-constructAuto :: IntMap IdInfo -> [Int] -> Trie [IdInfo]
+constructAuto :: IntMap IdInfo -> [Either Int IdInfo] -> Trie [IdInfo]
 constructAuto cache lk = Trie.fromListWith (++) newInfos
   where
-    aux k = let !idInfo = fromMaybe (error "constructAuto") $ IM.lookup k cache
+    aux k = let !idInfo = either (fromMaybe (error "constructAuto")
+                                  . flip IM.lookup cache) id k
             in (BSSC.pack (idName idInfo), [idInfo])
     forceSpine l = length l `seq` l
     !newInfos = forceSpine $ map aux lk
