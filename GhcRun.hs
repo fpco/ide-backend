@@ -43,6 +43,8 @@ import FastString ( unpackFS )
 import qualified GHC
 import GhcMonad (liftIO)
 import qualified HscTypes
+import UniqFM (UniqFM)
+import qualified UniqFM as UniqFM
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
 #if __GLASGOW_HASKELL__ >= 706
@@ -287,15 +289,19 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
                    -> IO [(ModuleName, ([Import], [IdInfo]))]
-extractImportsAuto dflags session = mapM goMod
+extractImportsAuto dflags session graph = do
+  idInfoCacheRef <- newIORef UniqFM.emptyUFM
+  mapM (goMod idInfoCacheRef) graph
   where
-    goMod :: ModSummary -> IO (ModuleName, ([Import], [IdInfo]))
-    goMod summary = do
+    goMod :: IORef (UniqFM IdInfo) -> ModSummary
+          -> IO (ModuleName, ([Import], [IdInfo]))
+    goMod idInfoCacheRef summary = do
       envs <- autoEnvs summary
+      idIs <- mapM (eltsToAutocompleteMap idInfoCacheRef) envs
       return ( moduleNameString (ms_mod_name summary)
              , ( map goImp (ms_srcimps summary)
                  ++ map goImp (ms_textual_imps summary)
-               , map (eltsToAutocompleteMap) envs
+               , idIs
                )
              )
 
@@ -313,9 +319,17 @@ extractImportsAuto dflags session = mapM goMod
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: GlobalRdrElt -> IdInfo
-    eltsToAutocompleteMap elt =
-      fromJust $ idInfoForName dflags (gre_name elt) False (Just elt)
+    eltsToAutocompleteMap :: IORef (UniqFM IdInfo) -> GlobalRdrElt -> IO IdInfo
+    eltsToAutocompleteMap idInfoCacheRef elt = do
+      cache <- readIORef idInfoCacheRef
+      let name = gre_name elt
+      case UniqFM.lookupUFM cache name of
+        Nothing -> do
+          let idInfo = fromJust $ idInfoForName dflags name False (Just elt)
+              ncache = UniqFM.addToUFM cache name idInfo
+          writeIORef idInfoCacheRef ncache
+          return idInfo
+        Just idInfo -> return idInfo
 
     autoEnvs :: ModSummary -> IO [GlobalRdrElt]
     autoEnvs ModSummary{ ms_mod
