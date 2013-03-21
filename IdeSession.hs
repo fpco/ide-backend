@@ -283,14 +283,14 @@ data Computed = Computed {
   , computedLoadedModules :: LoadedModules
     -- | Import information. This is (usually) available even for modules
     -- with parsing or type errors
-  , computedImports :: Map ModuleName [Import]
+  , computedImports :: !(Map ModuleName [Import])
     -- | Autocompletion map
     --
     -- Mapping, per module, from prefixes to fully qualified names
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
-  , computedAutoMap :: Map ModuleName (Trie [IdInfo])
+  , computedAutoMap :: !(Map ModuleName (Trie [IdInfo]))
   }
 
 -- | This type is a handle to a session state. Values of this type
