@@ -439,11 +439,12 @@ rpcCompile server opts dir genCode callback =
     go
 
 constructAuto :: IntMap IdInfo -> [Int] -> Trie [IdInfo]
-constructAuto cache = Trie.fromListWith (++) . forceSpine . map aux
+constructAuto cache lk = Trie.fromListWith (++) newInfos
   where
     aux k = let !idInfo = fromMaybe (error "constructAuto") $ IM.lookup k cache
             in (BSSC.pack (idName idInfo), [idInfo])
     forceSpine l = length l `seq` l
+    !newInfos = forceSpine $ map aux lk
 
 -- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {
