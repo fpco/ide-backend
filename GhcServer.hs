@@ -45,6 +45,8 @@ import System.Exit (ExitCode)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as IM
 import Data.Trie (Trie)
 import qualified Data.Trie.Convenience as Trie
 
@@ -74,7 +76,8 @@ data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone ( [SourceError]
                    , LoadedModules
-                   , Map ModuleName (Maybe ([Import], [IdInfo])) )
+                   , ( Map ModuleName (Maybe ([Import], [IdInfo]))
+                     , IM.IntMap IdInfo ) )
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -163,7 +166,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
                  importsAutoRef configSourcesDir ideGenerateCode = do
     errsRef  <- liftIO $ newIORef []
     counter  <- liftIO $ newIORef initialProgress
-    (errs, loadedModules, importsAutoList) <-
+    (errs, loadedModules, (importsAutoList, cache)) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
@@ -221,7 +224,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     liftIO $ writeIORef importsAutoRef
            $ applyMapDiff diffMap previousImportsAuto
     -- Ship the results.
-    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, diffMap)
+    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, (diffMap, cache))
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -427,7 +430,7 @@ rpcCompile server opts dir genCode callback =
                 case response of
                   GhcCompileProgress pcounter ->
                     callback pcounter >> go
-                  GhcCompileDone (errs, loaded, importsAuto) ->
+                  GhcCompileDone (errs, loaded, (importsAuto, _cache)) ->
                     return ( errs
                            , loaded
                            , Map.map (fmap (second constructAuto)) importsAuto

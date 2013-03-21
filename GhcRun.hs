@@ -43,8 +43,7 @@ import FastString ( unpackFS )
 import qualified GHC
 import GhcMonad (liftIO)
 import qualified HscTypes
-import UniqFM (UniqFM)
-import qualified UniqFM as UniqFM
+import qualified Unique as Unique
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
 #if __GLASGOW_HASKELL__ >= 706
@@ -78,6 +77,8 @@ import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM, void)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as IM
 import Data.IORef
 import Data.List ((\\))
 import Data.Maybe (fromJust)
@@ -197,7 +198,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc ( [SourceError]
                     , [ModuleName]
-                    , [(ModuleName, ([Import], [IdInfo]))]
+                    , ([(ModuleName, ([Import], [IdInfo]))], IM.IntMap IdInfo)
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -288,12 +289,15 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                        . handleSourceError (sourceErrorHandler flags)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
-                   -> IO [(ModuleName, ([Import], [IdInfo]))]
+                   -> IO ( [(ModuleName, ([Import], [IdInfo]))]
+                         , IM.IntMap IdInfo )
 extractImportsAuto dflags session graph = do
-  idInfoCacheRef <- newIORef UniqFM.emptyUFM
-  mapM (goMod idInfoCacheRef) graph
+  idInfoCacheRef <- newIORef IM.empty
+  assocs <- mapM (goMod idInfoCacheRef) graph
+  cache <- readIORef idInfoCacheRef
+  return (assocs, cache)
   where
-    goMod :: IORef (UniqFM IdInfo) -> ModSummary
+    goMod :: IORef (IntMap IdInfo) -> ModSummary
           -> IO (ModuleName, ([Import], [IdInfo]))
     goMod idInfoCacheRef summary = do
       envs <- autoEnvs summary
@@ -319,14 +323,15 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: IORef (UniqFM IdInfo) -> GlobalRdrElt -> IO IdInfo
+    eltsToAutocompleteMap :: IORef (IntMap IdInfo) -> GlobalRdrElt -> IO IdInfo
     eltsToAutocompleteMap idInfoCacheRef elt = do
       cache <- readIORef idInfoCacheRef
       let name = gre_name elt
-      case UniqFM.lookupUFM cache name of
+      case IM.lookup (Unique.getKey $ Unique.getUnique name) cache of
         Nothing -> do
           let idInfo = fromJust $ idInfoForName dflags name False (Just elt)
-              ncache = UniqFM.addToUFM cache name idInfo
+              ncache =
+                IM.insert (Unique.getKey $ Unique.getUnique name) idInfo cache
           writeIORef idInfoCacheRef ncache
           return idInfo
         Just idInfo -> return idInfo
