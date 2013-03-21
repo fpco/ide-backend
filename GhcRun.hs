@@ -198,7 +198,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc ( [SourceError]
                     , [ModuleName]
-                    , ([(ModuleName, ([Import], [IdInfo]))], IM.IntMap IdInfo)
+                    , ([(ModuleName, ([Import], [Int]))], IntMap IdInfo)
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -289,8 +289,8 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                        . handleSourceError (sourceErrorHandler flags)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
-                   -> IO ( [(ModuleName, ([Import], [IdInfo]))]
-                         , IM.IntMap IdInfo )
+                   -> IO ( [(ModuleName, ([Import], [Int]))]
+                         , IntMap IdInfo )
 extractImportsAuto dflags session graph = do
   idInfoCacheRef <- newIORef IM.empty
   assocs <- mapM (goMod idInfoCacheRef) graph
@@ -298,7 +298,7 @@ extractImportsAuto dflags session graph = do
   return (assocs, cache)
   where
     goMod :: IORef (IntMap IdInfo) -> ModSummary
-          -> IO (ModuleName, ([Import], [IdInfo]))
+          -> IO (ModuleName, ([Import], [Int]))
     goMod idInfoCacheRef summary = do
       envs <- autoEnvs summary
       idIs <- mapM (eltsToAutocompleteMap idInfoCacheRef) envs
@@ -323,18 +323,18 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: IORef (IntMap IdInfo) -> GlobalRdrElt -> IO IdInfo
+    eltsToAutocompleteMap :: IORef (IntMap IdInfo) -> GlobalRdrElt -> IO Int
     eltsToAutocompleteMap idInfoCacheRef elt = do
       cache <- readIORef idInfoCacheRef
       let name = gre_name elt
-      case IM.lookup (Unique.getKey $ Unique.getUnique name) cache of
+          k = Unique.getKey $ Unique.getUnique name
+      case IM.lookup k cache of
         Nothing -> do
           let idInfo = fromJust $ idInfoForName dflags name False (Just elt)
-              ncache =
-                IM.insert (Unique.getKey $ Unique.getUnique name) idInfo cache
+              ncache = IM.insert k idInfo cache
           writeIORef idInfoCacheRef ncache
-          return idInfo
-        Just idInfo -> return idInfo
+          return k
+        Just _ -> return k
 
     autoEnvs :: ModSummary -> IO [GlobalRdrElt]
     autoEnvs ModSummary{ ms_mod
