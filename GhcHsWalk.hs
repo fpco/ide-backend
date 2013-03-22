@@ -532,12 +532,23 @@ instance Record id => ExtractIds (LSig id) where
   extractIds (L span (TypeSig names tp)) = ast (Just span) "TypeSig" $ do
     forM_ names $ \name -> record (getLoc name) False (unLoc name)
     extractIds tp
-  extractIds (L span (GenericSig _ _)) = unsupported (Just span) "GenericSig"
-  extractIds (L span (IdSig _))        = unsupported (Just span) "IdSig"
-  extractIds (L span (FixSig _))       = unsupported (Just span) "FixSig"
-  extractIds (L span (InlineSig _ _))  = unsupported (Just span) "InlineSig"
-  extractIds (L span (SpecSig _ _ _))  = unsupported (Just span) "SpecSig"
-  extractIds (L span (SpecInstSig _))  = unsupported (Just span) "SpecInstSig"
+  extractIds (L span (GenericSig names tp)) = ast (Just span) "GenericSig" $ do
+    forM_ names $ \name -> record (getLoc name) False (unLoc name)
+    extractIds tp
+
+  -- Only in generated code
+  extractIds (L span (IdSig _)) = ast (Just span) "IdSig" $
+    return ()
+
+  -- Annotations
+  extractIds (L span (FixSig _)) = ast (Just span) "FixSig" $
+    return ()
+  extractIds (L span (InlineSig _ _)) = ast (Just span) "InlineSig" $
+    return ()
+  extractIds (L span (SpecSig _ _ _)) = ast (Just span) "SpecSig" $
+    return ()
+  extractIds (L span (SpecInstSig _)) = ast (Just span) "SpecInstSig" $
+    return ()
 
 instance Record id => ExtractIds (LHsType id) where
   extractIds (L span (HsFunTy arg res)) = ast (Just span) "HsFunTy" $
