@@ -85,7 +85,7 @@ import System.Process
 
 import Common
 import Data.Aeson.TH (deriveJSON)
-import GhcHsWalk (extractSourceSpan, IdInfo(..), idInfoForName, wipeIdInfoCache)
+import GhcHsWalk (extractSourceSpan, IdInfo(..), IdScope, idInfoForName, wipeIdInfoCache)
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -196,7 +196,8 @@ compileInGhc :: FilePath            -- ^ target directory
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc ( [SourceError]
                     , [ModuleName]
-                    , ( [(ModuleName, ([Import], [Either Int IdInfo]))]
+                    , ( [(ModuleName, ( [Import]
+                                      , [(Either Int IdInfo, IdScope)] ))]
                       , IntMap IdInfo )
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
@@ -288,14 +289,16 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                        . handleSourceError (sourceErrorHandler flags)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
-                   -> IO ( [(ModuleName, ([Import], [Either Int IdInfo]))]
+                   -> IO ( [(ModuleName, ( [Import]
+                                         , [(Either Int IdInfo, IdScope)] ))]
                          , IntMap IdInfo )
 extractImportsAuto dflags session graph = do
   assocs <- mapM goMod graph
   cache <- wipeIdInfoCache
   return (assocs, cache)
   where
-    goMod :: ModSummary -> IO (ModuleName, ([Import], [Either Int IdInfo]))
+    goMod :: ModSummary -> IO (ModuleName, ( [Import]
+                                           , [(Either Int IdInfo, IdScope)] ))
     goMod summary = do
       envs <- autoEnvs summary
       idIs <- mapM eltsToAutocompleteMap envs
@@ -320,11 +323,11 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: GlobalRdrElt -> IO (Either Int IdInfo)
+    eltsToAutocompleteMap :: GlobalRdrElt -> IO (Either Int IdInfo, IdScope)
     eltsToAutocompleteMap elt = do
       let name = gre_name elt
-      mk <- idInfoForName dflags name False (Just elt)
-      return $ fromJust mk
+      (idInfo, midScope) <- idInfoForName dflags name False (Just elt)
+      return $ (idInfo, fromJust midScope)
 
     autoEnvs :: ModSummary -> IO [GlobalRdrElt]
     autoEnvs ModSummary{ ms_mod

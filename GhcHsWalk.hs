@@ -83,8 +83,6 @@ data IdInfo = IdInfo
     -- We don't always know this; in particular, we don't know kinds because
     -- the type checker does not give us LSigs for top-level annotations)
   , idType :: Maybe String
-    -- | Scope
-  , idScope :: IdScope
   }
   deriving (Eq, Data, Typeable)
 
@@ -122,21 +120,21 @@ data IdScope =
   deriving (Eq, Data, Typeable)
 
 -- | Construct qualified name following Haskell's scoping rules
-idInfoQN :: IdInfo -> String
-idInfoQN IdInfo{idName, idScope} =
+idInfoQN :: (IdInfo, IdScope) -> String
+idInfoQN (IdInfo{idName}, idScope) =
   case idScope of
     Binder                 -> idName
     Local{}                -> idName
     Imported{idImportQual} -> idImportQual ++ idName
     WiredIn                -> idName
 
-data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
+data IdMap = IdMap { idMapToMap :: Map SourceSpan (IdInfo, IdScope) }
   deriving (Data, Typeable)
 
 -- TODO: use and pass through JSON
 -- The integers are keys in the @IdInfo@ cache.
 data IdCachedMap = IdCachedMap
-  { _idCachedMapToMap :: Map SourceSpan (Either Int IdInfo) }
+  { _idCachedMapToMap :: Map SourceSpan (Int, IdScope) }
   deriving (Data, Typeable)
 
 type LoadedModules = Map Common.ModuleName IdMap
@@ -151,20 +149,23 @@ instance FromJSON IdMap where
 instance ToJSON IdMap where
   toJSON = toJSON . idMapToList
 
-idMapToList :: IdMap -> [(SourceSpan, IdInfo)]
+idMapToList :: IdMap -> [(SourceSpan, (IdInfo, IdScope))]
 idMapToList = Map.toList . idMapToMap
 
-idMapFromList :: [(SourceSpan, IdInfo)] -> IdMap
+idMapFromList :: [(SourceSpan, (IdInfo, IdScope))] -> IdMap
 idMapFromList = IdMap . Map.fromList
 
 instance Show IdMap where
-  show = unlines . map show . idMapToList
+  show = let showIdInfoAndIdScope (span, (idInfo, idScope)) =
+               "(" ++ show span ++ ","
+               ++ show idInfo
+               ++ "(" ++ show idScope ++ "))"
+         in unlines . map showIdInfoAndIdScope . idMapToList
 
 instance Show IdInfo where
   show (IdInfo {..}) = idName ++ " "
                     ++ "(" ++ show idSpace ++ ") "
                     ++ (case idType of Just typ -> ":: " ++ typ ++ " "; Nothing -> [])
-                    ++ "(" ++ show idScope ++ ")"
 
 -- TODO: If these Maybes stay, we should have a prettier Show instance
 -- (but hopefully they will go)
@@ -199,8 +200,8 @@ haddockSpaceMarks TcClsName = "t"
 -- This is an illustraction and a test of the id info, but under ideal
 -- conditions could perhaps serve to link to documentation without
 -- going via Hoogle.
-haddockLink :: IdInfo -> String
-haddockLink IdInfo{..} =
+haddockLink :: (IdInfo, IdScope) -> String
+haddockLink (IdInfo{..}, idScope) =
   case idScope of
     Imported{idImportedFrom} ->
          dashToSlash (modulePackage idImportedFrom)
@@ -215,7 +216,7 @@ haddockLink IdInfo{..} =
      Nothing -> packageName p ++ "/latest"
      Just version -> packageName p ++ "/" ++ version
 
-idInfoAtLocation :: Int -> Int -> IdMap -> [(SourceSpan, IdInfo)]
+idInfoAtLocation :: Int -> Int -> IdMap -> [(SourceSpan, (IdInfo, IdScope))]
 idInfoAtLocation line col = filter inRange . idMapToList
   where
     inRange :: (SourceSpan, a) -> Bool
@@ -284,7 +285,10 @@ getDynFlags = asks fst
 getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
 getGlobalRdrEnv = asks snd
 
-modifyIdMap :: Monad m => (Map SourceSpan IdInfo -> Map SourceSpan IdInfo) -> ExtractIdsT m ()
+modifyIdMap :: Monad m
+            => (Map SourceSpan (IdInfo, IdScope)
+            -> Map SourceSpan (IdInfo, IdScope))
+            -> ExtractIdsT m ()
 modifyIdMap f = modify . second $ IdMap . f . idMapToMap
 
 prettyType :: Monad m => Type -> ExtractIdsT m Type
@@ -366,7 +370,8 @@ instance Record Id where
     ProperSpan sourceSpan -> do
       typ <- prettyType (Var.varType id)
       let typDoc = pprTypeForUser True typ
-      let addType idInfo = Just $ idInfo { idType = Just (showSDoc typDoc) }
+      let addType (idInfo, idScope) =
+            Just $ (idInfo { idType = Just (showSDoc typDoc) }, idScope)
       modifyIdMap $ Map.update addType sourceSpan
     TextSpan _ ->
       return ()
@@ -390,22 +395,18 @@ idInfoForName :: DynFlags                   -- ^ The usual dynflags
               -> Name                       -- ^ The name in question
               -> Bool                       -- ^ Is this a binding occurrence?
               -> Maybe RdrName.GlobalRdrElt -- ^ GlobalRdrElt for imported names
-              -> IO (Maybe (Either Int IdInfo))
+              -> IO (Either Int IdInfo, Maybe IdScope)
                    -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt = do
   cache <- readIORef idInfoCacheRef
   let k = Unique.getKey $ Unique.getUnique name
   case IM.lookup k cache of
-    Just _ | not idIsBinder -> return $ Just $ Left k
-    _ -> case constructScope of
-      Nothing      -> return Nothing
-      Just idScope -> do
-        let idInfo = IdInfo{..}
-        if idIsBinder then return $ Just $ Right idInfo
-        else do
-          let ncache = IM.insert k idInfo cache
-          writeIORef idInfoCacheRef ncache
-          return $ Just $ Left k
+    Just _ -> return ()
+    _ -> do
+      let idInfo = IdInfo{..}
+          ncache = IM.insert k idInfo cache
+      writeIORef idInfoCacheRef ncache
+  return (Left k, constructScope)
   where
       occ     = Name.nameOccName name
       idName  = Name.occNameString occ
@@ -528,15 +529,15 @@ instance Record Name where
         iFN <- liftIO $ idInfoForName
                           dflags name idIsBinder (lookupRdrEnv rdrEnv name)
         case iFN of
-          Just (Right idInfo) ->
-            modifyIdMap $ Map.insert sourceSpan idInfo
-          Just (Left k) -> do
+          (Right idInfo, Just idScope) ->
+            modifyIdMap $ Map.insert sourceSpan (idInfo, idScope)
+          (Left k, Just idScope) -> do
             cache <- liftIO $ readIORef idInfoCacheRef
             let idInfo = fromMaybe (error "instance Record Name")
                          $ IM.lookup k cache
             -- TODO: insert k instead of idInfo and don't look up
-            modifyIdMap $ Map.insert sourceSpan idInfo
-          Nothing ->
+            modifyIdMap $ Map.insert sourceSpan (idInfo, idScope)
+          (_, Nothing) ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from
             -- 'GHC.IO.Exception' but there is no corresponding entry in the
