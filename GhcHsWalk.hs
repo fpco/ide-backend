@@ -1,4 +1,6 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, TemplateHaskell, CPP, DeriveDataTypeable #-}
+{-# LANGUAGE CPP, DeriveDataTypeable, FlexibleInstances,
+             GeneralizedNewtypeDeriving, MultiParamTypeClasses, TemplateHaskell,
+             TypeSynonymInstances #-}
 module GhcHsWalk
   ( IdMap(..)
   , IdInfo
@@ -18,47 +20,48 @@ module GhcHsWalk
   , idInfoQN
   ) where
 
-import Prelude hiding (span, id, mod)
 import Control.Arrow (first, second)
 import Control.Monad (forM_)
-import Control.Monad.State (MonadState, StateT, execStateT, modify, state, get, put)
-import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
+import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
+import Control.Monad.State (MonadState, StateT, execStateT, get, modify, put,
+                            state)
 import Control.Monad.Trans.Class (MonadTrans, lift)
-import Data.IORef
-import Data.Aeson (FromJSON(..), ToJSON(..))
+import Data.Aeson (FromJSON (..), ToJSON (..))
 import Data.Aeson.TH (deriveJSON)
+import Data.Generics
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
+import Data.IORef
+import Data.List (stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Version
-import Data.Generics
 import Data.Maybe (fromMaybe)
-import Data.List (stripPrefix)
+import Data.Version
+import Prelude hiding (id, mod, span)
 import System.IO.Unsafe (unsafePerformIO)
 
-import qualified Common
 import Common hiding (ModuleName)
+import qualified Common
 
-import qualified GHC
-import GHC hiding (idType, PackageId, moduleName)
-import TcRnTypes
-import Outputable
-import HscPlugin
-import Var hiding (idInfo)
-import qualified Name
-import qualified Module
-import MonadUtils (MonadIO(..))
 import Bag
 import DataCon (dataConName)
-import qualified Packages
-import qualified RdrName
+import FastString (unpackFS)
+import GHC hiding (PackageId, idType, moduleName)
+import qualified GHC
+import HscPlugin
+import qualified Module
+import MonadUtils (MonadIO (..))
+import qualified Name
 import OccName
+import Outputable
+import qualified Packages
 import PprTyThing (pprTypeForUser)
+import qualified RdrName
+import TcRnTypes
 import TcType (tidyOpenType)
-import VarEnv (TidyEnv, emptyTidyEnv)
-import FastString ( unpackFS )
 import qualified Unique as Unique
+import Var hiding (idInfo)
+import VarEnv (TidyEnv, emptyTidyEnv)
 
 #define DEBUG 1
 
@@ -78,13 +81,13 @@ data IdNameSpace =
 data IdProp = IdProp
   { -- | The base name of the identifer at this location. Module prefix
     -- is not included.
-    idName :: String
+    idName  :: String
     -- | Namespace this identifier is drawn from
   , idSpace :: IdNameSpace
     -- | The type
     -- We don't always know this; in particular, we don't know kinds because
     -- the type checker does not give us LSigs for top-level annotations)
-  , idType :: Maybe String
+  , idType  :: Maybe String
   }
   deriving (Eq, Data, Typeable)
 
@@ -137,8 +140,7 @@ data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
 
 -- TODO: use and pass through JSON
 -- The integers are keys in the @IdProp@ cache.
-data IdCachedMap = IdCachedMap
-  { _idCachedMapToMap :: Map SourceSpan IdInfoOpt }
+data IdMapOpt = IdMapOpt { _idMapToMapOpt :: Map SourceSpan IdInfoOpt }
   deriving (Data, Typeable)
 
 type LoadedModules = Map Common.ModuleName IdMap
@@ -380,16 +382,16 @@ instance Record Id where
     TextSpan _ ->
       return ()
 
-idInfoCacheRef :: IORef (IntMap IdProp)
-{-# NOINLINE idInfoCacheRef #-}
-idInfoCacheRef = unsafePerformIO $ newIORef IM.empty
+idPropCacheRef :: IORef (IntMap IdProp)
+{-# NOINLINE idPropCacheRef #-}
+idPropCacheRef = unsafePerformIO $ newIORef IM.empty
 
 wipeIdPropCache :: IO (IntMap IdProp)
 wipeIdPropCache = do
   -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
   -- for long-running sessions with many added and removed definitions.
-  cache <- readIORef idInfoCacheRef
-  liftIO $ writeIORef idInfoCacheRef IM.empty
+  cache <- readIORef idPropCacheRef
+  liftIO $ writeIORef idPropCacheRef IM.empty
   return cache
 
 -- | Construct an IdInfo for a 'Name'. We assume the @GlobalRdrElt@ is
@@ -402,14 +404,14 @@ idInfoForName :: DynFlags                   -- ^ The usual dynflags
               -> IO (Int, Maybe IdScope)
                    -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt = do
-  cache <- readIORef idInfoCacheRef
+  cache <- readIORef idPropCacheRef
   let k = Unique.getKey $ Unique.getUnique name
   case IM.lookup k cache of
     Just _ -> return ()
     _ -> do
       let idInfo = IdProp{..}
           ncache = IM.insert k idInfo cache
-      writeIORef idInfoCacheRef ncache
+      writeIORef idPropCacheRef ncache
   return (k, constructScope)
   where
       occ     = Name.nameOccName name
@@ -529,16 +531,17 @@ instance Record Name where
       ProperSpan sourceSpan -> do
         dflags <- getDynFlags
         rdrEnv <- getGlobalRdrEnv
-        -- The lookup into the rdr env will only be used for imported names
+        -- The lookup into the rdr env will only be used for imported names.
+        -- TODO: the cache is update twice here; clean up with Ints in IdMaps.
         iFN <- liftIO $ idInfoForName
                           dflags name idIsBinder (lookupRdrEnv rdrEnv name)
         case iFN of
           (k, Just idScope) -> do
-            cache <- liftIO $ readIORef idInfoCacheRef
-            let idInfo = fromMaybe (error "instance Record Name")
+            cache <- liftIO $ readIORef idPropCacheRef
+            let idProp = fromMaybe (error "instance Record Name")
                          $ IM.lookup k cache
-            -- TODO: insert k instead of idInfo and don't look up
-            modifyIdMap $ Map.insert sourceSpan (idInfo, idScope)
+            -- TODO: insert k instead of idProp and don't look up
+            modifyIdMap $ Map.insert sourceSpan (idProp, idScope)
           (_, Nothing) ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from
@@ -672,19 +675,19 @@ instance Record id => ExtractIds (LHsTyVarBndrs id) where
 
 instance Record id => ExtractIds (LHsTyVarBndr id) where
 #if __GLASGOW_HASKELL__ >= 706
-  extractIds (L span (UserTyVar name)) = ast (Just span) "UserTyVar" $
+  extractIds (L span (UserTyVar name)) = ast (Just span) "UserTyVar"
 #else
-  extractIds (L span (UserTyVar name _postTcKind)) = ast (Just span) "UserTyVar" $
+  extractIds (L span (UserTyVar name _postTcKind)) = ast (Just span) "UserTyVar"
 #endif
-    record span True name
+    (record span True name)
 
 #if __GLASGOW_HASKELL__ >= 706
-  extractIds (L span (KindedTyVar name _kind)) = ast (Just span) "KindedTyVar" $
+  extractIds (L span (KindedTyVar name _kind)) = ast (Just span) "KindedTyVar"
 #else
-  extractIds (L span (KindedTyVar name _kind _postTcKind)) = ast (Just span) "KindedTyVar" $
+  extractIds (L span (KindedTyVar name _kind _postTcKind)) = ast (Just span) "KindedTyVar"
 #endif
     -- TODO: deal with _kind
-    record span True name
+    (record span True name)
 
 instance Record id => ExtractIds (LHsContext id) where
   extractIds (L span typs) = ast (Just span) "LHsContext" $
