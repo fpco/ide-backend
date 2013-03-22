@@ -943,16 +943,23 @@ instance Record id => ExtractIds (LPat id) where
     return ()
   extractIds (L span (NPat _ _ _)) = ast (Just span) "NPat" $
     return ()
+  extractIds (L span (NPlusKPat id _lit _rebind1 _rebind2)) = ast (Just span) "NPlusKPat" $ do
+    record (getLoc id) True (unLoc id)
+  extractIds (L span (ViewPat expr pat _postTcType)) = ast (Just span) "ViewPat" $ do
+    extractIds expr
+    extractIds pat
+  extractIds (L span (SigPatIn pat typ)) = ast (Just span) "SigPatIn" $ do
+    extractIds pat
+    extractIds typ
+  extractIds (L span (SigPatOut pat _typ)) = ast (Just span) "SigPatOut" $ do
+    -- _typ is not located
+    extractIds pat
+  extractIds (L span (QuasiQuotePat qquote)) = ast (Just span) "QuasiQuotePat" $
+    extractIds qquote
 
-
-
-  -- View patterns
-  extractIds (L span (ViewPat _ _ _))     = unsupported (Just span) "ViewPat"
-  extractIds (L span (QuasiQuotePat _))   = unsupported (Just span) "QuasiQuotePat"
-  extractIds (L span (NPlusKPat _ _ _ _)) = unsupported (Just span) "NPlusKPat"
-  extractIds (L span (SigPatIn _ _))      = unsupported (Just span) "SigPatIn"
-  extractIds (L span (SigPatOut _ _))     = unsupported (Just span) "SigPatOut"
-  extractIds (L span (CoPat _ _ _))       = unsupported (Just span) "CoPat"
+  -- During translation only
+  extractIds (L span (CoPat _ _ _)) = ast (Just span) "CoPat" $
+    return ()
 
 instance (ExtractIds arg, ExtractIds rec) => ExtractIds (HsConDetails arg rec) where
   extractIds (PrefixCon args) = ast Nothing "PrefixCon" $
