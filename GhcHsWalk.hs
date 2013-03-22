@@ -694,8 +694,17 @@ instance Record id => ExtractIds (HsLocalBinds id) where
   extractIds (HsValBinds (ValBindsOut binds sigs)) = ast Nothing "HsValBinds" $ do
     extractIds (map snd binds) -- "fst" is 'rec flag'
     extractIds sigs
-  extractIds (HsIPBinds _) =
-    unsupported Nothing "HsIPBinds"
+  extractIds (HsIPBinds binds) =
+    extractIds binds
+
+instance Record id => ExtractIds (HsIPBinds id) where
+  extractIds (IPBinds binds _evidence) =
+    extractIds binds
+
+instance Record id => ExtractIds (LIPBind id) where
+  extractIds (L span (IPBind _name expr)) = ast (Just span) "IPBind" $ do
+    -- Name is not located :(
+    extractIds expr
 
 instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsPar expr)) = ast (Just span) "HsPar" $
@@ -747,36 +756,56 @@ instance Record id => ExtractIds (LHsExpr id) where
     extractIds matches
   extractIds (L span (ExplicitTuple args _boxity)) = ast (Just span) "ExplicitTuple" $
     extractIds args
-  extractIds (L span (HsIf _ cond true false)) = ast (Just span) "HsIf" $
-    -- First argument is something to do with rebindable syntax
+  extractIds (L span (HsIf _rebind cond true false)) = ast (Just span) "HsIf" $
     extractIds [cond, true, false]
   extractIds (L span (SectionL arg op)) = ast (Just span) "SectionL" $
     extractIds [arg, op]
   extractIds (L span (SectionR op arg)) = ast (Just span) "SectionR" $
     extractIds [op, arg]
+  extractIds (L span (HsIPVar _name)) = ast (Just span) "HsIPVar" $
+    -- _name is not located :(
+    return ()
+  extractIds (L span (NegApp expr _rebind)) = ast (Just span) "NegApp" $
+    extractIds expr
+  extractIds (L span (HsBracket th)) = ast (Just span) "HsBracket" $
+    extractIds th
+  extractIds (L span (HsBracketOut th _pendingSplice)) = ast (Just span) "HsBracketOut" $
+    -- TODO: should we traverse pendingSplice?
+    extractIds th
+  extractIds (L span (RecordUpd expr binds _dataCons _postTcTypeInp _postTcTypeOutp)) = ast (Just span) "RecordUpd" $ do
+    extractIds expr
+    extractIds binds
 
-  extractIds (L span (HsIPVar _ ))          = unsupported (Just span) "HsIPVar"
-  extractIds (L span (NegApp _ _))          = unsupported (Just span) "NegApp"
-  extractIds (L span (ExplicitPArr _ _))    = unsupported (Just span) "ExplicitPArr"
-  extractIds (L span (RecordUpd _ _ _ _ _)) = unsupported (Just span) "RecordUpd"
-  extractIds (L span (PArrSeq _ _))         = unsupported (Just span) "PArrSeq"
-  extractIds (L span (HsSCC _ _))           = unsupported (Just span) "HsSCC"
-  extractIds (L span (HsCoreAnn _ _))       = unsupported (Just span) "HsCoreAnn"
-  extractIds (L span (HsBracket _))         = unsupported (Just span) "HsBracket"
-  extractIds (L span (HsBracketOut _ _))    = unsupported (Just span) "HsBracketOut"
   extractIds (L span (HsSpliceE _))         = unsupported (Just span) "HsSpliceE"
   extractIds (L span (HsQuasiQuoteE _ ))    = unsupported (Just span) "HsQuasiQuoteE"
+
   extractIds (L span (HsProc _ _))          = unsupported (Just span) "HsProc"
   extractIds (L span (HsArrApp _ _ _ _ _))  = unsupported (Just span) "HsArrApp"
   extractIds (L span (HsArrForm _ _ _))     = unsupported (Just span) "HsArrForm"
   extractIds (L span (HsTick _ _))          = unsupported (Just span) "HsTick"
   extractIds (L span (HsBinTick _ _ _))     = unsupported (Just span) "HsBinTick"
   extractIds (L span (HsTickPragma _ _))    = unsupported (Just span) "HsTickPragma"
-  extractIds (L span EWildPat)              = unsupported (Just span) "EWildPat"
-  extractIds (L span (EAsPat _ _))          = unsupported (Just span) "EAsPat"
-  extractIds (L span (EViewPat _ _))        = unsupported (Just span) "EViewPat"
-  extractIds (L span (ELazyPat _))          = unsupported (Just span) "ELazyPat"
-  extractIds (L span (HsType _ ))           = unsupported (Just span) "HsType"
+
+  extractIds (L span (HsSCC _ _))           = unsupported (Just span) "HsSCC"
+  extractIds (L span (HsCoreAnn _ _))       = unsupported (Just span) "HsCoreAnn"
+
+  -- Parallel arrays
+  extractIds (L span (ExplicitPArr _ _))    = unsupported (Just span) "ExplicitPArr"
+  extractIds (L span (PArrSeq _ _))         = unsupported (Just span) "PArrSeq"
+
+  -- According to the comments in HsExpr.lhs,
+  -- "These constructors only appear temporarily in the parser.
+  -- The renamer translates them into the Right Thing."
+  extractIds (L span EWildPat) = ast (Just span) "EWildPat" $
+    return ()
+  extractIds (L span (EAsPat _ _)) = ast (Just span) "EAsPat" $
+    return ()
+  extractIds (L span (EViewPat _ _)) = ast (Just span) "EViewPat" $
+    return ()
+  extractIds (L span (ELazyPat _)) = ast (Just span) "ELazyPat" $
+    return ()
+  extractIds (L span (HsType _ )) = ast (Just span) "HsType" $
+    return ()
 
 #if __GLASGOW_HASKELL__ >= 707
   -- Second argument is something to do with OverloadedLists
@@ -793,6 +822,22 @@ instance Record id => ExtractIds (LHsExpr id) where
 #if __GLASGOW_HASKELL__ >= 707
   extractIds (L span (HsUnboundVar _))      = unsupported (Just span) "HsUnboundVar"
 #endif
+
+instance Record id => ExtractIds (HsBracket id) where
+  extractIds (ExpBr expr) = ast Nothing "ExpBr" $
+    extractIds expr
+  extractIds (PatBr pat) = ast Nothing "PatBr" $
+    extractIds pat
+  extractIds (DecBrG group) = ast Nothing "DecBrG" $
+    extractIds group
+  extractIds (TypBr typ) = ast Nothing "TypBr" $
+    extractIds typ
+  extractIds (VarBr _namespace _id) = ast Nothing "VarBr" $
+    -- No location information, sadly
+    return ()
+
+  -- TODO
+  extractIds (DecBrL _decls) = unsupported Nothing "DecBrL"
 
 instance Record id => ExtractIds (HsTupArg id) where
   extractIds (Present arg) =
@@ -854,8 +899,7 @@ instance Record id => ExtractIds (LPat id) where
   extractIds (L span (BangPat pat)) = ast (Just span) "BangPat" $
     extractIds pat
 #if __GLASGOW_HASKELL__ >= 707
-  -- Third argument is something to do with rebindable syntax
-  extractIds (L span (ListPat pats _postTcType _)) = ast (Just span) "ListPat" $
+  extractIds (L span (ListPat pats _postTcType _rebind)) = ast (Just span) "ListPat" $
     extractIds pats
 #else
   extractIds (L span (ListPat pats _postTcType)) = ast (Just span) "ListPat" $
