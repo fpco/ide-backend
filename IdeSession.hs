@@ -134,7 +134,8 @@ module IdeSession (
   -- ** Symbol definition maps
   getLoadedModules,
   IdMap(..),
-  IdInfo(..),
+  IdInfo,
+  IdProp(..),
   IdNameSpace(..),
   IdScope(..),
   ModuleId (..),
@@ -290,7 +291,7 @@ data Computed = Computed {
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
-  , computedAutoMap :: !(Map ModuleName (Trie [(IdInfo, IdScope)]))
+  , computedAutoMap :: !(Map ModuleName (Trie [IdInfo]))
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -522,9 +523,9 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         -- from the RPC compilationi process.
         let usePrevious :: IdeIdleState
                         -> Map ModuleName (Maybe ( [Import]
-                                                 , Trie [(IdInfo, IdScope)] ))
+                                                 , Trie [IdInfo] ))
                         -> ( Map ModuleName [Import]
-                           , Map ModuleName (Trie [(IdInfo, IdScope)]) )
+                           , Map ModuleName (Trie [IdInfo]) )
             usePrevious idleSt importsAuto =
               ( applyMapDiff (Map.map (fmap fst) importsAuto)
                 $ maybe Map.empty computedImports $ idleSt ^. ideComputed
@@ -815,7 +816,7 @@ getImports IdeSession{ideState, ideStaticInfo} =
       Nothing -> fail "This session state does not admit queries."
 
 -- | Autocompletion
-getAutocompletion :: Query (ModuleName -> String -> [(IdInfo, IdScope)])
+getAutocompletion :: Query (ModuleName -> String -> [IdInfo])
 getAutocompletion IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
@@ -823,13 +824,13 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO (ModuleName -> String -> [(IdInfo, IdScope)])
+    aux :: IdeIdleState -> IO (ModuleName -> String -> [IdInfo])
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} -> return (autocomplete computedAutoMap)
       Nothing           -> fail "This session state does not admit queries."
 
-    autocomplete :: Map ModuleName (Trie [(IdInfo, IdScope)])
-                 -> ModuleName -> String -> [(IdInfo, IdScope)]
+    autocomplete :: Map ModuleName (Trie [IdInfo])
+                 -> ModuleName -> String -> [IdInfo]
     autocomplete mapOfTries modName name =
       let name' = BSSC.pack name
           n     = last (BSSC.split '.' name')

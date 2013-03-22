@@ -85,7 +85,7 @@ import System.Process
 
 import Common
 import Data.Aeson.TH (deriveJSON)
-import GhcHsWalk (extractSourceSpan, IdInfo(..), IdScope, idInfoForName, wipeIdInfoCache)
+import GhcHsWalk (extractSourceSpan, IdProp, IdInfoOpt, idInfoForName, wipeIdPropCache)
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -197,8 +197,8 @@ compileInGhc :: FilePath            -- ^ target directory
              -> Ghc ( [SourceError]
                     , [ModuleName]
                     , ( [(ModuleName, ( [Import]
-                                      , [(Int, IdScope)] ))]
-                      , IntMap IdInfo )
+                                      , [IdInfoOpt] ))]
+                      , IntMap IdProp )
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -290,15 +290,15 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
                    -> IO ( [(ModuleName, ( [Import]
-                                         , [(Int, IdScope)] ))]
-                         , IntMap IdInfo )
+                                         , [IdInfoOpt] ))]
+                         , IntMap IdProp )
 extractImportsAuto dflags session graph = do
   assocs <- mapM goMod graph
-  cache <- wipeIdInfoCache
+  cache <- wipeIdPropCache
   return (assocs, cache)
   where
     goMod :: ModSummary -> IO (ModuleName, ( [Import]
-                                           , [(Int, IdScope)] ))
+                                           , [IdInfoOpt] ))
     goMod summary = do
       envs <- autoEnvs summary
       idIs <- mapM eltsToAutocompleteMap envs
@@ -323,7 +323,7 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: GlobalRdrElt -> IO (Int, IdScope)
+    eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfoOpt
     eltsToAutocompleteMap elt = do
       let name = gre_name elt
       (idInfo, midScope) <- idInfoForName dflags name False (Just elt)

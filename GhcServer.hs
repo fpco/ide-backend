@@ -77,8 +77,8 @@ data GhcCompileResponse =
   | GhcCompileDone ( [SourceError]
                    , LoadedModules
                    , ( Map ModuleName (Maybe ( [Import]
-                                             , [(Int, IdScope)] ))
-                     , IntMap IdInfo ) )
+                                             , [IdInfoOpt] ))
+                     , IntMap IdProp ) )
   deriving Show
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
@@ -159,7 +159,7 @@ ghcHandleCompile :: RpcConversation
                  -> IORef LoadedModules  -- ^ ref for newly generated IdMaps
                  -> IORef LoadedModules  -- ^ ref for accumulated IdMaps
                  -> IORef (Map ModuleName ( [Import]
-                                          , [(Int, IdScope)] ))
+                                          , [IdInfoOpt] ))
                                          -- ref for previous imports and auto
                  -> FilePath             -- ^ source directory
                  -> Bool                 -- ^ should we generate code
@@ -206,9 +206,9 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     let currentImportsAuto = Map.fromList importsAutoList
         changedModuleSet = Map.keysSet pluginIdMaps
         diff :: (ModuleName, ( [Import]
-                             , [(Int, IdScope)] ))
+                             , [IdInfoOpt] ))
              -> Maybe (ModuleName, Maybe ( [Import]
-                                         , [(Int, IdScope)] ))
+                                         , [IdInfoOpt] ))
         diff (m, ia) =
           case Map.lookup m previousImportsAuto of
             Nothing -> Just (m, Just ia)  -- add a new module
@@ -426,7 +426,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> IO ( [SourceError]
                  , LoadedModules
                  , Map ModuleName (Maybe ( [Import]
-                                         , Trie [(IdInfo, IdScope)] )) )
+                                         , Trie [IdInfo] )) )
 rpcCompile server opts dir genCode callback =
   conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
@@ -443,8 +443,8 @@ rpcCompile server opts dir genCode callback =
                            )
     go
 
-constructAuto :: IntMap IdInfo -> [(Int, IdScope)]
-              -> Trie [(IdInfo, IdScope)]
+constructAuto :: IntMap IdProp -> [IdInfoOpt]
+              -> Trie [IdInfo]
 constructAuto cache lk = Trie.fromListWith (++) newInfos
   where
     aux (k, idScope) = let !idInfo = fromMaybe (error "constructAuto")

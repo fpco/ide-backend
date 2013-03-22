@@ -1,9 +1,11 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, TemplateHaskell, CPP, DeriveDataTypeable #-}
 module GhcHsWalk
   ( IdMap(..)
-  , IdInfo(..)
+  , IdInfo
+  , IdProp(..)
   , IdNameSpace(..)
   , IdScope(..)
+  , IdInfoOpt
   , LoadedModules
   , extractIdsPlugin
   , haddockLink
@@ -11,7 +13,7 @@ module GhcHsWalk
   , idMapToList
   , idMapFromList
   , idInfoForName
-  , wipeIdInfoCache
+  , wipeIdPropCache
   , extractSourceSpan
   , idInfoQN
   ) where
@@ -73,7 +75,7 @@ data IdNameSpace =
   deriving (Show, Eq, Data, Typeable)
 
 -- | Information about identifiers
-data IdInfo = IdInfo
+data IdProp = IdProp
   { -- | The base name of the identifer at this location. Module prefix
     -- is not included.
     idName :: String
@@ -119,29 +121,31 @@ data IdScope =
   | WiredIn
   deriving (Eq, Data, Typeable)
 
+type IdInfo = (IdProp, IdScope)
+type IdInfoOpt = (Int, IdScope)
 -- | Construct qualified name following Haskell's scoping rules
-idInfoQN :: (IdInfo, IdScope) -> String
-idInfoQN (IdInfo{idName}, idScope) =
+idInfoQN :: IdInfo -> String
+idInfoQN (IdProp{idName}, idScope) =
   case idScope of
     Binder                 -> idName
     Local{}                -> idName
     Imported{idImportQual} -> idImportQual ++ idName
     WiredIn                -> idName
 
-data IdMap = IdMap { idMapToMap :: Map SourceSpan (IdInfo, IdScope) }
+data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
   deriving (Data, Typeable)
 
 -- TODO: use and pass through JSON
--- The integers are keys in the @IdInfo@ cache.
+-- The integers are keys in the @IdProp@ cache.
 data IdCachedMap = IdCachedMap
-  { _idCachedMapToMap :: Map SourceSpan (Int, IdScope) }
+  { _idCachedMapToMap :: Map SourceSpan IdInfoOpt }
   deriving (Data, Typeable)
 
 type LoadedModules = Map Common.ModuleName IdMap
 
 $(deriveJSON (\x -> x) ''IdNameSpace)
 $(deriveJSON (\x -> x) ''IdScope)
-$(deriveJSON (\x -> x) ''IdInfo)
+$(deriveJSON (\x -> x) ''IdProp)
 
 instance FromJSON IdMap where
   parseJSON = fmap idMapFromList . parseJSON
@@ -149,21 +153,21 @@ instance FromJSON IdMap where
 instance ToJSON IdMap where
   toJSON = toJSON . idMapToList
 
-idMapToList :: IdMap -> [(SourceSpan, (IdInfo, IdScope))]
+idMapToList :: IdMap -> [(SourceSpan, IdInfo)]
 idMapToList = Map.toList . idMapToMap
 
-idMapFromList :: [(SourceSpan, (IdInfo, IdScope))] -> IdMap
+idMapFromList :: [(SourceSpan, IdInfo)] -> IdMap
 idMapFromList = IdMap . Map.fromList
 
 instance Show IdMap where
-  show = let showIdInfoAndIdScope (span, (idInfo, idScope)) =
+  show = let showIdInfo(span, (idInfo, idScope)) =
                "(" ++ show span ++ ","
                ++ show idInfo
                ++ "(" ++ show idScope ++ "))"
-         in unlines . map showIdInfoAndIdScope . idMapToList
+         in unlines . map showIdInfo . idMapToList
 
-instance Show IdInfo where
-  show (IdInfo {..}) = idName ++ " "
+instance Show IdProp where
+  show (IdProp {..}) = idName ++ " "
                     ++ "(" ++ show idSpace ++ ") "
                     ++ (case idType of Just typ -> ":: " ++ typ ++ " "; Nothing -> [])
 
@@ -200,8 +204,8 @@ haddockSpaceMarks TcClsName = "t"
 -- This is an illustraction and a test of the id info, but under ideal
 -- conditions could perhaps serve to link to documentation without
 -- going via Hoogle.
-haddockLink :: (IdInfo, IdScope) -> String
-haddockLink (IdInfo{..}, idScope) =
+haddockLink :: IdInfo -> String
+haddockLink (IdProp{..}, idScope) =
   case idScope of
     Imported{idImportedFrom} ->
          dashToSlash (modulePackage idImportedFrom)
@@ -216,7 +220,7 @@ haddockLink (IdInfo{..}, idScope) =
      Nothing -> packageName p ++ "/latest"
      Just version -> packageName p ++ "/" ++ version
 
-idInfoAtLocation :: Int -> Int -> IdMap -> [(SourceSpan, (IdInfo, IdScope))]
+idInfoAtLocation :: Int -> Int -> IdMap -> [(SourceSpan, IdInfo)]
 idInfoAtLocation line col = filter inRange . idMapToList
   where
     inRange :: (SourceSpan, a) -> Bool
@@ -286,8 +290,8 @@ getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
 getGlobalRdrEnv = asks snd
 
 modifyIdMap :: Monad m
-            => (Map SourceSpan (IdInfo, IdScope)
-            -> Map SourceSpan (IdInfo, IdScope))
+            => (Map SourceSpan IdInfo
+            -> Map SourceSpan IdInfo)
             -> ExtractIdsT m ()
 modifyIdMap f = modify . second $ IdMap . f . idMapToMap
 
@@ -376,12 +380,12 @@ instance Record Id where
     TextSpan _ ->
       return ()
 
-idInfoCacheRef :: IORef (IntMap IdInfo)
+idInfoCacheRef :: IORef (IntMap IdProp)
 {-# NOINLINE idInfoCacheRef #-}
 idInfoCacheRef = unsafePerformIO $ newIORef IM.empty
 
-wipeIdInfoCache :: IO (IntMap IdInfo)
-wipeIdInfoCache = do
+wipeIdPropCache :: IO (IntMap IdProp)
+wipeIdPropCache = do
   -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
   -- for long-running sessions with many added and removed definitions.
   cache <- readIORef idInfoCacheRef
@@ -403,7 +407,7 @@ idInfoForName dflags name idIsBinder mElt = do
   case IM.lookup k cache of
     Just _ -> return ()
     _ -> do
-      let idInfo = IdInfo{..}
+      let idInfo = IdProp{..}
           ncache = IM.insert k idInfo cache
       writeIORef idInfoCacheRef ncache
   return (k, constructScope)
