@@ -395,7 +395,7 @@ idInfoForName :: DynFlags                   -- ^ The usual dynflags
               -> Name                       -- ^ The name in question
               -> Bool                       -- ^ Is this a binding occurrence?
               -> Maybe RdrName.GlobalRdrElt -- ^ GlobalRdrElt for imported names
-              -> IO (Either Int IdInfo, Maybe IdScope)
+              -> IO (Int, Maybe IdScope)
                    -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt = do
   cache <- readIORef idInfoCacheRef
@@ -406,7 +406,7 @@ idInfoForName dflags name idIsBinder mElt = do
       let idInfo = IdInfo{..}
           ncache = IM.insert k idInfo cache
       writeIORef idInfoCacheRef ncache
-  return (Left k, constructScope)
+  return (k, constructScope)
   where
       occ     = Name.nameOccName name
       idName  = Name.occNameString occ
@@ -529,9 +529,7 @@ instance Record Name where
         iFN <- liftIO $ idInfoForName
                           dflags name idIsBinder (lookupRdrEnv rdrEnv name)
         case iFN of
-          (Right idInfo, Just idScope) ->
-            modifyIdMap $ Map.insert sourceSpan (idInfo, idScope)
-          (Left k, Just idScope) -> do
+          (k, Just idScope) -> do
             cache <- liftIO $ readIORef idInfoCacheRef
             let idInfo = fromMaybe (error "instance Record Name")
                          $ IM.lookup k cache

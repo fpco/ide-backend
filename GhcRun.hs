@@ -197,7 +197,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> Ghc ( [SourceError]
                     , [ModuleName]
                     , ( [(ModuleName, ( [Import]
-                                      , [(Either Int IdInfo, IdScope)] ))]
+                                      , [(Int, IdScope)] ))]
                       , IntMap IdInfo )
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
@@ -290,7 +290,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
                    -> IO ( [(ModuleName, ( [Import]
-                                         , [(Either Int IdInfo, IdScope)] ))]
+                                         , [(Int, IdScope)] ))]
                          , IntMap IdInfo )
 extractImportsAuto dflags session graph = do
   assocs <- mapM goMod graph
@@ -298,7 +298,7 @@ extractImportsAuto dflags session graph = do
   return (assocs, cache)
   where
     goMod :: ModSummary -> IO (ModuleName, ( [Import]
-                                           , [(Either Int IdInfo, IdScope)] ))
+                                           , [(Int, IdScope)] ))
     goMod summary = do
       envs <- autoEnvs summary
       idIs <- mapM eltsToAutocompleteMap envs
@@ -323,7 +323,7 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: GlobalRdrElt -> IO (Either Int IdInfo, IdScope)
+    eltsToAutocompleteMap :: GlobalRdrElt -> IO (Int, IdScope)
     eltsToAutocompleteMap elt = do
       let name = gre_name elt
       (idInfo, midScope) <- idInfoForName dflags name False (Just elt)
