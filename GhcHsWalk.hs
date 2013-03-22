@@ -769,29 +769,38 @@ instance Record id => ExtractIds (LHsExpr id) where
     extractIds expr
   extractIds (L span (HsBracket th)) = ast (Just span) "HsBracket" $
     extractIds th
-  extractIds (L span (HsBracketOut th _pendingSplice)) = ast (Just span) "HsBracketOut" $
-    -- TODO: should we traverse pendingSplice?
+  extractIds (L span (HsBracketOut th _pendingSplices)) = ast (Just span) "HsBracketOut" $
+    -- TODO: should we traverse pendingSplices?
     extractIds th
   extractIds (L span (RecordUpd expr binds _dataCons _postTcTypeInp _postTcTypeOutp)) = ast (Just span) "RecordUpd" $ do
     extractIds expr
     extractIds binds
-
-  extractIds (L span (HsSpliceE _))         = unsupported (Just span) "HsSpliceE"
-  extractIds (L span (HsQuasiQuoteE _ ))    = unsupported (Just span) "HsQuasiQuoteE"
-
-  extractIds (L span (HsProc _ _))          = unsupported (Just span) "HsProc"
-  extractIds (L span (HsArrApp _ _ _ _ _))  = unsupported (Just span) "HsArrApp"
-  extractIds (L span (HsArrForm _ _ _))     = unsupported (Just span) "HsArrForm"
-  extractIds (L span (HsTick _ _))          = unsupported (Just span) "HsTick"
-  extractIds (L span (HsBinTick _ _ _))     = unsupported (Just span) "HsBinTick"
-  extractIds (L span (HsTickPragma _ _))    = unsupported (Just span) "HsTickPragma"
-
-  extractIds (L span (HsSCC _ _))           = unsupported (Just span) "HsSCC"
-  extractIds (L span (HsCoreAnn _ _))       = unsupported (Just span) "HsCoreAnn"
-
-  -- Parallel arrays
-  extractIds (L span (ExplicitPArr _ _))    = unsupported (Just span) "ExplicitPArr"
-  extractIds (L span (PArrSeq _ _))         = unsupported (Just span) "PArrSeq"
+  extractIds (L span (HsProc pat body)) = ast (Just span) "HsProc" $ do
+    extractIds pat
+    extractIds body
+  extractIds (L span (HsArrApp arr inp _postTcType _arrType _orient)) = ast (Just span) "HsArrApp" $ do
+    extractIds [arr, inp]
+  extractIds (L span (HsArrForm expr _fixity cmds)) = ast (Just span) "HsArrForm" $ do
+    extractIds expr
+    extractIds cmds
+  extractIds (L span (HsTick _tickish expr)) = ast (Just span) "HsTick" $ do
+    extractIds expr
+  extractIds (L span (HsBinTick _trueTick _falseTick expr)) = ast (Just span) "HsBinTick" $ do
+    extractIds expr
+  extractIds (L span (HsTickPragma _span expr)) = ast (Just span) "HsTickPragma" $ do
+    extractIds expr
+  extractIds (L span (HsSCC _string expr)) = ast (Just span) "HsSCC" $ do
+    extractIds expr
+  extractIds (L span (HsCoreAnn _string expr)) = ast (Just span) "HsCoreAnn" $ do
+    extractIds expr
+  extractIds (L span (HsSpliceE splice)) = ast (Just span) "HsSpliceE" $ do
+    extractIds splice
+  extractIds (L span (HsQuasiQuoteE qquote)) = ast (Just span) "HsQuasiQuoteE" $ do
+    extractIds qquote
+  extractIds (L span (ExplicitPArr _postTcType exprs)) = ast (Just span) "ExplicitPArr" $ do
+    extractIds exprs
+  extractIds (L span (PArrSeq _postTcType seqInfo)) = ast (Just span) "PArrSeq" $ do
+    extractIds seqInfo
 
   -- According to the comments in HsExpr.lhs,
   -- "These constructors only appear temporarily in the parser.
@@ -822,6 +831,20 @@ instance Record id => ExtractIds (LHsExpr id) where
 #if __GLASGOW_HASKELL__ >= 707
   extractIds (L span (HsUnboundVar _))      = unsupported (Just span) "HsUnboundVar"
 #endif
+
+instance Record id => ExtractIds (ArithSeqInfo id) where
+  extractIds (From expr) = ast Nothing "From" $
+    extractIds expr
+  extractIds (FromThen frm thn) = ast Nothing "FromThen" $
+    extractIds [frm, thn]
+  extractIds (FromTo frm to) = ast Nothing "FromTo" $
+    extractIds [frm, to]
+  extractIds (FromThenTo frm thn to) = ast Nothing "FromThenTo" $
+    extractIds [frm, thn, to]
+
+instance Record id => ExtractIds (LHsCmdTop id) where
+  extractIds (L span (HsCmdTop cmd _postTcTypeInp _postTcTypeRet _syntaxTable)) = ast (Just span) "HsCmdTop" $
+    extractIds cmd
 
 instance Record id => ExtractIds (HsBracket id) where
   extractIds (ExpBr expr) = ast Nothing "ExpBr" $
