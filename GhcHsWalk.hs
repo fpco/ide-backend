@@ -21,7 +21,7 @@ module GhcHsWalk
   ) where
 
 import Control.Arrow (first, second)
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State (MonadState, StateT, execStateT, get, modify, put,
                             state)
@@ -302,12 +302,21 @@ modifyIdMap f span = do
   (_, idMap) <- get
   let idInfo1 = Map.lookup span $ idMapToMap idMap
       idInfo2 = f idInfo1
-      -- We assume modifications improve IdInfos, e.g., add idType,
+      -- We assume modifications improve IdInfos, e.g., add idTypes,
       -- so we replace the old value, if any.
-      ncache = maybe cache  -- we don't delete from cache
-                     (\(idProp, _) -> IM.insert (idUniq idProp) idProp cache)
-                     idInfo2
-  liftIO $ writeIORef idPropCacheRef ncache
+      overwrite Nothing = return ()
+      overwrite (Just (idProp, _)) = do
+#if DEBUG
+        -- We record (benign, we expect) deviations from the assumption above.
+        let moldType = maybe Nothing idType $ IM.lookup (idUniq idProp) cache
+        when (maybe False ((/= idType idProp) . Just) moldType) $
+          liftIO $ appendFile "/tmp/ghc.overwritten_types" $
+            "modifyIdMap: old was " ++ show moldType ++ "\n" ++
+            "            , new is " ++ show (idType idProp) ++ "\n"
+#endif
+        let ncache = IM.insert (idUniq idProp) idProp cache
+        liftIO $ writeIORef idPropCacheRef ncache
+  overwrite idInfo2
   modify . second $ IdMap . Map.alter (const idInfo2) span . idMapToMap
 
 prettyType :: Monad m => Type -> ExtractIdsT m Type
