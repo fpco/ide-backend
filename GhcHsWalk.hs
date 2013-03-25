@@ -88,6 +88,8 @@ data IdProp = IdProp
     -- We don't always know this; in particular, we don't know kinds because
     -- the type checker does not give us LSigs for top-level annotations)
   , idType  :: Maybe String
+    -- | The unique key coming from the @Name@ of the identifier.
+  , idUniq  :: !Int
   }
   deriving (Eq, Data, Typeable)
 
@@ -291,11 +293,22 @@ getDynFlags = asks fst
 getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
 getGlobalRdrEnv = asks snd
 
-modifyIdMap :: Monad m
-            => (Map SourceSpan IdInfo
-            -> Map SourceSpan IdInfo)
+modifyIdMap :: MonadIO m
+            => (Maybe IdInfo -> Maybe IdInfo)
+            -> SourceSpan
             -> ExtractIdsT m ()
-modifyIdMap f = modify . second $ IdMap . f . idMapToMap
+modifyIdMap f span = do
+  cache <- liftIO $ readIORef idPropCacheRef
+  (_, idMap) <- get
+  let idInfo1 = Map.lookup span $ idMapToMap idMap
+      idInfo2 = f idInfo1
+      -- We assume modifications improve IdInfos, e.g., add idType,
+      -- so we replace the old value, if any.
+      ncache = maybe cache  -- we don't delete from cache
+                     (\(idProp, _) -> IM.insert (idUniq idProp) idProp cache)
+                     idInfo2
+  liftIO $ writeIORef idPropCacheRef ncache
+  modify . second $ IdMap . Map.alter (const idInfo2) span . idMapToMap
 
 prettyType :: Monad m => Type -> ExtractIdsT m Type
 prettyType typ = state $ \(tidyEnv, idMap) ->
@@ -376,9 +389,11 @@ instance Record Id where
     ProperSpan sourceSpan -> do
       typ <- prettyType (Var.varType id)
       let typDoc = pprTypeForUser True typ
+      -- We assume, previously (in the @idMap@ or in the cache) there was
+      -- no type or it was equal to @typ@, so we overwrite here.
       let addType (idInfo, idScope) =
-            Just $ (idInfo { idType = Just (showSDoc typDoc) }, idScope)
-      modifyIdMap $ Map.update addType sourceSpan
+            (idInfo { idType = Just (showSDoc typDoc) }, idScope)
+      modifyIdMap (maybe Nothing (Just . addType)) sourceSpan
     TextSpan _ ->
       return ()
 
@@ -405,19 +420,21 @@ idInfoForName :: DynFlags                   -- ^ The usual dynflags
                    -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt = do
   cache <- readIORef idPropCacheRef
-  let k = Unique.getKey $ Unique.getUnique name
-  case IM.lookup k cache of
-    Just _ -> return ()
+  let idUniq = Unique.getKey $ Unique.getUnique name
+  case IM.lookup idUniq cache of
+    Just _ ->
+      -- Don't overwrite old value; the new one has no @idType@ (see below).
+      return ()
     _ -> do
-      let idInfo = IdProp{..}
-          ncache = IM.insert k idInfo cache
+      let idProp = IdProp{..}
+          ncache = IM.insert idUniq idProp cache
       writeIORef idPropCacheRef ncache
-  return (k, constructScope)
+  return (idUniq, constructScope)
   where
       occ     = Name.nameOccName name
       idName  = Name.occNameString occ
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
-      idType  = Nothing -- After renamer but before typechecker
+      idType  = Nothing  -- no type; we are after renamer but before typechecker
 
       constructScope :: Maybe IdScope
       constructScope
@@ -540,8 +557,10 @@ instance Record Name where
             cache <- liftIO $ readIORef idPropCacheRef
             let idProp = fromMaybe (error "instance Record Name")
                          $ IM.lookup k cache
+            -- If there was an old value in @idMap@, we overwrite it,
+            -- because cache has better values (more types, etc.).
             -- TODO: insert k instead of idProp and don't look up
-            modifyIdMap $ Map.insert sourceSpan (idProp, idScope)
+            modifyIdMap (const $ Just (idProp, idScope)) sourceSpan
           (_, Nothing) ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from
