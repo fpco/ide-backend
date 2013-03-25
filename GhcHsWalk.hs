@@ -35,7 +35,7 @@ import Data.IORef
 import Data.List (stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Version
 import Prelude hiding (id, mod, span)
 import System.IO.Unsafe (unsafePerformIO)
@@ -164,9 +164,9 @@ idMapFromList :: [(SourceSpan, IdInfo)] -> IdMap
 idMapFromList = IdMap . Map.fromList
 
 instance Show IdMap where
-  show = let showIdInfo(span, (idInfo, idScope)) =
+  show = let showIdInfo(span, (idProp, idScope)) =
                "(" ++ show span ++ ","
-               ++ show idInfo
+               ++ show idProp
                ++ "(" ++ show idScope ++ "))"
          in unlines . map showIdInfo . idMapToList
 
@@ -398,10 +398,15 @@ instance Record Id where
     ProperSpan sourceSpan -> do
       typ <- prettyType (Var.varType id)
       let typDoc = pprTypeForUser True typ
-      -- We assume, previously (in the @idMap@ or in the cache) there was
-      -- no type or it was equal to @typ@, so we overwrite here.
-      let addType (idInfo, idScope) =
-            (idInfo { idType = Just (showSDoc typDoc) }, idScope)
+      -- We assume, previously there was no type in @idMap@,
+      -- so we overwrite, adding the type.
+      let addType (idProp, idScope) =
+            if isNothing $ idType idProp
+            then (idProp { idType = Just (showSDoc typDoc) }, idScope)
+            else error $    "instance Record Id:  old was "
+                         ++ show (idType idProp)
+                         ++ ", new is "
+                         ++ show (Just (showSDoc typDoc))
       modifyIdMap (maybe Nothing (Just . addType)) sourceSpan
     TextSpan _ ->
       return ()
@@ -564,12 +569,25 @@ instance Record Name where
         case iFN of
           (k, Just idScope) -> do
             cache <- liftIO $ readIORef idPropCacheRef
-            let idProp = fromMaybe (error "instance Record Name")
+            let idProp = fromMaybe (error "instance Record Name: idProp")
                          $ IM.lookup k cache
-            -- If there was an old value in @idMap@, we overwrite it,
-            -- because cache has better values (more types, etc.).
-            -- TODO: insert k instead of idProp and don't look up
-            modifyIdMap (const $ Just (idProp, idScope)) sourceSpan
+                -- If there was an old value in @idMap@, we overwrite it,
+                -- because cache has better values (more types, etc.).
+                -- TODO: insert k instead of idProp and don't look up
+                overwrite Nothing = Just (idProp, idScope)
+                overwrite (Just (oldIdProp, _)) =
+#if DEBUG
+                  (unsafePerformIO $
+                    when (isJust $ idType oldIdProp) $
+                      liftIO $ appendFile "/tmp/ghc.overwritten_idMap" $
+                        "instance Record Name: old was "
+                        ++ show (idType oldIdProp) ++ "\n" ++
+                        "                     , new is "
+                        ++ show (idType idProp) ++ "\n")
+                  `seq`
+#endif
+                  Just (idProp, idScope)
+            modifyIdMap overwrite sourceSpan
           (_, Nothing) ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from
