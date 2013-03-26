@@ -50,6 +50,7 @@ import ErrUtils   ( MsgDoc )
 #else
 import ErrUtils   ( Message )
 #endif
+import qualified Unique
 
 #if __GLASGOW_HASKELL__ == 704
 -- Import our own version of --make as a workaround for
@@ -79,13 +80,19 @@ import Control.Arrow (second)
 import Data.IntMap (IntMap)
 import Data.IORef
 import Data.List ((\\))
-import Data.Maybe (fromJust)
 import System.FilePath.Find (find, always, extension)
 import System.Process
 
 import Common
 import Data.Aeson.TH (deriveJSON)
-import GhcHsWalk (extractSourceSpan, IdProp, IdInfoOpt, idInfoForName, wipeIdPropCache)
+import GhcHsWalk (
+    extractSourceSpan
+  , IdProp
+  , IdInfo
+  , idInfoForName
+  , wipeIdPropCache
+  , extendCache
+  )
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -196,9 +203,9 @@ compileInGhc :: FilePath            -- ^ target directory
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc ( [SourceError]
                     , [ModuleName]
-                    , ( [(ModuleName, ( [Import]
-                                      , [IdInfoOpt] ))]
-                      , IntMap IdProp )
+                    , ( [(ModuleName, ([Import], [IdInfo]))]
+                      , IntMap IdProp
+                      )
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -290,7 +297,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
                    -> IO ( [(ModuleName, ( [Import]
-                                         , [IdInfoOpt] ))]
+                                         , [IdInfo] ))]
                          , IntMap IdProp )
 extractImportsAuto dflags session graph = do
   assocs <- mapM goMod graph
@@ -298,7 +305,7 @@ extractImportsAuto dflags session graph = do
   return (assocs, cache)
   where
     goMod :: ModSummary -> IO (ModuleName, ( [Import]
-                                           , [IdInfoOpt] ))
+                                           , [IdInfo] ))
     goMod summary = do
       envs <- autoEnvs summary
       idIs <- mapM eltsToAutocompleteMap envs
@@ -323,11 +330,13 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfoOpt
+    eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
     eltsToAutocompleteMap elt = do
       let name = gre_name elt
-      (idInfo, midScope) <- idInfoForName dflags name False (Just elt)
-      return $ (idInfo, fromJust midScope)
+          uniq = Unique.getKey $ Unique.getUnique name
+          (idInfo, Just idScope) = idInfoForName dflags name False (Just elt)
+      extendCache uniq idInfo
+      return $ (uniq, idScope)
 
     autoEnvs :: ModSummary -> IO [GlobalRdrElt]
     autoEnvs ModSummary{ ms_mod

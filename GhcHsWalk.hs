@@ -7,7 +7,6 @@ module GhcHsWalk
   , IdProp(..)
   , IdNameSpace(..)
   , IdScope(..)
-  , IdInfoOpt
   , LoadedModules
   , extractIdsPlugin
   , haddockLink
@@ -18,10 +17,13 @@ module GhcHsWalk
   , wipeIdPropCache
   , extractSourceSpan
   , idInfoQN
+  , extendCache
+  , showIdMap
+  , cacheLookup
   ) where
 
 import Control.Arrow (first, second)
-import Control.Monad (forM_, when)
+import Control.Monad (forM_)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State (MonadState, StateT, execStateT, get, modify, put,
                             state)
@@ -35,7 +37,7 @@ import Data.IORef
 import Data.List (stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe)
 import Data.Version
 import Prelude hiding (id, mod, span)
 import System.IO.Unsafe (unsafePerformIO)
@@ -59,9 +61,9 @@ import PprTyThing (pprTypeForUser)
 import qualified RdrName
 import TcRnTypes
 import TcType (tidyOpenType)
-import qualified Unique as Unique
 import Var hiding (idInfo)
 import VarEnv (TidyEnv, emptyTidyEnv)
+import qualified Unique
 
 #define DEBUG 1
 
@@ -88,10 +90,14 @@ data IdProp = IdProp
     -- We don't always know this; in particular, we don't know kinds because
     -- the type checker does not give us LSigs for top-level annotations)
   , idType  :: Maybe String
-    -- | The unique key coming from the @Name@ of the identifier.
-  , idUniq  :: !Int
   }
   deriving (Eq, Data, Typeable)
+
+instance Show IdProp where
+  show (IdProp {..}) =
+       idName ++ " "
+    ++ "(" ++ show idSpace ++ ") "
+    ++ (case idType of Just typ -> ":: " ++ typ ++ " "; Nothing -> [])
 
 -- TODO: Ideally, we would have
 -- 1. SourceSpan for Local rather than EitherSpan
@@ -126,55 +132,6 @@ data IdScope =
   | WiredIn
   deriving (Eq, Data, Typeable)
 
-type IdInfo = (IdProp, IdScope)
-type IdInfoOpt = (Int, IdScope)
--- | Construct qualified name following Haskell's scoping rules
-idInfoQN :: IdInfo -> String
-idInfoQN (IdProp{idName}, idScope) =
-  case idScope of
-    Binder                 -> idName
-    Local{}                -> idName
-    Imported{idImportQual} -> idImportQual ++ idName
-    WiredIn                -> idName
-
-data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
-  deriving (Data, Typeable)
-
--- TODO: use and pass through JSON
--- The integers are keys in the @IdProp@ cache.
-data IdMapOpt = IdMapOpt { _idMapToMapOpt :: Map SourceSpan IdInfoOpt }
-  deriving (Data, Typeable)
-
-type LoadedModules = Map Common.ModuleName IdMap
-
-$(deriveJSON (\x -> x) ''IdNameSpace)
-$(deriveJSON (\x -> x) ''IdScope)
-$(deriveJSON (\x -> x) ''IdProp)
-
-instance FromJSON IdMap where
-  parseJSON = fmap idMapFromList . parseJSON
-
-instance ToJSON IdMap where
-  toJSON = toJSON . idMapToList
-
-idMapToList :: IdMap -> [(SourceSpan, IdInfo)]
-idMapToList = Map.toList . idMapToMap
-
-idMapFromList :: [(SourceSpan, IdInfo)] -> IdMap
-idMapFromList = IdMap . Map.fromList
-
-instance Show IdMap where
-  show = let showIdInfo(span, (idProp, idScope)) =
-               "(" ++ show span ++ ","
-               ++ show idProp
-               ++ "(" ++ show idScope ++ "))"
-         in unlines . map showIdInfo . idMapToList
-
-instance Show IdProp where
-  show (IdProp {..}) = idName ++ " "
-                    ++ "(" ++ show idSpace ++ ") "
-                    ++ (case idType of Just typ -> ":: " ++ typ ++ " "; Nothing -> [])
-
 -- TODO: If these Maybes stay, we should have a prettier Show instance
 -- (but hopefully they will go)
 instance Show IdScope where
@@ -188,6 +145,50 @@ instance Show IdScope where
                       ++ (if null idImportQual then [] else " as '" ++ idImportQual ++ "'")
                       ++ " at "++ show idImportSpan
 
+type IdPropKey = Int
+type IdInfo    = (IdPropKey, IdScope)
+
+-- | Construct qualified name following Haskell's scoping rules
+idInfoQN :: IdProp -> IdScope -> String
+idInfoQN IdProp{idName} idScope =
+  case idScope of
+    Binder                 -> idName
+    Local{}                -> idName
+    Imported{idImportQual} -> idImportQual ++ idName
+    WiredIn                -> idName
+
+data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
+  deriving (Data, Typeable)
+
+idMapToList :: IdMap -> [(SourceSpan, IdInfo)]
+idMapToList = Map.toList . idMapToMap
+
+idMapFromList :: [(SourceSpan, IdInfo)] -> IdMap
+idMapFromList = IdMap . Map.fromList
+
+-- | Throws an exception when the key does not exist
+cacheLookup :: IntMap IdProp -> IdPropKey -> IdProp
+cacheLookup cache k = fromMaybe (error "cacheLookup") $ IM.lookup k cache
+
+showIdMap :: IntMap IdProp -> IdMap -> String
+showIdMap cache =
+  let showIdInfo(span, (k, idScope)) =
+        "(" ++ show span ++ ","
+        ++ show (cacheLookup cache k)
+        ++ "(" ++ show idScope ++ "))"
+  in unlines . map showIdInfo . idMapToList
+
+type LoadedModules = Map Common.ModuleName IdMap
+
+$(deriveJSON (\x -> x) ''IdNameSpace)
+$(deriveJSON (\x -> x) ''IdScope)
+$(deriveJSON (\x -> x) ''IdProp)
+
+instance FromJSON IdMap where
+  parseJSON = fmap idMapFromList . parseJSON
+
+instance ToJSON IdMap where
+  toJSON = toJSON . idMapToList
 
 fromGhcNameSpace :: Name.NameSpace -> IdNameSpace
 fromGhcNameSpace ns
@@ -197,19 +198,19 @@ fromGhcNameSpace ns
   | ns == Name.tcName   = TcClsName
   | otherwise = error "fromGhcNameSpace"
 
--- | Show approximately what Haddock adds to documantation URLs.
+-- | Show approximately what Haddock adds to documentation URLs.
 haddockSpaceMarks :: IdNameSpace -> String
-haddockSpaceMarks VarName = "v"
-haddockSpaceMarks DataName = "v"
-haddockSpaceMarks TvName = "t"
+haddockSpaceMarks VarName   = "v"
+haddockSpaceMarks DataName  = "v"
+haddockSpaceMarks TvName    = "t"
 haddockSpaceMarks TcClsName = "t"
 
 -- | Show approximately a haddock link (without haddock root) for an id.
--- This is an illustraction and a test of the id info, but under ideal
+-- This is an illustration and a test of the id info, but under ideal
 -- conditions could perhaps serve to link to documentation without
 -- going via Hoogle.
-haddockLink :: IdInfo -> String
-haddockLink (IdProp{..}, idScope) =
+haddockLink :: IdProp -> IdScope -> String
+haddockLink IdProp{..} idScope =
   case idScope of
     Imported{idImportedFrom} ->
          dashToSlash (modulePackage idImportedFrom)
@@ -258,7 +259,7 @@ extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
 #endif
     extractIds (tcg_binds env)
 #if DEBUG
-  liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
+--  liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
 #endif
   liftIO $ modifyIORef symbolRef (Map.insert processedName identMap)
   return env
@@ -293,6 +294,12 @@ getDynFlags = asks fst
 getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
 getGlobalRdrEnv = asks snd
 
+extendIdMap :: MonadIO m => SourceSpan -> IdInfo -> ExtractIdsT m ()
+extendIdMap span info =
+  modify . second $ IdMap  . Map.insert span info . idMapToMap
+
+
+{-
 modifyIdMap :: MonadIO m
             => (Maybe IdInfo -> Maybe IdInfo)
             -> SourceSpan
@@ -318,6 +325,7 @@ modifyIdMap f span = do
         liftIO $ writeIORef idPropCacheRef ncache
   overwrite idInfo2
   modify . second $ IdMap . Map.alter (const idInfo2) span . idMapToMap
+-}
 
 prettyType :: Monad m => Type -> ExtractIdsT m Type
 prettyType typ = state $ \(tidyEnv, idMap) ->
@@ -394,22 +402,24 @@ class OutputableBndr id => Record id where
   record :: MonadIO m => SrcSpan -> IsBinder -> id -> ExtractIdsT m ()
 
 instance Record Id where
-  record span _idIsBinder id = case extractSourceSpan span of
-    ProperSpan sourceSpan -> do
-      typ <- prettyType (Var.varType id)
-      let typDoc = pprTypeForUser True typ
-      -- We assume, previously there was no type in @idMap@,
-      -- so we overwrite, adding the type.
-      let addType (idProp, idScope) =
-            if isNothing $ idType idProp
-            then (idProp { idType = Just (showSDoc typDoc) }, idScope)
-            else error $    "instance Record Id:  old was "
-                         ++ show (idType idProp)
-                         ++ ", new is "
-                         ++ show (Just (showSDoc typDoc))
-      modifyIdMap (maybe Nothing (Just . addType)) sourceSpan
-    TextSpan _ ->
-      return ()
+  record _span _idIsBinder id = do
+    typ <- prettyType (Var.varType id)
+    let typDoc = pprTypeForUser True typ
+        uniq   = Unique.getKey (Unique.getUnique id)
+    modifyCache uniq $ \idInfo -> idInfo { idType = Just (showSDoc typDoc) }
+
+modifyCache :: MonadIO m => IdPropKey -> (IdProp -> IdProp) -> m ()
+modifyCache uniq f = liftIO $ do
+  cache <- readIORef idPropCacheRef
+#if DEBUG
+  appendFile "/tmp/ghc.propcachehit" $ if uniq `IM.member` cache then "1" else "0"
+#endif
+  writeIORef idPropCacheRef $ IM.adjust f uniq cache
+
+extendCache :: MonadIO m => IdPropKey -> IdProp -> m ()
+extendCache uniq prop = liftIO $ do
+  cache <- readIORef idPropCacheRef
+  writeIORef idPropCacheRef $ IM.insert uniq prop cache
 
 idPropCacheRef :: IORef (IntMap IdProp)
 {-# NOINLINE idPropCacheRef #-}
@@ -430,11 +440,12 @@ idInfoForName :: DynFlags                   -- ^ The usual dynflags
               -> Name                       -- ^ The name in question
               -> Bool                       -- ^ Is this a binding occurrence?
               -> Maybe RdrName.GlobalRdrElt -- ^ GlobalRdrElt for imported names
-              -> IO (Int, Maybe IdScope)
-                   -- ^ Nothing if imported but no GlobalRdrElt
-idInfoForName dflags name idIsBinder mElt = do
+              ->(IdProp, Maybe IdScope)     -- ^ Nothing if imported but no GlobalRdrElt
+idInfoForName dflags name idIsBinder mElt = (IdProp{..}, constructScope)
+ {-
   cache <- readIORef idPropCacheRef
-  let idUniq = Unique.getKey $ Unique.getUnique name
+  let idUniq = Unique.getKey $ Name.nameUnique name
+--  let idUniq = Unique.getKey $ Unique.getUnique name
   case IM.lookup idUniq cache of
     Just _ ->
       -- Don't overwrite old value; the new one has no @idType@ (see below).
@@ -444,6 +455,7 @@ idInfoForName dflags name idIsBinder mElt = do
           ncache = IM.insert idUniq idProp cache
       writeIORef idPropCacheRef ncache
   return (idUniq, constructScope)
+ -}
   where
       occ     = Name.nameOccName name
       idName  = Name.occNameString occ
@@ -564,31 +576,12 @@ instance Record Name where
         rdrEnv <- getGlobalRdrEnv
         -- The lookup into the rdr env will only be used for imported names.
         -- TODO: the cache is update twice here; clean up with Ints in IdMaps.
-        iFN <- liftIO $ idInfoForName
-                          dflags name idIsBinder (lookupRdrEnv rdrEnv name)
-        case iFN of
-          (k, Just idScope) -> do
-            cache <- liftIO $ readIORef idPropCacheRef
-            let idProp = fromMaybe (error "instance Record Name: idProp")
-                         $ IM.lookup k cache
-                -- If there was an old value in @idMap@, we overwrite it,
-                -- because cache has better values (more types, etc.).
-                -- TODO: insert k instead of idProp and don't look up
-                overwrite Nothing = Just (idProp, idScope)
-                overwrite (Just (oldIdProp, _)) =
-#if DEBUG
-                  (unsafePerformIO $
-                    when (isJust $ idType oldIdProp) $
-                      liftIO $ appendFile "/tmp/ghc.overwritten_idMap" $
-                        "instance Record Name: old was "
-                        ++ show (idType oldIdProp) ++ "\n" ++
-                        "                     , new is "
-                        ++ show (idType idProp) ++ "\n")
-                  `seq`
-#endif
-                  Just (idProp, idScope)
-            modifyIdMap overwrite sourceSpan
-          (_, Nothing) ->
+        case idInfoForName dflags name idIsBinder (lookupRdrEnv rdrEnv name) of
+          (idProp, Just idScope) -> do
+            let uniq = Unique.getKey (Unique.getUnique name)
+            extendCache uniq idProp
+            extendIdMap sourceSpan (uniq, idScope)
+          _ ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from
             -- 'GHC.IO.Exception' but there is no corresponding entry in the

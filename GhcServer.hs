@@ -71,24 +71,20 @@ data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
   | ReqRun     ModuleName String RunBufferMode RunBufferMode
   | ReqSetEnv  [(String, Maybe String)]
-  deriving Show
 data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone ( [SourceError]
                    , LoadedModules
-                   , ( Map ModuleName (Maybe ( [Import]
-                                             , [IdInfoOpt] ))
-                     , IntMap IdProp ) )
-  deriving Show
+                   , Map ModuleName (Maybe ([Import], [IdInfo]))
+                   , IntMap IdProp
+                   )
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
   | GhcRunDone RunResult
-  deriving Show
 data GhcRunRequest =
     GhcRunInput BSS.ByteString
   | GhcRunInterrupt
   | GhcRunAckDone
-  deriving Show
 
 $(deriveJSON id ''GhcRequest)
 $(deriveJSON id ''GhcCompileResponse)
@@ -159,7 +155,7 @@ ghcHandleCompile :: RpcConversation
                  -> IORef LoadedModules  -- ^ ref for newly generated IdMaps
                  -> IORef LoadedModules  -- ^ ref for accumulated IdMaps
                  -> IORef (Map ModuleName ( [Import]
-                                          , [IdInfoOpt] ))
+                                          , [IdInfo] ))
                                          -- ref for previous imports and auto
                  -> FilePath             -- ^ source directory
                  -> Bool                 -- ^ should we generate code
@@ -206,9 +202,9 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     let currentImportsAuto = Map.fromList importsAutoList
         changedModuleSet = Map.keysSet pluginIdMaps
         diff :: (ModuleName, ( [Import]
-                             , [IdInfoOpt] ))
+                             , [IdInfo] ))
              -> Maybe (ModuleName, Maybe ( [Import]
-                                         , [IdInfoOpt] ))
+                                         , [IdInfo] ))
         diff (m, ia) =
           case Map.lookup m previousImportsAuto of
             Nothing -> Just (m, Just ia)  -- add a new module
@@ -228,7 +224,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     liftIO $ writeIORef importsAutoRef
            $ applyMapDiff diffMap previousImportsAuto
     -- Ship the results.
-    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, (diffMap, cache))
+    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, diffMap, cache)
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -425,8 +421,9 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ( [SourceError]
                  , LoadedModules
-                 , Map ModuleName (Maybe ( [Import]
-                                         , Trie [IdInfo] )) )
+                 , Map ModuleName (Maybe ([Import], Trie [IdInfo]))
+                 , IntMap IdProp
+                 )
 rpcCompile server opts dir genCode callback =
   conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
@@ -435,23 +432,21 @@ rpcCompile server opts dir genCode callback =
                 case response of
                   GhcCompileProgress pcounter ->
                     callback pcounter >> go
-                  GhcCompileDone (errs, loaded, (importsAuto, cache)) ->
+                  GhcCompileDone (errs, loaded, importsAuto, cache) ->
                     return ( errs
                            , loaded
                            , Map.map (fmap $ second $ constructAuto cache)
                                      importsAuto
+                           , cache
                            )
     go
 
-constructAuto :: IntMap IdProp -> [IdInfoOpt]
-              -> Trie [IdInfo]
-constructAuto cache lk = Trie.fromListWith (++) newInfos
+constructAuto :: IntMap IdProp -> [IdInfo] -> Trie [IdInfo]
+constructAuto cache lk = Trie.fromListWith (++) $ map aux lk
   where
-    aux (k, idScope) = let !idInfo = fromMaybe (error "constructAuto")
-                                     $ IM.lookup k cache
-                       in (BSSC.pack (idName idInfo), [(idInfo, idScope)])
-    forceSpine l = length l `seq` l
-    !newInfos = forceSpine $ map aux lk
+    aux idInfo@(k, _) =
+      let idProp = fromMaybe (error "constructAuto") $ IM.lookup k cache
+      in (BSSC.pack (idName idProp), [idInfo])
 
 -- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {

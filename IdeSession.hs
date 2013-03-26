@@ -49,7 +49,6 @@ module IdeSession (
 
   -- * Basic types
   ModuleName,
-  LoadedModules,
 
   -- * Sessions
   IdeSession,
@@ -133,6 +132,7 @@ module IdeSession (
 
   -- ** Symbol definition maps
   getLoadedModules,
+  getIdPropCache,
   IdMap(..),
   IdInfo,
   IdProp(..),
@@ -142,6 +142,7 @@ module IdeSession (
   PackageId (..),
   haddockLink,
   idInfoAtLocation,
+  showIdMap,
 
   -- ** Import information and autocompletion
   Import(..),
@@ -226,6 +227,7 @@ module IdeSession (
 import Control.Concurrent (MVar, newMVar)
 import qualified Control.Exception as Ex
 import Control.Monad
+import Control.Arrow (first)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString as BSS
@@ -243,6 +245,7 @@ import System.IO (Handle, hClose, openBinaryTempFile)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (setFileTimes)
 import System.Posix.Types (EpochTime)
+import Data.IntMap (IntMap)
 
 import Common
 import GhcServer
@@ -292,6 +295,8 @@ data Computed = Computed {
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
   , computedAutoMap :: !(Map ModuleName (Trie [IdInfo]))
+    -- | We access IdProps indirectly through this cache
+  , computedCache :: !(IntMap IdProp)
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -537,6 +542,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
                       ( computedErrors
                        , computedLoadedModules
                        , importsAuto
+                       , computedCache
                        ) <- rpcCompile (idleState ^. ideGhcServer)
                                        (idleState' ^. ideNewOpts)
                                        (ideSourcesDir ideStaticInfo)
@@ -799,6 +805,19 @@ getLoadedModules IdeSession{ideState, ideStaticInfo} =
         return (mkRelative (ideSourcesDir ideStaticInfo) computedLoadedModules)
       Nothing -> fail "This session state does not admit queries."
 
+getIdPropCache :: Query (IntMap IdProp)
+getIdPropCache IdeSession{ideState, ideStaticInfo} =
+  $withMVar ideState $ \st ->
+    case st of
+      IdeSessionIdle      idleState -> aux idleState
+      IdeSessionRunning _ idleState -> aux idleState
+      IdeSessionShutdown            -> fail "Session already shut down."
+  where
+    aux :: IdeIdleState -> IO (IntMap IdProp)
+    aux idleState = case idleState ^. ideComputed of
+      Just Computed{..} -> return computedCache
+      Nothing -> fail "This session state does not admit queries."
+
 -- | Get import information
 --
 -- This information is available even for modules with parse/type errors
@@ -816,7 +835,7 @@ getImports IdeSession{ideState, ideStaticInfo} =
       Nothing -> fail "This session state does not admit queries."
 
 -- | Autocompletion
-getAutocompletion :: Query (ModuleName -> String -> [IdInfo])
+getAutocompletion :: Query (ModuleName -> String -> [(IdProp, IdScope)])
 getAutocompletion IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
@@ -824,21 +843,24 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO (ModuleName -> String -> [IdInfo])
+    aux :: IdeIdleState -> IO (ModuleName -> String -> [(IdProp, IdScope)])
     aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return (autocomplete computedAutoMap)
+      Just Computed{..} -> return (autocomplete computedCache computedAutoMap)
       Nothing           -> fail "This session state does not admit queries."
 
-    autocomplete :: Map ModuleName (Trie [IdInfo])
-                 -> ModuleName -> String -> [IdInfo]
-    autocomplete mapOfTries modName name =
-      let name' = BSSC.pack name
-          n     = last (BSSC.split '.' name')
-      in filter (\idInfoAndScope -> name `isInfixOf` idInfoQN idInfoAndScope)
-           $ concat
-           . Trie.elems
-           . Trie.submap n
-           $ mapOfTries Map.! modName
+    autocomplete :: IntMap IdProp
+                 -> Map ModuleName (Trie [IdInfo])
+                 -> ModuleName -> String
+                 -> [(IdProp, IdScope)]
+    autocomplete cache mapOfTries modName name =
+        let name' = BSSC.pack name
+            n     = last (BSSC.split '.' name')
+        in filter (\(idProp, idScope) -> name `isInfixOf` idInfoQN idProp idScope)
+             $ map (first (cacheLookup cache))
+             . concat
+             . Trie.elems
+             . Trie.submap n
+             $ mapOfTries Map.! modName
 
 -- | Is code generation currently enabled?
 getCodeGeneration :: Query Bool
