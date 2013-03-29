@@ -1,6 +1,6 @@
 {-# LANGUAGE CPP, DeriveDataTypeable, FlexibleInstances,
              GeneralizedNewtypeDeriving, MultiParamTypeClasses, TemplateHaskell,
-             TypeSynonymInstances #-}
+             TypeSynonymInstances, ScopedTypeVariables #-}
 module GhcHsWalk
   ( IdMap(..)
   , IdInfo
@@ -57,15 +57,18 @@ import qualified Name
 import OccName
 import Outputable
 import qualified Packages
-import PprTyThing (pprTypeForUser)
 import qualified RdrName
 import TcRnTypes
 import TcType (tidyOpenType)
 import Var hiding (idInfo)
 import VarEnv (TidyEnv, emptyTidyEnv)
-import qualified Unique
+import Unique (Unique, Uniquable, getUnique, getKey)
+import HscTypes (TypeEnv)
+import NameEnv (nameEnvUniqueElts)
+import DataCon (dataConRepType)
+import Pretty (showDocWith, Mode(OneLineMode))
 
-#define DEBUG 1
+#define DEBUG 0
 
 {------------------------------------------------------------------------------
   Environment mapping source locations to info
@@ -247,22 +250,47 @@ extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
     pretty_rdr_env <- pretty False (tcg_rdr_env env)
     liftIO $ writeFile "/tmp/ghc.readerenv" pretty_rdr_env
 #endif
+
     -- Information provided by the renamer
     -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
+    -- It is important we do this *first*, because this creates the initial
+    -- cache with the IdInfo objects, which we can then update by processing
+    -- the typed AST and the global type environment.
 #if DEBUG
     liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING RENAMED AST " ++ pretty_mod ++ ">>\n"
 #endif
     extractIds (tcg_rn_decls env)
+
     -- Information provided by the type checker
 #if DEBUG
     liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPED AST " ++ pretty_mod ++ ">>\n"
 #endif
     extractIds (tcg_binds env)
+
+    -- Type environment constructed for this module
+#if DEBUG
+    liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPE ENV FOR " ++ pretty_mod ++ ">>\n"
+#endif
+    extractTypesFromTypeEnv (tcg_type_env env)
+
 #if DEBUG
 --  liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
+  liftIO $ do
+    cache <- readIORef idPropCacheRef
+    appendFile "/tmp/ghc.log" $ "Cache == " ++ show cache
 #endif
   liftIO $ modifyIORef symbolRef (Map.insert processedName identMap)
   return env
+
+extractTypesFromTypeEnv :: forall m. MonadIO m => TypeEnv -> ExtractIdsT m ()
+extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
+  where
+    go :: (Unique, TyThing) -> ExtractIdsT m ()
+    go (uniq, ADataCon dataCon) =
+      recordType ("ADataCon: " ++ showSDoc (ppr dataCon)) uniq (dataConRepType dataCon)
+    go _ =
+      return ()
+
 
 {------------------------------------------------------------------------------
   ExtractIdsT is just a wrapper around the writer monad for IdMap
@@ -327,8 +355,8 @@ modifyIdMap f span = do
   modify . second $ IdMap . Map.alter (const idInfo2) span . idMapToMap
 -}
 
-prettyType :: Monad m => Type -> ExtractIdsT m Type
-prettyType typ = state $ \(tidyEnv, idMap) ->
+tidyType :: Monad m => Type -> ExtractIdsT m Type
+tidyType typ = state $ \(tidyEnv, idMap) ->
   let (tidyEnv', typ') = tidyOpenType tidyEnv typ
   in (typ', (tidyEnv', idMap))
 
@@ -341,6 +369,7 @@ lookupRdrEnv rdrEnv name =
                    [elt] -> Just elt
                    _     -> error "ghc invariant violated"
 
+#if DEBUG
 -- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
 -- it does
 pretty :: (Monad m, Outputable a) => Bool -> a -> ExtractIdsT m String
@@ -350,6 +379,7 @@ pretty debugShow val = do
   return $ (if debugShow then showSDocDebug else showSDoc) _dynFlags (ppr val)
 #else
   return $ (if debugShow then showSDocDebug else showSDoc) (ppr val)
+#endif
 #endif
 
 debugPP :: (MonadIO m, Outputable a) => String -> a -> ExtractIdsT m ()
@@ -375,13 +405,32 @@ debugPP _ _ = return ()
 --
 -- TODO: This assumes that the structure of the AST follows Haskell scoping
 -- rules.  If this is not the case, this will break.
-ast :: Monad m => Maybe SrcSpan -> String -> ExtractIdsT m a -> ExtractIdsT m a
+ast :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m a -> ExtractIdsT m a
 ast _mspan _info cont = do
+#if DEBUG
+  indent <- liftIO $ do
+    indent <- readIORef astIndent
+    appendFile "/tmp/ghc.log" $ replicate indent ' ' ++ _info ++ "\n"
+    writeIORef astIndent (indent + 2)
+    return indent
+#endif
+
   (tidyEnv, _) <- get
   r <- cont
   (_, idMap') <- get
   put (tidyEnv, idMap')
+
+#if DEBUG
+  liftIO $ writeIORef astIndent indent
+#endif
+
   return r
+
+#if DEBUG
+astIndent :: IORef Int
+{-# NOINLINE astIndent #-}
+astIndent = unsafePerformIO $ newIORef 0
+#endif
 
 unsupported :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m ()
 #if DEBUG
@@ -398,28 +447,34 @@ unsupported _ _ = return ()
 
 type IsBinder = Bool
 
-class OutputableBndr id => Record id where
+class (Uniquable id, OutputableBndr id) => Record id where
   record :: MonadIO m => SrcSpan -> IsBinder -> id -> ExtractIdsT m ()
 
 instance Record Id where
-  record _span _idIsBinder id = do
-    typ <- prettyType (Var.varType id)
-    let typDoc = pprTypeForUser True typ
-        uniq   = Unique.getKey (Unique.getUnique id)
-    modifyCache uniq $ \idInfo -> idInfo { idType = Just (showSDoc typDoc) }
+  record _span _idIsBinder id = recordType (showSDocDebug (ppr id)) (getUnique id) (Var.varType id)
+
+recordType :: MonadIO m => String -> Unique -> Type -> ExtractIdsT m ()
+recordType _header uniq typ = do
+  typ' <- tidyType typ
+  -- We don't want line breaks in the types
+  let typStr = showDocWith OneLineMode
+                 (runSDoc (ppr typ') (initSDocContext defaultUserStyle))
+#if DEBUG
+  liftIO $ appendFile "/tmp/ghc.log" $ _header ++ ": recording " ++ typStr ++ " for unique " ++ show (getKey uniq) ++ "\n"
+#endif
+  modifyCache (getKey uniq) $ \idInfo -> idInfo { idType = Just typStr }
 
 modifyCache :: MonadIO m => IdPropKey -> (IdProp -> IdProp) -> m ()
 modifyCache uniq f = liftIO $ do
   cache <- readIORef idPropCacheRef
-#if DEBUG
-  appendFile "/tmp/ghc.propcachehit" $ if uniq `IM.member` cache then "1" else "0"
-#endif
   writeIORef idPropCacheRef $ IM.adjust f uniq cache
 
 extendCache :: MonadIO m => IdPropKey -> IdProp -> m ()
 extendCache uniq prop = liftIO $ do
   cache <- readIORef idPropCacheRef
-  writeIORef idPropCacheRef $ IM.insert uniq prop cache
+  -- Don't overwrite existing entries, because we might lose type information
+  -- that we gleaned earlier
+  writeIORef idPropCacheRef $ IM.insertWith (\_new old -> old) uniq prop cache
 
 idPropCacheRef :: IORef (IntMap IdProp)
 {-# NOINLINE idPropCacheRef #-}
@@ -444,8 +499,8 @@ idInfoForName :: DynFlags                   -- ^ The usual dynflags
 idInfoForName dflags name idIsBinder mElt = (IdProp{..}, constructScope)
  {-
   cache <- readIORef idPropCacheRef
-  let idUniq = Unique.getKey $ Name.nameUnique name
---  let idUniq = Unique.getKey $ Unique.getUnique name
+  let idUniq = getKey $ Name.nameUnique name
+--  let idUniq = getKey $ getUnique name
   case IM.lookup idUniq cache of
     Just _ ->
       -- Don't overwrite old value; the new one has no @idType@ (see below).
@@ -578,7 +633,7 @@ instance Record Name where
         -- TODO: the cache is update twice here; clean up with Ints in IdMaps.
         case idInfoForName dflags name idIsBinder (lookupRdrEnv rdrEnv name) of
           (idProp, Just idScope) -> do
-            let uniq = Unique.getKey (Unique.getUnique name)
+            let uniq = getKey (getUnique name)
             extendCache uniq idProp
             extendIdMap sourceSpan (uniq, idScope)
           _ ->
@@ -746,7 +801,9 @@ instance Record id => ExtractIds (LHsBind id) where
     -- These are only introduced by the type checker, and don't involve user
     -- written code. The ghc comments says "located 'only for consistency'"
     return ()
-  extractIds (L span bind@(AbsBinds {})) = ast (Just span) "AbsBinds" $
+  extractIds (L span bind@(AbsBinds {})) = ast (Just span) "AbsBinds" $ do
+    forM_ (abs_exports bind) $ \abs_export ->
+      record (UnhelpfulSpan (error "we never look at this span")) True (abe_poly abs_export)
     extractIds (abs_binds bind)
 
 #if __GLASGOW_HASKELL__ >= 707

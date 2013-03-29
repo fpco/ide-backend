@@ -1465,52 +1465,138 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
         -}
     )
-  , ( "Type information 1"
-    , let opts = defOpts ++ [
-                     "-package parallel"
-                   , "-XScopedTypeVariables"
-                   , "-XKindSignatures"
-                   ]
-      in withConfiguredSession opts $ \session -> do
-        let upd = (updateCodeGeneration True)
-               <> (updateModule "A.hs" . BSLC.pack . unlines $
+  , ( "Type information 1: Local identifiers and Prelude"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
-                    , "data T = MkT"
                     , "a = (5 :: Int)"
                     , "b = a + 6"
+                    , "c = True"
+                    , "d = foldr"
                     ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        idMaps <- getLoadedModules session
+        let idMapA = idMaps Map.! "A"
+        let expectedIdMapA = [
+                "(A.hs@2:1-2:2,a (VarName) :: GHC.Types.Int (binding occurrence))"
+              , "(A.hs@3:1-3:2,b (VarName) :: GHC.Types.Int (binding occurrence))"
+              , "(A.hs@3:5-3:6,a (VarName) :: GHC.Types.Int (defined at A.hs@2:1-2:2))"
+              , "(A.hs@3:7-3:8,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9))"
+              , "(A.hs@4:1-4:2,c (VarName) :: GHC.Types.Bool (binding occurrence))"
+              -- TODO: We should have a type for True
+              , "(A.hs@4:5-4:9,True (DataName) (wired in to the compiler))"
+              , "(A.hs@5:1-5:2,d (VarName) :: forall a b. (a -> b -> b) -> b -> [a] -> b (binding occurrence))"
+              , "(A.hs@5:5-5:10,foldr (VarName) :: forall a1 b1. (a1 -> b1 -> b1) -> b1 -> [a1] -> b1 (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9))"
+              ]
+        cache <- getIdPropCache session
+        let actualIdMapA = lines (showIdMap cache idMapA)
+        assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
+        {- TODO: reenable
+        assertEqual "Haddock link for A.b should be correct"
+                    "main/latest/doc/html/A.html#v:b" $
+                    haddockLink (idMapToMap idMapB Map.! SourceSpan "B.hs" 5 8 5 9)
+        -}
+    )
+  , ( "Type information 2: Simple ADTs"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "data T = MkT"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        idMaps <- getLoadedModules session
+        let idMapA = idMaps Map.! "A"
+        let expectedIdMapA = [
+                "(A.hs@2:10-2:13,MkT (DataName) :: A.T (binding occurrence))"
+              , "(A.hs@2:6-2:7,T (TcClsName) (binding occurrence))"
+              ]
+        cache <- getIdPropCache session
+        let actualIdMapA = lines (showIdMap cache idMapA)
+        assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
+    )
+  , ( "Type information 3: Polymorphism"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "data TMaybe a = TNothing | TJust a"
+                    , ""
+                    , "f1 x = x"
+                    , "f2 = \\x -> x"
+                    , ""
+                    , "g1 x y = x"
+                    , "g2 = \\x y -> x"
+                    , ""
+                    , "h1 = h1go True False"
+                    , "  where"
+                    , "    h1go x y = x"
+                    , ""
+                    , "h2 = h2go True False"
+                    , "  where"
+                    , "    h2go = \\x y -> x"
+                    ])
+        updateSessionD session upd 1
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        idMaps <- getLoadedModules session
+        let idMapA = idMaps Map.! "A"
+        let expectedIdMapA = [
+                "(A.hs@2:13-2:14,a (TvName) (binding occurrence))"
+              , "(A.hs@2:17-2:25,TNothing (DataName) :: forall a. A.TMaybe a (binding occurrence))"
+              , "(A.hs@2:28-2:33,TJust (DataName) :: forall a. a -> A.TMaybe a (binding occurrence))"
+              , "(A.hs@2:34-2:35,a (TvName) (defined at A.hs@2:13-2:14))"
+              , "(A.hs@2:6-2:12,TMaybe (TcClsName) (binding occurrence))"
+              , "(A.hs@4:1-4:3,f1 (VarName) :: forall t. t -> t (binding occurrence))"
+              , "(A.hs@4:4-4:5,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@4:8-4:9,x (VarName) :: t (defined at A.hs@4:4-4:5))"
+              , "(A.hs@5:1-5:3,f2 (VarName) :: forall t. t -> t (binding occurrence))"
+              , "(A.hs@5:12-5:13,x (VarName) :: t (defined at A.hs@5:7-5:8))"
+              , "(A.hs@5:7-5:8,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@7:1-7:3,g1 (VarName) :: forall t t1. t -> t1 -> t (binding occurrence))"
+              , "(A.hs@7:10-7:11,x (VarName) :: t (defined at A.hs@7:4-7:5))"
+              , "(A.hs@7:4-7:5,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@7:6-7:7,y (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@8:1-8:3,g2 (VarName) :: forall t t1. t -> t1 -> t (binding occurrence))"
+              , "(A.hs@8:14-8:15,x (VarName) :: t (defined at A.hs@8:7-8:8))"
+              , "(A.hs@8:7-8:8,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@8:9-8:10,y (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@10:1-10:3,h1 (VarName) :: GHC.Types.Bool (binding occurrence))"
+              , "(A.hs@10:11-10:15,True (DataName) (wired in to the compiler))"
+              , "(A.hs@10:16-10:21,False (DataName) (wired in to the compiler))"
+              , "(A.hs@10:6-10:10,h1go (VarName) :: forall t t1. t -> t1 -> t (defined at A.hs@12:5-12:9))"
+              , "(A.hs@12:10-12:11,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@12:12-12:13,y (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@12:16-12:17,x (VarName) :: t (defined at A.hs@12:10-12:11))"
+              , "(A.hs@12:5-12:9,h1go (VarName) :: forall t t1. t -> t1 -> t (binding occurrence))"
+              , "(A.hs@14:1-14:3,h2 (VarName) :: GHC.Types.Bool (binding occurrence))"
+              , "(A.hs@14:11-14:15,True (DataName) (wired in to the compiler))"
+              , "(A.hs@14:16-14:21,False (DataName) (wired in to the compiler))"
+              , "(A.hs@14:6-14:10,h2go (VarName) :: forall t t1. t -> t1 -> t (defined at A.hs@16:5-16:9))"
+              , "(A.hs@16:13-16:14,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@16:15-16:16,y (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@16:20-16:21,x (VarName) :: t (defined at A.hs@16:13-16:14))"
+              , "(A.hs@16:5-16:9,h2go (VarName) :: forall t t1. t -> t1 -> t (binding occurrence))"
+              ]
+        cache <- getIdPropCache session
+        let actualIdMapA = lines (showIdMap cache idMapA)
+        assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
+    )
+  , ( "Type information 4: Multiple modules"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "data T = MkT"
+                    ])
+                    -- Make sure that an occurrence of MkT in a second module
+                    -- doesn't cause us to lose type information we learned
+                    -- while processing the first
                <> (updateModule "B.hs" . BSLC.pack . unlines $
-                    [ {-  1 -} "module B where"
-
-                    , {-  2 -} "import A"
-                    , {-  3 -} "import Control.Parallel"
-
-                    , {-  4 -} "c = let e = 1"
-                    , {-  5 -} "    in b + 3 + d + e"
-                    , {-  6 -} "  where d = 6"
-
-                    , {-  7 -} "d :: Int -> T"
-                    , {-  8 -} "d _ = MkT"
-
-                    , {-  9 -} "e = True `pseq` False"
-
-                    , {- 10 -} "f :: a -> a"
-                    , {- 11 -} "f x = x"
-
-                    , {- 12 -} "g :: forall a. a -> a"
-                    , {- 13 -} "g x = x"
-
-                    , {- 14 -} "h :: forall a. a -> a"
-                    , {- 15 -} "h x = y"
-                    , {- 16 -} "  where"
-                    , {- 17 -} "    y :: a"
-                    , {- 18 -} "    y = x"
-
-                    , {- 19 -} "i :: forall (t :: * -> *) a. t a -> t a"
-                    , {- 20 -} "i x = x"
-
-                    , {- 21 -} "hello :: IO ()"
-                    , {- 22 -} "hello = putStrLn \"你好\""
+                    [ "module B where"
+                    , "import A"
+                    , "foo = MkT"
                     ])
         updateSessionD session upd 2
         msgs <- getSourceErrors session
@@ -1519,121 +1605,114 @@ syntheticTests =
         let idMapA = idMaps Map.! "A"
         let idMapB = idMaps Map.! "B"
         let expectedIdMapA = [
-                "(A.hs@2:10-2:13,MkT (DataName) (binding occurrence))"
+                "(A.hs@2:10-2:13,MkT (DataName) :: A.T (binding occurrence))"
               , "(A.hs@2:6-2:7,T (TcClsName) (binding occurrence))"
-              , "(A.hs@3:1-3:2,a (VarName) :: GHC.Types.Int (binding occurrence))"
-              , "(A.hs@4:1-4:2,b (VarName) :: GHC.Types.Int (binding occurrence))"
-              , "(A.hs@4:5-4:6,a (VarName) :: GHC.Types.Int (defined at A.hs@3:1-3:2))"
-              , "(A.hs@4:7-4:8,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9))"
               ]
         let expectedIdMapB = [
-                "(B.hs@10:1-10:2,f (VarName) (defined at B.hs@11:1-11:2))"
-              , "(B.hs@10:11-10:12,a (TvName) (defined at B.hs@10:6-10:7))"
-              , "(B.hs@10:6-10:7,a (TvName) (defined at B.hs@10:6-10:7))"
-              , "(B.hs@11:1-11:2,f (VarName) :: a -> a (binding occurrence))"
-              , "(B.hs@11:3-11:4,x (VarName) :: a (binding occurrence))"
-              , "(B.hs@11:7-11:8,x (VarName) :: a (defined at B.hs@11:3-11:4))"
-              , "(B.hs@12:1-12:2,g (VarName) (defined at B.hs@13:1-13:2))"
-              , "(B.hs@12:13-12:14,a (TvName) (binding occurrence))"
-              , "(B.hs@12:16-12:17,a (TvName) (defined at B.hs@12:13-12:14))"
-              , "(B.hs@12:21-12:22,a (TvName) (defined at B.hs@12:13-12:14))"
-              , "(B.hs@13:1-13:2,g (VarName) :: a -> a (binding occurrence))"
-              , "(B.hs@13:3-13:4,x (VarName) :: a (binding occurrence))"
-              , "(B.hs@13:7-13:8,x (VarName) :: a (defined at B.hs@13:3-13:4))"
-              , "(B.hs@14:1-14:2,h (VarName) (defined at B.hs@15:1-15:2))"
-              , "(B.hs@14:13-14:14,a (TvName) (binding occurrence))"
-              , "(B.hs@14:16-14:17,a (TvName) (defined at B.hs@14:13-14:14))"
-              , "(B.hs@14:21-14:22,a (TvName) (defined at B.hs@14:13-14:14))"
-              , "(B.hs@15:1-15:2,h (VarName) :: a -> a (binding occurrence))"
-              , "(B.hs@15:3-15:4,x (VarName) :: a (binding occurrence))"
-              , "(B.hs@15:7-15:8,y (VarName) :: a (defined at B.hs@18:5-18:6))"
-              , "(B.hs@17:10-17:11,a (TvName) (defined at B.hs@14:13-14:14))"
-              , "(B.hs@17:5-17:6,y (VarName) (defined at B.hs@18:5-18:6))"
-              , "(B.hs@18:5-18:6,y (VarName) :: a (binding occurrence))"
-              , "(B.hs@18:9-18:10,x (VarName) :: a (defined at B.hs@15:3-15:4))"
-              , "(B.hs@19:1-19:2,i (VarName) (defined at B.hs@20:1-20:2))"
-              , "(B.hs@19:13-19:26,t (TvName) (binding occurrence))"
-              , "(B.hs@19:27-19:28,a (TvName) (binding occurrence))"
-              , "(B.hs@19:30-19:31,t (TvName) (defined at B.hs@19:13-19:26))"
-              , "(B.hs@19:32-19:33,a (TvName) (defined at B.hs@19:27-19:28))"
-              , "(B.hs@19:37-19:38,t (TvName) (defined at B.hs@19:13-19:26))"
-              , "(B.hs@19:39-19:40,a (TvName) (defined at B.hs@19:27-19:28))"
-              , "(B.hs@20:1-20:2,i (VarName) :: t a -> t a (binding occurrence))"
-              , "(B.hs@20:3-20:4,x (VarName) :: t a (binding occurrence))"
-              , "(B.hs@20:7-20:8,x (VarName) :: t a (defined at B.hs@20:3-20:4))"
-              , "(B.hs@21:1-21:6,hello (VarName) (defined at B.hs@22:1-22:6))"
-              , "(B.hs@21:10-21:12,IO (TcClsName) (defined in ghc-prim-0.2.0.0:GHC.Types at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
-              , "(B.hs@21:13-21:15,() (TcClsName) (wired in to the compiler))"
-              , "(B.hs@22:1-22:6,hello (VarName) :: GHC.Types.IO () (binding occurrence))"
-              , "(B.hs@22:9-22:17,putStrLn (VarName) :: GHC.Base.String -> GHC.Types.IO () (defined in base-4.5.1.0:System.IO at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
-              , "(B.hs@4:1-4:2,c (VarName) :: GHC.Types.Int (binding occurrence))"
-              , "(B.hs@4:9-4:10,e (VarName) :: GHC.Types.Int (binding occurrence))"
-              , "(B.hs@5:10-5:11,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
-              , "(B.hs@5:14-5:15,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
-              , "(B.hs@5:16-5:17,d (VarName) :: GHC.Types.Int (defined at B.hs@6:9-6:10))"
-              , "(B.hs@5:18-5:19,+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at B.hs@1:8-1:9))"
-              , "(B.hs@5:20-5:21,e (VarName) :: GHC.Types.Int (defined at B.hs@4:9-4:10))"
-              , "(B.hs@5:8-5:9,b (VarName) :: GHC.Types.Int (defined in main:A at A.hs@4:1-4:2; imported from main:A at B.hs@2:1-2:9))"
-              , "(B.hs@6:9-6:10,d (VarName) :: GHC.Types.Int (binding occurrence))"
-              , "(B.hs@7:1-7:2,d (VarName) (defined at B.hs@8:1-8:2))"
-              , "(B.hs@7:13-7:14,T (TcClsName) (defined in main:A at A.hs@2:6-2:7; imported from main:A at B.hs@2:1-2:9))"
-              , "(B.hs@7:6-7:9,Int (TcClsName) (wired in to the compiler))"
-              , "(B.hs@8:1-8:2,d (VarName) :: GHC.Types.Int -> A.T (binding occurrence))"
-              , "(B.hs@8:7-8:10,MkT (DataName) :: A.T (defined in main:A at A.hs@2:10-2:13; imported from main:A at B.hs@2:1-2:9))"
-              , "(B.hs@9:1-9:2,e (VarName) :: GHC.Types.Bool (binding occurrence))"
-              , "(B.hs@9:10-9:16,pseq (VarName) :: forall a b. a -> b -> b (defined in parallel-3.2.0.3:Control.Parallel at <no location info>; imported from parallel-3.2.0.3:Control.Parallel at B.hs@3:1-3:24))"
-              , "(B.hs@9:17-9:22,False (DataName) :: GHC.Types.Bool (wired in to the compiler))"
-              , "(B.hs@9:5-9:9,True (DataName) :: GHC.Types.Bool (wired in to the compiler))"
+                "(B.hs@3:1-3:4,foo (VarName) :: A.T (binding occurrence))"
+              , "(B.hs@3:7-3:10,MkT (DataName) :: A.T (defined in main:A at A.hs@2:10-2:13; imported from main:A at B.hs@2:1-2:9))"
               ]
         cache <- getIdPropCache session
-        writeFile "/tmp/ghc.propcache" (show cache)
         let actualIdMapA = lines (showIdMap cache idMapA)
         let actualIdMapB = lines (showIdMap cache idMapB)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
         assertSameSet "actualIdMapB" expectedIdMapB actualIdMapB
-        {- TODO: reenable
-        assertEqual "Haddock link for A.b should be correct"
-                    "main/latest/doc/html/A.html#v:b" $
-                    haddockLink (idMapToMap idMapB Map.! SourceSpan "B.hs" 5 8 5 9)
-        -}
     )
-  , ( "Type information 2"
-    , withConfiguredSession defOpts $ \session -> do
+  , ( "Type information 5: External packages, type sigs, scoped type vars, kind sigs"
+    , let opts = defOpts ++ [
+                     "-package parallel"
+                   , "-XScopedTypeVariables"
+                   , "-XKindSignatures"
+                   ]
+      in withConfiguredSession opts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
-                    , "foo (x, y) = x"
-                    , "bar (x, y) = x"
-                    ])
-        updateSessionD session upd 2
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
-        idMaps <- getLoadedModules session
-        let idMap = idMaps Map.! "A"
-        let expectedIdMap = [
-              -- TODO: We are getting a monotype here, but we really should
-                "(A.hs@2:1-2:4,foo (VarName) :: (t, t1) -> t (binding occurrence))"
-              , "(A.hs@2:14-2:15,x (VarName) :: t (defined at A.hs@2:6-2:7))"
-              , "(A.hs@2:6-2:7,x (VarName) :: t (binding occurrence))"
-              , "(A.hs@2:9-2:10,y (VarName) :: t1 (binding occurrence))"
-              , "(A.hs@3:1-3:4,bar (VarName) :: (t, t1) -> t (binding occurrence))"
-              , "(A.hs@3:14-3:15,x (VarName) :: t (defined at A.hs@3:6-3:7))"
-              , "(A.hs@3:6-3:7,x (VarName) :: t (binding occurrence))"
-              , "(A.hs@3:9-3:10,y (VarName) :: t1 (binding occurrence))"
-              ]
-        cache <- getIdPropCache session
-        let actualIdMap = lines (showIdMap cache idMap)
-        assertSameSet "" expectedIdMap actualIdMap
-    )
-  , ( "Type information 3"
-    , withConfiguredSession defOpts $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
-                    [ "{-# LANGUAGE ScopedTypeVariables #-}"
-                    , "module A where"
-                    , "foo :: forall t t1. (t, t1) -> t"
-                    , "foo (x, y) = bar (x,y)"
+
+                    , "import Control.Parallel"
+
+                    , "e = True `pseq` False"
+
+                    , "f :: a -> a"
+                    , "f x = x"
+
+                    , "g :: forall a. a -> a"
+                    , "g x = x"
+
+                    , "h :: forall a. a -> a"
+                    , "h x = y"
                     , "  where"
-                    , "    bar :: forall t2. (t, t2) -> t"
-                    , "    bar (a, b) = a"
+                    , "    y :: a"
+                    , "    y = x"
+
+                    , "i :: forall (t :: * -> *) a. t a -> t a"
+                    , "i x = x"
+                    ])
+        updateSessionD session upd 2
+        msgs <- getSourceErrors session
+        assertEqual "This should compile without errors" [] msgs
+        idMaps <- getLoadedModules session
+        let idMapA = idMaps Map.! "A"
+        let expectedIdMapA = [
+                "(A.hs@3:1-3:2,e (VarName) :: GHC.Types.Bool (binding occurrence))"
+              , "(A.hs@3:10-3:16,pseq (VarName) :: forall a b. a -> b -> b (defined in parallel-3.2.0.3:Control.Parallel at <no location info>; imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24))"
+              , "(A.hs@3:17-3:22,False (DataName) (wired in to the compiler))"
+              , "(A.hs@3:5-3:9,True (DataName) (wired in to the compiler))"
+              , "(A.hs@4:1-4:2,f (VarName) :: forall a. a -> a (defined at A.hs@5:1-5:2))"
+              , "(A.hs@4:11-4:12,a (TvName) (defined at A.hs@4:6-4:7))"
+              , "(A.hs@4:6-4:7,a (TvName) (defined at A.hs@4:6-4:7))"
+              , "(A.hs@5:1-5:2,f (VarName) :: forall a. a -> a (binding occurrence))"
+              , "(A.hs@5:3-5:4,x (VarName) :: a (binding occurrence))"
+              , "(A.hs@5:7-5:8,x (VarName) :: a (defined at A.hs@5:3-5:4))"
+              , "(A.hs@6:1-6:2,g (VarName) :: forall a. a -> a (defined at A.hs@7:1-7:2))"
+              , "(A.hs@6:13-6:14,a (TvName) (binding occurrence))"
+              , "(A.hs@6:16-6:17,a (TvName) (defined at A.hs@6:13-6:14))"
+              , "(A.hs@6:21-6:22,a (TvName) (defined at A.hs@6:13-6:14))"
+              , "(A.hs@7:1-7:2,g (VarName) :: forall a. a -> a (binding occurrence))"
+              , "(A.hs@7:3-7:4,x (VarName) :: a (binding occurrence))"
+              , "(A.hs@7:7-7:8,x (VarName) :: a (defined at A.hs@7:3-7:4))"
+              , "(A.hs@8:1-8:2,h (VarName) :: forall a. a -> a (defined at A.hs@9:1-9:2))"
+              , "(A.hs@8:13-8:14,a (TvName) (binding occurrence))"
+              , "(A.hs@8:16-8:17,a (TvName) (defined at A.hs@8:13-8:14))"
+              , "(A.hs@8:21-8:22,a (TvName) (defined at A.hs@8:13-8:14))"
+              , "(A.hs@9:1-9:2,h (VarName) :: forall a. a -> a (binding occurrence))"
+              , "(A.hs@9:3-9:4,x (VarName) :: a (binding occurrence))"
+              , "(A.hs@9:7-9:8,y (VarName) :: a (defined at A.hs@12:5-12:6))"
+              , "(A.hs@11:10-11:11,a (TvName) (defined at A.hs@8:13-8:14))"
+              , "(A.hs@11:5-11:6,y (VarName) :: a (defined at A.hs@12:5-12:6))"
+              , "(A.hs@12:5-12:6,y (VarName) :: a (binding occurrence))"
+              , "(A.hs@12:9-12:10,x (VarName) :: a (defined at A.hs@9:3-9:4))"
+              , "(A.hs@13:1-13:2,i (VarName) :: forall (t :: * -> *) a. t a -> t a (defined at A.hs@14:1-14:2))"
+              , "(A.hs@13:13-13:26,t (TvName) (binding occurrence))"
+              , "(A.hs@13:27-13:28,a (TvName) (binding occurrence))"
+              , "(A.hs@13:30-13:31,t (TvName) (defined at A.hs@13:13-13:26))"
+              , "(A.hs@13:32-13:33,a (TvName) (defined at A.hs@13:27-13:28))"
+              , "(A.hs@13:37-13:38,t (TvName) (defined at A.hs@13:13-13:26))"
+              , "(A.hs@13:39-13:40,a (TvName) (defined at A.hs@13:27-13:28))"
+              , "(A.hs@14:1-14:2,i (VarName) :: forall (t :: * -> *) a. t a -> t a (binding occurrence))"
+              , "(A.hs@14:3-14:4,x (VarName) :: t a (binding occurrence))"
+              , "(A.hs@14:7-14:8,x (VarName) :: t a (defined at A.hs@14:3-14:4))"
+              ]
+        cache <- getIdPropCache session
+        let actualIdMapA = lines (showIdMap cache idMapA)
+        assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
+    )
+  , ( "Type information 6: Reusing type variables"
+    , withConfiguredSession ("-XScopedTypeVariables" : defOpts) $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+
+                    , "f1 (x, y) = x"
+                    , "f2 (x, y) = x"
+
+                    , "f3 (x, y) = f4 (x, y)"
+                    , "  where"
+                    , "    f4 (x, y) = x"
+
+                    , "f5 :: forall t t1. (t, t1) -> t"
+                    , "f5 (x, y) = f6 (x, y)"
+                    , "  where"
+                    , "    f6 :: forall t2. (t, t2) -> t"
+                    , "    f6 (x, y) = x"
                     ])
         updateSessionD session upd 2
         msgs <- getSourceErrors session
@@ -1641,33 +1720,51 @@ syntheticTests =
         idMaps <- getLoadedModules session
         let idMap = idMaps Map.! "A"
         let expectedIdMap = [
-                "(A.hs@3:1-3:4,foo (VarName) (defined at A.hs@4:1-4:4))"
-              , "(A.hs@3:15-3:16,t (TvName) (binding occurrence))"
-              , "(A.hs@3:17-3:19,t1 (TvName) (binding occurrence))"
-              , "(A.hs@3:22-3:23,t (TvName) (defined at A.hs@3:15-3:16))"
-              , "(A.hs@3:25-3:27,t1 (TvName) (defined at A.hs@3:17-3:19))"
-              , "(A.hs@3:32-3:33,t (TvName) (defined at A.hs@3:15-3:16))"
-              , "(A.hs@4:1-4:4,foo (VarName) :: (t, t1) -> t (binding occurrence))"
-              , "(A.hs@4:14-4:17,bar (VarName) :: forall t2. (t, t2) -> t (defined at A.hs@7:5-7:8))"
-              , "(A.hs@4:19-4:20,x (VarName) :: t (defined at A.hs@4:6-4:7))"
-              , "(A.hs@4:21-4:22,y (VarName) :: t1 (defined at A.hs@4:9-4:10))"
-              , "(A.hs@4:6-4:7,x (VarName) :: t (binding occurrence))"
-              , "(A.hs@4:9-4:10,y (VarName) :: t1 (binding occurrence))"
-              , "(A.hs@6:19-6:21,t2 (TvName) (binding occurrence))"
-              , "(A.hs@6:24-6:25,t (TvName) (defined at A.hs@3:15-3:16))"
-              , "(A.hs@6:27-6:29,t2 (TvName) (defined at A.hs@6:19-6:21))"
-              , "(A.hs@6:34-6:35,t (TvName) (defined at A.hs@3:15-3:16))"
-              , "(A.hs@6:5-6:8,bar (VarName) (defined at A.hs@7:5-7:8))"
-              , "(A.hs@7:10-7:11,a (VarName) :: t (binding occurrence))"
-              , "(A.hs@7:13-7:14,b (VarName) :: t2 (binding occurrence))"
-              , "(A.hs@7:18-7:19,a (VarName) :: t (defined at A.hs@7:10-7:11))"
-              , "(A.hs@7:5-7:8,bar (VarName) :: (t, t2) -> t (binding occurrence))"
+                "(A.hs@2:1-2:3,f1 (VarName) :: forall t t1. (t, t1) -> t (binding occurrence))"
+              , "(A.hs@2:13-2:14,x (VarName) :: t (defined at A.hs@2:5-2:6))"
+              , "(A.hs@2:5-2:6,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@2:8-2:9,y (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@3:1-3:3,f2 (VarName) :: forall t t1. (t, t1) -> t (binding occurrence))"
+              , "(A.hs@3:13-3:14,x (VarName) :: t (defined at A.hs@3:5-3:6))"
+              , "(A.hs@3:5-3:6,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@3:8-3:9,y (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@4:1-4:3,f3 (VarName) :: forall t t1. (t, t1) -> t (binding occurrence))"
+              , "(A.hs@4:13-4:15,f4 (VarName) :: forall t2 t3. (t2, t3) -> t2 (defined at A.hs@6:5-6:7))"
+              , "(A.hs@4:17-4:18,x (VarName) :: t (defined at A.hs@4:5-4:6))"
+              , "(A.hs@4:20-4:21,y (VarName) :: t1 (defined at A.hs@4:8-4:9))"
+              , "(A.hs@4:5-4:6,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@4:8-4:9,y (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@6:12-6:13,y (VarName) :: t3 (binding occurrence))"
+              , "(A.hs@6:17-6:18,x (VarName) :: t2 (defined at A.hs@6:9-6:10))"
+              , "(A.hs@6:5-6:7,f4 (VarName) :: forall t2 t3. (t2, t3) -> t2 (binding occurrence))"
+              , "(A.hs@6:9-6:10,x (VarName) :: t2 (binding occurrence))"
+              , "(A.hs@7:1-7:3,f5 (VarName) :: forall t t1. (t, t1) -> t (defined at A.hs@8:1-8:3))"
+              , "(A.hs@7:14-7:15,t (TvName) (binding occurrence))"
+              , "(A.hs@7:16-7:18,t1 (TvName) (binding occurrence))"
+              , "(A.hs@7:21-7:22,t (TvName) (defined at A.hs@7:14-7:15))"
+              , "(A.hs@7:24-7:26,t1 (TvName) (defined at A.hs@7:16-7:18))"
+              , "(A.hs@7:31-7:32,t (TvName) (defined at A.hs@7:14-7:15))"
+              , "(A.hs@8:1-8:3,f5 (VarName) :: forall t t1. (t, t1) -> t (binding occurrence))"
+              , "(A.hs@8:13-8:15,f6 (VarName) :: forall t2. (t, t2) -> t (defined at A.hs@11:5-11:7))"
+              , "(A.hs@8:17-8:18,x (VarName) :: t (defined at A.hs@8:5-8:6))"
+              , "(A.hs@8:20-8:21,y (VarName) :: t1 (defined at A.hs@8:8-8:9))"
+              , "(A.hs@8:5-8:6,x (VarName) :: t (binding occurrence))"
+              , "(A.hs@8:8-8:9,y (VarName) :: t1 (binding occurrence))"
+              , "(A.hs@10:18-10:20,t2 (TvName) (binding occurrence))"
+              , "(A.hs@10:23-10:24,t (TvName) (defined at A.hs@7:14-7:15))"
+              , "(A.hs@10:26-10:28,t2 (TvName) (defined at A.hs@10:18-10:20))"
+              , "(A.hs@10:33-10:34,t (TvName) (defined at A.hs@7:14-7:15))"
+              , "(A.hs@10:5-10:7,f6 (VarName) :: forall t2. (t, t2) -> t (defined at A.hs@11:5-11:7))"
+              , "(A.hs@11:12-11:13,y (VarName) :: t2 (binding occurrence))"
+              , "(A.hs@11:17-11:18,x (VarName) :: t (defined at A.hs@11:9-11:10))"
+              , "(A.hs@11:5-11:7,f6 (VarName) :: forall t2. (t, t2) -> t (binding occurrence))"
+              , "(A.hs@11:9-11:10,x (VarName) :: t (binding occurrence))"
               ]
         cache <- getIdPropCache session
         let actualIdMap = lines (showIdMap cache idMap)
         assertSameSet "" expectedIdMap actualIdMap
     )
-  , ( "Type information 4"
+  , ( "Type information 7: Qualified imports"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
@@ -1682,12 +1779,10 @@ syntheticTests =
         idMaps <- getLoadedModules session
         let idMap = idMaps Map.! "A"
         let expectedIdMap = [
-                "(A.hs@5:1-5:4,foo (VarName) :: (Data.Maybe.Maybe a -> a,"
-              , " [GHC.Types.Bool] -> GHC.Types.Bool,"
-              , " (b -> b -> c) -> (a1 -> b) -> a1 -> a1 -> c) (binding occurrence))"
-              , "(A.hs@5:8-5:16,fromJust (VarName) :: forall a2. Data.Maybe.Maybe a2 -> a2 (defined in base-4.5.1.0:Data.Maybe at <no location info>; imported from base-4.5.1.0:Data.Maybe at A.hs@2:1-2:18))"
+                "(A.hs@5:1-5:4,foo (VarName) :: forall a b c a1. (Data.Maybe.Maybe a -> a, [GHC.Types.Bool] -> GHC.Types.Bool, (b -> b -> c) -> (a1 -> b) -> a1 -> a1 -> c) (binding occurrence))"
               , "(A.hs@5:18-5:31,and (VarName) :: [GHC.Types.Bool] -> GHC.Types.Bool (defined in base-4.5.1.0:GHC.List at <no location info>; imported from base-4.5.1.0:Data.List as 'Data.List.' at A.hs@3:1-3:27))"
               , "(A.hs@5:33-5:37,on (VarName) :: forall b1 c1 a2. (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 (defined in base-4.5.1.0:Data.Function at <no location info>; imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36))"
+              , "(A.hs@5:8-5:16,fromJust (VarName) :: forall a2. Data.Maybe.Maybe a2 -> a2 (defined in base-4.5.1.0:Data.Maybe at <no location info>; imported from base-4.5.1.0:Data.Maybe at A.hs@2:1-2:18))"
               ]
         cache <- getIdPropCache session
         let actualIdMap = lines (showIdMap cache idMap)
