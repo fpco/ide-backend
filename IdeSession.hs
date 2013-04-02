@@ -856,7 +856,7 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
         let name' = BSSC.pack name
             n     = last (BSSC.split '.' name')
         in filter (\(idProp, idScope) -> name `isInfixOf` idInfoQN idProp idScope)
-             $ map (first (cacheLookup cache))
+             $ map (first (idPropCacheLookup cache))
              . concat
              . Trie.elems
              . Trie.submap n

@@ -17,9 +17,9 @@ module GhcHsWalk
   , wipeIdPropCache
   , extractSourceSpan
   , idInfoQN
-  , extendCache
+  , extendIdPropCache
+  , idPropCacheLookup
   , showIdMap
-  , cacheLookup
   ) where
 
 import Control.Arrow (first, second)
@@ -69,6 +69,41 @@ import DataCon (dataConRepType)
 import Pretty (showDocWith, Mode(OneLineMode))
 
 #define DEBUG 0
+
+{------------------------------------------------------------------------------
+  Caching
+
+  We use explicit sharing so that we can maintain sharing through the JSON
+  serialization.
+------------------------------------------------------------------------------}
+
+-- | Throws an exception when the key does not exist
+idPropCacheLookup :: IntMap IdProp -> IdPropKey -> IdProp
+idPropCacheLookup cache k = fromMaybe (error "cacheLookup") $ IM.lookup k cache
+
+modifyIdPropCache :: MonadIO m => IdPropKey -> (IdProp -> IdProp) -> m ()
+modifyIdPropCache uniq f = liftIO $ do
+  cache <- readIORef idPropCacheRef
+  writeIORef idPropCacheRef $ IM.adjust f uniq cache
+
+extendIdPropCache :: MonadIO m => IdPropKey -> IdProp -> m ()
+extendIdPropCache uniq prop = liftIO $ do
+  cache <- readIORef idPropCacheRef
+  -- Don't overwrite existing entries, because we might lose type information
+  -- that we gleaned earlier
+  writeIORef idPropCacheRef $ IM.insertWith (\_new old -> old) uniq prop cache
+
+idPropCacheRef :: IORef (IntMap IdProp)
+{-# NOINLINE idPropCacheRef #-}
+idPropCacheRef = unsafePerformIO $ newIORef IM.empty
+
+wipeIdPropCache :: IO (IntMap IdProp)
+wipeIdPropCache = do
+  -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
+  -- for long-running sessions with many added and removed definitions.
+  cache <- readIORef idPropCacheRef
+  liftIO $ writeIORef idPropCacheRef IM.empty
+  return cache
 
 {------------------------------------------------------------------------------
   Environment mapping source locations to info
@@ -169,15 +204,11 @@ idMapToList = Map.toList . idMapToMap
 idMapFromList :: [(SourceSpan, IdInfo)] -> IdMap
 idMapFromList = IdMap . Map.fromList
 
--- | Throws an exception when the key does not exist
-cacheLookup :: IntMap IdProp -> IdPropKey -> IdProp
-cacheLookup cache k = fromMaybe (error "cacheLookup") $ IM.lookup k cache
-
 showIdMap :: IntMap IdProp -> IdMap -> String
 showIdMap cache =
   let showIdInfo(span, (k, idScope)) =
         "(" ++ show span ++ ","
-        ++ show (cacheLookup cache k)
+        ++ show (idPropCacheLookup cache k)
         ++ "(" ++ show idScope ++ "))"
   in unlines . map showIdInfo . idMapToList
 
@@ -291,14 +322,14 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
     go _ =
       return ()
 
-
 {------------------------------------------------------------------------------
-  ExtractIdsT is just a wrapper around the writer monad for IdMap
-  (we wrap it to avoid orphan instances). Note that MonadIO is GHC's
-  MonadIO, not the standard one, and hence we need our own instance.
+  ExtractIdsT adds state and en environment to whatever monad that GHC
+  puts us in (this is why it needs to be a monad transformer).
+
+  Note that MonadIO is GHC's MonadIO, not the standard one, and hence we need
+  our own instance.
 ------------------------------------------------------------------------------}
 
--- Define type synonym to avoid orphan instances
 newtype ExtractIdsT m a = ExtractIdsT (
       ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StateT (TidyEnv, IdMap) m) a
     )
@@ -325,35 +356,6 @@ getGlobalRdrEnv = asks snd
 extendIdMap :: MonadIO m => SourceSpan -> IdInfo -> ExtractIdsT m ()
 extendIdMap span info =
   modify . second $ IdMap  . Map.insert span info . idMapToMap
-
-
-{-
-modifyIdMap :: MonadIO m
-            => (Maybe IdInfo -> Maybe IdInfo)
-            -> SourceSpan
-            -> ExtractIdsT m ()
-modifyIdMap f span = do
-  cache <- liftIO $ readIORef idPropCacheRef
-  (_, idMap) <- get
-  let idInfo1 = Map.lookup span $ idMapToMap idMap
-      idInfo2 = f idInfo1
-      -- We assume modifications improve IdInfos, e.g., add idTypes,
-      -- so we replace the old value, if any.
-      overwrite Nothing = return ()
-      overwrite (Just (idProp, _)) = do
-#if DEBUG
-        -- We record (benign, we expect) deviations from the assumption above.
-        let moldType = maybe Nothing idType $ IM.lookup (idUniq idProp) cache
-        when (maybe False ((/= idType idProp) . Just) moldType) $
-          liftIO $ appendFile "/tmp/ghc.overwritten_types" $
-            "modifyIdMap: old was " ++ show moldType ++ "\n" ++
-            "            , new is " ++ show (idType idProp) ++ "\n"
-#endif
-        let ncache = IM.insert (idUniq idProp) idProp cache
-        liftIO $ writeIORef idPropCacheRef ncache
-  overwrite idInfo2
-  modify . second $ IdMap . Map.alter (const idInfo2) span . idMapToMap
--}
 
 tidyType :: Monad m => Type -> ExtractIdsT m Type
 tidyType typ = state $ \(tidyEnv, idMap) ->
@@ -462,31 +464,7 @@ recordType _header uniq typ = do
 #if DEBUG
   liftIO $ appendFile "/tmp/ghc.log" $ _header ++ ": recording " ++ typStr ++ " for unique " ++ show (getKey uniq) ++ "\n"
 #endif
-  modifyCache (getKey uniq) $ \idInfo -> idInfo { idType = Just typStr }
-
-modifyCache :: MonadIO m => IdPropKey -> (IdProp -> IdProp) -> m ()
-modifyCache uniq f = liftIO $ do
-  cache <- readIORef idPropCacheRef
-  writeIORef idPropCacheRef $ IM.adjust f uniq cache
-
-extendCache :: MonadIO m => IdPropKey -> IdProp -> m ()
-extendCache uniq prop = liftIO $ do
-  cache <- readIORef idPropCacheRef
-  -- Don't overwrite existing entries, because we might lose type information
-  -- that we gleaned earlier
-  writeIORef idPropCacheRef $ IM.insertWith (\_new old -> old) uniq prop cache
-
-idPropCacheRef :: IORef (IntMap IdProp)
-{-# NOINLINE idPropCacheRef #-}
-idPropCacheRef = unsafePerformIO $ newIORef IM.empty
-
-wipeIdPropCache :: IO (IntMap IdProp)
-wipeIdPropCache = do
-  -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
-  -- for long-running sessions with many added and removed definitions.
-  cache <- readIORef idPropCacheRef
-  liftIO $ writeIORef idPropCacheRef IM.empty
-  return cache
+  modifyIdPropCache (getKey uniq) $ \idInfo -> idInfo { idType = Just typStr }
 
 -- | Construct an IdInfo for a 'Name'. We assume the @GlobalRdrElt@ is
 -- uniquely determined by the @Name@ and the @DynFlags@ do not change
@@ -497,20 +475,6 @@ idInfoForName :: DynFlags                   -- ^ The usual dynflags
               -> Maybe RdrName.GlobalRdrElt -- ^ GlobalRdrElt for imported names
               ->(IdProp, Maybe IdScope)     -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt = (IdProp{..}, constructScope)
- {-
-  cache <- readIORef idPropCacheRef
-  let idUniq = getKey $ Name.nameUnique name
---  let idUniq = getKey $ getUnique name
-  case IM.lookup idUniq cache of
-    Just _ ->
-      -- Don't overwrite old value; the new one has no @idType@ (see below).
-      return ()
-    _ -> do
-      let idProp = IdProp{..}
-          ncache = IM.insert idUniq idProp cache
-      writeIORef idPropCacheRef ncache
-  return (idUniq, constructScope)
- -}
   where
       occ     = Name.nameOccName name
       idName  = Name.occNameString occ
@@ -634,7 +598,7 @@ instance Record Name where
         case idInfoForName dflags name idIsBinder (lookupRdrEnv rdrEnv name) of
           (idProp, Just idScope) -> do
             let uniq = getKey (getUnique name)
-            extendCache uniq idProp
+            extendIdPropCache uniq idProp
             extendIdMap sourceSpan (uniq, idScope)
           _ ->
             -- This only happens for some special cases ('assert' being

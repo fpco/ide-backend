@@ -91,7 +91,7 @@ import GhcHsWalk (
   , IdInfo
   , idInfoForName
   , wipeIdPropCache
-  , extendCache
+  , extendIdPropCache
   )
 
 newtype DynamicOpts = DynamicOpts [Located String]
@@ -335,7 +335,7 @@ extractImportsAuto dflags session graph = do
       let name = gre_name elt
           uniq = Unique.getKey $ Unique.getUnique name
           (idInfo, Just idScope) = idInfoForName dflags name False (Just elt)
-      extendCache uniq idInfo
+      extendIdPropCache uniq idInfo
       return $ (uniq, idScope)
 
     autoEnvs :: ModSummary -> IO [GlobalRdrElt]
