@@ -408,7 +408,7 @@ idInfoForName dflags name idIsBinder mElt = do
                              return (Just scope)
               Nothing  -> return Nothing
 
-      scopeFromProv :: MonadIO m => RdrName.Provenance -> m XIdScope
+      scopeFromProv :: MonadIO m => RdrName.Provenance -> m (XShared IdScope)
       scopeFromProv RdrName.LocalDef = do
         span <- extractSourceSpan (Name.nameSrcSpan name)
         return XLocal {

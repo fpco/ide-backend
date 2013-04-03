@@ -288,10 +288,10 @@ data SessionConfig = SessionConfig {
 
 data Computed = Computed {
     -- | Last compilation and run errors
-    computedErrors :: [XSourceError]
+    computedErrors :: [XShared SourceError]
     -- | Modules that got loaded okay together with their mappings
     -- from source locations to information about identifiers there
-  , computedLoadedModules :: XLoadedModules
+  , computedLoadedModules :: XShared LoadedModules
     -- | Import information. This is (usually) available even for modules
     -- with parsing or type errors
   , computedImports :: !(Map ModuleName [Import])
@@ -301,7 +301,7 @@ data Computed = Computed {
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
-  , computedAutoMap :: !(Map ModuleName (Trie [XIdInfo]))
+  , computedAutoMap :: !(Map ModuleName (Trie [XShared IdInfo]))
     -- | We access IdProps indirectly through this cache
   , computedCache :: !ExplicitSharingCache
   }
@@ -534,9 +534,9 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         -- Determine imports and completion map from the diffs sent
         -- from the RPC compilationi process.
         let usePrevious :: IdeIdleState
-                        -> Map ModuleName (Maybe ([Import], Trie [XIdInfo]))
+                        -> Map ModuleName (Maybe ([Import], Trie [XShared IdInfo]))
                         -> ( Map ModuleName [Import]
-                           , Map ModuleName (Trie [XIdInfo])
+                           , Map ModuleName (Trie [XShared IdInfo])
                            )
             usePrevious idleSt importsAuto =
               ( applyMapDiff (Map.map (fmap fst) importsAuto)
@@ -808,7 +808,7 @@ getManagedFiles IdeSession{ideState} =
 -- what is the type of this symbol and some more information.
 -- This information lets us, e.g, construct Haddock URLs for symbols,
 -- like @parallel-3.2.0.3/Control-Parallel.html#v:pseq@.
-getLoadedModules :: Query XLoadedModules
+getLoadedModules :: Query (XShared LoadedModules)
 getLoadedModules IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
@@ -816,7 +816,7 @@ getLoadedModules IdeSession{ideState, ideStaticInfo} =
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO XLoadedModules
+    aux :: IdeIdleState -> IO (XShared LoadedModules)
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} -> return computedLoadedModules
       Nothing -> fail "This session state does not admit queries."
@@ -870,7 +870,7 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
       Nothing           -> fail "This session state does not admit queries."
 
     autocomplete :: ExplicitSharingCache
-                 -> Map ModuleName (Trie [XIdInfo])
+                 -> Map ModuleName (Trie [XShared IdInfo])
                  -> ModuleName -> String
                  -> [(IdProp, IdScope)]
     autocomplete cache mapOfTries modName name =
