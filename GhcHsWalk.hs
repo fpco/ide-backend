@@ -2,24 +2,13 @@
              GeneralizedNewtypeDeriving, MultiParamTypeClasses, TemplateHaskell,
              TypeSynonymInstances, ScopedTypeVariables #-}
 module GhcHsWalk
-  ( IdMap(..)
-  , IdInfo
-  , IdProp(..)
-  , IdNameSpace(..)
-  , IdScope(..)
-  , LoadedModules
-  , extractIdsPlugin
+  ( extractIdsPlugin
   , haddockLink
-  , idInfoAtLocation
-  , idMapToList
-  , idMapFromList
+  --, idInfoAtLocation
   , idInfoForName
-  , wipeIdPropCache
   , extractSourceSpan
   , idInfoQN
-  , extendIdPropCache
-  , idPropCacheLookup
-  , showIdMap
+  , constructExplicitSharingCache
   ) where
 
 import Control.Arrow (first, second)
@@ -28,22 +17,21 @@ import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State (MonadState, StateT, execStateT, get, modify, put,
                             state)
 import Control.Monad.Trans.Class (MonadTrans, lift)
-import Data.Aeson (FromJSON (..), ToJSON (..))
-import Data.Aeson.TH (deriveJSON)
-import Data.Generics
+import Control.Exception (evaluate)
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.IORef
 import Data.List (stripPrefix)
-import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
+import Data.Tuple (swap)
 import Data.Version
 import Prelude hiding (id, mod, span)
 import System.IO.Unsafe (unsafePerformIO)
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 
 import Common hiding (ModuleName)
-import qualified Common
 
 import Bag
 import DataCon (dataConName)
@@ -77,114 +65,58 @@ import Pretty (showDocWith, Mode(OneLineMode))
   serialization.
 ------------------------------------------------------------------------------}
 
--- | Throws an exception when the key does not exist
-idPropCacheLookup :: IntMap IdProp -> IdPropKey -> IdProp
-idPropCacheLookup cache k = fromMaybe (error "cacheLookup") $ IM.lookup k cache
-
-modifyIdPropCache :: MonadIO m => IdPropKey -> (IdProp -> IdProp) -> m ()
-modifyIdPropCache uniq f = liftIO $ do
-  cache <- readIORef idPropCacheRef
-  writeIORef idPropCacheRef $ IM.adjust f uniq cache
-
-extendIdPropCache :: MonadIO m => IdPropKey -> IdProp -> m ()
-extendIdPropCache uniq prop = liftIO $ do
-  cache <- readIORef idPropCacheRef
-  -- Don't overwrite existing entries, because we might lose type information
-  -- that we gleaned earlier
-  writeIORef idPropCacheRef $ IM.insertWith (\_new old -> old) uniq prop cache
-
 idPropCacheRef :: IORef (IntMap IdProp)
 {-# NOINLINE idPropCacheRef #-}
 idPropCacheRef = unsafePerformIO $ newIORef IM.empty
 
-wipeIdPropCache :: IO (IntMap IdProp)
-wipeIdPropCache = do
+filePathCacheRef :: IORef (HashMap FilePath Int, Int)
+{-# NOINLINE filePathCacheRef #-}
+filePathCacheRef = unsafePerformIO $ newIORef (HashMap.empty, 0)
+
+modifyIdPropCache :: MonadIO m => IdPropPtr -> (IdProp -> IdProp) -> m ()
+modifyIdPropCache ptr f = liftIO $ do
+  cache <- readIORef idPropCacheRef
+  let uniq = idPropPtr ptr
+  writeIORef idPropCacheRef $ IM.adjust f uniq cache
+
+extendIdPropCache :: MonadIO m => IdPropPtr -> IdProp -> m ()
+extendIdPropCache ptr prop = liftIO $ do
+  cache <- readIORef idPropCacheRef
+  -- Don't overwrite existing entries, because we might lose type information
+  -- that we gleaned earlier
+  let uniq = idPropPtr ptr
+  writeIORef idPropCacheRef $ IM.insertWith (\_new old -> old) uniq prop cache
+
+mkFilePathPtr :: FilePath -> IO FilePathPtr
+mkFilePathPtr path = do
+  (hash, next) <- readIORef filePathCacheRef
+  case HashMap.lookup path hash of
+    Nothing -> do
+      next' <- evaluate $ next + 1
+      writeIORef filePathCacheRef (HashMap.insert path next' hash, next')
+      return $ FilePathPtr next'
+    Just key ->
+      return $ FilePathPtr key
+
+-- | Construct the explicit sharing cache
+--
+-- NOTE: This wipes the IdPropCache. This should only be called at the end
+-- of a compile cycle.
+constructExplicitSharingCache :: IO ExplicitSharingCache
+constructExplicitSharingCache = do
   -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
   -- for long-running sessions with many added and removed definitions.
-  cache <- readIORef idPropCacheRef
+  idPropCache <- readIORef idPropCacheRef
   liftIO $ writeIORef idPropCacheRef IM.empty
-  return cache
+
+  (filePathHash, _) <- readIORef filePathCacheRef
+  let filePathCache = IM.fromList . map swap $ HashMap.toList filePathHash
+
+  return ExplicitSharingCache {..}
 
 {------------------------------------------------------------------------------
   Environment mapping source locations to info
 ------------------------------------------------------------------------------}
-
--- This type is abstract in GHC. One more reason to define our own.
-data IdNameSpace =
-    VarName    -- ^ Variables, including real data constructors
-  | DataName   -- ^ Source data constructors
-  | TvName     -- ^ Type variables
-  | TcClsName  -- ^ Type constructors and classes
-  deriving (Show, Eq, Data, Typeable)
-
--- | Information about identifiers
-data IdProp = IdProp
-  { -- | The base name of the identifer at this location. Module prefix
-    -- is not included.
-    idName  :: String
-    -- | Namespace this identifier is drawn from
-  , idSpace :: IdNameSpace
-    -- | The type
-    -- We don't always know this; in particular, we don't know kinds because
-    -- the type checker does not give us LSigs for top-level annotations)
-  , idType  :: Maybe String
-  }
-  deriving (Eq, Data, Typeable)
-
-instance Show IdProp where
-  show (IdProp {..}) =
-       idName ++ " "
-    ++ "(" ++ show idSpace ++ ") "
-    ++ (case idType of Just typ -> ":: " ++ typ ++ " "; Nothing -> [])
-
--- TODO: Ideally, we would have
--- 1. SourceSpan for Local rather than EitherSpan
--- 2. Don't have Maybe String or Maybe Package in the import case
---    (under which circumstances do we not get package information? -- the unit
---    tests give us examples)
--- 3. SourceSpan for idImportSpan
--- 4. Have a idImportedFromPackage, but unfortunately ghc doesn't give us
---    this information (it's marked as a TODO in RdrName.lhs)
-data IdScope =
-    -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
-    Binder
-    -- | Defined within this module
-  | Local {
-        idDefSpan :: EitherSpan
-      }
-    -- | Imported from a different module
-  | Imported {
-        idDefSpan      :: EitherSpan
-      , idDefinedIn    :: ModuleId
-      , idImportedFrom :: ModuleId
-      , idImportSpan   :: EitherSpan
-        -- | Qualifier used for the import
-        --
-        -- > IMPORTED AS                       idImportQual
-        -- > import Data.List                  ""
-        -- > import qualified Data.List        "Data.List."
-        -- > import qualified Data.List as L   "L."
-      , idImportQual   :: String
-      }
-    -- | Wired into the compiler (@()@, @True@, etc.)
-  | WiredIn
-  deriving (Eq, Data, Typeable)
-
--- TODO: If these Maybes stay, we should have a prettier Show instance
--- (but hopefully they will go)
-instance Show IdScope where
-  show Binder          = "binding occurrence"
-  show (Local {..})    = "defined at " ++ show idDefSpan
-  show WiredIn         = "wired in to the compiler"
-  show (Imported {..}) = "defined in "
-                      ++ show idDefinedIn
-                      ++ " at " ++ show idDefSpan ++ ";"
-                      ++ " imported from " ++ show idImportedFrom
-                      ++ (if null idImportQual then [] else " as '" ++ idImportQual ++ "'")
-                      ++ " at "++ show idImportSpan
-
-type IdPropKey = Int
-type IdInfo    = (IdPropKey, IdScope)
 
 -- | Construct qualified name following Haskell's scoping rules
 idInfoQN :: IdProp -> IdScope -> String
@@ -194,35 +126,6 @@ idInfoQN IdProp{idName} idScope =
     Local{}                -> idName
     Imported{idImportQual} -> idImportQual ++ idName
     WiredIn                -> idName
-
-data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
-  deriving (Data, Typeable)
-
-idMapToList :: IdMap -> [(SourceSpan, IdInfo)]
-idMapToList = Map.toList . idMapToMap
-
-idMapFromList :: [(SourceSpan, IdInfo)] -> IdMap
-idMapFromList = IdMap . Map.fromList
-
-showIdMap :: IntMap IdProp -> IdMap -> String
-showIdMap cache =
-  let showIdInfo(span, (k, idScope)) =
-        "(" ++ show span ++ ","
-        ++ show (idPropCacheLookup cache k)
-        ++ "(" ++ show idScope ++ "))"
-  in unlines . map showIdInfo . idMapToList
-
-type LoadedModules = Map Common.ModuleName IdMap
-
-$(deriveJSON (\x -> x) ''IdNameSpace)
-$(deriveJSON (\x -> x) ''IdScope)
-$(deriveJSON (\x -> x) ''IdProp)
-
-instance FromJSON IdMap where
-  parseJSON = fmap idMapFromList . parseJSON
-
-instance ToJSON IdMap where
-  toJSON = toJSON . idMapToList
 
 fromGhcNameSpace :: Name.NameSpace -> IdNameSpace
 fromGhcNameSpace ns
@@ -259,6 +162,7 @@ haddockLink IdProp{..} idScope =
      Nothing -> packageName p ++ "/latest"
      Just version -> packageName p ++ "/" ++ version
 
+{-
 idInfoAtLocation :: Int -> Int -> IdMap -> [(SourceSpan, IdInfo)]
 idInfoAtLocation line col = filter inRange . idMapToList
   where
@@ -266,12 +170,13 @@ idInfoAtLocation line col = filter inRange . idMapToList
     inRange (SourceSpan{..}, _) =
       (line   > spanFromLine || (line == spanFromLine && col >= spanFromColumn)) &&
       (line   < spanToLine   || (line == spanToLine   && col <= spanToColumn))
+-}
 
 {------------------------------------------------------------------------------
   Extract an IdMap from information returned by the ghc type checker
 ------------------------------------------------------------------------------}
 
-extractIdsPlugin :: IORef LoadedModules -> HscPlugin
+extractIdsPlugin :: IORef XLoadedModules -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
   let processedModule = tcg_mod env
       processedName = moduleNameString $ GHC.moduleName processedModule
@@ -331,13 +236,13 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
 ------------------------------------------------------------------------------}
 
 newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StateT (TidyEnv, IdMap) m) a
+      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StateT (TidyEnv, XIdMap) m) a
     )
-  deriving (Functor, Monad, MonadState (TidyEnv, IdMap), MonadReader (DynFlags, RdrName.GlobalRdrEnv))
+  deriving (Functor, Monad, MonadState (TidyEnv, XIdMap), MonadReader (DynFlags, RdrName.GlobalRdrEnv))
 
-execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> ExtractIdsT m () -> m IdMap
+execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> ExtractIdsT m () -> m XIdMap
 execExtractIdsT dynFlags rdrEnv (ExtractIdsT m) = do
-  (_, idMap) <- execStateT (runReaderT m (dynFlags, rdrEnv)) (emptyTidyEnv, IdMap Map.empty)
+  (_, idMap) <- execStateT (runReaderT m (dynFlags, rdrEnv)) (emptyTidyEnv, XIdMap Map.empty)
   return idMap
 
 instance MonadTrans ExtractIdsT where
@@ -353,9 +258,9 @@ getDynFlags = asks fst
 getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
 getGlobalRdrEnv = asks snd
 
-extendIdMap :: MonadIO m => SourceSpan -> IdInfo -> ExtractIdsT m ()
+extendIdMap :: MonadIO m => XSourceSpan -> XIdInfo -> ExtractIdsT m ()
 extendIdMap span info =
-  modify . second $ IdMap  . Map.insert span info . idMapToMap
+  modify . second $ XIdMap  . Map.insert span info . xIdMapToMap
 
 tidyType :: Monad m => Type -> ExtractIdsT m Type
 tidyType typ = state $ \(tidyEnv, idMap) ->
@@ -464,56 +369,68 @@ recordType _header uniq typ = do
 #if DEBUG
   liftIO $ appendFile "/tmp/ghc.log" $ _header ++ ": recording " ++ typStr ++ " for unique " ++ show (getKey uniq) ++ "\n"
 #endif
-  modifyIdPropCache (getKey uniq) $ \idInfo -> idInfo { idType = Just typStr }
+  let idPropPtr = IdPropPtr $ getKey uniq
+  modifyIdPropCache idPropPtr $ \idInfo -> idInfo { idType = Just typStr }
 
 -- | Construct an IdInfo for a 'Name'. We assume the @GlobalRdrElt@ is
 -- uniquely determined by the @Name@ and the @DynFlags@ do not change
 -- in a bad way.
-idInfoForName :: DynFlags                   -- ^ The usual dynflags
-              -> Name                       -- ^ The name in question
-              -> Bool                       -- ^ Is this a binding occurrence?
-              -> Maybe RdrName.GlobalRdrElt -- ^ GlobalRdrElt for imported names
-              ->(IdProp, Maybe IdScope)     -- ^ Nothing if imported but no GlobalRdrElt
-idInfoForName dflags name idIsBinder mElt = (IdProp{..}, constructScope)
+idInfoForName :: MonadIO m
+              => DynFlags                      -- ^ The usual dynflags
+              -> Name                          -- ^ The name in question
+              -> Bool                          -- ^ Is this a binding occurrence?
+              -> Maybe RdrName.GlobalRdrElt    -- ^ GlobalRdrElt for imported names
+              -> m (IdPropPtr, Maybe XIdScope) -- ^ Nothing if imported but no GlobalRdrElt
+idInfoForName dflags name idIsBinder mElt = do
+    scope <- constructScope
+    let idPropPtr = IdPropPtr . getKey . getUnique $ name
+    extendIdPropCache idPropPtr IdProp{..}
+    return (idPropPtr, scope)
   where
       occ     = Name.nameOccName name
       idName  = Name.occNameString occ
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
       idType  = Nothing  -- no type; we are after renamer but before typechecker
 
-      constructScope :: Maybe IdScope
+      constructScope :: MonadIO m => m (Maybe XIdScope)
       constructScope
-        | idIsBinder               = Just Binder
-        | Name.isWiredInName  name = Just WiredIn
-        | Name.isInternalName name = Just Local {
-              idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
-            }
+        | idIsBinder               = return $ Just XBinder
+        | Name.isWiredInName  name = return $ Just XWiredIn
+        | Name.isInternalName name = do
+            span <- extractSourceSpan (Name.nameSrcSpan name)
+            return . Just $ XLocal {
+                xIdDefSpan = span
+              }
         | otherwise = case mElt of
-              Just gre -> Just $ scopeFromProv (RdrName.gre_prov gre)
-              Nothing  -> Nothing
+              Just gre -> do scope <- scopeFromProv (RdrName.gre_prov gre)
+                             return (Just scope)
+              Nothing  -> return Nothing
 
-      scopeFromProv :: RdrName.Provenance -> IdScope
-      scopeFromProv RdrName.LocalDef = Local {
-          idDefSpan = extractSourceSpan (Name.nameSrcSpan name)
-        }
-      scopeFromProv (RdrName.Imported spec) =
+      scopeFromProv :: MonadIO m => RdrName.Provenance -> m XIdScope
+      scopeFromProv RdrName.LocalDef = do
+        span <- extractSourceSpan (Name.nameSrcSpan name)
+        return XLocal {
+            xIdDefSpan = span
+          }
+      scopeFromProv (RdrName.Imported spec) = do
         let mod = fromMaybe
                     (error (concatMap showSDocDebug $ ppr name : map ppr spec))
                     $ Name.nameModule_maybe name
-            (impMod, impSpan, impQual) = extractImportInfo spec
-        in Imported {
-          idDefSpan      = extractSourceSpan (Name.nameSrcSpan name)
-        , idDefinedIn    = ModuleId
-            { moduleName    = moduleNameString $ Module.moduleName mod
-            , modulePackage = fillVersion $ Module.modulePackageId mod
-            }
-        , idImportedFrom = ModuleId
-            { moduleName    = moduleNameString impMod
-            , modulePackage = modToPkg impMod
-            }
-        , idImportSpan   = impSpan
-        , idImportQual   = impQual
-        }
+        (impMod, impSpan, impQual) <- extractImportInfo spec
+        span <- extractSourceSpan (Name.nameSrcSpan name)
+        return XImported {
+            xIdDefSpan      = span
+          , xIdDefinedIn    = ModuleId
+              { moduleName    = moduleNameString $ Module.moduleName mod
+              , modulePackage = fillVersion $ Module.modulePackageId mod
+              }
+          , xIdImportedFrom = ModuleId
+              { moduleName    = moduleNameString impMod
+              , modulePackage = modToPkg impMod
+              }
+          , xIdImportSpan   = impSpan
+          , xIdImportQual   = impQual
+          }
 
       modToPkg :: ModuleName -> PackageId
       modToPkg impMod =
@@ -568,45 +485,50 @@ idInfoForName dflags name idIsBinder mElt = (IdProp{..}, constructScope)
         PackageId { packageName = Module.packageIdString Module.mainPackageId
                   , packageVersion = Nothing }  -- the only case of no version
 
-      extractImportInfo :: [RdrName.ImportSpec] -> (ModuleName, EitherSpan, String)
-      extractImportInfo (RdrName.ImpSpec decl item:_) =
-        ( RdrName.is_mod decl
-        , case item of
-            RdrName.ImpAll -> extractSourceSpan (RdrName.is_dloc decl)
-            RdrName.ImpSome _explicit loc -> extractSourceSpan loc
-        , if RdrName.is_qual decl
-            then moduleNameString (RdrName.is_as decl) ++ "."
-            else ""
-        )
-      extractImportInfo _ = error "ghc invariant violated"
+      extractImportInfo :: MonadIO m => [RdrName.ImportSpec] -> m (ModuleName, XEitherSpan, String)
+      extractImportInfo (RdrName.ImpSpec decl item:_) = do
+        span <- case item of
+                  RdrName.ImpAll -> extractSourceSpan (RdrName.is_dloc decl)
+                  RdrName.ImpSome _explicit loc -> extractSourceSpan loc
+        return
+          ( RdrName.is_mod decl
+          , span
+          , if RdrName.is_qual decl
+              then moduleNameString (RdrName.is_as decl) ++ "."
+              else ""
+          )
+      extractImportInfo _ = fail "ghc invariant violated"
 
-extractSourceSpan :: SrcSpan -> EitherSpan
-extractSourceSpan (RealSrcSpan srcspan) =
-  ProperSpan $ SourceSpan
-    (unpackFS (srcSpanFile srcspan))
+extractSourceSpan :: MonadIO m => SrcSpan -> m XEitherSpan
+extractSourceSpan (RealSrcSpan srcspan) = liftIO $ do
+  key <- mkFilePathPtr $ unpackFS (srcSpanFile srcspan)
+  return . XProperSpan $ XSourceSpan
+    key
     (srcSpanStartLine srcspan) (srcSpanStartCol srcspan)
     (srcSpanEndLine srcspan)   (srcSpanEndCol   srcspan)
-extractSourceSpan (UnhelpfulSpan s) = TextSpan $ unpackFS s
+extractSourceSpan (UnhelpfulSpan s) =
+  return . XTextSpan $ unpackFS s
 
 instance Record Name where
-  record span idIsBinder name = case extractSourceSpan span of
-      ProperSpan sourceSpan -> do
+  record span idIsBinder name = do
+    span' <- extractSourceSpan span
+    case span' of
+      XProperSpan sourceSpan -> do
         dflags <- getDynFlags
         rdrEnv <- getGlobalRdrEnv
         -- The lookup into the rdr env will only be used for imported names.
         -- TODO: the cache is update twice here; clean up with Ints in IdMaps.
-        case idInfoForName dflags name idIsBinder (lookupRdrEnv rdrEnv name) of
-          (idProp, Just idScope) -> do
-            let uniq = getKey (getUnique name)
-            extendIdPropCache uniq idProp
-            extendIdMap sourceSpan (uniq, idScope)
+        info <- idInfoForName dflags name idIsBinder (lookupRdrEnv rdrEnv name)
+        case info of
+          (idPropPtr, Just idScope) -> do
+            extendIdMap sourceSpan (idPropPtr, idScope)
           _ ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from
             -- 'GHC.IO.Exception' but there is no corresponding entry in the
             -- GlobalRdrEnv.
             return ()
-      TextSpan _ ->
+      XTextSpan _ ->
         debugPP "Name without source span" name
 
 {------------------------------------------------------------------------------

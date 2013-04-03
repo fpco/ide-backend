@@ -82,7 +82,7 @@ check opts what configDir = do
 
   modules <- if isFile
     then return [what]
-    else find always ((`elem` hsExtentions) `liftM` extension) what
+    else find always ((`elem` hsExtensions) `liftM` extension) what
 
   print modules
 
@@ -95,5 +95,5 @@ check opts what configDir = do
 
   updateSession session update displayCounter
   errs <- getSourceErrors session
-  putStrLn $ "\nErrors and warnings:\n" ++ unlines (map formatSourceError errs)
+  putStrLn $ "\nErrors and warnings:\n" ++ unlines (map show errs)
   shutdownSession session

@@ -42,7 +42,7 @@ getModulesFrom session originalSourcesDir = do
   -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
   -- using the IdeSession's update mechanism.
   originalFiles <- find always
-                        ((`elem` hsExtentions) `liftM` extension)
+                        ((`elem` hsExtensions) `liftM` extension)
                         originalSourcesDir
   let originalUpdate = updateCodeGeneration False
                     <> (mconcat $ map updateModuleFromFile originalFiles)
@@ -507,7 +507,7 @@ syntheticTests =
         idMaps <- getLoadedModules session
         let idMapGood = idMaps Map.! "Good"
         assertBool "Good header accepted" $
-          not $ Map.null $ idMapToMap idMapGood
+          not $ Map.null $ xIdMapToMap idMapGood
         let idMapBad = Map.lookup "Bad" idMaps
         assertBool "Bad header ignored" $ isNothing idMapBad
     )
@@ -1490,8 +1490,8 @@ syntheticTests =
               , "(A.hs@5:1-5:2,d (VarName) :: forall a b. (a -> b -> b) -> b -> [a] -> b (binding occurrence))"
               , "(A.hs@5:5-5:10,foldr (VarName) :: forall a1 b1. (a1 -> b1 -> b1) -> b1 -> [a1] -> b1 (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9))"
               ]
-        cache <- getIdPropCache session
-        let actualIdMapA = lines (showIdMap cache idMapA)
+        cache <- getExplicitSharingCache session
+        let actualIdMapA = lines (showNormalized cache idMapA)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
         {- TODO: reenable
         assertEqual "Haddock link for A.b should be correct"
@@ -1514,8 +1514,8 @@ syntheticTests =
                 "(A.hs@2:10-2:13,MkT (DataName) :: A.T (binding occurrence))"
               , "(A.hs@2:6-2:7,T (TcClsName) (binding occurrence))"
               ]
-        cache <- getIdPropCache session
-        let actualIdMapA = lines (showIdMap cache idMapA)
+        cache <- getExplicitSharingCache session
+        let actualIdMapA = lines (showNormalized cache idMapA)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
     )
   , ( "Type information 3: Polymorphism"
@@ -1580,8 +1580,8 @@ syntheticTests =
               , "(A.hs@16:20-16:21,x (VarName) :: t (defined at A.hs@16:13-16:14))"
               , "(A.hs@16:5-16:9,h2go (VarName) :: forall t t1. t -> t1 -> t (binding occurrence))"
               ]
-        cache <- getIdPropCache session
-        let actualIdMapA = lines (showIdMap cache idMapA)
+        cache <- getExplicitSharingCache session
+        let actualIdMapA = lines (showNormalized cache idMapA)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
     )
   , ( "Type information 4: Multiple modules"
@@ -1612,9 +1612,9 @@ syntheticTests =
                 "(B.hs@3:1-3:4,foo (VarName) :: A.T (binding occurrence))"
               , "(B.hs@3:7-3:10,MkT (DataName) :: A.T (defined in main:A at A.hs@2:10-2:13; imported from main:A at B.hs@2:1-2:9))"
               ]
-        cache <- getIdPropCache session
-        let actualIdMapA = lines (showIdMap cache idMapA)
-        let actualIdMapB = lines (showIdMap cache idMapB)
+        cache <- getExplicitSharingCache session
+        let actualIdMapA = lines (showNormalized cache idMapA)
+        let actualIdMapB = lines (showNormalized cache idMapB)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
         assertSameSet "actualIdMapB" expectedIdMapB actualIdMapB
     )
@@ -1692,8 +1692,8 @@ syntheticTests =
               , "(A.hs@14:3-14:4,x (VarName) :: t a (binding occurrence))"
               , "(A.hs@14:7-14:8,x (VarName) :: t a (defined at A.hs@14:3-14:4))"
               ]
-        cache <- getIdPropCache session
-        let actualIdMapA = lines (showIdMap cache idMapA)
+        cache <- getExplicitSharingCache session
+        let actualIdMapA = lines (showNormalized cache idMapA)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
     )
   , ( "Type information 6: Reusing type variables"
@@ -1760,8 +1760,8 @@ syntheticTests =
               , "(A.hs@11:5-11:7,f6 (VarName) :: forall t2. (t, t2) -> t (binding occurrence))"
               , "(A.hs@11:9-11:10,x (VarName) :: t (binding occurrence))"
               ]
-        cache <- getIdPropCache session
-        let actualIdMap = lines (showIdMap cache idMap)
+        cache <- getExplicitSharingCache session
+        let actualIdMap = lines (showNormalized cache idMap)
         assertSameSet "" expectedIdMap actualIdMap
     )
   , ( "Type information 7: Qualified imports"
@@ -1784,8 +1784,8 @@ syntheticTests =
               , "(A.hs@5:33-5:37,on (VarName) :: forall b1 c1 a2. (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 (defined in base-4.5.1.0:Data.Function at <no location info>; imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36))"
               , "(A.hs@5:8-5:16,fromJust (VarName) :: forall a2. Data.Maybe.Maybe a2 -> a2 (defined in base-4.5.1.0:Data.Maybe at <no location info>; imported from base-4.5.1.0:Data.Maybe at A.hs@2:1-2:18))"
               ]
-        cache <- getIdPropCache session
-        let actualIdMap = lines (showIdMap cache idMap)
+        cache <- getExplicitSharingCache session
+        let actualIdMap = lines (showNormalized cache idMap)
         assertSameSet "" expectedIdMap actualIdMap
     )
   , ( "Test internal consistency of local id markers"
@@ -2008,7 +2008,7 @@ updateSessionD session update i = do
   updateSession session update (displayCounter i)
   msgs <- getSourceErrors session
   debug dVerbosity $ "getSourceErrors after update: "
-                     ++ List.intercalate "\n" (map formatSourceError msgs)
+                     ++ List.intercalate "\n" (map show msgs)
 
 -- Extra test tools.
 --
@@ -2058,7 +2058,7 @@ assertOneError msgs = do
 
 show3errors :: [SourceError] -> String
 show3errors msgs =
-  let shown = List.intercalate "\n" (map formatSourceError $ take 3 $ msgs)
+  let shown = List.intercalate "\n" (map show $ take 3 $ msgs)
       more | length msgs > 3 = "\n... and more ..."
            | otherwise       = ""
   in shown ++ more

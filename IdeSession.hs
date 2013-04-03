@@ -1,69 +1,103 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DeriveDataTypeable #-}
 module IdeSession (
 
-  -- | This module provides an interface to the IDE backend.
-  --
-  -- It centres around the idea of a single threaded IDE session, and
-  -- operations for updating the session or running queries given the current
-  -- state of the session.
+    -- | This module provides an interface to the IDE backend.
+    --
+    -- It centres around the idea of a single threaded IDE session, and
+    -- operations for updating the session or running queries given the current
+    -- state of the session.
 
-  -- * Interaction with the compiler.
-  --
-  -- | Ironically for a pure functional language, the interface to the compiler
-  -- is rather stateful and sequential. In part this is because it's dealing
-  -- with the state of files in the file system which are of course mutable
-  -- variables.
-  --
-  -- So the general pattern of interaction is sequential and single-threaded.
-  -- The state transitions are fairly simple:
-  --
-  -- * update phase: we have a batch of updates, e.g. changes in module contents.
-  --   This part is declarative, we just describe what changes we want to make.
-  --
-  -- * compile phase: we apply the updates and invoke the compiler, which
-  --   incrementally recompiles some modules. This may be a relatively
-  --   long running operation and we may want progress info.
-  --
-  -- * query phase: after compiling we can collect information like
-  --   source errors, the list of successfully loaded modules
-  --   or symbol maps.
-  --
-  -- * run phase: regardless of compilation results, we may want to run some
-  --   code from a module (compiled recently or compiled many updates ago),
-  --   interact with the running code's input and output, interrupt
-  --   its execution.
-  --
-  -- Then the whole process can repeat.
-  --
-  -- To clarify these different phases we use different types:
-  --
-  -- * 'IdeSession' for the query mode. This is in a sense also the default
-  --   mode.
-  --
-  -- * 'IdeSessionUpdate' for accumulating updates.
-  --
-  -- * 'Progress' for the progress information in the compile mode.
-  --
-  -- * 'RunActions' for handles on the running code, through which
-  --   one can interact with the code.
+    -- * Interaction with the compiler.
+    --
+    -- | Ironically for a pure functional language, the interface to the compiler
+    -- is rather stateful and sequential. In part this is because it's dealing
+    -- with the state of files in the file system which are of course mutable
+    -- variables.
+    --
+    -- So the general pattern of interaction is sequential and single-threaded.
+    -- The state transitions are fairly simple:
+    --
+    -- * update phase: we have a batch of updates, e.g. changes in module contents.
+    --   This part is declarative, we just describe what changes we want to make.
+    --
+    -- * compile phase: we apply the updates and invoke the compiler, which
+    --   incrementally recompiles some modules. This may be a relatively
+    --   long running operation and we may want progress info.
+    --
+    -- * query phase: after compiling we can collect information like
+    --   source errors, the list of successfully loaded modules
+    --   or symbol maps.
+    --
+    -- * run phase: regardless of compilation results, we may want to run some
+    --   code from a module (compiled recently or compiled many updates ago),
+    --   interact with the running code's input and output, interrupt
+    --   its execution.
+    --
+    -- Then the whole process can repeat.
+    --
+    -- To clarify these different phases we use different types:
+    --
+    -- * 'IdeSession' for the query mode. This is in a sense also the default
+    --   mode.
+    --
+    -- * 'IdeSessionUpdate' for accumulating updates.
+    --
+    -- * 'Progress' for the progress information in the compile mode.
+    --
+    -- * 'RunActions' for handles on the running code, through which
+    --   one can interact with the code.
 
-  -- * Basic types
-  ModuleName,
+    -- * Common data types
+    IdNameSpace(..)
+  , IdInfo
+  , IdProp(..)
+  , IdScope(..)
+  , SourceSpan(..)
+  , EitherSpan(..)
+  , SourceError(..)
+  , SourceErrorKind(..)
+  , ModuleName
+  , ModuleId(..)
+  , PackageId(..)
+  , IdMap(..)
+  , LoadedModules
+
+    -- * Explicit sharing
+  , FilePathPtr(..)
+  , IdPropPtr(..)
+  , XIdInfo
+  , XIdScope(..)
+  , XSourceSpan(..)
+  , XEitherSpan(..)
+  , XSourceError(..)
+  , XIdMap(..)
+  , XLoadedModules
+
+    -- * Normalization
+  , ExplicitSharingCache(..)
+  , Normalize(..)
+  , showNormalized
+
+    -- * Progress
+  , Progress(..)
+  , initialProgress
+  , updateProgress
+  , progressStep
 
   -- * Sessions
-  IdeSession,
+  , IdeSession
 
   -- ** Initialisation and shutdown
   -- | Sessions are stateful and must be initialised and shut down so that
   -- resources can be released.
-  InProcess,
-  initSession,
-  shutdownSession,
-  SessionConfig(..),
-  getSessionConfig,
-  getSourcesDir,
-  getDataDir,
-  restartSession,
+  , InProcess
+  , initSession
+  , shutdownSession
+  , SessionConfig(..)
+  , getSessionConfig
+  , getSourcesDir
+  , getDataDir
+  , restartSession
 
   -- * Updates
   -- | Updates are done in batches: we collect together all of the updates we
@@ -74,97 +108,83 @@ module IdeSession (
   -- | So that we can batch the updates, all the updates are declarative.
   -- The 'IdeSessionUpdate' monoid is used to represent the updates, and the
   -- sub-sections below describe the various updates that are available.
-  IdeSessionUpdate,
+  , IdeSessionUpdate
 
   -- ** Modules
-  updateModule,
-  updateModuleFromFile,
-  updateModuleDelete,
+  , updateModule
+  , updateModuleFromFile
+  , updateModuleDelete
 
   -- ** Flags and other settings
-  updateGhcOptions,
-  updateCodeGeneration,
+  , updateGhcOptions
+  , updateCodeGeneration
 
   -- ** Data files
-  updateDataFile,
-  updateDataFileFromFile,
-  updateDataFileDelete,
+  , updateDataFile
+  , updateDataFileFromFile
+  , updateDataFileDelete
 
   -- ** Environment variables
-  updateEnv,
+  , updateEnv
 
   -- ** Buffer mode
-  updateStdoutBufferMode,
-  updateStderrBufferMode,
+  , updateStdoutBufferMode
+  , updateStderrBufferMode
 
   -- ** Performing the update
   -- | Once we have accumulated a batch of updates we can perform them all
   -- giving us a new session state. Since performing a bunch of updates can
   -- involve compiling modules and can take some time, the update uses the
   -- 'Progress' type to represent intermediate progress information.
-  updateSession,
-  Progress,
-  progressStep,
+  , updateSession
 
   -- * Queries
-  Query,
+  , Query
 
   -- ** Source errors
-  getSourceErrors,
-  SourceError(..),
-  SourceErrorKind(..),
-  SourceSpan(..),
-  EitherSpan(..),
+  , getSourceErrors
 
   -- ** Files
   -- | Simply getting the current state of the persistent files fits the
   -- queries pattern.
-  getSourceModule,
-  getDataFile,
+  , getSourceModule
+  , getDataFile
 
   -- ** The list of managed files and all data files
-  ManagedFiles(..),
-  getManagedFiles,
-  getAllDataFiles,
+  , ManagedFiles(..)
+  , getManagedFiles
+  , getAllDataFiles
 
   -- ** Environment variables
-  getEnv,
+  , getEnv
 
   -- ** Symbol definition maps
-  getLoadedModules,
-  getIdPropCache,
-  IdMap(..),
-  IdInfo,
-  IdProp(..),
-  IdNameSpace(..),
-  IdScope(..),
-  ModuleId (..),
-  PackageId (..),
-  haddockLink,
-  idInfoAtLocation,
-  showIdMap,
+  , getLoadedModules
+  , getExplicitSharingCache
+  , haddockLink
+  -- , idInfoAtLocation
 
   -- ** Import information and autocompletion
-  Import(..),
-  getImports,
-  getAutocompletion,
-  idInfoQN,
+  , Import(..)
+  , getImports
+  , getAutocompletion
+  , idInfoQN
 
   -- ** Run code
-  runStmt,
-  RunResult(..),
-  RunBufferMode(..),
-  RunActions, -- We don't export the constructor nor all accessors
-  interrupt,
-  runWait,
-  supplyStdin,
-  runWaitAll,
-  registerTerminationCallback,
+  , runStmt
+  , RunResult(..)
+  , RunBufferMode(..)
+  , RunActions -- We don't export the constructor nor all accessors
+  , interrupt
+  , runWait
+  , supplyStdin
+  , runWaitAll
+  , registerTerminationCallback
 
   -- ** Start and diagnose the server (probably only for debugging)
-  ghcServer,
-  getGhcServer,
-  getGhcExitCode,
+  , ghcServer
+  , getGhcServer
+  , getGhcExitCode
 
   -- * Additional notes
   -- ** Responsibility for managing and mutating files in the sources dir.
@@ -227,7 +247,6 @@ module IdeSession (
 import Control.Concurrent (MVar, newMVar)
 import qualified Control.Exception as Ex
 import Control.Monad
-import Control.Arrow (first)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString as BSS
@@ -237,6 +256,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Trie (Trie)
 import qualified Data.Trie as Trie
+import qualified Data.IntMap as IntMap
 import Data.Monoid (Monoid (..))
 import System.Directory
 import System.FilePath (splitFileName, takeDirectory, makeRelative, (<.>), (</>))
@@ -245,7 +265,6 @@ import System.IO (Handle, hClose, openBinaryTempFile)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (setFileTimes)
 import System.Posix.Types (EpochTime)
-import Data.IntMap (IntMap)
 
 import Common
 import GhcServer
@@ -264,8 +283,6 @@ import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
 
 import BlockingOps (modifyMVar, modifyMVar_, withMVar)
 
-import Data.Generics
-
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.
 --
@@ -281,10 +298,10 @@ data SessionConfig = SessionConfig {
 
 data Computed = Computed {
     -- | Last compilation and run errors
-    computedErrors :: [SourceError]
+    computedErrors :: [XSourceError]
     -- | Modules that got loaded okay together with their mappings
     -- from source locations to information about identifiers there
-  , computedLoadedModules :: LoadedModules
+  , computedLoadedModules :: XLoadedModules
     -- | Import information. This is (usually) available even for modules
     -- with parsing or type errors
   , computedImports :: !(Map ModuleName [Import])
@@ -294,9 +311,9 @@ data Computed = Computed {
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
-  , computedAutoMap :: !(Map ModuleName (Trie [IdInfo]))
+  , computedAutoMap :: !(Map ModuleName (Trie [XIdInfo]))
     -- | We access IdProps indirectly through this cache
-  , computedCache :: !(IntMap IdProp)
+  , computedCache :: !ExplicitSharingCache
   }
 
 -- | This type is a handle to a session state. Values of this type
@@ -527,10 +544,10 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         -- Determine imports and completion map from the diffs sent
         -- from the RPC compilationi process.
         let usePrevious :: IdeIdleState
-                        -> Map ModuleName (Maybe ( [Import]
-                                                 , Trie [IdInfo] ))
+                        -> Map ModuleName (Maybe ([Import], Trie [XIdInfo]))
                         -> ( Map ModuleName [Import]
-                           , Map ModuleName (Trie [IdInfo]) )
+                           , Map ModuleName (Trie [XIdInfo])
+                           )
             usePrevious idleSt importsAuto =
               ( applyMapDiff (Map.map (fmap fst) importsAuto)
                 $ maybe Map.empty computedImports $ idleSt ^. ideComputed
@@ -542,7 +559,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
                       ( computedErrors
                        , computedLoadedModules
                        , importsAuto
-                       , computedCache
+                       , computedCache'
                        ) <- rpcCompile (idleState ^. ideGhcServer)
                                        (idleState' ^. ideNewOpts)
                                        (ideSourcesDir ideStaticInfo)
@@ -550,6 +567,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
                                        callback
                       let (computedImports, computedAutoMap) =
                             usePrevious idleState' importsAuto
+                          computedCache = mkRelative computedCache'
                       return $ Just Computed{..}
                     else return $ idleState' ^. ideComputed
 
@@ -563,6 +581,12 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         Ex.throwIO (userError "Cannot update session in running mode")
       IdeSessionShutdown ->
         Ex.throwIO (userError "Session already shut down.")
+  where
+    mkRelative :: ExplicitSharingCache -> ExplicitSharingCache
+    mkRelative ExplicitSharingCache{..} = ExplicitSharingCache {
+        filePathCache = IntMap.map (makeRelative (ideSourcesDir ideStaticInfo)) filePathCache
+      , idPropCache   = idPropCache
+      }
 
 -- | Writes a file atomically.
 --
@@ -749,6 +773,9 @@ getDataFile n IdeSession{ideStaticInfo} =
 -- morally it be a pure function of the current state of the files, and so it
 -- would return all warnings (as if you did clean and rebuild each time).
 --
+-- getSourceErrors does internal normalization. This simplifies the life of the
+-- client and anyway there shouldn't be that many soruce errors that it really
+-- makes a big difference.
 getSourceErrors :: Query [SourceError]
 getSourceErrors IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
@@ -760,7 +787,7 @@ getSourceErrors IdeSession{ideState, ideStaticInfo} =
     aux :: IdeIdleState -> IO [SourceError]
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} ->
-        return (mkRelative (ideSourcesDir ideStaticInfo) computedErrors)
+        return $ map (normalize computedCache) computedErrors
       Nothing -> fail "This session state does not admit queries."
 
 -- | Get the collection of files submitted by the user and not deleted yet.
@@ -791,7 +818,7 @@ getManagedFiles IdeSession{ideState} =
 -- what is the type of this symbol and some more information.
 -- This information lets us, e.g, construct Haddock URLs for symbols,
 -- like @parallel-3.2.0.3/Control-Parallel.html#v:pseq@.
-getLoadedModules :: Query LoadedModules
+getLoadedModules :: Query XLoadedModules
 getLoadedModules IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
@@ -799,21 +826,20 @@ getLoadedModules IdeSession{ideState, ideStaticInfo} =
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO LoadedModules
+    aux :: IdeIdleState -> IO XLoadedModules
     aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} ->
-        return (mkRelative (ideSourcesDir ideStaticInfo) computedLoadedModules)
+      Just Computed{..} -> return computedLoadedModules
       Nothing -> fail "This session state does not admit queries."
 
-getIdPropCache :: Query (IntMap IdProp)
-getIdPropCache IdeSession{ideState, ideStaticInfo} =
+getExplicitSharingCache :: Query ExplicitSharingCache
+getExplicitSharingCache IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
       IdeSessionIdle      idleState -> aux idleState
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO (IntMap IdProp)
+    aux :: IdeIdleState -> IO ExplicitSharingCache
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} -> return computedCache
       Nothing -> fail "This session state does not admit queries."
@@ -835,6 +861,11 @@ getImports IdeSession{ideState, ideStaticInfo} =
       Nothing -> fail "This session state does not admit queries."
 
 -- | Autocompletion
+--
+-- TODO: At the moment, this returns a function with internally does
+-- normalization.  Hence, this is not useful for explicit sharing. If the
+-- autocompletion info needs to be shipped, we need to change this to a list
+-- and avoid normalization here.
 getAutocompletion :: Query (ModuleName -> String -> [(IdProp, IdScope)])
 getAutocompletion IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
@@ -848,15 +879,15 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
       Just Computed{..} -> return (autocomplete computedCache computedAutoMap)
       Nothing           -> fail "This session state does not admit queries."
 
-    autocomplete :: IntMap IdProp
-                 -> Map ModuleName (Trie [IdInfo])
+    autocomplete :: ExplicitSharingCache
+                 -> Map ModuleName (Trie [XIdInfo])
                  -> ModuleName -> String
                  -> [(IdProp, IdScope)]
     autocomplete cache mapOfTries modName name =
         let name' = BSSC.pack name
             n     = last (BSSC.split '.' name')
         in filter (\(idProp, idScope) -> name `isInfixOf` idInfoQN idProp idScope)
-             $ map (first (idPropCacheLookup cache))
+             $ map (\(idPropPtr, xIdScope) -> (normalize cache idPropPtr, normalize cache xIdScope))
              . concat
              . Trie.elems
              . Trie.submap n
@@ -948,15 +979,6 @@ getGhcServer IdeSession{ideState} =
         return $! idleState ^. ideGhcServer
       IdeSessionShutdown ->
         fail "Session already shut down."
-
--- Make all nested SourceSpans relative to the given directory
-mkRelative :: Data a => FilePath -> a -> a
-mkRelative path = everywhere (mkT aux)
-  where
-    aux :: SourceSpan -> SourceSpan
-    aux srcSpan = srcSpan {
-        spanFilePath = makeRelative path (spanFilePath srcSpan)
-      }
 
 {------------------------------------------------------------------------------
   Accessors

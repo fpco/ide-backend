@@ -42,6 +42,7 @@ import Exception (ghandle)
 import FastString ( unpackFS )
 import qualified GHC
 import GhcMonad (liftIO)
+import MonadUtils (MonadIO (..))
 import qualified HscTypes
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
@@ -50,7 +51,6 @@ import ErrUtils   ( MsgDoc )
 #else
 import ErrUtils   ( Message )
 #endif
-import qualified Unique
 
 #if __GLASGOW_HASKELL__ == 704
 -- Import our own version of --make as a workaround for
@@ -77,7 +77,6 @@ import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM, void)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
-import Data.IntMap (IntMap)
 import Data.IORef
 import Data.List ((\\))
 import System.FilePath.Find (find, always, extension)
@@ -85,14 +84,7 @@ import System.Process
 
 import Common
 import Data.Aeson.TH (deriveJSON)
-import GhcHsWalk (
-    extractSourceSpan
-  , IdProp
-  , IdInfo
-  , idInfoForName
-  , wipeIdPropCache
-  , extendIdPropCache
-  )
+import GhcHsWalk (extractSourceSpan, idInfoForName)
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -194,18 +186,16 @@ invalidateModSummaryCache =
 #endif
 #endif
 
-compileInGhc :: FilePath            -- ^ target directory
-             -> DynamicOpts         -- ^ dynamic flags for this call
-             -> Bool                -- ^ whether to generate code
-             -> Int                 -- ^ verbosity level
-             -> IORef [SourceError] -- ^ the IORef where GHC stores errors
-             -> (String -> IO ())   -- ^ handler for each SevOutput message
-             -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-             -> Ghc ( [SourceError]
+compileInGhc :: FilePath             -- ^ target directory
+             -> DynamicOpts          -- ^ dynamic flags for this call
+             -> Bool                 -- ^ whether to generate code
+             -> Int                  -- ^ verbosity level
+             -> IORef [XSourceError] -- ^ the IORef where GHC stores errors
+             -> (String -> IO ())    -- ^ handler for each SevOutput message
+             -> (String -> IO ())    -- ^ handler for remaining non-error msgs
+             -> Ghc ( [XSourceError]
                     , [ModuleName]
-                    , ( [(ModuleName, ([Import], [IdInfo]))]
-                      , IntMap IdProp
-                      )
+                    , [(ModuleName, ([Import], [XIdInfo]))]
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -214,7 +204,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     liftIO $ writeIORef errsRef []
     -- Determine files to process.
     targets <- liftIO $ find always
-                             ((`elem` hsExtentions) `liftM` extension)
+                             ((`elem` hsExtensions) `liftM` extension)
                              configSourcesDir
     -- Compute new GHC flags.
     flags0 <- getSessionDynFlags
@@ -277,7 +267,8 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     sourceErrorHandler _flags e = liftIO $ do
       debug dVerbosity $ "handleSourceError: " ++ show e
       errs <- readIORef errsRef
-      writeIORef errsRef (fromHscSourceError e : errs)
+      e'   <- fromHscSourceError e
+      writeIORef errsRef (e' : errs)
 
     -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7430.
     -- Some errors are reported as exceptions instead.
@@ -285,7 +276,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     ghcExceptionHandler _flags e = liftIO $ do
       let eText   = show e  -- no SrcSpan as a field in GhcException
           exError =
-            SourceError KindError (TextSpan "<from GhcException>") eText
+            XSourceError KindError (XTextSpan "<from GhcException>") eText
             -- though it may be embedded in string
       debug dVerbosity $ "handleOtherErrors: " ++ eText
       errs <- readIORef errsRef
@@ -296,16 +287,13 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                        . handleSourceError (sourceErrorHandler flags)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
-                   -> IO ( [(ModuleName, ( [Import]
-                                         , [IdInfo] ))]
-                         , IntMap IdProp )
+                   -> IO [(ModuleName, ([Import], [XIdInfo]))]
 extractImportsAuto dflags session graph = do
   assocs <- mapM goMod graph
-  cache <- wipeIdPropCache
-  return (assocs, cache)
+--  cache <- wipeIdPropCache
+  return assocs
   where
-    goMod :: ModSummary -> IO (ModuleName, ( [Import]
-                                           , [IdInfo] ))
+    goMod :: ModSummary -> IO (ModuleName, ([Import], [XIdInfo]))
     goMod summary = do
       envs <- autoEnvs summary
       idIs <- mapM eltsToAutocompleteMap envs
@@ -330,13 +318,11 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
+    eltsToAutocompleteMap :: GlobalRdrElt -> IO XIdInfo
     eltsToAutocompleteMap elt = do
       let name = gre_name elt
-          uniq = Unique.getKey $ Unique.getUnique name
-          (idInfo, Just idScope) = idInfoForName dflags name False (Just elt)
-      extendIdPropCache uniq idInfo
-      return $ (uniq, idScope)
+      (idPropPtr, Just idScope) <- idInfoForName dflags name False (Just elt)
+      return $ (idPropPtr, idScope)
 
     autoEnvs :: ModSummary -> IO [GlobalRdrElt]
     autoEnvs ModSummary{ ms_mod
@@ -428,7 +414,7 @@ runInGhc (m, fun) outBMode errBMode = do
 -- Source error conversion and collection
 --
 
-collectSrcError :: IORef [SourceError]
+collectSrcError :: IORef [XSourceError]
                 -> (String -> IO ())
                 -> (String -> IO ())
                 -> DynFlags
@@ -455,7 +441,7 @@ collectSrcError errsRef handlerOutput handlerRemaining flags
   collectSrcError'
     errsRef handlerOutput handlerRemaining flags severity srcspan style msg
 
-collectSrcError' :: IORef [SourceError]
+collectSrcError' :: IORef [XSourceError]
                  -> (String -> IO ())
                  -> (String -> IO ())
                  -> DynFlags
@@ -466,9 +452,9 @@ collectSrcError' errsRef _ _ flags severity srcspan style msg
                       SevError   -> Just KindError
                       SevFatal   -> Just KindError
                       _          -> Nothing
-  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
-        sp = extractSourceSpan srcspan
-     in modifyIORef errsRef (SourceError errKind sp msgstr :)
+  = do let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+       sp <- extractSourceSpan srcspan
+       modifyIORef errsRef (XSourceError errKind sp msgstr :)
 
 collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
@@ -486,15 +472,16 @@ collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
 -- our control (and so, e.g., not relative to the project root).
 -- But at least the IDE could point somewhere in the code.
 -- | Convert GHC's SourceError type into ours.
-fromHscSourceError :: HscTypes.SourceError -> SourceError
+fromHscSourceError :: MonadIO m => HscTypes.SourceError -> m XSourceError
 fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
   [errMsg] -> case ErrUtils.errMsgSpans errMsg of
-    [real@RealSrcSpan{}] ->
-      SourceError
-        KindError (extractSourceSpan real) (show e)
-    _ -> SourceError KindError (TextSpan "<no location info>") (show e)
-  _ -> SourceError
-         KindError (TextSpan "<no location info>") (show e)
+    [real@RealSrcSpan{}] -> do
+      xSpan <- extractSourceSpan real
+      return $ XSourceError KindError xSpan (show e)
+    _ ->
+      return $ XSourceError KindError (XTextSpan "<no location info>") (show e)
+  _ ->
+    return $ XSourceError KindError (XTextSpan "<no location info>") (show e)
 
 -----------------------
 -- GHC version compat

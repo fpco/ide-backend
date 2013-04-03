@@ -1,24 +1,57 @@
-{-# LANGUAGE TemplateHaskell, DeriveDataTypeable #-}
+{-# LANGUAGE TemplateHaskell, DeriveDataTypeable, MultiParamTypeClasses, FunctionalDependencies, TypeSynonymInstances, FlexibleInstances #-}
 -- | Common types and utilities
 module Common
-  ( SourceSpan(..), EitherSpan (..), SourceErrorKind(..), SourceError(..)
-  , ModuleName, ModuleId (..), PackageId (..)
-  , formatSourceError
-  , hsExtentions
-  , Progress
+  ( -- * Common data types
+    IdNameSpace(..)
+  , IdInfo
+  , IdProp(..)
+  , IdScope(..)
+  , SourceSpan(..)
+  , EitherSpan(..)
+  , SourceError(..)
+  , SourceErrorKind(..)
+  , ModuleName
+  , ModuleId(..)
+  , PackageId(..)
+  , IdMap(..)
+  , LoadedModules
+    -- * Explicit sharing
+  , FilePathPtr(..)
+  , IdPropPtr(..)
+  , XIdInfo
+  , XIdScope(..)
+  , XSourceSpan(..)
+  , XEitherSpan(..)
+  , XSourceError(..)
+  , XIdMap(..)
+  , XLoadedModules
+    -- * Normalization
+  , ExplicitSharingCache(..)
+  , Normalize(..)
+  , showNormalized
+    -- * Progress
+  , Progress(..)
   , initialProgress
   , updateProgress
   , progressStep
+    -- * Configuration
+  , hsExtensions
+    -- * Debugging
+  , dVerbosity
+  , debugFile
+  , debug
+    -- * Util
   , applyMapDiff
   , showExWithClass
-  , dVerbosity, debug
   , accessorName
   , lookup'
   ) where
 
+import Prelude hiding (span)
 import qualified Control.Exception as Ex
 import Control.Monad (when)
 import Control.Monad.Trans (MonadIO, liftIO)
+import Data.Aeson (FromJSON (..), ToJSON (..))
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString.Char8 as BS
 import System.IO (hFlush, stderr)
@@ -26,8 +59,73 @@ import Data.Generics
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.List as List
-
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as IntMap
 import Data.Accessor (Accessor, accessor)
+
+{------------------------------------------------------------------------------
+  Common data types
+
+  These are the normalized data types (without explicit sharing).
+------------------------------------------------------------------------------}
+
+-- This type is abstract in GHC. One more reason to define our own.
+data IdNameSpace =
+    VarName    -- ^ Variables, including real data constructors
+  | DataName   -- ^ Source data constructors
+  | TvName     -- ^ Type variables
+  | TcClsName  -- ^ Type constructors and classes
+  deriving (Show, Eq, Data, Typeable)
+
+-- | Information about identifiers
+type IdInfo = (IdProp, IdScope)
+
+-- | Identifier info that is independent of the usage site
+data IdProp = IdProp
+  { -- | The base name of the identifer at this location. Module prefix
+    -- is not included.
+    idName  :: String
+    -- | Namespace this identifier is drawn from
+  , idSpace :: IdNameSpace
+    -- | The type
+    -- We don't always know this; in particular, we don't know kinds because
+    -- the type checker does not give us LSigs for top-level annotations)
+  , idType  :: Maybe String
+  }
+  deriving (Eq, Data, Typeable)
+
+-- TODO: Ideally, we would have
+-- 1. SourceSpan for Local rather than EitherSpan
+-- 2. Don't have Maybe String or Maybe Package in the import case
+--    (under which circumstances do we not get package information? -- the unit
+--    tests give us examples)
+-- 3. SourceSpan for idImportSpan
+-- 4. Have a idImportedFromPackage, but unfortunately ghc doesn't give us
+--    this information (it's marked as a TODO in RdrName.lhs)
+data IdScope =
+    -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
+    Binder
+    -- | Defined within this module
+  | Local {
+        idDefSpan :: EitherSpan
+      }
+    -- | Imported from a different module
+  | Imported {
+        idDefSpan      :: EitherSpan
+      , idDefinedIn    :: ModuleId
+      , idImportedFrom :: ModuleId
+      , idImportSpan   :: EitherSpan
+        -- | Qualifier used for the import
+        --
+        -- > IMPORTED AS                       idImportQual
+        -- > import Data.List                  ""
+        -- > import qualified Data.List        "Data.List."
+        -- > import qualified Data.List as L   "L."
+      , idImportQual   :: String
+      }
+    -- | Wired into the compiler (@()@, @True@, etc.)
+  | WiredIn
+  deriving (Eq, Data, Typeable)
 
 data SourceSpan = SourceSpan
   { spanFilePath   :: FilePath
@@ -37,19 +135,10 @@ data SourceSpan = SourceSpan
   , spanToColumn   :: Int }
   deriving (Eq, Ord, Data, Typeable)
 
-instance Show SourceSpan where
-  show (SourceSpan{..}) = spanFilePath ++ "@"
-                       ++ show spanFromLine ++ ":" ++ show spanFromColumn ++ "-"
-                       ++ show spanToLine   ++ ":" ++ show spanToColumn
-
 data EitherSpan =
     ProperSpan SourceSpan
   | TextSpan String
   deriving (Eq, Data, Typeable)
-
-instance Show EitherSpan where
-  show (ProperSpan srcSpan) = show srcSpan
-  show (TextSpan str)       = str
 
 -- | An error or warning in a source module.
 --
@@ -81,6 +170,45 @@ data PackageId = PackageId
   }
   deriving (Eq, Data, Typeable)
 
+data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
+  deriving (Data, Typeable)
+
+type LoadedModules = Map Common.ModuleName IdMap
+
+{------------------------------------------------------------------------------
+  Show instances
+------------------------------------------------------------------------------}
+
+instance Show SourceSpan where
+  show (SourceSpan{..}) =
+       spanFilePath ++ "@"
+    ++ show spanFromLine ++ ":" ++ show spanFromColumn ++ "-"
+    ++ show spanToLine   ++ ":" ++ show spanToColumn
+
+instance Show IdProp where
+  show (IdProp {..}) =
+       idName ++ " "
+    ++ "(" ++ show idSpace ++ ")"
+    ++ (case idType of Just typ -> " :: " ++ typ; Nothing -> [])
+
+-- TODO: If these Maybes stay, we should have a prettier Show instance
+-- (but hopefully they will go)
+instance Show IdScope where
+  show Binder          = "binding occurrence"
+  show (Local {..})    = "defined at " ++ show idDefSpan
+  show WiredIn         = "wired in to the compiler"
+  show (Imported {..}) =
+          "defined in "
+        ++ show idDefinedIn
+        ++ " at " ++ show idDefSpan ++ ";"
+        ++ " imported from " ++ show idImportedFrom
+        ++ (if null idImportQual then [] else " as '" ++ idImportQual ++ "'")
+        ++ " at "++ show idImportSpan
+
+instance Show EitherSpan where
+  show (ProperSpan srcSpan) = show srcSpan
+  show (TextSpan str)       = str
+
 instance Show ModuleId where
   show (ModuleId mo pkg) = show pkg ++ ":" ++ mo
 
@@ -88,19 +216,231 @@ instance Show PackageId where
   show (PackageId name (Just version)) = name ++ "-" ++ version
   show (PackageId name Nothing)        = name
 
-formatSourceError :: SourceError -> String
-formatSourceError = show
+instance Show IdMap where
+  show =
+    let showIdInfo(span, (idProp, idScope)) =
+          "(" ++ show span ++ ","
+          ++ show idProp
+          ++ " (" ++ show idScope ++ "))"
+    in unlines . map showIdInfo . Map.toList . idMapToMap
 
--- | These source files are type-checked.
-hsExtentions:: [FilePath]
-hsExtentions = [".hs", ".lhs"]
--- Boot files are not so simple. They should probably be copied to the src dir,
--- but not made proper targets. This is probably similar to .h files.
--- hsExtentions = [".hs", ".lhs", ".hs-boot", ".lhs-boot", ".hi-boot"]
+{------------------------------------------------------------------------------
+  Versions of the above with explicit sharing
+
+  These data types don't have Show instances (we'd have to show them with
+  the sharing pointers in them. See 'showNormalized' instead.
+------------------------------------------------------------------------------}
+
+newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
+  deriving (Data, Typeable, Eq, Ord)
+
+newtype IdPropPtr = IdPropPtr { idPropPtr :: Int }
+  deriving (Data, Typeable, Eq, Ord)
+
+-- | Information about identifiers
+type XIdInfo = (IdPropPtr, XIdScope)
+
+data XIdScope =
+    -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
+    XBinder
+    -- | Defined within this module
+  | XLocal {
+        xIdDefSpan :: XEitherSpan
+      }
+    -- | Imported from a different module
+  | XImported {
+        xIdDefSpan      :: XEitherSpan
+      , xIdDefinedIn    :: ModuleId
+      , xIdImportedFrom :: ModuleId
+      , xIdImportSpan   :: XEitherSpan
+        -- | Qualifier used for the import
+        --
+        -- > IMPORTED AS                       idImportQual
+        -- > import Data.List                  ""
+        -- > import qualified Data.List        "Data.List."
+        -- > import qualified Data.List as L   "L."
+      , xIdImportQual   :: String
+      }
+    -- | Wired into the compiler (@()@, @True@, etc.)
+  | XWiredIn
+  deriving (Eq, Data, Typeable)
+
+data XSourceSpan = XSourceSpan
+  { xSpanFilePath   :: FilePathPtr
+  , xSpanFromLine   :: Int
+  , xSpanFromColumn :: Int
+  , xSpanToLine     :: Int
+  , xSpanToColumn   :: Int
+  }
+  deriving (Eq, Ord, Data, Typeable)
+
+data XEitherSpan =
+    XProperSpan XSourceSpan
+  | XTextSpan String
+  deriving (Eq, Data, Typeable)
+
+-- | An error or warning in a source module.
+--
+-- Most errors are associated with a span of text, but some have only a
+-- location point.
+--
+data XSourceError = XSourceError
+  { xErrorKind :: SourceErrorKind
+  , xErrorSpan :: XEitherSpan
+  , xErrorMsg  :: String
+  }
+  deriving (Eq, Data, Typeable)
+
+data XIdMap = XIdMap { xIdMapToMap :: Map XSourceSpan XIdInfo }
+  deriving (Data, Typeable)
+
+type XLoadedModules = Map Common.ModuleName XIdMap
+
+{------------------------------------------------------------------------------
+  Normalization (turning explicit sharing into implicit sharing)
+------------------------------------------------------------------------------}
+
+data ExplicitSharingCache = ExplicitSharingCache {
+    filePathCache :: IntMap FilePath
+  , idPropCache   :: IntMap IdProp
+  }
+
+class Normalize a b | a -> b, b -> a where
+  normalize :: ExplicitSharingCache -> a -> b
+
+showNormalized :: (Show b, Normalize a b) => ExplicitSharingCache -> a -> String
+showNormalized cache = show . normalize cache
+
+instance Normalize FilePathPtr FilePath where
+  normalize cache ptr = filePathCache cache IntMap.! filePathPtr ptr
+
+instance Normalize IdPropPtr IdProp where
+  normalize cache ptr = idPropCache cache IntMap.! idPropPtr ptr
+
+instance Normalize XIdInfo IdInfo where
+  normalize cache (idPropPtr, xIdScope) =
+    ( normalize cache idPropPtr
+    , normalize cache xIdScope
+    )
+
+instance Normalize XIdScope IdScope where
+  normalize cache xIdScope = case xIdScope of
+    XBinder        -> Binder
+    XLocal {..}    -> Local {
+                          idDefSpan      = normalize cache xIdDefSpan
+                        }
+    XImported {..} -> Imported {
+                          idDefSpan      = normalize cache xIdDefSpan
+                        , idDefinedIn    = xIdDefinedIn
+                        , idImportedFrom = xIdImportedFrom
+                        , idImportSpan   = normalize cache xIdImportSpan
+                        , idImportQual   = xIdImportQual
+                        }
+    XWiredIn       -> WiredIn
+
+instance Normalize XSourceSpan SourceSpan where
+  normalize cache XSourceSpan{..} = SourceSpan {
+      spanFilePath   = normalize cache xSpanFilePath
+    , spanFromLine   = xSpanFromLine
+    , spanFromColumn = xSpanFromColumn
+    , spanToLine     = xSpanToLine
+    , spanToColumn   = xSpanToColumn
+    }
+
+instance Normalize XEitherSpan EitherSpan where
+  normalize cache xEitherSpan = case xEitherSpan of
+    XProperSpan xSourceSpan -> ProperSpan (normalize cache xSourceSpan)
+    XTextSpan str           -> TextSpan str
+
+instance Normalize XSourceError SourceError where
+  normalize cache XSourceError{..} = SourceError {
+      errorKind = xErrorKind
+    , errorSpan = normalize cache xErrorSpan
+    , errorMsg  = xErrorMsg
+    }
+
+instance Normalize XIdMap IdMap where
+  normalize cache = IdMap
+                  . Map.map (normalize cache)
+                  . Map.mapKeys (normalize cache)
+                  . xIdMapToMap
+
+instance Normalize XLoadedModules LoadedModules where
+  normalize = Map.map . normalize
+
+{------------------------------------------------------------------------------
+  JSON instances
+
+  Note that most of the data types without explicit sharing do NOT have JSON
+  instances. The whole point is that we maintain sharing when through
+  serialization.
+
+  We could give generic JSON instances for Map and IntMap, but these would be
+  orphan instances (grr).
+------------------------------------------------------------------------------}
+
+-- Types without an explicit sharing version
+$(deriveJSON id ''SourceErrorKind)
+$(deriveJSON id ''ModuleId)
+$(deriveJSON id ''PackageId)
+
+-- Types with explicit sharing
+$(deriveJSON id ''XIdScope)
+$(deriveJSON id ''XSourceSpan)
+$(deriveJSON id ''XEitherSpan)
+$(deriveJSON id ''XSourceError)
+
+instance FromJSON XIdMap where
+  parseJSON = fmap aux . parseJSON
+    where
+      aux :: [(XSourceSpan, XIdInfo)] -> XIdMap
+      aux = XIdMap . Map.fromList
+
+instance ToJSON XIdMap where
+  toJSON = toJSON . aux
+    where
+      aux :: XIdMap -> [(XSourceSpan, XIdInfo)]
+      aux = Map.toList . xIdMapToMap
+
+-- Types that we ship as part of the explicit sharing cache
+$(deriveJSON id ''IdNameSpace)
+$(deriveJSON id ''IdProp)
+$(deriveJSON id ''IdPropPtr)
+$(deriveJSON id ''FilePathPtr)
+
+instance FromJSON ExplicitSharingCache where
+  parseJSON = fmap aux . parseJSON
+    where
+      aux :: ( [(Int, FilePath)]
+             , [(Int, IdProp)]
+             )
+          -> ExplicitSharingCache
+      aux (fpCache, idCache) = ExplicitSharingCache {
+          filePathCache = IntMap.fromList fpCache
+        , idPropCache   = IntMap.fromList idCache
+        }
+
+instance ToJSON ExplicitSharingCache where
+  toJSON = toJSON . aux
+    where
+      aux :: ExplicitSharingCache
+          -> ( [(Int, FilePath)]
+             , [(Int, IdProp)]
+             )
+      aux ExplicitSharingCache {..} = (
+          IntMap.toList filePathCache
+        , IntMap.toList idPropCache
+        )
+
+{------------------------------------------------------------------------------
+  Progress
+------------------------------------------------------------------------------}
 
 -- | This type represents intermediate progress information during compilation.
 newtype Progress = Progress Int
   deriving (Show, Eq, Ord)
+
+$(deriveJSON id ''Progress)
 
 initialProgress :: Progress
 initialProgress = Progress 1  -- the progress indicates a start of a step
@@ -113,22 +453,20 @@ updateProgress _msg (Progress n) = Progress (n + 1)
 progressStep :: Progress -> Int
 progressStep (Progress n) = n
 
-$(deriveJSON id ''SourceSpan)
-$(deriveJSON id ''EitherSpan)
-$(deriveJSON id ''SourceErrorKind)
-$(deriveJSON id ''SourceError)
-$(deriveJSON (\x -> x) ''ModuleId)
-$(deriveJSON (\x -> x) ''PackageId)
-$(deriveJSON id ''Progress)
+{------------------------------------------------------------------------------
+  Configuration
+------------------------------------------------------------------------------}
 
-applyMapDiff :: Ord k => Map k (Maybe v) -> Map k v -> Map k v
-applyMapDiff diff m =
-  let f m2 (k, v) = Map.alter (const v) k m2
-  in List.foldl' f m $ Map.toList diff
+-- | These source files are type-checked.
+hsExtensions :: [FilePath]
+hsExtensions = [".hs", ".lhs"]
+-- Boot files are not so simple. They should probably be copied to the src dir,
+-- but not made proper targets. This is probably similar to .h files.
+-- hsExtentions = [".hs", ".lhs", ".hs-boot", ".lhs-boot", ".hi-boot"]
 
--- | Show an exception together with its most precise type tag.
-showExWithClass :: Ex.SomeException -> String
-showExWithClass (Ex.SomeException ex) = show (typeOf ex) ++ ": " ++ show ex
+{------------------------------------------------------------------------------
+  Debugging
+------------------------------------------------------------------------------}
 
 dVerbosity :: Int
 dVerbosity = 3
@@ -146,6 +484,19 @@ debug verbosity msg =
     when (verbosity >= 4) $ liftIO $ do
       BS.hPutStrLn stderr $ BS.pack $ "debug: " ++ msg
       hFlush stderr
+
+{------------------------------------------------------------------------------
+  Util
+------------------------------------------------------------------------------}
+
+applyMapDiff :: Ord k => Map k (Maybe v) -> Map k v -> Map k v
+applyMapDiff diff m =
+  let f m2 (k, v) = Map.alter (const v) k m2
+  in List.foldl' f m $ Map.toList diff
+
+-- | Show an exception together with its most precise type tag.
+showExWithClass :: Ex.SomeException -> String
+showExWithClass (Ex.SomeException ex) = show (typeOf ex) ++ ": " ++ show ex
 
 -- | Translate record field '_name' to the accessor 'name'
 accessorName :: String -> Maybe String
