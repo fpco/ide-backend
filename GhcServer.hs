@@ -71,9 +71,9 @@ data GhcRequest
   | ReqSetEnv  [(String, Maybe String)]
 data GhcCompileResponse =
     GhcCompileProgress Progress
-  | GhcCompileDone ( [XSourceError]
-                   , XLoadedModules
-                   , Map ModuleName (Maybe ([Import], [XIdInfo]))
+  | GhcCompileDone ( [XShared SourceError]
+                   , XShared LoadedModules
+                   , Map ModuleName (Maybe ([Import], [XShared IdInfo]))
                    , ExplicitSharingCache
                    )
 data GhcRunResponse =
@@ -148,14 +148,20 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 
 -- | Handle a compile or type check request
 ghcHandleCompile :: RpcConversation
-                 -> DynamicOpts           -- ^ startup dynamic flags
-                 -> Maybe [String]        -- ^ new, user-submitted dynamic flags
-                 -> IORef XLoadedModules  -- ^ ref for newly generated IdMaps
-                 -> IORef XLoadedModules  -- ^ ref for accumulated IdMaps
-                 -> IORef (Map ModuleName ([Import], [XIdInfo]))
-                                          -- ^ ref for previous imports and auto
-                 -> FilePath              -- ^ source directory
-                 -> Bool                  -- ^ should we generate code
+                    -- | startup dynamic flags
+                 -> DynamicOpts
+                    -- | new, user-submitted dynamic flags
+                 -> Maybe [String]
+                    -- | ref for newly generated IdMaps
+                 -> IORef (XShared LoadedModules)
+                    -- | ref for accumulated IdMaps
+                 -> IORef (XShared LoadedModules)
+                    -- | ref for previous imports and auto
+                 -> IORef (Map ModuleName ([Import], [XShared IdInfo]))
+                    -- | source directory
+                 -> FilePath
+                    -- | should we generate code
+                 -> Bool
                  -> Ghc ()
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
                  importsAutoRef configSourcesDir ideGenerateCode = do
@@ -199,8 +205,8 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     previousImportsAuto <- liftIO $ readIORef importsAutoRef
     let currentImportsAuto = Map.fromList importsAutoList
         changedModuleSet = Map.keysSet pluginIdMaps
-        diff :: (ModuleName, ([Import], [XIdInfo]))
-             -> Maybe (ModuleName, Maybe ([Import], [XIdInfo]))
+        diff :: (ModuleName, ([Import], [XShared IdInfo]))
+             -> Maybe (ModuleName, Maybe ([Import], [XShared IdInfo]))
         diff (m, ia) =
           case Map.lookup m previousImportsAuto of
             Nothing -> Just (m, Just ia)  -- add a new module
@@ -415,9 +421,9 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ( [XSourceError]
-                 , XLoadedModules
-                 , Map ModuleName (Maybe ([Import], Trie [XIdInfo]))
+           -> IO ( [XShared SourceError]
+                 , XShared LoadedModules
+                 , Map ModuleName (Maybe ([Import], Trie [XShared IdInfo]))
                  , ExplicitSharingCache
                  )
 rpcCompile server opts dir genCode callback =
@@ -437,10 +443,10 @@ rpcCompile server opts dir genCode callback =
                            )
     go
 
-constructAuto :: ExplicitSharingCache -> [XIdInfo] -> Trie [XIdInfo]
+constructAuto :: ExplicitSharingCache -> [XShared IdInfo] -> Trie [XShared IdInfo]
 constructAuto cache lk = Trie.fromListWith (++) $ map aux lk
   where
-    aux idInfo@(k, _) = let idProp = normalize cache k
+    aux idInfo@(k, _) = let idProp = removeExplicitSharing cache k
                         in (BSSC.pack (idName idProp), [idInfo])
 
 -- | Handles to the running code, through which one can interact with the code.

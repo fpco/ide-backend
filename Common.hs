@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, DeriveDataTypeable, MultiParamTypeClasses, FunctionalDependencies, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TemplateHaskell, DeriveDataTypeable, MultiParamTypeClasses, TypeFamilies, TypeSynonymInstances, FlexibleInstances, ScopedTypeVariables #-}
 -- | Common types and utilities
 module Common
   ( -- * Common data types
@@ -25,9 +25,10 @@ module Common
   , XSourceError(..)
   , XIdMap(..)
   , XLoadedModules
+  , XShared
     -- * Normalization
   , ExplicitSharingCache(..)
-  , Normalize(..)
+  , ExplicitSharing(..)
   , showNormalized
     -- * Progress
   , Progress(..)
@@ -132,7 +133,8 @@ data SourceSpan = SourceSpan
   , spanFromLine   :: Int
   , spanFromColumn :: Int
   , spanToLine     :: Int
-  , spanToColumn   :: Int }
+  , spanToColumn   :: Int
+  }
   deriving (Eq, Ord, Data, Typeable)
 
 data EitherSpan =
@@ -275,7 +277,7 @@ data XSourceSpan = XSourceSpan
   deriving (Eq, Ord, Data, Typeable)
 
 data XEitherSpan =
-    XProperSpan XSourceSpan
+    XProperSpan (XSourceSpan)
   | XTextSpan String
   deriving (Eq, Data, Typeable)
 
@@ -291,10 +293,10 @@ data XSourceError = XSourceError
   }
   deriving (Eq, Data, Typeable)
 
-data XIdMap = XIdMap { xIdMapToMap :: Map XSourceSpan XIdInfo }
+data XIdMap = XIdMap { xIdMapToMap :: Map (XSourceSpan) (XIdInfo) }
   deriving (Data, Typeable)
 
-type XLoadedModules = Map Common.ModuleName XIdMap
+type XLoadedModules = Map Common.ModuleName (XIdMap)
 
 {------------------------------------------------------------------------------
   Normalization (turning explicit sharing into implicit sharing)
@@ -305,68 +307,95 @@ data ExplicitSharingCache = ExplicitSharingCache {
   , idPropCache   :: IntMap IdProp
   }
 
-class Normalize a b | a -> b, b -> a where
-  normalize :: ExplicitSharingCache -> a -> b
+-- | The associated type with explicit sharing
+type family XShared a
 
-showNormalized :: (Show b, Normalize a b) => ExplicitSharingCache -> a -> String
-showNormalized cache = show . normalize cache
+-- | The inverse of MShared, only for decidability of type checking
+type family MShared a
 
-instance Normalize FilePathPtr FilePath where
-  normalize cache ptr = filePathCache cache IntMap.! filePathPtr ptr
+type instance XShared FilePath      = FilePathPtr
+type instance XShared IdProp        = IdPropPtr
+type instance XShared IdInfo        = XIdInfo
+type instance XShared IdScope       = XIdScope
+type instance XShared SourceSpan    = XSourceSpan
+type instance XShared EitherSpan    = XEitherSpan
+type instance XShared SourceError   = XSourceError
+type instance XShared IdMap         = XIdMap
+type instance XShared LoadedModules = XLoadedModules
 
-instance Normalize IdPropPtr IdProp where
-  normalize cache ptr = idPropCache cache IntMap.! idPropPtr ptr
+type instance MShared FilePathPtr    = FilePath
+type instance MShared IdPropPtr      = IdProp
+type instance MShared XIdInfo        = IdInfo
+type instance MShared XIdScope       = IdScope
+type instance MShared XSourceSpan    = SourceSpan
+type instance MShared XEitherSpan    = EitherSpan
+type instance MShared XSourceError   = SourceError
+type instance MShared XIdMap         = IdMap
+type instance MShared XLoadedModules = LoadedModules
 
-instance Normalize XIdInfo IdInfo where
-  normalize cache (idPropPtr, xIdScope) =
-    ( normalize cache idPropPtr
-    , normalize cache xIdScope
+class MShared (XShared a) ~ a => ExplicitSharing a where
+  removeExplicitSharing :: ExplicitSharingCache -> XShared a -> a
+
+showNormalized :: forall a. (Show a, ExplicitSharing a)
+               => ExplicitSharingCache -> XShared a -> String
+showNormalized cache x = show (removeExplicitSharing cache x :: a)
+
+instance ExplicitSharing FilePath where
+  removeExplicitSharing cache ptr = filePathCache cache IntMap.! filePathPtr ptr
+
+instance ExplicitSharing IdProp where
+  removeExplicitSharing cache ptr = idPropCache cache IntMap.! idPropPtr ptr
+
+instance ExplicitSharing IdInfo where
+  removeExplicitSharing cache (idPropPtr, xIdScope) =
+    ( removeExplicitSharing cache idPropPtr
+    , removeExplicitSharing cache xIdScope
     )
 
-instance Normalize XIdScope IdScope where
-  normalize cache xIdScope = case xIdScope of
+instance ExplicitSharing IdScope where
+  removeExplicitSharing cache xIdScope = case xIdScope of
     XBinder        -> Binder
     XLocal {..}    -> Local {
-                          idDefSpan      = normalize cache xIdDefSpan
+                          idDefSpan      = removeExplicitSharing cache xIdDefSpan
                         }
     XImported {..} -> Imported {
-                          idDefSpan      = normalize cache xIdDefSpan
+                          idDefSpan      = removeExplicitSharing cache xIdDefSpan
                         , idDefinedIn    = xIdDefinedIn
                         , idImportedFrom = xIdImportedFrom
-                        , idImportSpan   = normalize cache xIdImportSpan
+                        , idImportSpan   = removeExplicitSharing cache xIdImportSpan
                         , idImportQual   = xIdImportQual
                         }
     XWiredIn       -> WiredIn
 
-instance Normalize XSourceSpan SourceSpan where
-  normalize cache XSourceSpan{..} = SourceSpan {
-      spanFilePath   = normalize cache xSpanFilePath
+instance ExplicitSharing SourceSpan where
+  removeExplicitSharing cache XSourceSpan{..} = SourceSpan {
+      spanFilePath   = removeExplicitSharing cache xSpanFilePath
     , spanFromLine   = xSpanFromLine
     , spanFromColumn = xSpanFromColumn
     , spanToLine     = xSpanToLine
     , spanToColumn   = xSpanToColumn
     }
 
-instance Normalize XEitherSpan EitherSpan where
-  normalize cache xEitherSpan = case xEitherSpan of
-    XProperSpan xSourceSpan -> ProperSpan (normalize cache xSourceSpan)
+instance ExplicitSharing EitherSpan where
+  removeExplicitSharing cache xEitherSpan = case xEitherSpan of
+    XProperSpan xSourceSpan -> ProperSpan (removeExplicitSharing cache xSourceSpan)
     XTextSpan str           -> TextSpan str
 
-instance Normalize XSourceError SourceError where
-  normalize cache XSourceError{..} = SourceError {
+instance ExplicitSharing SourceError where
+  removeExplicitSharing cache XSourceError{..} = SourceError {
       errorKind = xErrorKind
-    , errorSpan = normalize cache xErrorSpan
+    , errorSpan = removeExplicitSharing cache xErrorSpan
     , errorMsg  = xErrorMsg
     }
 
-instance Normalize XIdMap IdMap where
-  normalize cache = IdMap
-                  . Map.map (normalize cache)
-                  . Map.mapKeys (normalize cache)
+instance ExplicitSharing IdMap where
+  removeExplicitSharing cache = IdMap
+                  . Map.map (removeExplicitSharing cache)
+                  . Map.mapKeys (removeExplicitSharing cache)
                   . xIdMapToMap
 
-instance Normalize XLoadedModules LoadedModules where
-  normalize = Map.map . normalize
+instance ExplicitSharing LoadedModules where
+  removeExplicitSharing = Map.map . removeExplicitSharing
 
 {------------------------------------------------------------------------------
   JSON instances

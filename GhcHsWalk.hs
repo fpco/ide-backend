@@ -176,7 +176,7 @@ idInfoAtLocation line col = filter inRange . idMapToList
   Extract an IdMap from information returned by the ghc type checker
 ------------------------------------------------------------------------------}
 
-extractIdsPlugin :: IORef XLoadedModules -> HscPlugin
+extractIdsPlugin :: IORef (XShared LoadedModules) -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
   let processedModule = tcg_mod env
       processedName = moduleNameString $ GHC.moduleName processedModule
@@ -236,11 +236,11 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
 ------------------------------------------------------------------------------}
 
 newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StateT (TidyEnv, XIdMap) m) a
+      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StateT (TidyEnv, XShared IdMap) m) a
     )
   deriving (Functor, Monad, MonadState (TidyEnv, XIdMap), MonadReader (DynFlags, RdrName.GlobalRdrEnv))
 
-execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> ExtractIdsT m () -> m XIdMap
+execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> ExtractIdsT m () -> m (XShared IdMap)
 execExtractIdsT dynFlags rdrEnv (ExtractIdsT m) = do
   (_, idMap) <- execStateT (runReaderT m (dynFlags, rdrEnv)) (emptyTidyEnv, XIdMap Map.empty)
   return idMap
@@ -258,9 +258,11 @@ getDynFlags = asks fst
 getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
 getGlobalRdrEnv = asks snd
 
-extendIdMap :: MonadIO m => XSourceSpan -> XIdInfo -> ExtractIdsT m ()
-extendIdMap span info =
-  modify . second $ XIdMap  . Map.insert span info . xIdMapToMap
+extendIdMap :: MonadIO m => XShared SourceSpan -> XShared IdInfo -> ExtractIdsT m ()
+extendIdMap span info = modify (second aux)
+  where
+    aux :: XShared IdMap -> XShared IdMap
+    aux = XIdMap  . Map.insert span info . xIdMapToMap
 
 tidyType :: Monad m => Type -> ExtractIdsT m Type
 tidyType typ = state $ \(tidyEnv, idMap) ->
@@ -380,7 +382,7 @@ idInfoForName :: MonadIO m
               -> Name                          -- ^ The name in question
               -> Bool                          -- ^ Is this a binding occurrence?
               -> Maybe RdrName.GlobalRdrElt    -- ^ GlobalRdrElt for imported names
-              -> m (IdPropPtr, Maybe XIdScope) -- ^ Nothing if imported but no GlobalRdrElt
+              -> m (IdPropPtr, Maybe (XShared IdScope)) -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt = do
     scope <- constructScope
     let idPropPtr = IdPropPtr . getKey . getUnique $ name
@@ -392,7 +394,7 @@ idInfoForName dflags name idIsBinder mElt = do
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
       idType  = Nothing  -- no type; we are after renamer but before typechecker
 
-      constructScope :: MonadIO m => m (Maybe XIdScope)
+      constructScope :: MonadIO m => m (Maybe (XShared IdScope))
       constructScope
         | idIsBinder               = return $ Just XBinder
         | Name.isWiredInName  name = return $ Just XWiredIn
@@ -485,7 +487,7 @@ idInfoForName dflags name idIsBinder mElt = do
         PackageId { packageName = Module.packageIdString Module.mainPackageId
                   , packageVersion = Nothing }  -- the only case of no version
 
-      extractImportInfo :: MonadIO m => [RdrName.ImportSpec] -> m (ModuleName, XEitherSpan, String)
+      extractImportInfo :: MonadIO m => [RdrName.ImportSpec] -> m (ModuleName, XShared EitherSpan, String)
       extractImportInfo (RdrName.ImpSpec decl item:_) = do
         span <- case item of
                   RdrName.ImpAll -> extractSourceSpan (RdrName.is_dloc decl)
@@ -499,7 +501,7 @@ idInfoForName dflags name idIsBinder mElt = do
           )
       extractImportInfo _ = fail "ghc invariant violated"
 
-extractSourceSpan :: MonadIO m => SrcSpan -> m XEitherSpan
+extractSourceSpan :: MonadIO m => SrcSpan -> m (XShared EitherSpan)
 extractSourceSpan (RealSrcSpan srcspan) = liftIO $ do
   key <- mkFilePathPtr $ unpackFS (srcSpanFile srcspan)
   return . XProperSpan $ XSourceSpan

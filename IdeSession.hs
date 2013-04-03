@@ -63,19 +63,9 @@ module IdeSession (
   , LoadedModules
 
     -- * Explicit sharing
-  , FilePathPtr(..)
-  , IdPropPtr(..)
-  , XIdInfo
-  , XIdScope(..)
-  , XSourceSpan(..)
-  , XEitherSpan(..)
-  , XSourceError(..)
-  , XIdMap(..)
-  , XLoadedModules
-
-    -- * Normalization
+  , XShared
   , ExplicitSharingCache(..)
-  , Normalize(..)
+  , ExplicitSharing(..)
   , showNormalized
 
     -- * Progress
@@ -787,7 +777,7 @@ getSourceErrors IdeSession{ideState, ideStaticInfo} =
     aux :: IdeIdleState -> IO [SourceError]
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} ->
-        return $ map (normalize computedCache) computedErrors
+        return $ map (removeExplicitSharing computedCache) computedErrors
       Nothing -> fail "This session state does not admit queries."
 
 -- | Get the collection of files submitted by the user and not deleted yet.
@@ -887,7 +877,7 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
         let name' = BSSC.pack name
             n     = last (BSSC.split '.' name')
         in filter (\(idProp, idScope) -> name `isInfixOf` idInfoQN idProp idScope)
-             $ map (\(idPropPtr, xIdScope) -> (normalize cache idPropPtr, normalize cache xIdScope))
+             $ map (\(idPropPtr, xIdScope) -> (removeExplicitSharing cache idPropPtr, removeExplicitSharing cache xIdScope))
              . concat
              . Trie.elems
              . Trie.submap n

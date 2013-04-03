@@ -186,16 +186,23 @@ invalidateModSummaryCache =
 #endif
 #endif
 
-compileInGhc :: FilePath             -- ^ target directory
-             -> DynamicOpts          -- ^ dynamic flags for this call
-             -> Bool                 -- ^ whether to generate code
-             -> Int                  -- ^ verbosity level
-             -> IORef [XSourceError] -- ^ the IORef where GHC stores errors
-             -> (String -> IO ())    -- ^ handler for each SevOutput message
-             -> (String -> IO ())    -- ^ handler for remaining non-error msgs
-             -> Ghc ( [XSourceError]
+compileInGhc :: -- | target directory
+                FilePath
+                -- | dynamic flags for this call
+             -> DynamicOpts
+                -- | whether to generate code
+             -> Bool
+                -- | verbosity level
+             -> Int
+                -- | the IORef where GHC stores errors
+             -> IORef [XShared SourceError]
+                -- | handler for each SevOutput message
+             -> (String -> IO ())
+                -- | handler for remaining non-error msgs
+             -> (String -> IO ())
+             -> Ghc ( [XShared SourceError]
                     , [ModuleName]
-                    , [(ModuleName, ([Import], [XIdInfo]))]
+                    , [(ModuleName, ([Import], [XShared IdInfo]))]
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -287,13 +294,13 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                        . handleSourceError (sourceErrorHandler flags)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
-                   -> IO [(ModuleName, ([Import], [XIdInfo]))]
+                   -> IO [(ModuleName, ([Import], [XShared IdInfo]))]
 extractImportsAuto dflags session graph = do
   assocs <- mapM goMod graph
 --  cache <- wipeIdPropCache
   return assocs
   where
-    goMod :: ModSummary -> IO (ModuleName, ([Import], [XIdInfo]))
+    goMod :: ModSummary -> IO (ModuleName, ([Import], [XShared IdInfo]))
     goMod summary = do
       envs <- autoEnvs summary
       idIs <- mapM eltsToAutocompleteMap envs
@@ -318,7 +325,7 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: GlobalRdrElt -> IO XIdInfo
+    eltsToAutocompleteMap :: GlobalRdrElt -> IO (XShared IdInfo)
     eltsToAutocompleteMap elt = do
       let name = gre_name elt
       (idPropPtr, Just idScope) <- idInfoForName dflags name False (Just elt)
@@ -414,7 +421,7 @@ runInGhc (m, fun) outBMode errBMode = do
 -- Source error conversion and collection
 --
 
-collectSrcError :: IORef [XSourceError]
+collectSrcError :: IORef [XShared SourceError]
                 -> (String -> IO ())
                 -> (String -> IO ())
                 -> DynFlags
@@ -441,7 +448,7 @@ collectSrcError errsRef handlerOutput handlerRemaining flags
   collectSrcError'
     errsRef handlerOutput handlerRemaining flags severity srcspan style msg
 
-collectSrcError' :: IORef [XSourceError]
+collectSrcError' :: IORef [XShared SourceError]
                  -> (String -> IO ())
                  -> (String -> IO ())
                  -> DynFlags
@@ -472,7 +479,7 @@ collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
 -- our control (and so, e.g., not relative to the project root).
 -- But at least the IDE could point somewhere in the code.
 -- | Convert GHC's SourceError type into ours.
-fromHscSourceError :: MonadIO m => HscTypes.SourceError -> m XSourceError
+fromHscSourceError :: MonadIO m => HscTypes.SourceError -> m (XShared SourceError)
 fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
   [errMsg] -> case ErrUtils.errMsgSpans errMsg of
     [real@RealSrcSpan{}] -> do
