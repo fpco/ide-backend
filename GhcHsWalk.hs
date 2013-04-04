@@ -119,8 +119,8 @@ constructExplicitSharingCache = do
 ------------------------------------------------------------------------------}
 
 -- | Construct qualified name following Haskell's scoping rules
-idInfoQN :: IdProp -> IdScope -> String
-idInfoQN IdProp{idName} idScope =
+idInfoQN :: IdInfo -> String
+idInfoQN IdInfo{idProp = IdProp{idName}, idScope} =
   case idScope of
     Binder                 -> idName
     Local{}                -> idName
@@ -522,8 +522,8 @@ instance Record Name where
         -- TODO: the cache is update twice here; clean up with Ints in IdMaps.
         info <- idInfoForName dflags name idIsBinder (lookupRdrEnv rdrEnv name)
         case info of
-          (idPropPtr, Just idScope) -> do
-            extendIdMap sourceSpan (idPropPtr, idScope)
+          (xIdProp, Just xIdScope) -> do
+            extendIdMap sourceSpan XIdInfo{..}
           _ ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from

@@ -856,7 +856,7 @@ getImports IdeSession{ideState, ideStaticInfo} =
 -- normalization.  Hence, this is not useful for explicit sharing. If the
 -- autocompletion info needs to be shipped, we need to change this to a list
 -- and avoid normalization here.
-getAutocompletion :: Query (ModuleName -> String -> [(IdProp, IdScope)])
+getAutocompletion :: Query (ModuleName -> String -> [IdInfo])
 getAutocompletion IdeSession{ideState, ideStaticInfo} =
   $withMVar ideState $ \st ->
     case st of
@@ -864,7 +864,7 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
       IdeSessionRunning _ idleState -> aux idleState
       IdeSessionShutdown            -> fail "Session already shut down."
   where
-    aux :: IdeIdleState -> IO (ModuleName -> String -> [(IdProp, IdScope)])
+    aux :: IdeIdleState -> IO (ModuleName -> String -> [IdInfo])
     aux idleState = case idleState ^. ideComputed of
       Just Computed{..} -> return (autocomplete computedCache computedAutoMap)
       Nothing           -> fail "This session state does not admit queries."
@@ -872,12 +872,12 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
     autocomplete :: ExplicitSharingCache
                  -> Map ModuleName (Trie [XShared IdInfo])
                  -> ModuleName -> String
-                 -> [(IdProp, IdScope)]
+                 -> [IdInfo]
     autocomplete cache mapOfTries modName name =
         let name' = BSSC.pack name
             n     = last (BSSC.split '.' name')
-        in filter (\(idProp, idScope) -> name `isInfixOf` idInfoQN idProp idScope)
-             $ map (\(idPropPtr, xIdScope) -> (removeExplicitSharing cache idPropPtr, removeExplicitSharing cache xIdScope))
+        in filter (\idInfo -> name `isInfixOf` idInfoQN idInfo)
+             $ map (removeExplicitSharing cache)
              . concat
              . Trie.elems
              . Trie.submap n

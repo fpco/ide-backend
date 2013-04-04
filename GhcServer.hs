@@ -446,8 +446,9 @@ rpcCompile server opts dir genCode callback =
 constructAuto :: ExplicitSharingCache -> [XShared IdInfo] -> Trie [XShared IdInfo]
 constructAuto cache lk = Trie.fromListWith (++) $ map aux lk
   where
-    aux idInfo@(k, _) = let idProp = removeExplicitSharing cache k
-                        in (BSSC.pack (idName idProp), [idInfo])
+    aux idInfo@XIdInfo{xIdProp = k} =
+      let idProp = removeExplicitSharing cache k
+      in (BSSC.pack (idName idProp), [idInfo])
 
 -- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {

@@ -1882,7 +1882,7 @@ syntheticTests =
           ]
         autocomplete <- getAutocompletion session
         let completeFo = autocomplete "M" "fo"
-        assertSameSet "fo: " (map (uncurry idInfoQN) completeFo) [
+        assertSameSet "fo: " (map idInfoQN completeFo) [
             "foldM"
           , "foldM_"
           , "forM"
@@ -1896,7 +1896,7 @@ syntheticTests =
           , "Data.List.foldr1"
           ]
         let completeControlMonadFo = autocomplete "M" "Data.List.fo"
-        assertSameSet "Data.List.fo: " (map (uncurry idInfoQN) completeControlMonadFo) [
+        assertSameSet "Data.List.fo: " (map idInfoQN completeControlMonadFo) [
             "Data.List.foldl'"
           , "Data.List.foldl1"
           , "Data.List.foldl1'"
@@ -1905,7 +1905,7 @@ syntheticTests =
           , "Data.List.foldr1"
           ]
         let completeSec = autocomplete "M" "sec"
-        assertSameSet "sec: " (map (uncurry idInfoQN) completeSec) [
+        assertSameSet "sec: " (map idInfoQN completeSec) [
             "A.second"
           ]
     )

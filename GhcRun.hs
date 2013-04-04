@@ -328,8 +328,8 @@ extractImportsAuto dflags session graph = do
     eltsToAutocompleteMap :: GlobalRdrElt -> IO (XShared IdInfo)
     eltsToAutocompleteMap elt = do
       let name = gre_name elt
-      (idPropPtr, Just idScope) <- idInfoForName dflags name False (Just elt)
-      return $ (idPropPtr, idScope)
+      (xIdProp, Just xIdScope) <- idInfoForName dflags name False (Just elt)
+      return XIdInfo{..}
 
     autoEnvs :: ModSummary -> IO [GlobalRdrElt]
     autoEnvs ModSummary{ ms_mod

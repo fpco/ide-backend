@@ -1,9 +1,9 @@
-{-# LANGUAGE TemplateHaskell, DeriveDataTypeable, MultiParamTypeClasses, TypeFamilies, TypeSynonymInstances, FlexibleInstances, ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell, MultiParamTypeClasses, TypeFamilies, TypeSynonymInstances, FlexibleInstances, ScopedTypeVariables #-}
 -- | Common types and utilities
 module Common
   ( -- * Common data types
     IdNameSpace(..)
-  , IdInfo
+  , IdInfo(..)
   , IdProp(..)
   , IdScope(..)
   , SourceSpan(..)
@@ -18,7 +18,7 @@ module Common
     -- * Explicit sharing
   , FilePathPtr(..)
   , IdPropPtr(..)
-  , XIdInfo
+  , XIdInfo(..)
   , XIdScope(..)
   , XSourceSpan(..)
   , XEitherSpan(..)
@@ -54,9 +54,9 @@ import Control.Monad (when)
 import Control.Monad.Trans (MonadIO, liftIO)
 import Data.Aeson (FromJSON (..), ToJSON (..))
 import Data.Aeson.TH (deriveJSON)
+import Data.Typeable (typeOf)
 import qualified Data.ByteString.Char8 as BS
 import System.IO (hFlush, stderr)
-import Data.Generics
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.List as List
@@ -76,10 +76,12 @@ data IdNameSpace =
   | DataName   -- ^ Source data constructors
   | TvName     -- ^ Type variables
   | TcClsName  -- ^ Type constructors and classes
-  deriving (Show, Eq, Data, Typeable)
+  deriving (Show, Eq)
 
 -- | Information about identifiers
-type IdInfo = (IdProp, IdScope)
+data IdInfo = IdInfo { idProp  :: IdProp
+                     , idScope :: IdScope
+                     }
 
 -- | Identifier info that is independent of the usage site
 data IdProp = IdProp
@@ -93,7 +95,7 @@ data IdProp = IdProp
     -- the type checker does not give us LSigs for top-level annotations)
   , idType  :: Maybe String
   }
-  deriving (Eq, Data, Typeable)
+  deriving (Eq)
 
 -- TODO: Ideally, we would have
 -- 1. SourceSpan for Local rather than EitherSpan
@@ -126,7 +128,7 @@ data IdScope =
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
-  deriving (Eq, Data, Typeable)
+  deriving (Eq)
 
 data SourceSpan = SourceSpan
   { spanFilePath   :: FilePath
@@ -135,12 +137,12 @@ data SourceSpan = SourceSpan
   , spanToLine     :: Int
   , spanToColumn   :: Int
   }
-  deriving (Eq, Ord, Data, Typeable)
+  deriving (Eq, Ord)
 
 data EitherSpan =
     ProperSpan SourceSpan
   | TextSpan String
-  deriving (Eq, Data, Typeable)
+  deriving (Eq)
 
 -- | An error or warning in a source module.
 --
@@ -152,11 +154,11 @@ data SourceError = SourceError
   , errorSpan :: EitherSpan
   , errorMsg  :: String
   }
-  deriving (Show, Eq, Data, Typeable)
+  deriving (Show, Eq)
 
 -- | Severity of an error.
 data SourceErrorKind = KindError | KindWarning
-  deriving (Show, Eq, Data, Typeable)
+  deriving (Show, Eq)
 
 type ModuleName = String
 
@@ -164,16 +166,15 @@ data ModuleId = ModuleId
   { moduleName    :: ModuleName
   , modulePackage :: PackageId
   }
-  deriving (Eq, Data, Typeable)
+  deriving (Eq)
 
 data PackageId = PackageId
   { packageName    :: String
   , packageVersion :: Maybe String
   }
-  deriving (Eq, Data, Typeable)
+  deriving (Eq)
 
 data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
-  deriving (Data, Typeable)
 
 type LoadedModules = Map Common.ModuleName IdMap
 
@@ -218,12 +219,12 @@ instance Show PackageId where
   show (PackageId name (Just version)) = name ++ "-" ++ version
   show (PackageId name Nothing)        = name
 
+instance Show IdInfo where
+  show IdInfo{..} = show idProp ++ " (" ++ show idScope ++ ")"
+
 instance Show IdMap where
   show =
-    let showIdInfo(span, (idProp, idScope)) =
-          "(" ++ show span ++ ","
-          ++ show idProp
-          ++ " (" ++ show idScope ++ "))"
+    let showIdInfo(span, idInfo) = "(" ++ show span ++ "," ++ show idInfo ++ ")"
     in unlines . map showIdInfo . Map.toList . idMapToMap
 
 {------------------------------------------------------------------------------
@@ -234,13 +235,15 @@ instance Show IdMap where
 ------------------------------------------------------------------------------}
 
 newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
-  deriving (Data, Typeable, Eq, Ord)
+  deriving (Eq, Ord)
 
 newtype IdPropPtr = IdPropPtr { idPropPtr :: Int }
-  deriving (Data, Typeable, Eq, Ord)
+  deriving (Eq, Ord)
 
 -- | Information about identifiers
-type XIdInfo = (IdPropPtr, XIdScope)
+data XIdInfo = XIdInfo { xIdProp  :: IdPropPtr
+                       , xIdScope :: XIdScope
+                       }
 
 data XIdScope =
     -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
@@ -265,7 +268,7 @@ data XIdScope =
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | XWiredIn
-  deriving (Eq, Data, Typeable)
+  deriving (Eq)
 
 data XSourceSpan = XSourceSpan
   { xSpanFilePath   :: FilePathPtr
@@ -274,12 +277,12 @@ data XSourceSpan = XSourceSpan
   , xSpanToLine     :: Int
   , xSpanToColumn   :: Int
   }
-  deriving (Eq, Ord, Data, Typeable)
+  deriving (Eq, Ord)
 
 data XEitherSpan =
-    XProperSpan (XSourceSpan)
+    XProperSpan XSourceSpan
   | XTextSpan String
-  deriving (Eq, Data, Typeable)
+  deriving (Eq)
 
 -- | An error or warning in a source module.
 --
@@ -291,10 +294,9 @@ data XSourceError = XSourceError
   , xErrorSpan :: XEitherSpan
   , xErrorMsg  :: String
   }
-  deriving (Eq, Data, Typeable)
+  deriving (Eq)
 
 data XIdMap = XIdMap { xIdMapToMap :: Map (XSourceSpan) (XIdInfo) }
-  deriving (Data, Typeable)
 
 type XLoadedModules = Map Common.ModuleName (XIdMap)
 
@@ -347,10 +349,10 @@ instance ExplicitSharing IdProp where
   removeExplicitSharing cache ptr = idPropCache cache IntMap.! idPropPtr ptr
 
 instance ExplicitSharing IdInfo where
-  removeExplicitSharing cache (idPropPtr, xIdScope) =
-    ( removeExplicitSharing cache idPropPtr
-    , removeExplicitSharing cache xIdScope
-    )
+  removeExplicitSharing cache XIdInfo{..} = IdInfo {
+      idProp  = removeExplicitSharing cache xIdProp
+    , idScope = removeExplicitSharing cache xIdScope
+    }
 
 instance ExplicitSharing IdScope where
   removeExplicitSharing cache xIdScope = case xIdScope of
@@ -418,6 +420,7 @@ $(deriveJSON id ''XIdScope)
 $(deriveJSON id ''XSourceSpan)
 $(deriveJSON id ''XEitherSpan)
 $(deriveJSON id ''XSourceError)
+$(deriveJSON id ''XIdInfo)
 
 instance FromJSON XIdMap where
   parseJSON = fmap aux . parseJSON
