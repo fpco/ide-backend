@@ -17,7 +17,6 @@ module GhcServer
   , InProcess
   , forkGhcServer
   , rpcCompile
-  , LoadedModules
   , RunActions(..)
   , runWaitAll
   , rpcRun
@@ -47,6 +46,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Trie (Trie)
 import qualified Data.Trie.Convenience as Trie
+import qualified Data.IntMap as IntMap
 
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -56,10 +56,14 @@ import System.Posix (Fd)
 import System.Posix.Env (setEnv, unsetEnv)
 import System.Posix.IO.ByteString
 
-import Common
 import GhcHsWalk
 import GhcRun
 import RpcServer
+import IdeSession.Types.Private
+import IdeSession.Types.Progress
+import IdeSession.Types.Translation
+import IdeSession.Debug
+import IdeSession.Util
 
 import BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)
 
@@ -71,9 +75,9 @@ data GhcRequest
   | ReqSetEnv  [(String, Maybe String)]
 data GhcCompileResponse =
     GhcCompileProgress Progress
-  | GhcCompileDone ( [XShared SourceError]
-                   , XShared LoadedModules
-                   , Map ModuleName (Maybe ([Import], [XShared IdInfo]))
+  | GhcCompileDone ( [SourceError]
+                   , LoadedModules
+                   , Map ModuleName (Maybe ([Import], [IdInfo]))
                    , ExplicitSharingCache
                    )
 data GhcRunResponse =
@@ -153,11 +157,11 @@ ghcHandleCompile :: RpcConversation
                     -- | new, user-submitted dynamic flags
                  -> Maybe [String]
                     -- | ref for newly generated IdMaps
-                 -> IORef (XShared LoadedModules)
+                 -> IORef LoadedModules
                     -- | ref for accumulated IdMaps
-                 -> IORef (XShared LoadedModules)
+                 -> IORef LoadedModules
                     -- | ref for previous imports and auto
-                 -> IORef (Map ModuleName ([Import], [XShared IdInfo]))
+                 -> IORef (Map ModuleName ([Import], [IdInfo]))
                     -- | source directory
                  -> FilePath
                     -- | should we generate code
@@ -205,8 +209,8 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     previousImportsAuto <- liftIO $ readIORef importsAutoRef
     let currentImportsAuto = Map.fromList importsAutoList
         changedModuleSet = Map.keysSet pluginIdMaps
-        diff :: (ModuleName, ([Import], [XShared IdInfo]))
-             -> Maybe (ModuleName, Maybe ([Import], [XShared IdInfo]))
+        diff :: (ModuleName, ([Import], [IdInfo]))
+             -> Maybe (ModuleName, Maybe ([Import], [IdInfo]))
         diff (m, ia) =
           case Map.lookup m previousImportsAuto of
             Nothing -> Just (m, Just ia)  -- add a new module
@@ -421,9 +425,9 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ( [XShared SourceError]
-                 , XShared LoadedModules
-                 , Map ModuleName (Maybe ([Import], Trie [XShared IdInfo]))
+           -> IO ( [SourceError]
+                 , LoadedModules
+                 , Map ModuleName (Maybe ([Import], Trie [IdInfo]))
                  , ExplicitSharingCache
                  )
 rpcCompile server opts dir genCode callback =
@@ -443,11 +447,11 @@ rpcCompile server opts dir genCode callback =
                            )
     go
 
-constructAuto :: ExplicitSharingCache -> [XShared IdInfo] -> Trie [XShared IdInfo]
+constructAuto :: ExplicitSharingCache -> [IdInfo] -> Trie [IdInfo]
 constructAuto cache lk = Trie.fromListWith (++) $ map aux lk
   where
-    aux idInfo@XIdInfo{xIdProp = k} =
-      let idProp = removeExplicitSharing cache k
+    aux idInfo@IdInfo{idProp = k} =
+      let idProp = idPropCache cache IntMap.! idPropPtr k
       in (BSSC.pack (idName idProp), [idInfo])
 
 -- | Handles to the running code, through which one can interact with the code.

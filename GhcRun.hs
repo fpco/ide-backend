@@ -24,6 +24,7 @@ module GhcRun
   , defaultDynFlags
   , getSessionDynFlags
   , setSessionDynFlags
+  , hsExtensions
     -- * Executing snippets
   , runInGhc
   , RunResult(..)
@@ -82,9 +83,19 @@ import Data.List ((\\))
 import System.FilePath.Find (find, always, extension)
 import System.Process
 
-import Common
 import Data.Aeson.TH (deriveJSON)
+
 import GhcHsWalk (extractSourceSpan, idInfoForName)
+import IdeSession.Types.Private
+import IdeSession.Debug
+import IdeSession.Util
+
+-- | These source files are type-checked.
+hsExtensions :: [FilePath]
+hsExtensions = [".hs", ".lhs"]
+-- Boot files are not so simple. They should probably be copied to the src dir,
+-- but not made proper targets. This is probably similar to .h files.
+-- hsExtentions = [".hs", ".lhs", ".hs-boot", ".lhs-boot", ".hi-boot"]
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -121,23 +132,8 @@ data RunBufferMode =
                       }
   deriving Show
 
-data Import = Import {
-    importModule    :: ModuleName
-  -- | Used only for ghc's PackageImports extension
-  , importPackage   :: Maybe String
-  , importQualified :: Bool
-  , importImplicit  :: Bool
-  , importAs        :: Maybe ModuleName
-  -- | @Just (True, ..)@ for @import M hiding (..)@,
-  -- @Just (False, ..)@ for @import M (..)@, or
-  -- @Nothing@ otherwise.
-  , importHiding    :: Maybe (Bool, [String])
-  }
-  deriving (Show, Eq, Ord)
-
 $(deriveJSON id ''RunResult)
 $(deriveJSON id ''RunBufferMode)
-$(deriveJSON id ''Import)
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
@@ -195,14 +191,14 @@ compileInGhc :: -- | target directory
                 -- | verbosity level
              -> Int
                 -- | the IORef where GHC stores errors
-             -> IORef [XShared SourceError]
+             -> IORef [SourceError]
                 -- | handler for each SevOutput message
              -> (String -> IO ())
                 -- | handler for remaining non-error msgs
              -> (String -> IO ())
-             -> Ghc ( [XShared SourceError]
+             -> Ghc ( [SourceError]
                     , [ModuleName]
-                    , [(ModuleName, ([Import], [XShared IdInfo]))]
+                    , [(ModuleName, ([Import], [IdInfo]))]
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
@@ -283,7 +279,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     ghcExceptionHandler _flags e = liftIO $ do
       let eText   = show e  -- no SrcSpan as a field in GhcException
           exError =
-            XSourceError KindError (XTextSpan "<from GhcException>") eText
+            SourceError KindError (TextSpan "<from GhcException>") eText
             -- though it may be embedded in string
       debug dVerbosity $ "handleOtherErrors: " ++ eText
       errs <- readIORef errsRef
@@ -294,13 +290,13 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                        . handleSourceError (sourceErrorHandler flags)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
-                   -> IO [(ModuleName, ([Import], [XShared IdInfo]))]
+                   -> IO [(ModuleName, ([Import], [IdInfo]))]
 extractImportsAuto dflags session graph = do
   assocs <- mapM goMod graph
 --  cache <- wipeIdPropCache
   return assocs
   where
-    goMod :: ModSummary -> IO (ModuleName, ([Import], [XShared IdInfo]))
+    goMod :: ModSummary -> IO (ModuleName, ([Import], [IdInfo]))
     goMod summary = do
       envs <- autoEnvs summary
       idIs <- mapM eltsToAutocompleteMap envs
@@ -325,11 +321,11 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> String
     unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: GlobalRdrElt -> IO (XShared IdInfo)
+    eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
     eltsToAutocompleteMap elt = do
       let name = gre_name elt
-      (xIdProp, Just xIdScope) <- idInfoForName dflags name False (Just elt)
-      return XIdInfo{..}
+      (idProp, Just idScope) <- idInfoForName dflags name False (Just elt)
+      return IdInfo{..}
 
     autoEnvs :: ModSummary -> IO [GlobalRdrElt]
     autoEnvs ModSummary{ ms_mod
@@ -421,7 +417,7 @@ runInGhc (m, fun) outBMode errBMode = do
 -- Source error conversion and collection
 --
 
-collectSrcError :: IORef [XShared SourceError]
+collectSrcError :: IORef [SourceError]
                 -> (String -> IO ())
                 -> (String -> IO ())
                 -> DynFlags
@@ -448,7 +444,7 @@ collectSrcError errsRef handlerOutput handlerRemaining flags
   collectSrcError'
     errsRef handlerOutput handlerRemaining flags severity srcspan style msg
 
-collectSrcError' :: IORef [XShared SourceError]
+collectSrcError' :: IORef [SourceError]
                  -> (String -> IO ())
                  -> (String -> IO ())
                  -> DynFlags
@@ -461,7 +457,7 @@ collectSrcError' errsRef _ _ flags severity srcspan style msg
                       _          -> Nothing
   = do let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
        sp <- extractSourceSpan srcspan
-       modifyIORef errsRef (XSourceError errKind sp msgstr :)
+       modifyIORef errsRef (SourceError errKind sp msgstr :)
 
 collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
@@ -479,16 +475,16 @@ collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
 -- our control (and so, e.g., not relative to the project root).
 -- But at least the IDE could point somewhere in the code.
 -- | Convert GHC's SourceError type into ours.
-fromHscSourceError :: MonadIO m => HscTypes.SourceError -> m (XShared SourceError)
+fromHscSourceError :: MonadIO m => HscTypes.SourceError -> m SourceError
 fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
   [errMsg] -> case ErrUtils.errMsgSpans errMsg of
     [real@RealSrcSpan{}] -> do
       xSpan <- extractSourceSpan real
-      return $ XSourceError KindError xSpan (show e)
+      return $ SourceError KindError xSpan (show e)
     _ ->
-      return $ XSourceError KindError (XTextSpan "<no location info>") (show e)
+      return $ SourceError KindError (TextSpan "<no location info>") (show e)
   _ ->
-    return $ XSourceError KindError (XTextSpan "<no location info>") (show e)
+    return $ SourceError KindError (TextSpan "<no location info>") (show e)
 
 -----------------------
 -- GHC version compat

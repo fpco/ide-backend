@@ -256,9 +256,12 @@ import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (setFileTimes)
 import System.Posix.Types (EpochTime)
 
-import Common
+import IdeSession.Types.Public
+import IdeSession.Types.Translation
+import IdeSession.Types.Progress
+import IdeSession.Util
 import GhcServer
-import GhcRun (RunResult(..), RunBufferMode(..), Import(..))
+import GhcRun (RunResult(..), RunBufferMode(..))
 import GhcHsWalk
 
 import Control.Monad.IO.Class (liftIO)

@@ -13,13 +13,23 @@ cabal-version:        >=1.10
 
 library
   exposed-modules:    IdeSession
-  other-modules:      Common,
-                      GhcRun,
+  other-modules:      GhcRun,
                       GhcServer,
                       GhcHsWalk,
                       RpcServer,
                       Paths_ide_backend,
-                      BlockingOps
+                      BlockingOps,
+                      IdeSession.Types.Public,
+                      IdeSession.Types.Private,
+                      IdeSession.Types.Translation,
+                      IdeSession.Types.Progress,
+                      IdeSession.Util,
+                      IdeSession.Debug,
+                      IdeSession.Strict.IntMap,
+                      IdeSession.Strict.List,
+                      IdeSession.Strict.Map,
+                      IdeSession.Strict.Maybe,
+                      IdeSession.Strict.MVar
   if impl(ghc == 7.4.*)
     other-modules:    GhcMakeFixed
 

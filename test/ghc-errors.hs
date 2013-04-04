@@ -26,10 +26,12 @@ import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure, (@?=))
 
-import Common
-import GhcServer
+import GhcServer ()
 import IdeSession
 import TestTools
+import IdeSession.Debug
+import GhcRun (hsExtensions)
+import qualified IdeSession.Types.Private as Private
 
 -- Tests using various functions of the IdeSession API
 -- and a variety of small test Haskell projects.
@@ -507,7 +509,7 @@ syntheticTests =
         idMaps <- getLoadedModules session
         let idMapGood = idMaps Map.! "Good"
         assertBool "Good header accepted" $
-          not $ Map.null $ xIdMapToMap idMapGood
+          not $ Map.null $ Private.idMapToMap idMapGood
         let idMapBad = Map.lookup "Bad" idMaps
         assertBool "Bad header ignored" $ isNothing idMapBad
     )
