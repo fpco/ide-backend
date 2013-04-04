@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DeriveDataTypeable, RankNTypes #-}
 {-# OPTIONS_GHC -Wall #-}
-module RpcServer
+module IdeSession.RPC.Server
   ( -- * Server-side
     rpcServer
   , RpcConversation(..)
@@ -64,7 +64,7 @@ import qualified Data.Attoparsec as Attoparsec
 import Data.IORef (IORef, writeIORef, readIORef, newIORef)
 import Control.Concurrent.Async (async)
 
-import BlockingOps (putMVar, takeMVar, readChan, waitAnyCatchCancel, waitCatch)
+import IdeSession.BlockingOps (putMVar, takeMVar, readChan, waitAnyCatchCancel, waitCatch)
 
 --------------------------------------------------------------------------------
 -- Exceptions thrown by the RPC server are retrown locally as                 --

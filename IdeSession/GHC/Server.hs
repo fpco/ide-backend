@@ -6,7 +6,7 @@
 -- The modules importing any GHC internals, as well as the modules
 -- implementing the  RPC infrastructure, should be accessible to the rest
 -- of the program only indirectly, through the @GhcServer@ module.
-module GhcServer
+module IdeSession.GHC.Server
   ( -- * Types involved in the communication
     Progress
     -- * A handle to the server
@@ -56,16 +56,15 @@ import System.Posix (Fd)
 import System.Posix.Env (setEnv, unsetEnv)
 import System.Posix.IO.ByteString
 
-import GhcHsWalk
-import GhcRun
-import RpcServer
+import IdeSession.GHC.HsWalk
+import IdeSession.GHC.Run
+import IdeSession.RPC.Server
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Types.Translation
 import IdeSession.Debug
 import IdeSession.Util
-
-import BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)
+import IdeSession.BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)
 
 import Paths_ide_backend
 

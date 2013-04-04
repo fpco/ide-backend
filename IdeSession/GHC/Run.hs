@@ -7,7 +7,7 @@
 -- based on source files, provides progress information while doing so
 -- and optionally compiles, links and executes code.
 -- Only this file should import the GHC-internals modules.
-module GhcRun
+module IdeSession.GHC.Run
   ( -- * Re-expored GHC API
     Ghc
   , runFromGhc
@@ -56,7 +56,7 @@ import ErrUtils   ( Message )
 #if __GLASGOW_HASKELL__ == 704
 -- Import our own version of --make as a workaround for
 -- http://hackage.haskell.org/trac/ghc/ticket/7548
-import GhcMakeFixed
+import IdeSession.GHC.MakeFixed
 import GHC hiding (flags, ModuleName, RunResult(..), load)
 import GhcMonad (modifySession)
 import HscTypes (HscEnv(hsc_mod_graph))
@@ -85,7 +85,7 @@ import System.Process
 
 import Data.Aeson.TH (deriveJSON)
 
-import GhcHsWalk (extractSourceSpan, idInfoForName)
+import IdeSession.GHC.HsWalk (extractSourceSpan, idInfoForName)
 import IdeSession.Types.Private
 import IdeSession.Debug
 import IdeSession.Util

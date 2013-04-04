@@ -260,9 +260,9 @@ import IdeSession.Types.Public
 import IdeSession.Types.Translation
 import IdeSession.Types.Progress
 import IdeSession.Util
-import GhcServer
-import GhcRun (RunResult(..), RunBufferMode(..))
-import GhcHsWalk
+import IdeSession.GHC.Server
+import IdeSession.GHC.Run (RunResult(..), RunBufferMode(..))
+import IdeSession.GHC.HsWalk
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT, execStateT)
@@ -274,7 +274,7 @@ import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
 import Data.Tagged (Tagged, untag)
 import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
 
-import BlockingOps (modifyMVar, modifyMVar_, withMVar)
+import IdeSession.BlockingOps (modifyMVar, modifyMVar_, withMVar)
 
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.

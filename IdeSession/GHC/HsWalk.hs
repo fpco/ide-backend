@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP, DeriveDataTypeable, FlexibleInstances,
              GeneralizedNewtypeDeriving, MultiParamTypeClasses, TemplateHaskell,
              TypeSynonymInstances, ScopedTypeVariables #-}
-module GhcHsWalk
+module IdeSession.GHC.HsWalk
   ( extractIdsPlugin
   , haddockLink
   --, idInfoAtLocation

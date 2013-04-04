@@ -30,7 +30,7 @@
 --     http://hackage.haskell.org/trac/ghc/wiki/Commentary/CodingStyle#TabsvsSpaces
 -- for details
 
-module GhcMakeFixed(
+module IdeSession.GHC.MakeFixed(
 --  depanal,
   load,
 --  LoadHowMuch(..),

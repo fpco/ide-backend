@@ -26,11 +26,10 @@ import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure, (@?=))
 
-import GhcServer ()
 import IdeSession
 import TestTools
 import IdeSession.Debug
-import GhcRun (hsExtensions)
+import IdeSession.GHC.Run (hsExtensions)
 import qualified IdeSession.Types.Private as Private
 
 -- Tests using various functions of the IdeSession API

@@ -7,7 +7,7 @@ import System.Environment
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
 
-import GhcRun (hsExtensions)
+import IdeSession.GHC.Run (hsExtensions)
 import IdeSession
 
 --- A sample program using the library. It type-checks all files

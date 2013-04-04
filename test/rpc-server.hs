@@ -17,7 +17,7 @@ import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertEqual)
 
-import RpcServer
+import IdeSession.RPC.Server
 import TestTools
 
 --------------------------------------------------------------------------------
