@@ -79,21 +79,22 @@ data IdNameSpace =
   deriving (Show, Eq)
 
 -- | Information about identifiers
-data IdInfo = IdInfo { idProp  :: IdProp
-                     , idScope :: IdScope
-                     }
+data IdInfo = IdInfo {
+    idProp  :: {-# UNPACK #-} !IdProp
+  , idScope :: !IdScope
+  }
 
 -- | Identifier info that is independent of the usage site
-data IdProp = IdProp
-  { -- | The base name of the identifer at this location. Module prefix
+data IdProp = IdProp {
+    -- | The base name of the identifer at this location. Module prefix
     -- is not included.
-    idName  :: String
+    idName  :: !String
     -- | Namespace this identifier is drawn from
-  , idSpace :: IdNameSpace
+  , idSpace :: !IdNameSpace
     -- | The type
     -- We don't always know this; in particular, we don't know kinds because
     -- the type checker does not give us LSigs for top-level annotations)
-  , idType  :: Maybe String
+  , idType  :: !(Maybe String)
   }
   deriving (Eq)
 
@@ -110,38 +111,38 @@ data IdScope =
     Binder
     -- | Defined within this module
   | Local {
-        idDefSpan :: EitherSpan
+        idDefSpan :: !EitherSpan
       }
     -- | Imported from a different module
   | Imported {
-        idDefSpan      :: EitherSpan
-      , idDefinedIn    :: ModuleId
-      , idImportedFrom :: ModuleId
-      , idImportSpan   :: EitherSpan
+        idDefSpan      :: !EitherSpan
+      , idDefinedIn    :: {-# UNPACK #-} !ModuleId
+      , idImportedFrom :: {-# UNPACK #-} !ModuleId
+      , idImportSpan   :: !EitherSpan
         -- | Qualifier used for the import
         --
         -- > IMPORTED AS                       idImportQual
         -- > import Data.List                  ""
         -- > import qualified Data.List        "Data.List."
         -- > import qualified Data.List as L   "L."
-      , idImportQual   :: String
+      , idImportQual   :: !String
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
   deriving (Eq)
 
 data SourceSpan = SourceSpan
-  { spanFilePath   :: FilePath
-  , spanFromLine   :: Int
-  , spanFromColumn :: Int
-  , spanToLine     :: Int
-  , spanToColumn   :: Int
+  { spanFilePath   :: !FilePath
+  , spanFromLine   :: {-# UNPACK #-} !Int
+  , spanFromColumn :: {-# UNPACK #-} !Int
+  , spanToLine     :: {-# UNPACK #-} !Int
+  , spanToColumn   :: {-# UNPACK #-} !Int
   }
   deriving (Eq, Ord)
 
 data EitherSpan =
-    ProperSpan SourceSpan
-  | TextSpan String
+    ProperSpan {-# UNPACK #-} !SourceSpan
+  | TextSpan !String
   deriving (Eq)
 
 -- | An error or warning in a source module.
@@ -150,9 +151,9 @@ data EitherSpan =
 -- location point.
 --
 data SourceError = SourceError
-  { errorKind :: SourceErrorKind
-  , errorSpan :: EitherSpan
-  , errorMsg  :: String
+  { errorKind :: !SourceErrorKind
+  , errorSpan :: !EitherSpan
+  , errorMsg  :: !String
   }
   deriving (Show, Eq)
 
@@ -163,18 +164,18 @@ data SourceErrorKind = KindError | KindWarning
 type ModuleName = String
 
 data ModuleId = ModuleId
-  { moduleName    :: ModuleName
-  , modulePackage :: PackageId
+  { moduleName    :: !ModuleName
+  , modulePackage :: {-# UNPACK #-} !PackageId
   }
   deriving (Eq)
 
 data PackageId = PackageId
-  { packageName    :: String
-  , packageVersion :: Maybe String
+  { packageName    :: !String
+  , packageVersion :: !(Maybe String)
   }
   deriving (Eq)
 
-data IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
+newtype IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
 
 type LoadedModules = Map Common.ModuleName IdMap
 
@@ -241,8 +242,8 @@ newtype IdPropPtr = IdPropPtr { idPropPtr :: Int }
   deriving (Eq, Ord)
 
 -- | Information about identifiers
-data XIdInfo = XIdInfo { xIdProp  :: IdPropPtr
-                       , xIdScope :: XIdScope
+data XIdInfo = XIdInfo { xIdProp  :: {-# UNPACK #-} !IdPropPtr
+                       , xIdScope :: !XIdScope
                        }
 
 data XIdScope =
@@ -250,38 +251,38 @@ data XIdScope =
     XBinder
     -- | Defined within this module
   | XLocal {
-        xIdDefSpan :: XEitherSpan
+        xIdDefSpan :: !XEitherSpan
       }
     -- | Imported from a different module
   | XImported {
-        xIdDefSpan      :: XEitherSpan
-      , xIdDefinedIn    :: ModuleId
-      , xIdImportedFrom :: ModuleId
-      , xIdImportSpan   :: XEitherSpan
+        xIdDefSpan      :: !XEitherSpan
+      , xIdDefinedIn    :: {-# UNPACK #-} !ModuleId
+      , xIdImportedFrom :: {-# UNPACK #-} !ModuleId
+      , xIdImportSpan   :: !XEitherSpan
         -- | Qualifier used for the import
         --
         -- > IMPORTED AS                       idImportQual
         -- > import Data.List                  ""
         -- > import qualified Data.List        "Data.List."
         -- > import qualified Data.List as L   "L."
-      , xIdImportQual   :: String
+      , xIdImportQual   :: !String
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | XWiredIn
   deriving (Eq)
 
 data XSourceSpan = XSourceSpan
-  { xSpanFilePath   :: FilePathPtr
-  , xSpanFromLine   :: Int
-  , xSpanFromColumn :: Int
-  , xSpanToLine     :: Int
-  , xSpanToColumn   :: Int
+  { xSpanFilePath   :: {-# UNPACK #-} !FilePathPtr
+  , xSpanFromLine   :: {-# UNPACK #-} !Int
+  , xSpanFromColumn :: {-# UNPACK #-} !Int
+  , xSpanToLine     :: {-# UNPACK #-} !Int
+  , xSpanToColumn   :: {-# UNPACK #-} !Int
   }
   deriving (Eq, Ord)
 
 data XEitherSpan =
-    XProperSpan XSourceSpan
-  | XTextSpan String
+    XProperSpan {-# UNPACK #-} !XSourceSpan
+  | XTextSpan !String
   deriving (Eq)
 
 -- | An error or warning in a source module.
@@ -290,13 +291,13 @@ data XEitherSpan =
 -- location point.
 --
 data XSourceError = XSourceError
-  { xErrorKind :: SourceErrorKind
-  , xErrorSpan :: XEitherSpan
-  , xErrorMsg  :: String
+  { xErrorKind :: !SourceErrorKind
+  , xErrorSpan :: !XEitherSpan
+  , xErrorMsg  :: !String
   }
   deriving (Eq)
 
-data XIdMap = XIdMap { xIdMapToMap :: Map (XSourceSpan) (XIdInfo) }
+newtype XIdMap = XIdMap { xIdMapToMap :: Map (XSourceSpan) (XIdInfo) }
 
 type XLoadedModules = Map Common.ModuleName (XIdMap)
 
@@ -305,8 +306,8 @@ type XLoadedModules = Map Common.ModuleName (XIdMap)
 ------------------------------------------------------------------------------}
 
 data ExplicitSharingCache = ExplicitSharingCache {
-    filePathCache :: IntMap FilePath
-  , idPropCache   :: IntMap IdProp
+    filePathCache :: !(IntMap FilePath)
+  , idPropCache   :: !(IntMap IdProp)
   }
 
 -- | The associated type with explicit sharing
