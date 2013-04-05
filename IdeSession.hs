@@ -234,39 +234,27 @@ module IdeSession (
   -- away all the transitory state and recovering.
 ) where
 
-import Control.Concurrent (MVar, newMVar)
+import Control.Concurrent (newMVar)
 import qualified Control.Exception as Ex
 import Control.Monad
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString as BSS
-import qualified Data.ByteString.Char8 as BSSC
-import Data.List (delete, isInfixOf)
+import Data.List (delete)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Trie (Trie)
-import qualified Data.Trie as Trie
 import qualified Data.IntMap as IntMap
 import Data.Monoid (Monoid (..))
 import System.Directory
 import System.FilePath (splitFileName, takeDirectory, makeRelative, (<.>), (</>))
-import qualified System.FilePath.Find as Find
 import System.IO (Handle, hClose, openBinaryTempFile)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (setFileTimes)
-import System.Posix.Types (EpochTime)
-
-import IdeSession.Types.Public
-import IdeSession.Types.Translation
-import IdeSession.Types.Progress
-import IdeSession.Util
-import IdeSession.GHC.Server
-import IdeSession.GHC.Run (RunResult(..), RunBufferMode(..))
-import IdeSession.GHC.HsWalk
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT, execStateT)
-import Data.Accessor (Accessor, accessor, (.>), (^.), (^=))
+import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 
 import Crypto.Types (BitLength)
@@ -274,123 +262,18 @@ import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
 import Data.Tagged (Tagged, untag)
 import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
 
-import IdeSession.BlockingOps (modifyMVar, modifyMVar_, withMVar)
-
--- | Configuration parameters for a session. These remain the same throughout
--- the whole session's lifetime.
---
-data SessionConfig = SessionConfig {
-    -- | The directory to use for all session files.
-    configDir        :: FilePath
-    -- | GHC static options. Can also contain default dynamic options,
-    -- that are overridden via session update.
-  , configStaticOpts :: [String]
-    -- | Should the GHC client run in-process?
-  , configInProcess  :: InProcess
-  }
-
-data Computed = Computed {
-    -- | Last compilation and run errors
-    computedErrors :: [XShared SourceError]
-    -- | Modules that got loaded okay together with their mappings
-    -- from source locations to information about identifiers there
-  , computedLoadedModules :: XShared LoadedModules
-    -- | Import information. This is (usually) available even for modules
-    -- with parsing or type errors
-  , computedImports :: !(Map ModuleName [Import])
-    -- | Autocompletion map
-    --
-    -- Mapping, per module, from prefixes to fully qualified names
-    -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
-    -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
-    -- was imported qualified as @M@).
-  , computedAutoMap :: !(Map ModuleName (Trie [XShared IdInfo]))
-    -- | We access IdProps indirectly through this cache
-  , computedCache :: !ExplicitSharingCache
-  }
-
--- | This type is a handle to a session state. Values of this type
--- point to the non-persistent parts of the session state in memory
--- and to directories containing source and data file that form
--- the persistent part of the session state. Whenever we perform updates
--- or run queries, it's always in the context of a particular handle,
--- representing the session we want to work within. Many sessions
--- can be active at once, but in normal applications this shouldn't be needed.
---
-data IdeSession = IdeSession {
-    ideStaticInfo :: IdeStaticInfo
-  , ideState      :: MVar IdeSessionState
-  }
-
-data IdeStaticInfo = IdeStaticInfo {
-    -- | Configuration
-    ideConfig     :: SessionConfig
-    -- | The directory to use for managing source files.
-  , ideSourcesDir :: FilePath
-    -- | The directory to use for data files that may be accessed by the
-    -- running program. The running program will have this as its CWD.
-  , ideDataDir    :: FilePath
-  }
-
-data IdeSessionState =
-    IdeSessionIdle IdeIdleState
-  | IdeSessionRunning RunActions IdeIdleState
-  | IdeSessionShutdown
-
-type LogicalTimestamp = EpochTime
-
-data IdeIdleState = IdeIdleState {
-    -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7473.
-    -- Logical timestamps (used to force ghc to recompile files)
-    _ideLogicalTimestamp :: LogicalTimestamp
-    -- The result computed by the last 'updateSession' invocation.
-  , _ideComputed         :: Maybe Computed
-    -- Compiler dynamic options. If they are not set, the options from
-    -- SessionConfig are used.
-  , _ideNewOpts          :: Maybe [String]
-    -- Whether to generate code in addition to type-checking.
-  , _ideGenerateCode     :: Bool
-    -- Files submitted by the user and not deleted yet.
-  , _ideManagedFiles     :: ManagedFilesInternal
-    -- Environment overrides
-  , _ideEnv              :: [(String, Maybe String)]
-    -- The GHC server (this is replaced in 'restartSession')
-  , _ideGhcServer        :: GhcServer
-    -- Buffer mode for standard output for 'runStmt'
-  , _ideStdoutBufferMode :: RunBufferMode
-    -- Buffer mode for standard error for 'runStmt'
-  , _ideStderrBufferMode :: RunBufferMode
-    -- Has the environment (as recorded in this state) diverged from the
-    -- environment on the server?
-  , _ideUpdatedEnv       :: Bool
-    -- Has the code diverged from what has been loaded into GHC on the last
-    -- call to 'updateSession'?
-  , _ideUpdatedCode      :: Bool
-  }
-
--- | The collection of source and data files submitted by the user.
-data ManagedFilesInternal = ManagedFilesInternal
-  { _managedSource :: [(FilePath, (MD5Digest, LogicalTimestamp))]
-  , _managedData   :: [FilePath]
-  }
-
--- | The collection of source and data files submitted by the user.
-data ManagedFiles = ManagedFiles
-  { sourceFiles :: [FilePath]
-  , dataFiles   :: [FilePath]
-  }
-
--- | Recover the fixed config the session was initialized with.
-getSessionConfig :: IdeSession -> SessionConfig
-getSessionConfig = ideConfig . ideStaticInfo
-
--- | Obtain the source files directory for this session.
-getSourcesDir :: IdeSession -> FilePath
-getSourcesDir = ideSourcesDir . ideStaticInfo
-
--- | Obtain the data files directory for this session.
-getDataDir :: IdeSession -> FilePath
-getDataDir = ideDataDir . ideStaticInfo
+import IdeSession.Types.Public
+import IdeSession.Types.Private (ExplicitSharingCache(..))
+import IdeSession.Types.Translation
+import IdeSession.Types.Progress
+import IdeSession.Util
+import IdeSession.GHC.Server
+import IdeSession.GHC.Run (RunResult(..), RunBufferMode(..))
+import IdeSession.GHC.HsWalk
+import IdeSession.BlockingOps (modifyMVar, modifyMVar_)
+import IdeSession.State
+import IdeSession.Config
+import IdeSession.Query
 
 -- | Create a fresh session, using some initial configuration.
 --
@@ -689,9 +572,6 @@ updateCodeGeneration b = IdeSessionUpdate $ \_ -> do
   set ideGenerateCode b
   set ideUpdatedCode True
 
-internalFile :: FilePath -> FilePath -> FilePath
-internalFile ideSourcesDir m = ideSourcesDir </> m
-
 -- | A session update that changes a data file by giving a new value for the
 -- file. This can be used to add a new file or update an existing one.
 --
@@ -737,187 +617,6 @@ updateStderrBufferMode :: RunBufferMode -> IdeSessionUpdate
 updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ ->
   set ideStderrBufferMode bufferMode
 
--- | The type of queries in a given session state.
---
--- Queries are in IO because they depend on the current state of the session
--- but they promise not to alter the session state (at least not in any visible
--- way; they might update caches, etc.).
---
-type Query a = IdeSession -> IO a
-
--- | Read the current value of one of the source modules.
---
-getSourceModule :: FilePath -> Query ByteString
-getSourceModule m IdeSession{ideStaticInfo} =
-  BSL.readFile $ internalFile (ideSourcesDir ideStaticInfo) m
-
--- | Read the current value of one of the data files.
---
-getDataFile :: FilePath -> Query ByteString
-getDataFile n IdeSession{ideStaticInfo} =
-  BSL.readFile $ ideDataDir ideStaticInfo </> n
-
--- | Get any compilation errors or warnings in the current state of the
--- session, meaning errors that GHC reports for the current state of all the
--- source modules.
---
--- Note that in the initial implementation this will only return warnings from
--- the modules that changed in the last update, the intended semantics is that
--- morally it be a pure function of the current state of the files, and so it
--- would return all warnings (as if you did clean and rebuild each time).
---
--- getSourceErrors does internal normalization. This simplifies the life of the
--- client and anyway there shouldn't be that many soruce errors that it really
--- makes a big difference.
-getSourceErrors :: Query [SourceError]
-getSourceErrors IdeSession{ideState, ideStaticInfo} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
-  where
-    aux :: IdeIdleState -> IO [SourceError]
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} ->
-        return $ map (removeExplicitSharing computedCache) computedErrors
-      Nothing -> fail "This session state does not admit queries."
-
--- | Get the collection of files submitted by the user and not deleted yet.
--- The module names are those supplied by the user as the first
--- arguments of the @updateModule@ and @updateModuleFromFile@ calls,
--- as opposed to the compiler internal @module ... end@ module names.
--- Usually the two names are equal, but they needn't be.
-getManagedFiles :: Query ManagedFiles
-getManagedFiles IdeSession{ideState} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle idleState ->
-        return $ plugLeaks $ idleState ^. ideManagedFiles
-      IdeSessionRunning _ idleState ->
-        return $ plugLeaks $ idleState ^. ideManagedFiles
-      IdeSessionShutdown ->
-        fail "Session already shut down."
- where
-  plugLeaks :: ManagedFilesInternal -> ManagedFiles
-  plugLeaks files = ManagedFiles { sourceFiles = map fst $ _managedSource files
-                                 , dataFiles = _managedData files }
-
--- | Get the list of correctly compiled modules, as reported by the compiler,
--- together with a mapping from symbol uses to symbol info.
--- That is, given a symbol used at a particular location in a source module
--- the mapping tells us where that symbol is defined, either locally in a
--- source module or a top-level symbol imported from another package,
--- what is the type of this symbol and some more information.
--- This information lets us, e.g, construct Haddock URLs for symbols,
--- like @parallel-3.2.0.3/Control-Parallel.html#v:pseq@.
-getLoadedModules :: Query (XShared LoadedModules)
-getLoadedModules IdeSession{ideState, ideStaticInfo} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
-  where
-    aux :: IdeIdleState -> IO (XShared LoadedModules)
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return computedLoadedModules
-      Nothing -> fail "This session state does not admit queries."
-
-getExplicitSharingCache :: Query ExplicitSharingCache
-getExplicitSharingCache IdeSession{ideState, ideStaticInfo} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
-  where
-    aux :: IdeIdleState -> IO ExplicitSharingCache
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return computedCache
-      Nothing -> fail "This session state does not admit queries."
-
--- | Get import information
---
--- This information is available even for modules with parse/type errors
-getImports :: Query (Map ModuleName [Import])
-getImports IdeSession{ideState, ideStaticInfo} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
-  where
-    aux :: IdeIdleState -> IO (Map ModuleName [Import])
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return computedImports
-      Nothing -> fail "This session state does not admit queries."
-
--- | Autocompletion
---
--- TODO: At the moment, this returns a function with internally does
--- normalization.  Hence, this is not useful for explicit sharing. If the
--- autocompletion info needs to be shipped, we need to change this to a list
--- and avoid normalization here.
-getAutocompletion :: Query (ModuleName -> String -> [IdInfo])
-getAutocompletion IdeSession{ideState, ideStaticInfo} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
-  where
-    aux :: IdeIdleState -> IO (ModuleName -> String -> [IdInfo])
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return (autocomplete computedCache computedAutoMap)
-      Nothing           -> fail "This session state does not admit queries."
-
-    autocomplete :: ExplicitSharingCache
-                 -> Map ModuleName (Trie [XShared IdInfo])
-                 -> ModuleName -> String
-                 -> [IdInfo]
-    autocomplete cache mapOfTries modName name =
-        let name' = BSSC.pack name
-            n     = last (BSSC.split '.' name')
-        in filter (\idInfo -> name `isInfixOf` idInfoQN idInfo)
-             $ map (removeExplicitSharing cache)
-             . concat
-             . Trie.elems
-             . Trie.submap n
-             $ mapOfTries Map.! modName
-
--- | Is code generation currently enabled?
-getCodeGeneration :: Query Bool
-getCodeGeneration IdeSession{ideState} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle idleState ->
-        return $ idleState ^. ideGenerateCode
-      IdeSessionRunning _ idleState ->
-        return $ idleState ^. ideGenerateCode
-      IdeSessionShutdown ->
-        fail "Session already shut down."
-
--- | Get the list of all data files currently available to the session:
--- both the files copied via an update and files created by user code.
-getAllDataFiles :: Query [FilePath]
-getAllDataFiles IdeSession{ideStaticInfo} =
-  Find.find Find.always
-            (Find.fileType Find.==? Find.RegularFile)
-            (ideDataDir ideStaticInfo)
-
--- | Get all current environment overrides
-getEnv :: Query [(String, Maybe String)]
-getEnv IdeSession{ideState} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle idleState ->
-        return $ idleState ^. ideEnv
-      IdeSessionRunning _ idleState ->
-        return $ idleState ^. ideEnv
-      IdeSessionShutdown ->
-        fail "Session already shut down."
-
 -- | Run a given function in a given module (the name of the module
 -- is the one between @module ... end@, which may differ from the file name).
 -- The function resembles a query, but it's not instantaneous
@@ -960,49 +659,3 @@ runStmt IdeSession{ideState} m fun = do
         return $ IdeSessionIdle idleState
       IdeSessionShutdown ->
         return state
-
--- | Get the RPC server used by the session.
-getGhcServer :: IdeSession -> IO GhcServer
-getGhcServer IdeSession{ideState} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle idleState ->
-        return $! idleState ^. ideGhcServer
-      IdeSessionRunning _ idleState ->
-        return $! idleState ^. ideGhcServer
-      IdeSessionShutdown ->
-        fail "Session already shut down."
-
-{------------------------------------------------------------------------------
-  Accessors
-------------------------------------------------------------------------------}
-
-ideLogicalTimestamp :: Accessor IdeIdleState LogicalTimestamp
-ideComputed         :: Accessor IdeIdleState (Maybe Computed)
-ideNewOpts          :: Accessor IdeIdleState (Maybe [String])
-ideGenerateCode     :: Accessor IdeIdleState Bool
-ideManagedFiles     :: Accessor IdeIdleState ManagedFilesInternal
-ideEnv              :: Accessor IdeIdleState [(String, Maybe String)]
-ideGhcServer        :: Accessor IdeIdleState GhcServer
-ideStdoutBufferMode :: Accessor IdeIdleState RunBufferMode
-ideStderrBufferMode :: Accessor IdeIdleState RunBufferMode
-ideUpdatedEnv       :: Accessor IdeIdleState Bool
-ideUpdatedCode      :: Accessor IdeIdleState Bool
-
-ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
-ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
-ideNewOpts          = accessor _ideNewOpts          $ \x s -> s { _ideNewOpts          = x }
-ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCode     = x }
-ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }
-ideEnv              = accessor _ideEnv              $ \x s -> s { _ideEnv              = x }
-ideGhcServer        = accessor _ideGhcServer        $ \x s -> s { _ideGhcServer        = x }
-ideStdoutBufferMode = accessor _ideStdoutBufferMode $ \x s -> s { _ideStdoutBufferMode = x }
-ideStderrBufferMode = accessor _ideStderrBufferMode $ \x s -> s { _ideStderrBufferMode = x }
-ideUpdatedEnv       = accessor _ideUpdatedEnv       $ \x s -> s { _ideUpdatedEnv       = x }
-ideUpdatedCode      = accessor _ideUpdatedCode      $ \x s -> s { _ideUpdatedCode      = x }
-
-managedSource :: Accessor ManagedFilesInternal [(FilePath, (MD5Digest, LogicalTimestamp))]
-managedData   :: Accessor ManagedFilesInternal [FilePath]
-
-managedSource = accessor _managedSource $ \x s -> s { _managedSource = x }
-managedData   = accessor _managedData   $ \x s -> s { _managedData   = x }

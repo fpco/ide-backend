@@ -2,24 +2,16 @@
 -- | Translation from the private to the public types
 module IdeSession.Types.Translation (
     XShared
-  , ExplicitSharingCache(..)
   , ExplicitSharing(..)
   , showNormalized
   ) where
 
-import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
 import Data.Aeson (FromJSON(..), ToJSON(..))
 
 import qualified IdeSession.Types.Public  as Public
 import qualified IdeSession.Types.Private as Private
-
--- TODO: Use IdeSession.Strict.IntMap
-data ExplicitSharingCache = ExplicitSharingCache {
-    filePathCache :: !(IntMap FilePath)
-  , idPropCache   :: !(IntMap Private.IdProp)
-  }
 
 -- | The associated type with explicit sharing
 type family XShared a
@@ -50,10 +42,10 @@ type instance MShared Private.ModuleId      = Public.ModuleId
 type instance MShared Private.PackageId     = Public.PackageId
 
 class MShared (XShared a) ~ a => ExplicitSharing a where
-  removeExplicitSharing :: ExplicitSharingCache -> XShared a -> a
+  removeExplicitSharing :: Private.ExplicitSharingCache -> XShared a -> a
 
 showNormalized :: forall a. (Show a, ExplicitSharing a)
-               => ExplicitSharingCache -> XShared a -> String
+               => Private.ExplicitSharingCache -> XShared a -> String
 showNormalized cache x = show (removeExplicitSharing cache x :: a)
 
 instance ExplicitSharing Public.IdProp where
@@ -65,7 +57,7 @@ instance ExplicitSharing Public.IdProp where
 
 instance ExplicitSharing Public.IdInfo where
   removeExplicitSharing cache Private.IdInfo{..} = Public.IdInfo {
-      Public.idProp  = removeExplicitSharing cache (idPropCache cache IntMap.! Private.idPropPtr idProp)
+      Public.idProp  = removeExplicitSharing cache (Private.idPropCache cache IntMap.! Private.idPropPtr idProp)
     , Public.idScope = removeExplicitSharing cache idScope
     }
 
@@ -98,7 +90,7 @@ instance ExplicitSharing Public.IdScope where
 
 instance ExplicitSharing Public.SourceSpan where
   removeExplicitSharing cache Private.SourceSpan{..} = Public.SourceSpan {
-      Public.spanFilePath   = filePathCache cache IntMap.! Private.filePathPtr spanFilePath
+      Public.spanFilePath   = Private.filePathCache cache IntMap.! Private.filePathPtr spanFilePath
     , Public.spanFromLine   = spanFromLine
     , Public.spanFromColumn = spanFromColumn
     , Public.spanToLine     = spanToLine
@@ -132,26 +124,26 @@ instance ExplicitSharing Public.LoadedModules where
   JSON
 ------------------------------------------------------------------------------}
 
-instance FromJSON ExplicitSharingCache where
+instance FromJSON Private.ExplicitSharingCache where
   parseJSON = fmap aux . parseJSON
     where
       aux :: ( [(Int, FilePath)]
              , [(Int, Private.IdProp)]
              )
-          -> ExplicitSharingCache
-      aux (fpCache, idCache) = ExplicitSharingCache {
-          filePathCache = IntMap.fromList fpCache
-        , idPropCache   = IntMap.fromList idCache
+          -> Private.ExplicitSharingCache
+      aux (fpCache, idCache) = Private.ExplicitSharingCache {
+          Private.filePathCache = IntMap.fromList fpCache
+        , Private.idPropCache   = IntMap.fromList idCache
         }
 
-instance ToJSON ExplicitSharingCache where
+instance ToJSON Private.ExplicitSharingCache where
   toJSON = toJSON . aux
     where
-      aux :: ExplicitSharingCache
+      aux :: Private.ExplicitSharingCache
           -> ( [(Int, FilePath)]
              , [(Int, Private.IdProp)]
              )
-      aux ExplicitSharingCache {..} = (
+      aux Private.ExplicitSharingCache {..} = (
           IntMap.toList filePathCache
         , IntMap.toList idPropCache
         )

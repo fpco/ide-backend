@@ -61,7 +61,7 @@ import IdeSession.GHC.Run
 import IdeSession.RPC.Server
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
-import IdeSession.Types.Translation
+import IdeSession.Types.Translation (showNormalized) -- For debugging
 import IdeSession.Debug
 import IdeSession.Util
 import IdeSession.BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)

@@ -19,10 +19,13 @@ module IdeSession.Types.Private (
   , IdMap(..)
   , LoadedModules
   , Public.Import(..)
+    -- * Cache
+  , ExplicitSharingCache(..)
   ) where
 
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.IntMap (IntMap)
 import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Aeson.TH (deriveJSON)
 
@@ -33,6 +36,7 @@ import qualified IdeSession.Types.Public as Public
 -- 2. Replace Map with StrictMap
 -- 3. Replace Maybe with StrictMaybe
 -- 4. Replace [] with StrictList (or perhaps even arrays)
+-- 5. Replace IntMap with StrictIntMap
 
 newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
   deriving (Eq, Ord)
@@ -113,6 +117,15 @@ data PackageId = PackageId
 newtype IdMap = IdMap { idMapToMap :: Map (SourceSpan) (IdInfo) }
 
 type LoadedModules = Map Public.ModuleName (IdMap)
+
+{------------------------------------------------------------------------------
+  Cache
+------------------------------------------------------------------------------}
+
+data ExplicitSharingCache = ExplicitSharingCache {
+    filePathCache :: !(IntMap FilePath)
+  , idPropCache   :: !(IntMap IdProp)
+  }
 
 {------------------------------------------------------------------------------
   JSON

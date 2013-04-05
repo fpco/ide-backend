@@ -31,7 +31,6 @@ import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 
 import IdeSession.Types.Private
-import IdeSession.Types.Translation (ExplicitSharingCache(..))
 
 import Bag
 import DataCon (dataConName)

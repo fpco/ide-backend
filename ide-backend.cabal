@@ -13,7 +13,10 @@ cabal-version:        >=1.10
 
 library
   exposed-modules:    IdeSession
-  other-modules:      IdeSession.GHC.Run,
+  other-modules:      IdeSession.State,
+                      IdeSession.Config,
+                      IdeSession.Query,
+                      IdeSession.GHC.Run,
                       IdeSession.GHC.Server,
                       IdeSession.GHC.HsWalk,
                       IdeSession.RPC.Server,
