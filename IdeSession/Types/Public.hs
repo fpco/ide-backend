@@ -18,6 +18,8 @@ module IdeSession.Types.Public (
   , Import(..)
     -- * Util
   , idInfoQN
+--, idInfoAtLocation
+  , haddockLink
   ) where
 
 import Prelude hiding (span)
@@ -225,4 +227,41 @@ idInfoQN IdInfo{idProp = IdProp{idName}, idScope} =
     Local{}                -> idName
     Imported{idImportQual} -> idImportQual ++ idName
     WiredIn                -> idName
+
+-- | Show approximately what Haddock adds to documentation URLs.
+haddockSpaceMarks :: IdNameSpace -> String
+haddockSpaceMarks VarName   = "v"
+haddockSpaceMarks DataName  = "v"
+haddockSpaceMarks TvName    = "t"
+haddockSpaceMarks TcClsName = "t"
+
+-- | Show approximately a haddock link (without haddock root) for an id.
+-- This is an illustration and a test of the id info, but under ideal
+-- conditions could perhaps serve to link to documentation without
+-- going via Hoogle.
+haddockLink :: IdProp -> IdScope -> String
+haddockLink IdProp{..} idScope =
+  case idScope of
+    Imported{idImportedFrom} ->
+         dashToSlash (modulePackage idImportedFrom)
+      ++ "/doc/html/"
+      ++ dotToDash (moduleName idImportedFrom) ++ ".html#"
+      ++ haddockSpaceMarks idSpace ++ ":"
+      ++ idName
+    _ -> "<local identifier>"
+ where
+   dotToDash = map (\c -> if c == '.' then '-' else c)
+   dashToSlash p = case packageVersion p of
+     Nothing -> packageName p ++ "/latest"
+     Just version -> packageName p ++ "/" ++ version
+
+{-
+idInfoAtLocation :: Int -> Int -> IdMap -> [(SourceSpan, IdInfo)]
+idInfoAtLocation line col = filter inRange . idMapToList
+  where
+    inRange :: (SourceSpan, a) -> Bool
+    inRange (SourceSpan{..}, _) =
+      (line   > spanFromLine || (line == spanFromLine && col >= spanFromColumn)) &&
+      (line   < spanToLine   || (line == spanToLine   && col <= spanToColumn))
+-}
 

@@ -1,7 +1,7 @@
 module Main where
 
-import IdeSession
-import System.Environment
+import IdeSession (ghcServer)
+import System.Environment (getArgs)
 
 main = do
   args <- getArgs

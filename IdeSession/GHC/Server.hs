@@ -7,10 +7,8 @@
 -- implementing the  RPC infrastructure, should be accessible to the rest
 -- of the program only indirectly, through the @GhcServer@ module.
 module IdeSession.GHC.Server
-  ( -- * Types involved in the communication
-    Progress
-    -- * A handle to the server
-  , GhcServer
+  ( -- * A handle to the server
+    GhcServer
     -- * Server-side operations
   , ghcServer
     -- * Client-side operations
@@ -151,20 +149,14 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 
 -- | Handle a compile or type check request
 ghcHandleCompile :: RpcConversation
-                    -- | startup dynamic flags
-                 -> DynamicOpts
-                    -- | new, user-submitted dynamic flags
-                 -> Maybe [String]
-                    -- | ref for newly generated IdMaps
-                 -> IORef LoadedModules
-                    -- | ref for accumulated IdMaps
-                 -> IORef LoadedModules
-                    -- | ref for previous imports and auto
+                 -> DynamicOpts         -- ^ startup dynamic flags
+                 -> Maybe [String]      -- ^ new, user-submitted dynamic flags
+                 -> IORef LoadedModules -- ^ ref for newly generated IdMaps
+                 -> IORef LoadedModules -- ^ ref for accumulated IdMaps
                  -> IORef (Map ModuleName ([Import], [IdInfo]))
-                    -- | source directory
-                 -> FilePath
-                    -- | should we generate code
-                 -> Bool
+                                        -- ^ ref for previous imports and auto
+                 -> FilePath            -- ^ source directory
+                 -> Bool                -- ^ should we generate code
                  -> Ghc ()
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
                  importsAutoRef configSourcesDir ideGenerateCode = do

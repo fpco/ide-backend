@@ -2,7 +2,28 @@
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
-module IdeSession.Update
+module IdeSession.Update (
+    -- * Starting and stopping
+    initSession
+  , shutdownSession
+  , restartSession
+    -- * Session updates
+  , IdeSessionUpdate -- Abstract
+  , updateSession
+  , updateModule
+  , updateModuleFromFile
+  , updateModuleDelete
+  , updateGhcOptions
+  , updateCodeGeneration
+  , updateDataFile
+  , updateDataFileFromFile
+  , updateDataFileDelete
+  , updateEnv
+  , updateStdoutBufferMode
+  , updateStderrBufferMode
+    -- * Running code
+  , runStmt
+  )
   where
 
 import Control.Monad (when, void)
@@ -30,7 +51,12 @@ import IdeSession.GHC.Run (RunBufferMode(..), RunResult(..))
 import IdeSession.GHC.Server
 import IdeSession.BlockingOps (modifyMVar, modifyMVar_)
 import IdeSession.Types.Private
+import IdeSession.Types.Progress
 import IdeSession.Util
+
+{------------------------------------------------------------------------------
+  Starting and stopping
+------------------------------------------------------------------------------}
 
 -- | Create a fresh session, using some initial configuration.
 --
@@ -139,6 +165,10 @@ restartSession session@IdeSession{ideStaticInfo, ideState} = do
     workingDir = Just (ideDataDir ideStaticInfo)
     config     = ideConfig ideStaticInfo
     opts       = configStaticOpts config
+
+{------------------------------------------------------------------------------
+  Session updates
+------------------------------------------------------------------------------}
 
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
 -- bunch of updates.

@@ -16,6 +16,7 @@ library
   other-modules:      IdeSession.State,
                       IdeSession.Config,
                       IdeSession.Query,
+                      IdeSession.Update,
                       IdeSession.GHC.Run,
                       IdeSession.GHC.Server,
                       IdeSession.GHC.HsWalk,

@@ -29,8 +29,6 @@ module IdeSession.GHC.Run
   , runInGhc
   , RunResult(..)
   , RunBufferMode(..)
-    -- * Information about imports
-  , Import(..)
   ) where
 
 #define DEBUG 1
@@ -182,20 +180,13 @@ invalidateModSummaryCache =
 #endif
 #endif
 
-compileInGhc :: -- | target directory
-                FilePath
-                -- | dynamic flags for this call
-             -> DynamicOpts
-                -- | whether to generate code
-             -> Bool
-                -- | verbosity level
-             -> Int
-                -- | the IORef where GHC stores errors
-             -> IORef [SourceError]
-                -- | handler for each SevOutput message
-             -> (String -> IO ())
-                -- | handler for remaining non-error msgs
-             -> (String -> IO ())
+compileInGhc :: FilePath            -- ^ target directory
+             -> DynamicOpts         -- ^ dynamic flags for this call
+             -> Bool                -- ^ whether to generate code
+             -> Int                 -- ^ verbosity level
+             -> IORef [SourceError] -- ^ the IORef where GHC stores errors
+             -> (String -> IO ())   -- ^ handler for each SevOutput message
+             -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc ( [SourceError]
                     , [ModuleName]
                     , [(ModuleName, ([Import], [IdInfo]))]
