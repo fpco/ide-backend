@@ -31,6 +31,7 @@ import IdeSession
 import TestTools
 import IdeSession.Debug
 import IdeSession.GHC.Run (hsExtensions)
+import qualified IdeSession.Strict.Map as StrictMap
 
 -- Tests using various functions of the IdeSession API
 -- and a variety of small test Haskell projects.
@@ -258,7 +259,7 @@ syntheticTests =
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
               assertEqual name (sort (map Text.pack goodMods))
-                =<< (liftM Map.keys $ getLoadedModules session)
+                =<< (liftM StrictMap.keys $ getLoadedModules session)
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
         assEq "XXX" ["XXX"]
         updateSessionD session (loadModule "A.hs" "a = 5") 1
@@ -281,7 +282,7 @@ syntheticTests =
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
               assertEqual name (sort (map Text.pack goodMods))
-                =<< (liftM Map.keys $ getLoadedModules session)
+                =<< (liftM StrictMap.keys $ getLoadedModules session)
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
         assEq "XXX" ["XXX"]
         updateSessionD session (loadModule "A.hs" "a = 5") 1
@@ -308,7 +309,7 @@ syntheticTests =
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
               assertEqual name (sort (map Text.pack goodMods))
-                =<< (liftM Map.keys $ getLoadedModules session)
+                =<< (liftM StrictMap.keys $ getLoadedModules session)
         updateSessionD session (loadModule "A.hs" "a = 5") 1
         assEq "1 [A]" ["A"]
         updateSessionD session (loadModule "A.hs" "a = 5 + True") 1
@@ -961,10 +962,10 @@ syntheticTests =
                     , "loop = loop"
                     ])
         updateSessionD session upd 1
-        mods <- liftM Map.keys $ getLoadedModules session
+        mods <- liftM StrictMap.keys $ getLoadedModules session
         assertEqual "" [Text.pack "M"] mods
         _runActions <- runStmt session "M" "loop"
-        mods' <- liftM Map.keys $ getLoadedModules session
+        mods' <- liftM StrictMap.keys $ getLoadedModules session
         assertEqual "Running code does not affect getLoadedModules" mods mods'
     )
   , ( "Interrupt, then capture stdout"

@@ -23,22 +23,15 @@ module IdeSession.Types.Private (
   , ExplicitSharingCache(..)
   ) where
 
+import Prelude (Eq, Ord, Int, id, (.), fmap)
 import Data.Text (Text)
-import Data.Map (Map)
-import qualified Data.Map as Map
-import Data.IntMap (IntMap)
-import Data.Aeson (FromJSON(..), ToJSON(..))
+import Data.ByteString (ByteString)
 import Data.Aeson.TH (deriveJSON)
-import qualified Data.IntMap as IntMap
 
 import qualified IdeSession.Types.Public as Public
-
--- TODOs:
--- 1. Get rid of strings
--- 2. Replace Map with StrictMap
--- 3. Replace Maybe with StrictMaybe
--- 4. Replace [] with StrictList (or perhaps even arrays)
--- 5. Replace IntMap with StrictIntMap
+import IdeSession.Strict.Map (StrictMap)
+import IdeSession.Strict.IntMap (StrictIntMap)
+import IdeSession.Strict.Maybe (StrictMaybe)
 
 newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
   deriving (Eq, Ord)
@@ -54,7 +47,7 @@ data IdInfo = IdInfo {
 data IdProp = IdProp {
     idName  :: !Text
   , idSpace :: !Public.IdNameSpace
-  , idType  :: !(Maybe Text)
+  , idType  :: !(StrictMaybe Text)
   }
   deriving (Eq)
 
@@ -112,21 +105,25 @@ data ModuleId = ModuleId
 
 data PackageId = PackageId
   { packageName    :: !Text
-  , packageVersion :: !(Maybe Text)
+  , packageVersion :: !(StrictMaybe Text)
   }
   deriving (Eq)
 
-newtype IdMap = IdMap { idMapToMap :: Map (SourceSpan) (IdInfo) }
+newtype IdMap = IdMap { idMapToMap :: StrictMap SourceSpan IdInfo }
 
-type LoadedModules = Map Public.ModuleName (IdMap)
+type LoadedModules = StrictMap Public.ModuleName IdMap
 
 {------------------------------------------------------------------------------
   Cache
 ------------------------------------------------------------------------------}
 
+-- TODO: Since the ExplicitSharingCache contains internal types, resolving
+-- references to the cache means we lose implicit sharing because we need
+-- to translate on every lookup. To avoid this, we'd have to introduce two
+-- versions of the cache and translate the entire cache first.
 data ExplicitSharingCache = ExplicitSharingCache {
-    filePathCache :: !(IntMap FilePath)
-  , idPropCache   :: !(IntMap IdProp)
+    filePathCache :: !(StrictIntMap ByteString)
+  , idPropCache   :: !(StrictIntMap IdProp)
   }
 
 {------------------------------------------------------------------------------
@@ -143,33 +140,5 @@ $(deriveJSON id ''IdPropPtr)
 $(deriveJSON id ''ModuleId)
 $(deriveJSON id ''PackageId)
 $(deriveJSON id ''IdProp)
-
-instance FromJSON IdMap where
-  parseJSON = fmap (IdMap . Map.fromList) . parseJSON
-
-instance ToJSON IdMap where
-  toJSON = toJSON . Map.toList . idMapToMap
-
-instance FromJSON ExplicitSharingCache where
-  parseJSON = fmap aux . parseJSON
-    where
-      aux :: ( [(Int, FilePath)]
-             , [(Int, IdProp)]
-             )
-          -> ExplicitSharingCache
-      aux (fpCache, idCache) = ExplicitSharingCache {
-          filePathCache = IntMap.fromList fpCache
-        , idPropCache   = IntMap.fromList idCache
-        }
-
-instance ToJSON ExplicitSharingCache where
-  toJSON = toJSON . aux
-    where
-      aux :: ExplicitSharingCache
-          -> ( [(Int, FilePath)]
-             , [(Int, IdProp)]
-             )
-      aux ExplicitSharingCache {..} = (
-          IntMap.toList filePathCache
-        , IntMap.toList idPropCache
-        )
+$(deriveJSON id ''IdMap)
+$(deriveJSON id ''ExplicitSharingCache)

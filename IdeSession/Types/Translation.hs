@@ -7,11 +7,14 @@ module IdeSession.Types.Translation (
   ) where
 
 import Data.Aeson (FromJSON, ToJSON)
-import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
+import qualified Data.ByteString.Char8 as BSSC
 
 import qualified IdeSession.Types.Public  as Public
 import qualified IdeSession.Types.Private as Private
+import qualified IdeSession.Strict.Maybe  as StrictMaybe
+import qualified IdeSession.Strict.IntMap as StrictIntMap
+import qualified IdeSession.Strict.Map    as StrictMap
 
 -- | The associated type with explicit sharing
 type family XShared a
@@ -68,12 +71,12 @@ instance ExplicitSharing Public.IdProp where
   removeExplicitSharing _cache Private.IdProp{..} = Public.IdProp {
       Public.idName  = idName
     , Public.idSpace = idSpace
-    , Public.idType  = idType
+    , Public.idType  = StrictMaybe.toMaybe idType
     }
 
 instance ExplicitSharing Public.IdInfo where
   removeExplicitSharing cache Private.IdInfo{..} = Public.IdInfo {
-      Public.idProp  = removeExplicitSharing cache (Private.idPropCache cache IntMap.! Private.idPropPtr idProp)
+      Public.idProp  = removeExplicitSharing cache (Private.idPropCache cache StrictIntMap.! Private.idPropPtr idProp)
     , Public.idScope = removeExplicitSharing cache idScope
     }
 
@@ -86,7 +89,7 @@ instance ExplicitSharing Public.ModuleId where
 instance ExplicitSharing Public.PackageId where
   removeExplicitSharing _cache Private.PackageId{..} = Public.PackageId {
       Public.packageName    = packageName
-    , Public.packageVersion = packageVersion
+    , Public.packageVersion = StrictMaybe.toMaybe packageVersion
     }
 
 instance ExplicitSharing Public.IdScope where
@@ -106,7 +109,7 @@ instance ExplicitSharing Public.IdScope where
 
 instance ExplicitSharing Public.SourceSpan where
   removeExplicitSharing cache Private.SourceSpan{..} = Public.SourceSpan {
-      Public.spanFilePath   = Private.filePathCache cache IntMap.! Private.filePathPtr spanFilePath
+      Public.spanFilePath   = BSSC.unpack $ Private.filePathCache cache StrictIntMap.! Private.filePathPtr spanFilePath
     , Public.spanFromLine   = spanFromLine
     , Public.spanFromColumn = spanFromColumn
     , Public.spanToLine     = spanToLine
@@ -129,9 +132,11 @@ instance ExplicitSharing Public.SourceError where
 
 instance ExplicitSharing Public.IdMap where
   removeExplicitSharing cache = Public.IdMap
-                              . Map.map (removeExplicitSharing cache)
-                              . Map.mapKeys (removeExplicitSharing cache)
+                              . StrictMap.toMap
+                              . StrictMap.map (removeExplicitSharing cache)
+                              . StrictMap.mapKeys (removeExplicitSharing cache)
                               . Private.idMapToMap
 
 instance ExplicitSharing Public.LoadedModules where
-  removeExplicitSharing = Map.map . removeExplicitSharing
+  removeExplicitSharing cache = Map.map (removeExplicitSharing cache)
+                              . StrictMap.toMap

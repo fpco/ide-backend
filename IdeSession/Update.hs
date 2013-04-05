@@ -35,10 +35,8 @@ import Data.List (delete)
 import Data.Monoid (Monoid(..))
 import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
-import Data.Map (Map)
-import qualified Data.Map as Map
 import qualified Data.ByteString.Lazy as BSL
-import qualified Data.IntMap as IntMap
+import qualified Data.ByteString.Char8 as BSS
 import Data.Trie (Trie)
 import qualified System.Directory as Dir
 import System.FilePath (takeDirectory, makeRelative, (</>))
@@ -54,6 +52,9 @@ import IdeSession.BlockingOps (modifyMVar, modifyMVar_)
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util
+import qualified IdeSession.Strict.IntMap as IntMap
+import IdeSession.Strict.Map (StrictMap)
+import qualified IdeSession.Strict.Map as Map
 
 {------------------------------------------------------------------------------
   Starting and stopping
@@ -208,9 +209,9 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         -- Determine imports and completion map from the diffs sent
         -- from the RPC compilationi process.
         let usePrevious :: IdeIdleState
-                        -> Map ModuleName (Maybe ([Import], Trie [IdInfo]))
-                        -> ( Map ModuleName [Import]
-                           , Map ModuleName (Trie [IdInfo])
+                        -> StrictMap ModuleName (Maybe ([Import], Trie [IdInfo]))
+                        -> ( StrictMap ModuleName [Import]
+                           , StrictMap ModuleName (Trie [IdInfo])
                            )
             usePrevious idleSt importsAuto =
               ( applyMapDiff (Map.map (fmap fst) importsAuto)
@@ -247,10 +248,14 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         Ex.throwIO (userError "Session already shut down.")
   where
     mkRelative :: ExplicitSharingCache -> ExplicitSharingCache
-    mkRelative ExplicitSharingCache{..} = ExplicitSharingCache {
-        filePathCache = IntMap.map (makeRelative (ideSourcesDir ideStaticInfo)) filePathCache
+    mkRelative ExplicitSharingCache{..} =
+      let aux :: BSS.ByteString -> BSS.ByteString
+          aux = BSS.pack . makeRelative (ideSourcesDir ideStaticInfo) . BSS.unpack
+      in ExplicitSharingCache {
+        filePathCache = IntMap.map aux filePathCache
       , idPropCache   = idPropCache
       }
+
 
 -- | A session update that changes a source module by giving a new value for
 -- the module source. This can be used to add a new module or update an

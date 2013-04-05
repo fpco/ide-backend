@@ -33,7 +33,6 @@ import Data.Accessor ((^.), getVal)
 import Data.Trie (Trie)
 import qualified Data.Trie as Trie
 import Data.Map (Map)
-import qualified Data.Map as Map
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
@@ -46,6 +45,8 @@ import IdeSession.Types.Public
 import IdeSession.Types.Private (ExplicitSharingCache)
 import IdeSession.BlockingOps (withMVar)
 import IdeSession.GHC.Server (GhcServer)
+import IdeSession.Strict.Map (StrictMap)
+import qualified IdeSession.Strict.Map as StrictMap
 
 {------------------------------------------------------------------------------
   Types
@@ -169,7 +170,7 @@ getExplicitSharingCache = computedQuery computedCache
 --
 -- This information is available even for modules with parse/type errors
 getImports :: Query (Map ModuleName [Import])
-getImports = computedQuery computedImports
+getImports = computedQuery $ StrictMap.toMap . computedImports
 
 -- | Autocompletion
 --
@@ -182,7 +183,7 @@ getAutocompletion = computedQuery $ \Computed{..} ->
     autocomplete computedCache computedAutoMap
   where
     autocomplete :: ExplicitSharingCache
-                 -> Map ModuleName (Trie [XShared IdInfo])
+                 -> StrictMap ModuleName (Trie [XShared IdInfo])
                  -> ModuleName -> String
                  -> [IdInfo]
     autocomplete cache mapOfTries modName name =
@@ -193,7 +194,7 @@ getAutocompletion = computedQuery $ \Computed{..} ->
              . concat
              . Trie.elems
              . Trie.submap n
-             $ mapOfTries Map.! modName
+             $ mapOfTries StrictMap.! modName
 
 {------------------------------------------------------------------------------
   Auxiliary

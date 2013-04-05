@@ -29,12 +29,9 @@ module IdeSession.State
   ) where
 
 -- TODOs:
--- 1. StrictMap instead of Map
--- 2. StrictTrie instead of Trie
--- 3. StrictMVar instread of MVar
--- 4. Rename ManagedFilesInternal to ManagedFiles (use modules to distinguish)
+-- 1. StrictTrie instead of Trie
+-- 2. StrictMVar instread of MVar
 
-import Data.Map (Map)
 import Data.Trie (Trie)
 import Data.Digest.Pure.MD5 (MD5Digest)
 import Data.Accessor (Accessor, accessor)
@@ -46,6 +43,7 @@ import IdeSession.Types.Private
 import IdeSession.Config
 import IdeSession.GHC.Server (RunActions, GhcServer)
 import IdeSession.GHC.Run (RunBufferMode)
+import IdeSession.Strict.Map (StrictMap)
 
 data Computed = Computed {
     -- | Last compilation and run errors
@@ -55,14 +53,14 @@ data Computed = Computed {
   , computedLoadedModules :: LoadedModules
     -- | Import information. This is (usually) available even for modules
     -- with parsing or type errors
-  , computedImports :: !(Map ModuleName [Import])
+  , computedImports :: !(StrictMap ModuleName [Import])
     -- | Autocompletion map
     --
     -- Mapping, per module, from prefixes to fully qualified names
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
-  , computedAutoMap :: !(Map ModuleName (Trie [IdInfo]))
+  , computedAutoMap :: !(StrictMap ModuleName (Trie [IdInfo]))
     -- | We access IdProps indirectly through this cache
   , computedCache :: !ExplicitSharingCache
   }

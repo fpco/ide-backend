@@ -39,12 +39,9 @@ import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
 import Data.Maybe (mapMaybe)
 import System.Exit (ExitCode)
-import Data.Map (Map)
-import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Trie (Trie)
 import qualified Data.Trie.Convenience as Trie
-import qualified Data.IntMap as IntMap
 import qualified Data.Text as Text
 
 import System.Directory (doesFileExist)
@@ -64,6 +61,9 @@ import IdeSession.Types.Translation (showNormalized) -- For debugging
 import IdeSession.Debug
 import IdeSession.Util
 import IdeSession.BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)
+import IdeSession.Strict.Map (StrictMap)
+import qualified IdeSession.Strict.Map as Map
+import qualified IdeSession.Strict.IntMap as IntMap
 
 import Paths_ide_backend
 
@@ -75,7 +75,7 @@ data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone ( [SourceError]
                    , LoadedModules
-                   , Map ModuleName (Maybe ([Import], [IdInfo]))
+                   , StrictMap ModuleName (Maybe ([Import], [IdInfo]))
                    , ExplicitSharingCache
                    )
 data GhcRunResponse =
@@ -154,7 +154,7 @@ ghcHandleCompile :: RpcConversation
                  -> Maybe [String]      -- ^ new, user-submitted dynamic flags
                  -> IORef LoadedModules -- ^ ref for newly generated IdMaps
                  -> IORef LoadedModules -- ^ ref for accumulated IdMaps
-                 -> IORef (Map ModuleName ([Import], [IdInfo]))
+                 -> IORef (StrictMap ModuleName ([Import], [IdInfo]))
                                         -- ^ ref for previous imports and auto
                  -> FilePath            -- ^ source directory
                  -> Bool                -- ^ should we generate code
@@ -419,7 +419,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ( [SourceError]
                  , LoadedModules
-                 , Map ModuleName (Maybe ([Import], Trie [IdInfo]))
+                 , StrictMap ModuleName (Maybe ([Import], Trie [IdInfo]))
                  , ExplicitSharingCache
                  )
 rpcCompile server opts dir genCode callback =

@@ -7,8 +7,6 @@ module IdeSession.Util (
   ) where
 
 import Data.Typeable (typeOf)
-import Data.Map (Map)
-import qualified Data.Map as Map
 import qualified Data.List as List
 import qualified Control.Exception as Ex
 import Data.Accessor (Accessor, accessor)
@@ -22,7 +20,10 @@ import System.FilePath (splitFileName, (<.>))
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
 import System.IO (Handle, hClose, openBinaryTempFile)
 
-applyMapDiff :: Ord k => Map k (Maybe v) -> Map k v -> Map k v
+import IdeSession.Strict.Map (StrictMap)
+import qualified IdeSession.Strict.Map as Map
+
+applyMapDiff :: Ord k => StrictMap k (Maybe v) -> StrictMap k v -> StrictMap k v
 applyMapDiff diff m =
   let f m2 (k, v) = Map.alter (const v) k m2
   in List.foldl' f m $ Map.toList diff
