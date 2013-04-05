@@ -6,28 +6,30 @@
 -- except as part of abstract XShared types.
 module IdeSession.Query (
     -- * Types
-    ManagedFiles(..)
-  , Query
-    -- * Queries
+    Query
+  , ManagedFiles(..)
+    -- * Queries that rely on the static part of the state only
   , getSessionConfig
   , getSourcesDir
   , getDataDir
   , getSourceModule
   , getDataFile
-  , getSourceErrors
+  , getAllDataFiles
+    -- * Queries that do not rely on computed state
+  , getCodeGeneration
+  , getEnv
+  , getGhcServer
   , getManagedFiles
+    -- * Queries that rely on computed state
+  , getSourceErrors
   , getLoadedModules
   , getExplicitSharingCache
   , getImports
   , getAutocompletion
-  , getCodeGeneration
-  , getAllDataFiles
-  , getEnv
-  , getGhcServer
   ) where
 
 import Data.List (isInfixOf)
-import Data.Accessor ((^.))
+import Data.Accessor ((^.), getVal)
 import Data.Trie (Trie)
 import qualified Data.Trie as Trie
 import Data.Map (Map)
@@ -45,24 +47,9 @@ import IdeSession.Types.Private (ExplicitSharingCache)
 import IdeSession.BlockingOps (withMVar)
 import IdeSession.GHC.Server (GhcServer)
 
--- | The collection of source and data files submitted by the user.
-data ManagedFiles = ManagedFiles
-  { sourceFiles :: [FilePath]
-  , dataFiles   :: [FilePath]
-  }
-
--- | Recover the fixed config the session was initialized with.
-getSessionConfig :: IdeSession -> SessionConfig
-getSessionConfig = ideConfig . ideStaticInfo
-
--- | Obtain the source files directory for this session.
-getSourcesDir :: IdeSession -> FilePath
-getSourcesDir = ideSourcesDir . ideStaticInfo
-
--- | Obtain the data files directory for this session.
-getDataDir :: IdeSession -> FilePath
-getDataDir = ideDataDir . ideStaticInfo
-
+{------------------------------------------------------------------------------
+  Types
+------------------------------------------------------------------------------}
 
 -- | The type of queries in a given session state.
 --
@@ -72,17 +59,79 @@ getDataDir = ideDataDir . ideStaticInfo
 --
 type Query a = IdeSession -> IO a
 
+-- | The collection of source and data files submitted by the user.
+data ManagedFiles = ManagedFiles
+  { sourceFiles :: [FilePath]
+  , dataFiles   :: [FilePath]
+  }
+
+{------------------------------------------------------------------------------
+  Queries that rely on the static part of the state only
+------------------------------------------------------------------------------}
+
+-- | Recover the fixed config the session was initialized with.
+getSessionConfig :: Query SessionConfig
+getSessionConfig = staticQuery $ return . ideConfig
+
+-- | Obtain the source files directory for this session.
+getSourcesDir :: Query FilePath
+getSourcesDir = staticQuery $ return . ideSourcesDir
+
+-- | Obtain the data files directory for this session.
+getDataDir :: Query FilePath
+getDataDir = staticQuery $ return . ideDataDir
+
 -- | Read the current value of one of the source modules.
---
 getSourceModule :: FilePath -> Query BSL.ByteString
-getSourceModule m IdeSession{ideStaticInfo} =
-  BSL.readFile $ internalFile (ideSourcesDir ideStaticInfo) m
+getSourceModule path = staticQuery $ \IdeStaticInfo{ideSourcesDir} ->
+  BSL.readFile $ internalFile ideSourcesDir path
 
 -- | Read the current value of one of the data files.
---
 getDataFile :: FilePath -> Query BSL.ByteString
-getDataFile n IdeSession{ideStaticInfo} =
-  BSL.readFile $ ideDataDir ideStaticInfo </> n
+getDataFile path = staticQuery $ \IdeStaticInfo{ideDataDir} ->
+  BSL.readFile $ ideDataDir </> path
+
+-- | Get the list of all data files currently available to the session:
+-- both the files copied via an update and files created by user code.
+getAllDataFiles :: Query [FilePath]
+getAllDataFiles = staticQuery $ \IdeStaticInfo{ideDataDir} ->
+  Find.find Find.always
+            (Find.fileType Find.==? Find.RegularFile)
+            ideDataDir
+
+{------------------------------------------------------------------------------
+  Queries that do not rely on computed state
+------------------------------------------------------------------------------}
+
+-- | Is code generation currently enabled?
+getCodeGeneration :: Query Bool
+getCodeGeneration = simpleQuery $ getVal ideGenerateCode
+
+-- | Get all current environment overrides
+getEnv :: Query [(String, Maybe String)]
+getEnv = simpleQuery $ getVal ideEnv
+
+-- | Get the RPC server used by the session.
+getGhcServer :: Query GhcServer
+getGhcServer = simpleQuery $ getVal ideGhcServer
+
+-- | Get the collection of files submitted by the user and not deleted yet.
+-- The module names are those supplied by the user as the first
+-- arguments of the @updateModule@ and @updateModuleFromFile@ calls,
+-- as opposed to the compiler internal @module ... end@ module names.
+-- Usually the two names are equal, but they needn't be.
+getManagedFiles :: Query ManagedFiles
+getManagedFiles = simpleQuery $ translate . getVal ideManagedFiles
+  where
+    translate :: ManagedFilesInternal -> ManagedFiles
+    translate files = ManagedFiles {
+        sourceFiles = map fst $ _managedSource files
+      , dataFiles   = _managedData files
+      }
+
+{------------------------------------------------------------------------------
+  Queries that rely on computed state
+------------------------------------------------------------------------------}
 
 -- | Get any compilation errors or warnings in the current state of the
 -- session, meaning errors that GHC reports for the current state of all the
@@ -97,38 +146,8 @@ getDataFile n IdeSession{ideStaticInfo} =
 -- client and anyway there shouldn't be that many soruce errors that it really
 -- makes a big difference.
 getSourceErrors :: Query [SourceError]
-getSourceErrors IdeSession{ideState, ideStaticInfo} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
-  where
-    aux :: IdeIdleState -> IO [SourceError]
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} ->
-        return $ map (removeExplicitSharing computedCache) computedErrors
-      Nothing -> fail "This session state does not admit queries."
-
--- | Get the collection of files submitted by the user and not deleted yet.
--- The module names are those supplied by the user as the first
--- arguments of the @updateModule@ and @updateModuleFromFile@ calls,
--- as opposed to the compiler internal @module ... end@ module names.
--- Usually the two names are equal, but they needn't be.
-getManagedFiles :: Query ManagedFiles
-getManagedFiles IdeSession{ideState} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle idleState ->
-        return $ plugLeaks $ idleState ^. ideManagedFiles
-      IdeSessionRunning _ idleState ->
-        return $ plugLeaks $ idleState ^. ideManagedFiles
-      IdeSessionShutdown ->
-        fail "Session already shut down."
- where
-  plugLeaks :: ManagedFilesInternal -> ManagedFiles
-  plugLeaks files = ManagedFiles { sourceFiles = map fst $ _managedSource files
-                                 , dataFiles = _managedData files }
+getSourceErrors = computedQuery $ \Computed{..} ->
+  map (removeExplicitSharing computedCache) computedErrors
 
 -- | Get the list of correctly compiled modules, as reported by the compiler,
 -- together with a mapping from symbol uses to symbol info.
@@ -139,46 +158,18 @@ getManagedFiles IdeSession{ideState} =
 -- This information lets us, e.g, construct Haddock URLs for symbols,
 -- like @parallel-3.2.0.3/Control-Parallel.html#v:pseq@.
 getLoadedModules :: Query (XShared LoadedModules)
-getLoadedModules IdeSession{ideState, ideStaticInfo} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
-  where
-    aux :: IdeIdleState -> IO (XShared LoadedModules)
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return computedLoadedModules
-      Nothing -> fail "This session state does not admit queries."
+getLoadedModules = computedQuery computedLoadedModules
 
+-- | The cache necessary to resolve explicit sharing
+-- (i.e., to translate from @XShared Foo@ to @Foo@)
 getExplicitSharingCache :: Query ExplicitSharingCache
-getExplicitSharingCache IdeSession{ideState, ideStaticInfo} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
-  where
-    aux :: IdeIdleState -> IO ExplicitSharingCache
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return computedCache
-      Nothing -> fail "This session state does not admit queries."
+getExplicitSharingCache = computedQuery computedCache
 
 -- | Get import information
 --
 -- This information is available even for modules with parse/type errors
 getImports :: Query (Map ModuleName [Import])
-getImports IdeSession{ideState, ideStaticInfo} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
-  where
-    aux :: IdeIdleState -> IO (Map ModuleName [Import])
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return computedImports
-      Nothing -> fail "This session state does not admit queries."
+getImports = computedQuery computedImports
 
 -- | Autocompletion
 --
@@ -187,18 +178,9 @@ getImports IdeSession{ideState, ideStaticInfo} =
 -- autocompletion info needs to be shipped, we need to change this to a list
 -- and avoid normalization here.
 getAutocompletion :: Query (ModuleName -> String -> [IdInfo])
-getAutocompletion IdeSession{ideState, ideStaticInfo} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle      idleState -> aux idleState
-      IdeSessionRunning _ idleState -> aux idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
+getAutocompletion = computedQuery $ \Computed{..} ->
+    autocomplete computedCache computedAutoMap
   where
-    aux :: IdeIdleState -> IO (ModuleName -> String -> [IdInfo])
-    aux idleState = case idleState ^. ideComputed of
-      Just Computed{..} -> return (autocomplete computedCache computedAutoMap)
-      Nothing           -> fail "This session state does not admit queries."
-
     autocomplete :: ExplicitSharingCache
                  -> Map ModuleName (Trie [XShared IdInfo])
                  -> ModuleName -> String
@@ -213,46 +195,30 @@ getAutocompletion IdeSession{ideState, ideStaticInfo} =
              . Trie.submap n
              $ mapOfTries Map.! modName
 
--- | Is code generation currently enabled?
-getCodeGeneration :: Query Bool
-getCodeGeneration IdeSession{ideState} =
+{------------------------------------------------------------------------------
+  Auxiliary
+------------------------------------------------------------------------------}
+
+withIdleState :: IdeSession -> (IdeIdleState -> IO a) -> IO a
+withIdleState IdeSession{ideState} f =
   $withMVar ideState $ \st ->
     case st of
-      IdeSessionIdle idleState ->
-        return $ idleState ^. ideGenerateCode
-      IdeSessionRunning _ idleState ->
-        return $ idleState ^. ideGenerateCode
-      IdeSessionShutdown ->
-        fail "Session already shut down."
+      IdeSessionIdle      idleState -> f idleState
+      IdeSessionRunning _ idleState -> f idleState
+      IdeSessionShutdown            -> fail "Session already shut down."
 
--- | Get the list of all data files currently available to the session:
--- both the files copied via an update and files created by user code.
-getAllDataFiles :: Query [FilePath]
-getAllDataFiles IdeSession{ideStaticInfo} =
-  Find.find Find.always
-            (Find.fileType Find.==? Find.RegularFile)
-            (ideDataDir ideStaticInfo)
+withComputedState :: IdeSession -> (IdeIdleState -> Computed -> IO a) -> IO a
+withComputedState session f = withIdleState session $ \idleState ->
+  case idleState ^. ideComputed of
+    Just computed -> f idleState computed
+    Nothing       -> fail "This session state does not admit queries."
 
--- | Get all current environment overrides
-getEnv :: Query [(String, Maybe String)]
-getEnv IdeSession{ideState} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle idleState ->
-        return $ idleState ^. ideEnv
-      IdeSessionRunning _ idleState ->
-        return $ idleState ^. ideEnv
-      IdeSessionShutdown ->
-        fail "Session already shut down."
+staticQuery :: (IdeStaticInfo -> IO a) -> Query a
+staticQuery f = f . ideStaticInfo
 
--- | Get the RPC server used by the session.
-getGhcServer :: IdeSession -> IO GhcServer
-getGhcServer IdeSession{ideState} =
-  $withMVar ideState $ \st ->
-    case st of
-      IdeSessionIdle idleState ->
-        return $! idleState ^. ideGhcServer
-      IdeSessionRunning _ idleState ->
-        return $! idleState ^. ideGhcServer
-      IdeSessionShutdown ->
-        fail "Session already shut down."
+simpleQuery :: (IdeIdleState -> a) -> Query a
+simpleQuery f session = withIdleState session $ return . f
+
+computedQuery :: (Computed -> a) -> Query a
+computedQuery f session = withComputedState session $ const (return . f)
+

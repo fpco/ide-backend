@@ -209,30 +209,6 @@ instance Show IdMap where
   not meant to be serialized.
 ------------------------------------------------------------------------------}
 
--- Types without an explicit sharing version
-{-
-$(deriveJSON id ''SourceErrorKind)
-$(deriveJSON id ''ModuleId)
-$(deriveJSON id ''PackageId)
-$(deriveJSON id ''Import)
--}
-
-{-
--- Types with explicit sharing
-$(deriveJSON id ''XIdScope)
-$(deriveJSON id ''XSourceSpan)
-$(deriveJSON id ''XEitherSpan)
-$(deriveJSON id ''XIdInfo)
-
--- Types that we ship as part of the explicit sharing cache
-$(deriveJSON id ''IdNameSpace)
-$(deriveJSON id ''IdProp)
-$(deriveJSON id ''IdPropPtr)
-$(deriveJSON id ''FilePathPtr)
-
--}
-
-
 $(deriveJSON id ''IdNameSpace)
 $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''Import)

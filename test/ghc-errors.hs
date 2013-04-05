@@ -38,8 +38,9 @@ import qualified IdeSession.Types.Private as Private
 -- | Update the session with all modules of the given directory.
 getModulesFrom :: IdeSession -> FilePath -> IO (IdeSessionUpdate, [FilePath])
 getModulesFrom session originalSourcesDir = do
+  sourcesDir <- getSourcesDir session
   debug dVerbosity $ "\nCopying files from: " ++ originalSourcesDir
-                     ++ " to: " ++ getSourcesDir session
+                     ++ " to: " ++ sourcesDir
   -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
   -- using the IdeSession's update mechanism.
   originalFiles <- find always
@@ -50,7 +51,9 @@ getModulesFrom session originalSourcesDir = do
   return (originalUpdate, originalFiles)
 
 getModules :: IdeSession -> IO (IdeSessionUpdate, [FilePath])
-getModules session = getModulesFrom session (getSourcesDir session)
+getModules session = do
+  sourcesDir <- getSourcesDir session
+  getModulesFrom session sourcesDir
 
 loadModulesFrom :: IdeSession -> FilePath -> IO ()
 loadModulesFrom session originalSourcesDir = do
@@ -321,8 +324,8 @@ syntheticTests =
   , ( "Permit a session within a session and duplicated shutdownSession"
     , withConfiguredSession defOpts $ \session -> do
         loadModulesFrom session "test/ABnoError"
-        let config = getSessionConfig session
-            tweakConfig :: Int -> SessionConfig -> IO SessionConfig
+        config <- getSessionConfig session
+        let tweakConfig :: Int -> SessionConfig -> IO SessionConfig
             tweakConfig n cfg@SessionConfig{configDir} = do
               let newDir = configDir </> "new" ++ show n
               createDirectory newDir
