@@ -45,6 +45,7 @@ import qualified Data.Set as Set
 import Data.Trie (Trie)
 import qualified Data.Trie.Convenience as Trie
 import qualified Data.IntMap as IntMap
+import qualified Data.Text as Text
 
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -68,7 +69,7 @@ import Paths_ide_backend
 
 data GhcRequest
   = ReqCompile (Maybe [String]) FilePath Bool
-  | ReqRun     ModuleName String RunBufferMode RunBufferMode
+  | ReqRun     String String RunBufferMode RunBufferMode
   | ReqSetEnv  [(String, Maybe String)]
 data GhcCompileResponse =
     GhcCompileProgress Progress
@@ -239,7 +240,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation
-             -> ModuleName       -- ^ Module
+             -> String            -- ^ Module
              -> String            -- ^ Function
              -> RunBufferMode     -- ^ Buffer mode for stdout
              -> RunBufferMode     -- ^ Buffer mode for stderr
@@ -443,7 +444,7 @@ constructAuto cache lk = Trie.fromListWith (++) $ map aux lk
   where
     aux idInfo@IdInfo{idProp = k} =
       let idProp = idPropCache cache IntMap.! idPropPtr k
-      in (BSSC.pack (idName idProp), [idInfo])
+      in (BSSC.pack . Text.unpack . idName $ idProp, [idInfo])
 
 -- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {
@@ -485,7 +486,7 @@ runWaitAll RunActions{runWait} = go []
 
 -- | Run code
 rpcRun :: GhcServer       -- ^ GHC server
-       -> ModuleName      -- ^ Module
+       -> String          -- ^ Module
        -> String          -- ^ Function
        -> RunBufferMode   -- ^ Buffer mode for stdout
        -> RunBufferMode   -- ^ Buffer mode for stderr

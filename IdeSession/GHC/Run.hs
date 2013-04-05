@@ -78,6 +78,8 @@ import Control.Applicative ((<$>))
 import Control.Arrow (second)
 import Data.IORef
 import Data.List ((\\))
+import Data.Text (Text)
+import qualified Data.Text as Text
 import System.FilePath.Find (find, always, extension)
 import System.Process
 
@@ -253,7 +255,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     loaded <- filterM isLoaded (map ms_mod_name graph)
     importsAuto <- liftIO $ extractImportsAuto flags session graph
     return ( reverse errs
-           , map moduleNameString loaded
+           , map (Text.pack . moduleNameString) loaded
            , importsAuto
            )
   where
@@ -268,11 +270,11 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     -- Some errors are reported as exceptions instead.
     ghcExceptionHandler :: DynFlags -> GhcException -> Ghc ()
     ghcExceptionHandler _flags e = liftIO $ do
-      let eText   = show e  -- no SrcSpan as a field in GhcException
-          exError =
-            SourceError KindError (TextSpan "<from GhcException>") eText
+      let eText   = Text.pack $ show e  -- no SrcSpan as a field in GhcException
+          fromEx  = Text.pack $ "<from GhcException>"
+          exError = SourceError KindError (TextSpan fromEx) eText
             -- though it may be embedded in string
-      debug dVerbosity $ "handleOtherErrors: " ++ eText
+      debug dVerbosity $ "handleOtherErrors: " ++ Text.unpack eText
       errs <- readIORef errsRef
       writeIORef errsRef (exError : errs)
 
@@ -291,7 +293,7 @@ extractImportsAuto dflags session graph = do
     goMod summary = do
       envs <- autoEnvs summary
       idIs <- mapM eltsToAutocompleteMap envs
-      return ( moduleNameString (ms_mod_name summary)
+      return ( Text.pack $ moduleNameString (ms_mod_name summary)
              , ( map goImp (ms_srcimps summary)
                  ++ map goImp (ms_textual_imps summary)
                , idIs
@@ -300,17 +302,17 @@ extractImportsAuto dflags session graph = do
 
     goImp :: Located (ImportDecl RdrName) -> Import
     goImp (L _ decl) = Import {
-        importModule    = moduleNameString (unLoc (ideclName decl))
-      , importPackage   = unpackFS <$> ideclPkgQual decl
+        importModule    = Text.pack $ moduleNameString (unLoc (ideclName decl))
+      , importPackage   = (Text.pack . unpackFS) <$> ideclPkgQual decl
       , importQualified = ideclQualified decl
       , importImplicit  = ideclImplicit decl
-      , importAs        = moduleNameString <$> ideclAs decl
+      , importAs        = (Text.pack . moduleNameString) <$> ideclAs decl
       , importHiding    = second (map unLIE) <$> ideclHiding decl
       }
 
     -- TODO: This is lossy. We might want a more accurate data type.
-    unLIE :: LIE RdrName -> String
-    unLIE (L _ name) = GHC.showSDoc (GHC.ppr name)
+    unLIE :: LIE RdrName -> Text
+    unLIE (L _ name) = Text.pack $ GHC.showSDoc (GHC.ppr name)
 
     eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
     eltsToAutocompleteMap elt = do
@@ -343,9 +345,9 @@ extractImportsAuto dflags session graph = do
       return $ env1 ++ env2
 
 -- | Run a snippet.
-runInGhc :: (ModuleName, String)  -- ^ module and function to execute
-         -> RunBufferMode         -- ^ Buffer mode for stdout
-         -> RunBufferMode         -- ^ Buffer mode for stderr
+runInGhc :: (String, String)  -- ^ module and function to execute
+         -> RunBufferMode     -- ^ Buffer mode for stdout
+         -> RunBufferMode     -- ^ Buffer mode for stderr
          -> Ghc RunResult
 runInGhc (m, fun) outBMode errBMode = do
   flags <- getSessionDynFlags
@@ -448,7 +450,7 @@ collectSrcError' errsRef _ _ flags severity srcspan style msg
                       _          -> Nothing
   = do let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
        sp <- extractSourceSpan srcspan
-       modifyIORef errsRef (SourceError errKind sp msgstr :)
+       modifyIORef errsRef (SourceError errKind sp (Text.pack msgstr) :)
 
 collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
@@ -468,14 +470,17 @@ collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
 -- | Convert GHC's SourceError type into ours.
 fromHscSourceError :: MonadIO m => HscTypes.SourceError -> m SourceError
 fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
-  [errMsg] -> case ErrUtils.errMsgSpans errMsg of
-    [real@RealSrcSpan{}] -> do
-      xSpan <- extractSourceSpan real
-      return $ SourceError KindError xSpan (show e)
+    [errMsg] -> case ErrUtils.errMsgSpans errMsg of
+      [real@RealSrcSpan{}] -> do
+        xSpan <- extractSourceSpan real
+        return $ SourceError KindError xSpan err
+      _ ->
+        return $ SourceError KindError (TextSpan noloc) err
     _ ->
-      return $ SourceError KindError (TextSpan "<no location info>") (show e)
-  _ ->
-    return $ SourceError KindError (TextSpan "<no location info>") (show e)
+      return $ SourceError KindError (TextSpan noloc) err
+  where
+    err   = Text.pack (show e)
+    noloc = Text.pack "<no location info>"
 
 -----------------------
 -- GHC version compat

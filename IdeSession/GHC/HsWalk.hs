@@ -15,6 +15,9 @@ import Control.Monad.State (MonadState, StateT, execStateT, get, modify, put,
                             state)
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Control.Exception (evaluate)
+import Control.Applicative ((<$>))
+import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.IORef
@@ -32,7 +35,7 @@ import IdeSession.Types.Private
 
 import Bag
 import DataCon (dataConName)
-import FastString (unpackFS)
+import FastString (FastString, unpackFS)
 import GHC hiding (PackageId, idType, moduleName, ModuleName)
 import qualified GHC
 import HscPlugin
@@ -130,7 +133,7 @@ fromGhcNameSpace ns
 extractIdsPlugin :: IORef LoadedModules -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
   let processedModule = tcg_mod env
-      processedName = moduleNameString $ GHC.moduleName processedModule
+      processedName   = Text.pack $ moduleNameString $ GHC.moduleName processedModule
   identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) $ do
 #if DEBUG
     pretty_mod     <- pretty False processedModule
@@ -323,7 +326,9 @@ recordType _header uniq typ = do
   liftIO $ appendFile "/tmp/ghc.log" $ _header ++ ": recording " ++ typStr ++ " for unique " ++ show (getKey uniq) ++ "\n"
 #endif
   let idPropPtr = IdPropPtr $ getKey uniq
-  modifyIdPropCache idPropPtr $ \idInfo -> idInfo { idType = Just typStr }
+  modifyIdPropCache idPropPtr $ \idInfo -> idInfo {
+      idType = Just $ Text.pack typStr
+    }
 
 -- | Construct an IdInfo for a 'Name'. We assume the @GlobalRdrElt@ is
 -- uniquely determined by the @Name@ and the @DynFlags@ do not change
@@ -341,7 +346,7 @@ idInfoForName dflags name idIsBinder mElt = do
     return (idPropPtr, scope)
   where
       occ     = Name.nameOccName name
-      idName  = Name.occNameString occ
+      idName  = Text.pack $ Name.occNameString occ
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
       idType  = Nothing  -- no type; we are after renamer but before typechecker
 
@@ -374,15 +379,15 @@ idInfoForName dflags name idIsBinder mElt = do
         return Imported {
             idDefSpan      = span
           , idDefinedIn    = ModuleId
-              { moduleName    = moduleNameString $ Module.moduleName mod
+              { moduleName    = Text.pack $ moduleNameString $ Module.moduleName mod
               , modulePackage = fillVersion $ Module.modulePackageId mod
               }
           , idImportedFrom = ModuleId
-              { moduleName    = moduleNameString $ impMod
+              { moduleName    = Text.pack $ moduleNameString $ impMod
               , modulePackage = modToPkg impMod
               }
           , idImportSpan   = impSpan
-          , idImportQual   = impQual
+          , idImportQual   = Text.pack $ impQual
           }
 
       modToPkg :: GHC.ModuleName -> PackageId
@@ -431,12 +436,16 @@ idInfoForName dflags name idIsBinder mElt = do
                                     $ stripPrefix prefixPV showPV
                         in reverse $ tail $ snd $ break (=='-') $ reverse errPV
                   s  -> s
-            in PackageId {..}
+            in PackageId {
+                   packageName    = Text.pack packageName
+                 , packageVersion = Text.pack <$> packageVersion
+                 }
 
       mainPackage :: PackageId
-      mainPackage =
-        PackageId { packageName = Module.packageIdString Module.mainPackageId
-                  , packageVersion = Nothing }  -- the only case of no version
+      mainPackage = PackageId {
+          packageName    = Text.pack $ Module.packageIdString Module.mainPackageId
+        , packageVersion = Nothing -- the only case of no version
+        }
 
       extractImportInfo :: MonadIO m => [RdrName.ImportSpec] -> m (GHC.ModuleName, EitherSpan, String)
       extractImportInfo (RdrName.ImpSpec decl item:_) = do
@@ -460,7 +469,7 @@ extractSourceSpan (RealSrcSpan srcspan) = liftIO $ do
     (srcSpanStartLine srcspan) (srcSpanStartCol srcspan)
     (srcSpanEndLine srcspan)   (srcSpanEndCol   srcspan)
 extractSourceSpan (UnhelpfulSpan s) =
-  return . TextSpan $ unpackFS s
+  return . TextSpan $ fsToText s
 
 instance Record Name where
   record span idIsBinder name = do
@@ -998,3 +1007,10 @@ instance Record id => ExtractIds (ConDeclField id) where
   extractIds (ConDeclField name typ _doc) = do
     record (getLoc name) True (unLoc name)
     extractIds typ
+
+{------------------------------------------------------------------------------
+  Auxiliary
+------------------------------------------------------------------------------}
+
+fsToText :: FastString -> Text
+fsToText = Text.pack . unpackFS

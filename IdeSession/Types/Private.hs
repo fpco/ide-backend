@@ -23,6 +23,7 @@ module IdeSession.Types.Private (
   , ExplicitSharingCache(..)
   ) where
 
+import Data.Text (Text)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.IntMap (IntMap)
@@ -51,9 +52,9 @@ data IdInfo = IdInfo {
   }
 
 data IdProp = IdProp {
-    idName  :: !String
+    idName  :: !Text
   , idSpace :: !Public.IdNameSpace
-  , idType  :: !(Maybe String)
+  , idType  :: !(Maybe Text)
   }
   deriving (Eq)
 
@@ -76,7 +77,7 @@ data IdScope =
         -- > import Data.List                  ""
         -- > import qualified Data.List        "Data.List."
         -- > import qualified Data.List as L   "L."
-      , idImportQual   :: !String
+      , idImportQual   :: !Text
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
@@ -93,13 +94,13 @@ data SourceSpan = SourceSpan
 
 data EitherSpan =
     ProperSpan {-# UNPACK #-} !SourceSpan
-  | TextSpan !String
+  | TextSpan !Text
   deriving (Eq)
 
 data SourceError = SourceError
   { errorKind :: !Public.SourceErrorKind
   , errorSpan :: !EitherSpan
-  , errorMsg  :: !String
+  , errorMsg  :: !Text
   }
   deriving (Eq)
 
@@ -110,8 +111,8 @@ data ModuleId = ModuleId
   deriving (Eq)
 
 data PackageId = PackageId
-  { packageName    :: !String
-  , packageVersion :: !(Maybe String)
+  { packageName    :: !Text
+  , packageVersion :: !(Maybe Text)
   }
   deriving (Eq)
 

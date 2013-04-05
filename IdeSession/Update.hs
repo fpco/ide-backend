@@ -44,6 +44,7 @@ import qualified System.Directory as Dir
 import System.FilePath (takeDirectory, makeRelative, (</>))
 import System.Posix.Files (setFileTimes)
 import System.IO.Temp (createTempDirectory)
+import qualified Data.Text as Text
 
 import IdeSession.State
 import IdeSession.Config
@@ -359,7 +360,7 @@ updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ ->
 -- is the one between @module ... end@, which may differ from the file name).
 -- The function resembles a query, but it's not instantaneous
 -- and the running code can be interrupted or interacted with.
-runStmt :: IdeSession -> ModuleName -> String -> IO RunActions
+runStmt :: IdeSession -> String -> String -> IO RunActions
 runStmt IdeSession{ideState} m fun = do
   $modifyMVar ideState $ \state -> case state of
     IdeSessionIdle idleState ->
@@ -367,7 +368,7 @@ runStmt IdeSession{ideState} m fun = do
        (Just comp, True) ->
           -- ideManagedFiles is irrelevant, because only the module name
           -- inside 'module .. where' counts.
-          if m `Map.member` computedLoadedModules comp
+          if Text.pack m `Map.member` computedLoadedModules comp
           then do
             runActions <- rpcRun (idleState ^. ideGhcServer)
                                  m fun

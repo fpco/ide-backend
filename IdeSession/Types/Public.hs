@@ -23,6 +23,8 @@ module IdeSession.Types.Public (
   ) where
 
 import Prelude hiding (span)
+import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Aeson.TH (deriveJSON)
@@ -49,19 +51,19 @@ data IdInfo = IdInfo {
 data IdProp = IdProp {
     -- | The base name of the identifer at this location. Module prefix
     -- is not included.
-    idName  :: !String
+    idName  :: !Text
     -- | Namespace this identifier is drawn from
   , idSpace :: !IdNameSpace
     -- | The type
     -- We don't always know this; in particular, we don't know kinds because
     -- the type checker does not give us LSigs for top-level annotations)
-  , idType  :: !(Maybe String)
+  , idType  :: !(Maybe Text)
   }
   deriving (Eq)
 
 -- TODO: Ideally, we would have
 -- 1. SourceSpan for Local rather than EitherSpan
--- 2. Don't have Maybe String or Maybe Package in the import case
+-- 2. Don't have Maybe Text or Maybe Package in the import case
 --    (under which circumstances do we not get package information? -- the unit
 --    tests give us examples)
 -- 3. SourceSpan for idImportSpan
@@ -86,7 +88,7 @@ data IdScope =
         -- > import Data.List                  ""
         -- > import qualified Data.List        "Data.List."
         -- > import qualified Data.List as L   "L."
-      , idImportQual   :: !String
+      , idImportQual   :: !Text
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
@@ -103,7 +105,7 @@ data SourceSpan = SourceSpan
 
 data EitherSpan =
     ProperSpan {-# UNPACK #-} !SourceSpan
-  | TextSpan !String
+  | TextSpan !Text
   deriving (Eq)
 
 -- | An error or warning in a source module.
@@ -113,7 +115,7 @@ data EitherSpan =
 data SourceError = SourceError
   { errorKind :: !SourceErrorKind
   , errorSpan :: !EitherSpan
-  , errorMsg  :: !String
+  , errorMsg  :: !Text
   }
   deriving (Show, Eq)
 
@@ -121,7 +123,7 @@ data SourceError = SourceError
 data SourceErrorKind = KindError | KindWarning
   deriving (Show, Eq)
 
-type ModuleName = String
+type ModuleName = Text
 
 data ModuleId = ModuleId
   { moduleName    :: !ModuleName
@@ -130,8 +132,8 @@ data ModuleId = ModuleId
   deriving (Eq)
 
 data PackageId = PackageId
-  { packageName    :: !String
-  , packageVersion :: !(Maybe String)
+  { packageName    :: !Text
+  , packageVersion :: !(Maybe Text)
   }
   deriving (Eq)
 
@@ -142,14 +144,14 @@ type LoadedModules = Map ModuleName IdMap
 data Import = Import {
     importModule    :: ModuleName
   -- | Used only for ghc's PackageImports extension
-  , importPackage   :: Maybe String
+  , importPackage   :: Maybe Text
   , importQualified :: Bool
   , importImplicit  :: Bool
   , importAs        :: Maybe ModuleName
   -- | @Just (True, ..)@ for @import M hiding (..)@,
   -- @Just (False, ..)@ for @import M (..)@, or
   -- @Nothing@ otherwise.
-  , importHiding    :: Maybe (Bool, [String])
+  , importHiding    :: Maybe (Bool, [Text])
   }
   deriving (Show, Eq, Ord)
 
@@ -166,9 +168,9 @@ instance Show SourceSpan where
 
 instance Show IdProp where
   show (IdProp {..}) =
-       idName ++ " "
+       Text.unpack idName ++ " "
     ++ "(" ++ show idSpace ++ ")"
-    ++ (case idType of Just typ -> " :: " ++ typ; Nothing -> [])
+    ++ (case idType of Just typ -> " :: " ++ Text.unpack typ; Nothing -> [])
 
 -- TODO: If these Maybes stay, we should have a prettier Show instance
 -- (but hopefully they will go)
@@ -181,19 +183,23 @@ instance Show IdScope where
         ++ show idDefinedIn
         ++ " at " ++ show idDefSpan ++ ";"
         ++ " imported from " ++ show idImportedFrom
-        ++ (if null idImportQual then [] else " as '" ++ idImportQual ++ "'")
+        ++ (if Text.null idImportQual
+              then []
+              else " as '" ++ Text.unpack idImportQual ++ "'")
         ++ " at "++ show idImportSpan
 
 instance Show EitherSpan where
   show (ProperSpan srcSpan) = show srcSpan
-  show (TextSpan str)       = str
+  show (TextSpan str)       = Text.unpack str
 
 instance Show ModuleId where
-  show (ModuleId mo pkg) = show pkg ++ ":" ++ mo
+  show (ModuleId mo pkg) = show pkg ++ ":" ++ Text.unpack mo
 
 instance Show PackageId where
-  show (PackageId name (Just version)) = name ++ "-" ++ version
-  show (PackageId name Nothing)        = name
+  show (PackageId name (Just version)) =
+    Text.unpack name ++ "-" ++ Text.unpack version
+  show (PackageId name Nothing) =
+    Text.unpack name
 
 instance Show IdInfo where
   show IdInfo{..} = show idProp ++ " (" ++ show idScope ++ ")"
@@ -223,10 +229,10 @@ $(deriveJSON id ''Import)
 idInfoQN :: IdInfo -> String
 idInfoQN IdInfo{idProp = IdProp{idName}, idScope} =
   case idScope of
-    Binder                 -> idName
-    Local{}                -> idName
-    Imported{idImportQual} -> idImportQual ++ idName
-    WiredIn                -> idName
+    Binder                 -> Text.unpack idName
+    Local{}                -> Text.unpack idName
+    Imported{idImportQual} -> Text.unpack idImportQual ++ Text.unpack idName
+    WiredIn                -> Text.unpack idName
 
 -- | Show approximately what Haddock adds to documentation URLs.
 haddockSpaceMarks :: IdNameSpace -> String
@@ -245,15 +251,15 @@ haddockLink IdProp{..} idScope =
     Imported{idImportedFrom} ->
          dashToSlash (modulePackage idImportedFrom)
       ++ "/doc/html/"
-      ++ dotToDash (moduleName idImportedFrom) ++ ".html#"
+      ++ dotToDash (Text.unpack $ moduleName idImportedFrom) ++ ".html#"
       ++ haddockSpaceMarks idSpace ++ ":"
-      ++ idName
+      ++ Text.unpack idName
     _ -> "<local identifier>"
  where
    dotToDash = map (\c -> if c == '.' then '-' else c)
    dashToSlash p = case packageVersion p of
-     Nothing -> packageName p ++ "/latest"
-     Just version -> packageName p ++ "/" ++ version
+     Nothing      -> Text.unpack (packageName p) ++ "/latest"
+     Just version -> Text.unpack (packageName p) ++ "/" ++ Text.unpack version
 
 {-
 idInfoAtLocation :: Int -> Int -> IdMap -> [(SourceSpan, IdInfo)]

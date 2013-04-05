@@ -21,6 +21,7 @@ import System.IO.Temp (withTempDirectory)
 import System.Random (randomRIO)
 import qualified Data.Map as Map
 import Data.Maybe (isNothing)
+import qualified Data.Text as Text
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -30,7 +31,6 @@ import IdeSession
 import TestTools
 import IdeSession.Debug
 import IdeSession.GHC.Run (hsExtensions)
-import qualified IdeSession.Types.Private as Private
 
 -- Tests using various functions of the IdeSession API
 -- and a variety of small test Haskell projects.
@@ -89,7 +89,7 @@ withSession' config' io = do
 -- E.g., check that the values of Progress do not exceeed the number of files.
 -- Also, check ModuleDelete and all the DataFileChange constructors,
 -- getSourceModule an getDataFile.
-multipleTests :: [(String, IdeSession -> IdeSessionUpdate -> [ModuleName] -> Assertion)]
+multipleTests :: [(String, IdeSession -> IdeSessionUpdate -> [String] -> Assertion)]
 multipleTests =
   [ ( "Overwrite with error"
     , \session originalUpdate lm -> do
@@ -104,8 +104,10 @@ multipleTests =
         msgs2 <- getSourceErrors session
         -- Error reported due to the overwrite.
         case msgs2 of
-          [SourceError _ _ "Not in scope: `unknownX'"] -> return ()
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
+          [SourceError _ _ msg] ->
+            assertEqual "" "Not in scope: `unknownX'" (Text.unpack msg)
+          _ ->
+            assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
     )
   , ( "Overwrite with the same module name in all files"
     , \session originalUpdate lm -> do
@@ -118,7 +120,7 @@ multipleTests =
           then case msgs of
             [SourceError _ (TextSpan _) s ] ->
               assertBool "Wrong error message"
-              $ isPrefixOf "module `main:Wrong' is defined in multiple files" s
+              $ isPrefixOf "module `main:Wrong' is defined in multiple files" (Text.unpack s)
             _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
           else assertNoErrors msgs
     )
@@ -137,13 +139,17 @@ multipleTests =
         updateSessionD session update1 1
         msgs1 <- getSourceErrors session
         case msgs1 of
-          [SourceError _ _ "Not in scope: `unknownX'"] -> return ()
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs1
+          [SourceError _ _ msg] ->
+            assertEqual "" "Not in scope: `unknownX'" (Text.unpack msg)
+          _ ->
+            assertFailure $ "Unexpected source errors: " ++ show3errors msgs1
         updateSessionD session mempty 1  -- was an error, so trying again
         msgs2 <- getSourceErrors session
         case msgs2 of
-          [SourceError _ _ "Not in scope: `unknownX'"] -> return ()
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
+          [SourceError _ _ msg] ->
+            assertEqual "" "Not in scope: `unknownX'" (Text.unpack msg)
+          _ ->
+            assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
         -- Overwrite all files, many times, with correct code eventually.
         let upd m = loadModule m "x = unknownX"
                     <> loadModule m "y = 2"
@@ -156,8 +162,10 @@ multipleTests =
         updateSessionD session update1 1  -- drop bytecode, don't recompile
         msgs5 <- getSourceErrors session
         case msgs5 of
-          [SourceError _ _ "Not in scope: `unknownX'"] -> return ()
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs5
+          [SourceError _ _ msg] ->
+            assertEqual "" "Not in scope: `unknownX'" (Text.unpack msg)
+          _ ->
+            assertFailure $ "Unexpected source errors: " ++ show3errors msgs5
         assertRaises "runStmt session Main main"
           (== userError "Cannot run before the code is generated.")
           (runStmt session "Main" "main")
@@ -249,7 +257,7 @@ syntheticTests =
   [ ( "Maintain list of compiled modules I"
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
-              assertEqual name (sort goodMods)
+              assertEqual name (sort (map Text.pack goodMods))
                 =<< (liftM Map.keys $ getLoadedModules session)
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
         assEq "XXX" ["XXX"]
@@ -272,7 +280,7 @@ syntheticTests =
   , ( "Maintain list of compiled modules II"
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
-              assertEqual name (sort goodMods)
+              assertEqual name (sort (map Text.pack goodMods))
                 =<< (liftM Map.keys $ getLoadedModules session)
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
         assEq "XXX" ["XXX"]
@@ -299,7 +307,7 @@ syntheticTests =
   , ( "Maintain list of compiled modules III"
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
-              assertEqual name (sort goodMods)
+              assertEqual name (sort (map Text.pack goodMods))
                 =<< (liftM Map.keys $ getLoadedModules session)
         updateSessionD session (loadModule "A.hs" "a = 5") 1
         assEq "1 [A]" ["A"]
@@ -354,7 +362,7 @@ syntheticTests =
             assertBool "Wrong file reported for the error"
               $ isSuffixOf "A.hs" fn
             assertBool "Wrong error message"
-              $ isPrefixOf "No instance for (Num (IO ()))" s
+              $ isPrefixOf "No instance for (Num (IO ()))" (Text.unpack s)
           _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
      )
   , ( "Compile a project: A depends on B, error in B"
@@ -367,7 +375,7 @@ syntheticTests =
             assertBool "Wrong file reported for the error"
               $ isSuffixOf "B.hs" fn
             assertBool "Wrong error message"
-              $ isPrefixOf "No instance for (Num (IO ()))" s
+              $ isPrefixOf "No instance for (Num (IO ()))" (Text.unpack s)
           _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
     )
   , ( "Compile and run a project with some .lhs files"
@@ -508,11 +516,13 @@ syntheticTests =
         updateSessionD session update 1
         msgs <- getSourceErrors session
         assertNoErrors msgs
-        idMaps <- getLoadedModules session
-        let idMapGood = idMaps Map.! "Good"
+        cache <- getExplicitSharingCache session
+        idMaps' <- getLoadedModules session
+        let idMaps = removeExplicitSharing cache idMaps'
+        let idMapGood = idMaps Map.! Text.pack "Good"
         assertBool "Good header accepted" $
-          not $ Map.null $ Private.idMapToMap idMapGood
-        let idMapBad = Map.lookup "Bad" idMaps
+          not $ Map.null $ idMapToMap idMapGood
+        let idMapBad = Map.lookup (Text.pack "Bad") idMaps
         assertBool "Bad header ignored" $ isNothing idMapBad
     )
   , ( "Reject a wrong CPP directive"
@@ -538,15 +548,19 @@ syntheticTests =
         updateSessionD session update 1
         msgs <- getSourceErrors session
         case msgs of
-          [SourceError _ _ "parse error on input `very'\n"] -> return ()
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
+          [SourceError _ _ msg] ->
+            assertEqual "" "parse error on input `very'\n" (Text.unpack msg)
+          _ ->
+            assertFailure $ "Unexpected source errors: " ++ show3errors msgs
         let update2 = updateModule "M.hs"
                                    (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update2 1
         msgs2 <- getSourceErrors session
         case msgs2 of
-          [SourceError _ _ "parse error on input `.'\n"] -> return ()
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
+          [SourceError _ _ msg] ->
+            assertEqual "" "parse error on input `.'\n" (Text.unpack msg)
+          _ ->
+            assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
     )
   , ( "Interrupt runStmt (after 1 sec)"
     , withConfiguredSession defOpts $ \session -> do
@@ -948,7 +962,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         mods <- liftM Map.keys $ getLoadedModules session
-        assertEqual "" ["M"] mods
+        assertEqual "" [Text.pack "M"] mods
         _runActions <- runStmt session "M" "loop"
         mods' <- liftM Map.keys $ getLoadedModules session
         assertEqual "Running code does not affect getLoadedModules" mods mods'
@@ -1481,8 +1495,10 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        idMaps <- getLoadedModules session
-        let idMapA = idMaps Map.! "A"
+        cache <- getExplicitSharingCache session
+        idMaps' <- getLoadedModules session
+        let idMaps = removeExplicitSharing cache idMaps'
+        let idMapA = idMaps Map.! Text.pack "A"
         let expectedIdMapA = [
                 "(A.hs@2:1-2:2,a (VarName) :: GHC.Types.Int (binding occurrence))"
               , "(A.hs@3:1-3:2,b (VarName) :: GHC.Types.Int (binding occurrence))"
@@ -1494,8 +1510,7 @@ syntheticTests =
               , "(A.hs@5:1-5:2,d (VarName) :: forall a b. (a -> b -> b) -> b -> [a] -> b (binding occurrence))"
               , "(A.hs@5:5-5:10,foldr (VarName) :: forall a1 b1. (a1 -> b1 -> b1) -> b1 -> [a1] -> b1 (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9))"
               ]
-        cache <- getExplicitSharingCache session
-        let actualIdMapA = lines (showNormalized cache idMapA)
+        let actualIdMapA = lines (show idMapA)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
         {- TODO: reenable
         assertEqual "Haddock link for A.b should be correct"
@@ -1512,14 +1527,15 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        idMaps <- getLoadedModules session
-        let idMapA = idMaps Map.! "A"
+        cache <- getExplicitSharingCache session
+        idMaps' <- getLoadedModules session
+        let idMaps = removeExplicitSharing cache idMaps'
+        let idMapA = idMaps Map.! Text.pack "A"
         let expectedIdMapA = [
                 "(A.hs@2:10-2:13,MkT (DataName) :: A.T (binding occurrence))"
               , "(A.hs@2:6-2:7,T (TcClsName) (binding occurrence))"
               ]
-        cache <- getExplicitSharingCache session
-        let actualIdMapA = lines (showNormalized cache idMapA)
+        let actualIdMapA = lines (show idMapA)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
     )
   , ( "Type information 3: Polymorphism"
@@ -1545,8 +1561,10 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        idMaps <- getLoadedModules session
-        let idMapA = idMaps Map.! "A"
+        cache <- getExplicitSharingCache session
+        idMaps' <- getLoadedModules session
+        let idMaps = removeExplicitSharing cache idMaps'
+        let idMapA = idMaps Map.! Text.pack "A"
         let expectedIdMapA = [
                 "(A.hs@2:13-2:14,a (TvName) (binding occurrence))"
               , "(A.hs@2:17-2:25,TNothing (DataName) :: forall a. A.TMaybe a (binding occurrence))"
@@ -1584,8 +1602,7 @@ syntheticTests =
               , "(A.hs@16:20-16:21,x (VarName) :: t (defined at A.hs@16:13-16:14))"
               , "(A.hs@16:5-16:9,h2go (VarName) :: forall t t1. t -> t1 -> t (binding occurrence))"
               ]
-        cache <- getExplicitSharingCache session
-        let actualIdMapA = lines (showNormalized cache idMapA)
+        let actualIdMapA = lines (show idMapA)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
     )
   , ( "Type information 4: Multiple modules"
@@ -1605,9 +1622,11 @@ syntheticTests =
         updateSessionD session upd 2
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        idMaps <- getLoadedModules session
-        let idMapA = idMaps Map.! "A"
-        let idMapB = idMaps Map.! "B"
+        cache <- getExplicitSharingCache session
+        idMaps' <- getLoadedModules session
+        let idMaps = removeExplicitSharing cache idMaps'
+        let idMapA = idMaps Map.! Text.pack "A"
+        let idMapB = idMaps Map.! Text.pack "B"
         let expectedIdMapA = [
                 "(A.hs@2:10-2:13,MkT (DataName) :: A.T (binding occurrence))"
               , "(A.hs@2:6-2:7,T (TcClsName) (binding occurrence))"
@@ -1616,9 +1635,8 @@ syntheticTests =
                 "(B.hs@3:1-3:4,foo (VarName) :: A.T (binding occurrence))"
               , "(B.hs@3:7-3:10,MkT (DataName) :: A.T (defined in main:A at A.hs@2:10-2:13; imported from main:A at B.hs@2:1-2:9))"
               ]
-        cache <- getExplicitSharingCache session
-        let actualIdMapA = lines (showNormalized cache idMapA)
-        let actualIdMapB = lines (showNormalized cache idMapB)
+        let actualIdMapA = lines (show idMapA)
+        let actualIdMapB = lines (show idMapB)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
         assertSameSet "actualIdMapB" expectedIdMapB actualIdMapB
     )
@@ -1654,8 +1672,10 @@ syntheticTests =
         updateSessionD session upd 2
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        idMaps <- getLoadedModules session
-        let idMapA = idMaps Map.! "A"
+        cache <- getExplicitSharingCache session
+        idMaps' <- getLoadedModules session
+        let idMaps = removeExplicitSharing cache idMaps'
+        let idMapA = idMaps Map.! Text.pack "A"
         let expectedIdMapA = [
                 "(A.hs@3:1-3:2,e (VarName) :: GHC.Types.Bool (binding occurrence))"
               , "(A.hs@3:10-3:16,pseq (VarName) :: forall a b. a -> b -> b (defined in parallel-3.2.0.3:Control.Parallel at <no location info>; imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24))"
@@ -1696,8 +1716,7 @@ syntheticTests =
               , "(A.hs@14:3-14:4,x (VarName) :: t a (binding occurrence))"
               , "(A.hs@14:7-14:8,x (VarName) :: t a (defined at A.hs@14:3-14:4))"
               ]
-        cache <- getExplicitSharingCache session
-        let actualIdMapA = lines (showNormalized cache idMapA)
+        let actualIdMapA = lines (show idMapA)
         assertSameSet "actualIdMapA" expectedIdMapA actualIdMapA
     )
   , ( "Type information 6: Reusing type variables"
@@ -1721,8 +1740,10 @@ syntheticTests =
         updateSessionD session upd 2
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        idMaps <- getLoadedModules session
-        let idMap = idMaps Map.! "A"
+        cache <- getExplicitSharingCache session
+        idMaps' <- getLoadedModules session
+        let idMaps = removeExplicitSharing cache idMaps'
+        let idMap = idMaps Map.! Text.pack "A"
         let expectedIdMap = [
                 "(A.hs@2:1-2:3,f1 (VarName) :: forall t t1. (t, t1) -> t (binding occurrence))"
               , "(A.hs@2:13-2:14,x (VarName) :: t (defined at A.hs@2:5-2:6))"
@@ -1764,8 +1785,7 @@ syntheticTests =
               , "(A.hs@11:5-11:7,f6 (VarName) :: forall t2. (t, t2) -> t (binding occurrence))"
               , "(A.hs@11:9-11:10,x (VarName) :: t (binding occurrence))"
               ]
-        cache <- getExplicitSharingCache session
-        let actualIdMap = lines (showNormalized cache idMap)
+        let actualIdMap = lines (show idMap)
         assertSameSet "" expectedIdMap actualIdMap
     )
   , ( "Type information 7: Qualified imports"
@@ -1780,16 +1800,17 @@ syntheticTests =
         updateSessionD session upd 2
         msgs <- getSourceErrors session
         assertEqual "This should compile without errors" [] msgs
-        idMaps <- getLoadedModules session
-        let idMap = idMaps Map.! "A"
+        cache <- getExplicitSharingCache session
+        idMaps'  <- getLoadedModules session
+        let idMaps = removeExplicitSharing cache idMaps'
+        let idMap = idMaps Map.! (Text.pack "A")
         let expectedIdMap = [
                 "(A.hs@5:1-5:4,foo (VarName) :: forall a b c a1. (Data.Maybe.Maybe a -> a, [GHC.Types.Bool] -> GHC.Types.Bool, (b -> b -> c) -> (a1 -> b) -> a1 -> a1 -> c) (binding occurrence))"
               , "(A.hs@5:18-5:31,and (VarName) :: [GHC.Types.Bool] -> GHC.Types.Bool (defined in base-4.5.1.0:GHC.List at <no location info>; imported from base-4.5.1.0:Data.List as 'Data.List.' at A.hs@3:1-3:27))"
               , "(A.hs@5:33-5:37,on (VarName) :: forall b1 c1 a2. (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 (defined in base-4.5.1.0:Data.Function at <no location info>; imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36))"
               , "(A.hs@5:8-5:16,fromJust (VarName) :: forall a2. Data.Maybe.Maybe a2 -> a2 (defined in base-4.5.1.0:Data.Maybe at <no location info>; imported from base-4.5.1.0:Data.Maybe at A.hs@2:1-2:18))"
               ]
-        cache <- getExplicitSharingCache session
-        let actualIdMap = lines (showNormalized cache idMap)
+        let actualIdMap = lines (show idMap)
         assertSameSet "" expectedIdMap actualIdMap
     )
   , ( "Test internal consistency of local id markers"
@@ -1839,12 +1860,12 @@ syntheticTests =
         updateSessionD session upd 1
         msgs <- getSourceErrors session
         case msgs of
-          [SourceError KindError _ msg] | "parse error" `isPrefixOf` msg -> return ()
+          [SourceError KindError _ msg] | "parse error" `isPrefixOf` (Text.unpack msg) -> return ()
           _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
         imports <- getImports session
-        assertSameSet "imports: " (imports Map.! "M") [
+        assertSameSet "imports: " (imports Map.! Text.pack "M") [
             Import {
-                importModule    = "Prelude"
+                importModule    = Text.pack "Prelude"
               , importPackage   = Nothing
               , importQualified = False
               , importImplicit  = True
@@ -1852,7 +1873,7 @@ syntheticTests =
               , importHiding    = Nothing
               }
           , Import {
-                importModule    = "Control.Monad"
+                importModule    = Text.pack "Control.Monad"
               , importPackage   = Nothing
               , importQualified = False
               , importImplicit  = False
@@ -1860,24 +1881,24 @@ syntheticTests =
               , importHiding    = Nothing
               }
           , Import {
-                importModule    = "Control.Category"
+                importModule    = Text.pack "Control.Category"
               , importPackage   = Nothing
               , importQualified = False
               , importImplicit  = False
               , importAs        = Nothing
-              , importHiding    = Just (True, ["id"])
+              , importHiding    = Just (True, [Text.pack "id"])
               }
           , Import {
-                importModule     = "Control.Arrow"
+                importModule     = Text.pack "Control.Arrow"
               , importPackage    = Nothing
               , importQualified  = True
               , importImplicit   = False
-              , importAs         = Just "A"
-              , importHiding     = Just (False, ["second"])
+              , importAs         = Just (Text.pack "A")
+              , importHiding     = Just (False, [Text.pack "second"])
               }
           , Import {
-                importModule    = "Data.List"
-              , importPackage   = Just "base"
+                importModule    = Text.pack "Data.List"
+              , importPackage   = Just (Text.pack "base")
               , importQualified = True
               , importImplicit  = False
               , importAs        = Nothing
@@ -1885,7 +1906,7 @@ syntheticTests =
               }
           ]
         autocomplete <- getAutocompletion session
-        let completeFo = autocomplete "M" "fo"
+        let completeFo = autocomplete (Text.pack "M") "fo"
         assertSameSet "fo: " (map idInfoQN completeFo) [
             "foldM"
           , "foldM_"
@@ -1899,7 +1920,7 @@ syntheticTests =
           , "Data.List.foldl"
           , "Data.List.foldr1"
           ]
-        let completeControlMonadFo = autocomplete "M" "Data.List.fo"
+        let completeControlMonadFo = autocomplete (Text.pack "M") "Data.List.fo"
         assertSameSet "Data.List.fo: " (map idInfoQN completeControlMonadFo) [
             "Data.List.foldl'"
           , "Data.List.foldl1"
@@ -1908,7 +1929,7 @@ syntheticTests =
           , "Data.List.foldl"
           , "Data.List.foldr1"
           ]
-        let completeSec = autocomplete "M" "sec"
+        let completeSec = autocomplete (Text.pack "M") "sec"
         assertSameSet "sec: " (map idInfoQN completeSec) [
             "A.second"
           ]
@@ -2023,7 +2044,7 @@ loadModule file contents =
     in updateModule file (BSLC.pack mod)
   where
     -- This is a hack: construct a module name from a filename
-    mname :: FilePath -> ModuleName
+    mname :: FilePath -> String
     mname path = case "test/" `substr` path of
       Just rest -> dotToSlash . dropExtension . dropFirstPathComponent $ rest
       Nothing   -> takeBaseName path
