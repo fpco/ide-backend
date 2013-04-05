@@ -239,7 +239,6 @@ import qualified Control.Exception as Ex
 import Control.Monad
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BSL
-import qualified Data.ByteString as BSS
 import Data.List (delete)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -247,8 +246,7 @@ import Data.Trie (Trie)
 import qualified Data.IntMap as IntMap
 import Data.Monoid (Monoid (..))
 import System.Directory
-import System.FilePath (splitFileName, takeDirectory, makeRelative, (<.>), (</>))
-import System.IO (Handle, hClose, openBinaryTempFile)
+import System.FilePath (takeDirectory, makeRelative, (</>))
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (setFileTimes)
 
@@ -256,11 +254,6 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT, execStateT)
 import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
-
-import Crypto.Types (BitLength)
-import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
-import Data.Tagged (Tagged, untag)
-import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
 
 import IdeSession.Types.Public
 import IdeSession.Types.Private (ExplicitSharingCache(..))
@@ -463,55 +456,6 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         filePathCache = IntMap.map (makeRelative (ideSourcesDir ideStaticInfo)) filePathCache
       , idPropCache   = idPropCache
       }
-
--- | Writes a file atomically.
---
--- The file is either written successfully or an IO exception is raised and
--- the original file is left unchanged.
---
--- On windows it is not possible to delete a file that is open by a process.
--- This case will give an IO exception but the atomic property is not affected.
---
--- Returns the hash of the file; we are careful not to force the entire input
--- bytestring into memory (we compute the hash as we write the file).
-writeFileAtomic :: FilePath -> BSL.ByteString -> IO MD5Digest
-writeFileAtomic targetPath content = do
-  let (targetDir, targetFile) = splitFileName targetPath
-  createDirectoryIfMissing True targetDir
-  Ex.bracketOnError
-    (openBinaryTempFile targetDir $ targetFile <.> "tmp")
-    (\(tmpPath, handle) -> hClose handle >> removeFile tmpPath)
-    (\(tmpPath, handle) -> do
-        let bits :: Tagged MD5Digest BitLength ; bits = blockLength
-        hash <- go handle initialCtx $ makeBlocks (untag bits `div` 8) content
-        hClose handle
-        renameFile tmpPath targetPath
-        return hash)
-  where
-    go :: Handle -> MD5Context -> [BSS.ByteString] -> IO MD5Digest
-    go _ _   []       = error "Bug in makeBlocks"
-    go h ctx [bs]     = BSS.hPut h bs >> return (finalize ctx bs)
-    go h ctx (bs:bss) = BSS.hPut h bs >> go h (updateCtx ctx bs) bss
-
--- | @makeBlocks n@ splits a bytestring into blocks with a size that is a
--- multiple of 'n', with one left-over smaller bytestring at the end.
---
--- Based from the (unexported) 'makeBlocks' in the crypto-api package, but
--- we are careful to be as lazy as possible (the first -- block can be returned
--- before the entire input bytestring is forced)
-makeBlocks :: Int -> ByteString -> [BSS.ByteString]
-makeBlocks n = go . BSL.toChunks
-  where
-    go [] = [BSS.empty]
-    go (bs:bss)
-      | BSS.length bs >= n =
-          let l = BSS.length bs - (BSS.length bs `rem` n)
-              (bsInit, bsTail) = BSS.splitAt l bs
-          in bsInit : go (bsTail : bss)
-      | otherwise =
-          case bss of
-            []         -> [bs]
-            (bs':bss') -> go (BSS.append bs bs' : bss')
 
 -- | A session update that changes a source module by giving a new value for
 -- the module source. This can be used to add a new module or update an

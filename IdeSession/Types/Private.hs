@@ -28,6 +28,7 @@ import qualified Data.Map as Map
 import Data.IntMap (IntMap)
 import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Aeson.TH (deriveJSON)
+import qualified Data.IntMap as IntMap
 
 import qualified IdeSession.Types.Public as Public
 
@@ -147,3 +148,27 @@ instance FromJSON IdMap where
 
 instance ToJSON IdMap where
   toJSON = toJSON . Map.toList . idMapToMap
+
+instance FromJSON ExplicitSharingCache where
+  parseJSON = fmap aux . parseJSON
+    where
+      aux :: ( [(Int, FilePath)]
+             , [(Int, IdProp)]
+             )
+          -> ExplicitSharingCache
+      aux (fpCache, idCache) = ExplicitSharingCache {
+          filePathCache = IntMap.fromList fpCache
+        , idPropCache   = IntMap.fromList idCache
+        }
+
+instance ToJSON ExplicitSharingCache where
+  toJSON = toJSON . aux
+    where
+      aux :: ExplicitSharingCache
+          -> ( [(Int, FilePath)]
+             , [(Int, IdProp)]
+             )
+      aux ExplicitSharingCache {..} = (
+          IntMap.toList filePathCache
+        , IntMap.toList idPropCache
+        )

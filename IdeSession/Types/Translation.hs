@@ -8,7 +8,6 @@ module IdeSession.Types.Translation (
 
 import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
-import Data.Aeson (FromJSON(..), ToJSON(..))
 
 import qualified IdeSession.Types.Public  as Public
 import qualified IdeSession.Types.Private as Private
@@ -119,31 +118,3 @@ instance ExplicitSharing Public.IdMap where
 
 instance ExplicitSharing Public.LoadedModules where
   removeExplicitSharing = Map.map . removeExplicitSharing
-
-{------------------------------------------------------------------------------
-  JSON
-------------------------------------------------------------------------------}
-
-instance FromJSON Private.ExplicitSharingCache where
-  parseJSON = fmap aux . parseJSON
-    where
-      aux :: ( [(Int, FilePath)]
-             , [(Int, Private.IdProp)]
-             )
-          -> Private.ExplicitSharingCache
-      aux (fpCache, idCache) = Private.ExplicitSharingCache {
-          Private.filePathCache = IntMap.fromList fpCache
-        , Private.idPropCache   = IntMap.fromList idCache
-        }
-
-instance ToJSON Private.ExplicitSharingCache where
-  toJSON = toJSON . aux
-    where
-      aux :: Private.ExplicitSharingCache
-          -> ( [(Int, FilePath)]
-             , [(Int, Private.IdProp)]
-             )
-      aux Private.ExplicitSharingCache {..} = (
-          IntMap.toList filePathCache
-        , IntMap.toList idPropCache
-        )
