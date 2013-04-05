@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
 -- | Translation from the private to the public types
 module IdeSession.Types.Translation (
     XShared
@@ -6,6 +6,7 @@ module IdeSession.Types.Translation (
   , showNormalized
   ) where
 
+import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.IntMap as IntMap
 import qualified Data.Map as Map
 
@@ -40,7 +41,23 @@ type instance MShared Private.LoadedModules = Public.LoadedModules
 type instance MShared Private.ModuleId      = Public.ModuleId
 type instance MShared Private.PackageId     = Public.PackageId
 
-class MShared (XShared a) ~ a => ExplicitSharing a where
+-- | Many of the public data types that we export in "IdeSession" have a
+-- corresponding private @XShared@ version. For instance, we have @IdProp@ and
+-- @XShared IdProp@, @SourceError@ and @XShared SourceError@, etc. These
+-- @XShared@ types are abstract; what's important is only that they can be
+-- serialized (support @FromJSON@ and @ToJSON@). The main difference between
+-- the public and the private data types is that the private data types use
+-- explicit sharing. This is important for serialization, because there is
+-- quite a bit of sharing in the type information that we collect and losing
+-- this would be a significant performance hit. (The other difference is that
+-- the private data types use specialized types that guarantee strictness.)
+--
+-- The @MShared (XShared a) ~ a@ condition on the @ExplicitSharing@ type class
+-- is there for technical reasons only (it convinces GHC that the @XShared@
+-- type family is a bijection).
+class ( MShared (XShared a) ~ a
+      , FromJSON (XShared a), ToJSON (XShared a)
+      ) => ExplicitSharing a where
   removeExplicitSharing :: Private.ExplicitSharingCache -> XShared a -> a
 
 showNormalized :: forall a. (Show a, ExplicitSharing a)
