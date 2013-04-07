@@ -36,7 +36,6 @@ import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
-import Data.IORef
 import System.Exit (ExitCode)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
@@ -57,6 +56,7 @@ import IdeSession.Types.Progress
 import IdeSession.Debug
 import IdeSession.Util
 import IdeSession.BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)
+import IdeSession.Strict.IORef
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map    as StrictMap
 import qualified IdeSession.Strict.IntMap as StrictIntMap
@@ -154,11 +154,11 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 ghcHandleCompile :: RpcConversation
                  -> DynamicOpts         -- ^ startup dynamic flags
                  -> Maybe [String]      -- ^ new, user-submitted dynamic flags
-                 -> IORef LoadedModules -- ^ ref for newly generated IdMaps
-                 -> IORef LoadedModules -- ^ ref for accumulated IdMaps
-                 -> IORef (Strict (Map ModuleName) ( Strict [] Import
-                                                   , Strict [] IdInfo
-                                                   ))
+                 -> StrictIORef LoadedModules -- ^ ref for newly generated IdMaps
+                 -> StrictIORef LoadedModules -- ^ ref for accumulated IdMaps
+                 -> StrictIORef (Strict (Map ModuleName) ( Strict [] Import
+                                                         , Strict [] IdInfo
+                                                         ))
                                         -- ^ ref for previous imports and auto
                  -> FilePath            -- ^ source directory
                  -> Bool                -- ^ should we generate code
@@ -240,7 +240,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     verbosity = 1
 
     -- TODO: verify that _ is the "compiling M" message
-    progressCallback :: IORef Progress -> String -> IO ()
+    progressCallback :: StrictIORef Progress -> String -> IO ()
     progressCallback counter ghcMsg = do
       oldCounter <- readIORef counter
       modifyIORef counter (updateProgress ghcMsg)

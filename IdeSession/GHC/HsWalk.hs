@@ -13,8 +13,7 @@ module IdeSession.GHC.HsWalk
 import Control.Arrow (first, second)
 import Control.Monad (forM_)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
-import Control.Monad.State (MonadState, StateT, execStateT, get, modify, put,
-                            state)
+import Control.Monad.State.Class (MonadState(..))
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Control.Exception (evaluate)
 import Control.Applicative ((<$>))
@@ -22,7 +21,6 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BSSC
-import Data.IORef
 import Data.List (stripPrefix)
 import Data.Maybe (fromMaybe)
 import Data.Version
@@ -36,6 +34,8 @@ import IdeSession.Strict.Container
 import qualified IdeSession.Strict.IntMap as IntMap
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
+import IdeSession.Strict.IORef
+import IdeSession.Strict.StateT
 
 import Bag
 import DataCon (dataConName)
@@ -69,11 +69,11 @@ import Pretty (showDocWith, Mode(OneLineMode))
   serialization.
 ------------------------------------------------------------------------------}
 
-idPropCacheRef :: IORef (Strict IntMap IdProp)
+idPropCacheRef :: StrictIORef (Strict IntMap IdProp)
 {-# NOINLINE idPropCacheRef #-}
 idPropCacheRef = unsafePerformIO $ newIORef IntMap.empty
 
-filePathCacheRef :: IORef (HashMap FilePath Int, Int)
+filePathCacheRef :: StrictIORef (HashMap FilePath Int, Int)
 {-# NOINLINE filePathCacheRef #-}
 filePathCacheRef = unsafePerformIO $ newIORef (HashMap.empty, 0)
 
@@ -137,7 +137,7 @@ fromGhcNameSpace ns
   Extract an IdMap from information returned by the ghc type checker
 ------------------------------------------------------------------------------}
 
-extractIdsPlugin :: IORef LoadedModules -> HscPlugin
+extractIdsPlugin :: StrictIORef LoadedModules -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
   let processedModule = tcg_mod env
       processedName   = Text.pack $ moduleNameString $ GHC.moduleName processedModule
@@ -197,7 +197,7 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
 ------------------------------------------------------------------------------}
 
 newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StateT (TidyEnv, IdMap) m) a
+      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StrictStateT (TidyEnv, IdMap) m) a
     )
   deriving (Functor, Monad, MonadState (TidyEnv, IdMap), MonadReader (DynFlags, RdrName.GlobalRdrEnv))
 

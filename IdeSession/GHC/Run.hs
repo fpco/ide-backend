@@ -76,7 +76,6 @@ import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM, void)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
-import Data.IORef
 import Data.List ((\\))
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -90,6 +89,7 @@ import IdeSession.Types.Private
 import IdeSession.Debug
 import IdeSession.Util
 import IdeSession.Strict.Container
+import IdeSession.Strict.IORef
 import qualified IdeSession.Strict.List as StrictList
 import qualified IdeSession.Strict.Map as StrictMap
 
@@ -189,7 +189,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this call
              -> Bool                -- ^ whether to generate code
              -> Int                 -- ^ verbosity level
-             -> IORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
+             -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc ( Strict [] SourceError
@@ -417,7 +417,7 @@ runInGhc (m, fun) outBMode errBMode = do
 -- Source error conversion and collection
 --
 
-collectSrcError :: IORef (Strict [] SourceError)
+collectSrcError :: StrictIORef (Strict [] SourceError)
                 -> (String -> IO ())
                 -> (String -> IO ())
                 -> DynFlags
@@ -444,7 +444,7 @@ collectSrcError errsRef handlerOutput handlerRemaining flags
   collectSrcError'
     errsRef handlerOutput handlerRemaining flags severity srcspan style msg
 
-collectSrcError' :: IORef (Strict [] SourceError)
+collectSrcError' :: StrictIORef (Strict [] SourceError)
                  -> (String -> IO ())
                  -> (String -> IO ())
                  -> DynFlags
