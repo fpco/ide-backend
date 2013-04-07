@@ -29,9 +29,7 @@ import Data.ByteString (ByteString)
 import Data.Aeson.TH (deriveJSON)
 
 import qualified IdeSession.Types.Public as Public
-import IdeSession.Strict.Map (StrictMap)
-import IdeSession.Strict.IntMap (StrictIntMap)
-import IdeSession.Strict.Maybe (StrictMaybe)
+import IdeSession.Strict.Container
 
 newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
   deriving (Eq, Ord)
@@ -47,7 +45,7 @@ data IdInfo = IdInfo {
 data IdProp = IdProp {
     idName  :: !Text
   , idSpace :: !Public.IdNameSpace
-  , idType  :: !(StrictMaybe Text)
+  , idType  :: !(Strict Maybe Text)
   }
   deriving (Eq)
 
@@ -105,13 +103,13 @@ data ModuleId = ModuleId
 
 data PackageId = PackageId
   { packageName    :: !Text
-  , packageVersion :: !(StrictMaybe Text)
+  , packageVersion :: !(Strict Maybe Text)
   }
   deriving (Eq)
 
-newtype IdMap = IdMap { idMapToMap :: StrictMap SourceSpan IdInfo }
+newtype IdMap = IdMap { idMapToMap :: Strict (Map SourceSpan) IdInfo }
 
-type LoadedModules = StrictMap Public.ModuleName IdMap
+type LoadedModules = Strict (Map Public.ModuleName) IdMap
 
 {------------------------------------------------------------------------------
   Cache
@@ -122,8 +120,8 @@ type LoadedModules = StrictMap Public.ModuleName IdMap
 -- to translate on every lookup. To avoid this, we'd have to introduce two
 -- versions of the cache and translate the entire cache first.
 data ExplicitSharingCache = ExplicitSharingCache {
-    filePathCache :: !(StrictIntMap ByteString)
-  , idPropCache   :: !(StrictIntMap IdProp)
+    filePathCache :: !(Strict IntMap ByteString)
+  , idPropCache   :: !(Strict IntMap IdProp)
   }
 
 {------------------------------------------------------------------------------

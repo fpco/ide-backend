@@ -1,52 +1,41 @@
 {-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 -- | Strict lists
 module IdeSession.Strict.List (
-  -- * Strict lists
-    StrictList -- Abstract
+    nil
+  , cons
   , singleton
   , map
-  , concat
-  , fromList
-  , toList
+  , all
+  , any
+  , reverse
+  , (++)
   ) where
 
-import Prelude hiding (map, concat, concatMap)
-import Control.Applicative
-import Data.Foldable (Foldable)
-import Data.Traversable (Traversable)
+import Prelude hiding (map, all, any, reverse, (++))
+import qualified Data.List as List
 
-data StrictList a = Nil | Cons !a !(StrictList a)
-  deriving (Eq, Ord, Functor, Foldable, Traversable)
+import IdeSession.Strict.Container
 
-instance Applicative StrictList where
-  pure = singleton
-  Nil         <*> _           = Nil
-  _           <*> Nil         = Nil
-  (Cons f fs) <*> (Cons x xs) = Cons (f x) (fs <*> xs)
+nil :: Strict [] a
+nil = StrictList []
 
-map :: (a -> b) -> StrictList a -> StrictList b
-map _ Nil         = Nil
-map f (Cons x xs) = Cons (f x) (map f xs)
+cons :: a -> Strict [] a -> Strict [] a
+cons x xs = x `seq` StrictList (x : toLazyList xs)
 
-concat :: StrictList (StrictList a) -> StrictList a
-concat Nil                    = Nil
-concat (Cons Nil         xss) = concat xss
-concat (Cons (Cons x xs) xss) = Cons x (concat (Cons xs xss))
+singleton :: a -> Strict [] a
+singleton x = x `seq` StrictList [x]
 
-concatMap :: (a -> StrictList b) -> StrictList a -> StrictList b
-concatMap f = concat . map f
+map :: (a -> b) -> Strict [] a -> Strict [] b
+map f = force . List.map f . toLazyList
 
-instance Monad StrictList where
-  return = singleton
-  (>>=)  = flip concatMap
+all :: (a -> Bool) -> Strict [] a -> Bool
+all p = List.all p . toLazyList
 
-singleton :: a -> StrictList a
-singleton x = Cons x Nil
+any :: (a -> Bool) -> Strict [] a -> Bool
+any p = List.any p . toLazyList
 
-fromList :: [a] -> StrictList a
-fromList []     = Nil
-fromList (x:xs) = Cons x (fromList xs)
+reverse :: Strict [] a -> Strict [] a
+reverse = StrictList . List.reverse . toLazyList
 
-toList :: StrictList a -> [a]
-toList Nil         = []
-toList (Cons x xs) = x : toList xs
+(++) :: Strict [] a -> Strict [] a -> Strict [] a
+xs ++ ys = StrictList $ toLazyList xs List.++ toLazyList ys

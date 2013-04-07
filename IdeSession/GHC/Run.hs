@@ -89,6 +89,9 @@ import IdeSession.GHC.HsWalk (extractSourceSpan, idInfoForName)
 import IdeSession.Types.Private
 import IdeSession.Debug
 import IdeSession.Util
+import IdeSession.Strict.Container
+import qualified IdeSession.Strict.List as StrictList
+import qualified IdeSession.Strict.Map as StrictMap
 
 -- | These source files are type-checked.
 hsExtensions :: [FilePath]
@@ -186,18 +189,20 @@ compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this call
              -> Bool                -- ^ whether to generate code
              -> Int                 -- ^ verbosity level
-             -> IORef [SourceError] -- ^ the IORef where GHC stores errors
+             -> IORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-             -> Ghc ( [SourceError]
+             -> Ghc ( Strict [] SourceError
                     , [ModuleName]
-                    , [(ModuleName, ([Import], [IdInfo]))]
+                    , Strict (Map ModuleName) ( Strict [] Import
+                                              , Strict [] IdInfo
+                                              )
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
              generateCode verbosity
              errsRef handlerOutput handlerRemaining = do
     -- Reset errors storage.
-    liftIO $ writeIORef errsRef []
+    liftIO $ writeIORef errsRef StrictList.nil
     -- Determine files to process.
     targets <- liftIO $ find always
                              ((`elem` hsExtensions) `liftM` extension)
@@ -254,7 +259,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     errs   <- liftIO $ readIORef errsRef
     loaded <- filterM isLoaded (map ms_mod_name graph)
     importsAuto <- liftIO $ extractImportsAuto flags session graph
-    return ( reverse errs
+    return ( StrictList.reverse errs
            , map (Text.pack . moduleNameString) loaded
            , importsAuto
            )
@@ -264,7 +269,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
       debug dVerbosity $ "handleSourceError: " ++ show e
       errs <- readIORef errsRef
       e'   <- fromHscSourceError e
-      writeIORef errsRef (e' : errs)
+      writeIORef errsRef (e' `StrictList.cons` errs)
 
     -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7430.
     -- Some errors are reported as exceptions instead.
@@ -276,27 +281,29 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
             -- though it may be embedded in string
       debug dVerbosity $ "handleOtherErrors: " ++ Text.unpack eText
       errs <- readIORef errsRef
-      writeIORef errsRef (exError : errs)
+      writeIORef errsRef (exError `StrictList.cons` errs)
 
     handleErrors :: DynFlags -> Ghc () -> Ghc ()
     handleErrors flags = ghandle (ghcExceptionHandler flags)
                        . handleSourceError (sourceErrorHandler flags)
 
 extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
-                   -> IO [(ModuleName, ([Import], [IdInfo]))]
+                   -> IO (Strict (Map ModuleName) ( Strict [] Import
+                                                  , Strict [] IdInfo))
 extractImportsAuto dflags session graph = do
   assocs <- mapM goMod graph
 --  cache <- wipeIdPropCache
-  return assocs
+  return (StrictMap.fromList assocs)
   where
-    goMod :: ModSummary -> IO (ModuleName, ([Import], [IdInfo]))
+    goMod :: ModSummary -> IO (ModuleName, ( Strict [] Import
+                                           , Strict [] IdInfo))
     goMod summary = do
       envs <- autoEnvs summary
       idIs <- mapM eltsToAutocompleteMap envs
       return ( Text.pack $ moduleNameString (ms_mod_name summary)
-             , ( map goImp (ms_srcimps summary)
-                 ++ map goImp (ms_textual_imps summary)
-               , idIs
+             , ( force $ map goImp (ms_srcimps summary)
+                      ++ map goImp (ms_textual_imps summary)
+               , force idIs
                )
              )
 
@@ -410,7 +417,7 @@ runInGhc (m, fun) outBMode errBMode = do
 -- Source error conversion and collection
 --
 
-collectSrcError :: IORef [SourceError]
+collectSrcError :: IORef (Strict [] SourceError)
                 -> (String -> IO ())
                 -> (String -> IO ())
                 -> DynFlags
@@ -437,7 +444,7 @@ collectSrcError errsRef handlerOutput handlerRemaining flags
   collectSrcError'
     errsRef handlerOutput handlerRemaining flags severity srcspan style msg
 
-collectSrcError' :: IORef [SourceError]
+collectSrcError' :: IORef (Strict [] SourceError)
                  -> (String -> IO ())
                  -> (String -> IO ())
                  -> DynFlags
@@ -450,7 +457,7 @@ collectSrcError' errsRef _ _ flags severity srcspan style msg
                       _          -> Nothing
   = do let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
        sp <- extractSourceSpan srcspan
-       modifyIORef errsRef (SourceError errKind sp (Text.pack msgstr) :)
+       modifyIORef errsRef (StrictList.cons $ SourceError errKind sp (Text.pack msgstr))
 
 collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg

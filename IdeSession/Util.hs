@@ -1,13 +1,16 @@
+{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor #-}
 module IdeSession.Util (
-    applyMapDiff
-  , showExWithClass
+    -- * Misc util
+    showExWithClass
   , accessorName
   , lookup'
   , writeFileAtomic
+    -- * Simple diffs
+  , Diff(..)
+  , applyMapDiff
   ) where
 
 import Data.Typeable (typeOf)
-import qualified Data.List as List
 import qualified Control.Exception as Ex
 import Data.Accessor (Accessor, accessor)
 import qualified Data.ByteString as BSS
@@ -19,14 +22,14 @@ import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
 import System.FilePath (splitFileName, (<.>))
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
 import System.IO (Handle, hClose, openBinaryTempFile)
+import Data.Aeson.TH (deriveJSON)
 
-import IdeSession.Strict.Map (StrictMap)
-import qualified IdeSession.Strict.Map as Map
+import IdeSession.Strict.Container
+import qualified IdeSession.Strict.Map as StrictMap
 
-applyMapDiff :: Ord k => StrictMap k (Maybe v) -> StrictMap k v -> StrictMap k v
-applyMapDiff diff m =
-  let f m2 (k, v) = Map.alter (const v) k m2
-  in List.foldl' f m $ Map.toList diff
+{------------------------------------------------------------------------------
+  Util
+------------------------------------------------------------------------------}
 
 -- | Show an exception together with its most precise type tag.
 showExWithClass :: Ex.SomeException -> String
@@ -106,3 +109,21 @@ makeBlocks n = go . BSL.toChunks
             []         -> [bs]
             (bs':bss') -> go (BSS.append bs bs' : bss')
 
+{------------------------------------------------------------------------------
+  Simple diffs
+------------------------------------------------------------------------------}
+
+data Diff a = Keep | Remove | Insert a
+  deriving Functor
+
+$(deriveJSON id ''Diff)
+
+applyMapDiff :: forall k v. Ord k
+             => Strict (Map k) (Diff v)
+             -> Strict (Map k) v -> Strict (Map k) v
+applyMapDiff diff = foldr (.) id (map aux $ StrictMap.toList diff)
+  where
+    aux :: (k, Diff v) -> Strict (Map k) v -> Strict (Map k) v
+    aux (_, Keep)     = id
+    aux (k, Remove)   = StrictMap.delete k
+    aux (k, Insert x) = StrictMap.insert k x

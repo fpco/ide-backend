@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
@@ -30,7 +29,6 @@ import Control.Monad (when, void)
 import Control.Monad.State (StateT, execStateT)
 import Control.Monad.IO.Class (liftIO)
 import qualified Control.Exception as Ex
-import Control.Concurrent.MVar (newMVar)
 import Data.List (delete)
 import Data.Monoid (Monoid(..))
 import Data.Accessor ((.>), (^.), (^=))
@@ -48,13 +46,14 @@ import IdeSession.State
 import IdeSession.Config
 import IdeSession.GHC.Run (RunBufferMode(..), RunResult(..))
 import IdeSession.GHC.Server
-import IdeSession.BlockingOps (modifyMVar, modifyMVar_)
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util
+import IdeSession.Strict.Container
 import qualified IdeSession.Strict.IntMap as IntMap
-import IdeSession.Strict.Map (StrictMap)
-import qualified IdeSession.Strict.Map as Map
+import qualified IdeSession.Strict.Map    as Map
+import qualified IdeSession.Strict.Maybe  as Maybe
+import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_)
 
 {------------------------------------------------------------------------------
   Starting and stopping
@@ -77,7 +76,7 @@ initSession ideConfig'@SessionConfig{configStaticOpts,configInProcess} = do
   -- We rather arbitrary start at Jan 2, 1970.
   ideState <- newMVar $ IdeSessionIdle IdeIdleState {
                           _ideLogicalTimestamp = 86400
-                        , _ideComputed         = Nothing
+                        , _ideComputed         = Maybe.nothing
                         , _ideNewOpts          = Nothing
                         , _ideGenerateCode     = False
                         , _ideManagedFiles     = ManagedFilesInternal [] []
@@ -105,7 +104,7 @@ initSession ideConfig'@SessionConfig{configStaticOpts,configInProcess} = do
 -- If code is still running, it will be interrupted.
 shutdownSession :: IdeSession -> IO ()
 shutdownSession IdeSession{ideState, ideStaticInfo} = do
-  snapshot <- $modifyMVar ideState $ \state -> return (IdeSessionShutdown, state)
+  snapshot <- modifyMVar ideState $ \state -> return (IdeSessionShutdown, state)
   case snapshot of
     IdeSessionRunning runActions idleState -> do
       -- We need to terminate the running program before we can shut down
@@ -142,8 +141,8 @@ shutdownSession IdeSession{ideState, ideStaticInfo} = do
 -- (We don't automatically recompile the code using the new session, because
 -- what would we do with the progress messages?)
 restartSession :: IdeSession -> IO ()
-restartSession session@IdeSession{ideStaticInfo, ideState} = do
-    $modifyMVar_ ideState $ \state ->
+restartSession IdeSession{ideStaticInfo, ideState} = do
+    modifyMVar_ ideState $ \state ->
       case state of
         IdeSessionIdle idleState ->
           restart idleState
@@ -158,7 +157,7 @@ restartSession session@IdeSession{ideStaticInfo, ideState} = do
       forceShutdownGhcServer $ _ideGhcServer idleState
       server <- forkGhcServer opts workingDir (configInProcess config)
       return . IdeSessionIdle
-             . (ideComputed    ^= Nothing)
+             . (ideComputed    ^= Maybe.nothing)
              . (ideUpdatedEnv  ^= True)
              . (ideUpdatedCode ^= True)
              . (ideGhcServer   ^= server)
@@ -197,7 +196,7 @@ instance Monoid IdeSessionUpdate where
 -- which can be used to monitor progress of the operation.
 updateSession :: IdeSession -> IdeSessionUpdate -> (Progress -> IO ()) -> IO ()
 updateSession IdeSession{ideStaticInfo, ideState} update callback = do
-  $modifyMVar_ ideState $ \state ->
+  modifyMVar_ ideState $ \state ->
     case state of
       IdeSessionIdle idleState -> do
         idleState' <- execStateT (runSessionUpdate update ideStaticInfo) idleState
@@ -209,15 +208,16 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         -- Determine imports and completion map from the diffs sent
         -- from the RPC compilationi process.
         let usePrevious :: IdeIdleState
-                        -> StrictMap ModuleName (Maybe ([Import], Trie [IdInfo]))
-                        -> ( StrictMap ModuleName [Import]
-                           , StrictMap ModuleName (Trie [IdInfo])
+                        -> Strict (Map ModuleName) (Diff ( Strict [] Import
+                                                         , Trie (Strict [] IdInfo)))
+                        -> ( Strict (Map ModuleName) (Strict [] Import)
+                           , Strict (Map ModuleName) (Trie (Strict [] IdInfo))
                            )
             usePrevious idleSt importsAuto =
               ( applyMapDiff (Map.map (fmap fst) importsAuto)
-                $ maybe Map.empty computedImports $ idleSt ^. ideComputed
+                $ Maybe.maybe Map.empty computedImports $ idleSt ^. ideComputed
               , applyMapDiff (Map.map (fmap snd) importsAuto)
-                $ maybe Map.empty computedAutoMap $ idleSt ^. ideComputed
+                $ Maybe.maybe Map.empty computedAutoMap $ idleSt ^. ideComputed
               )
         -- Update code
         computed <- if (idleState' ^. ideUpdatedCode) then do
@@ -233,7 +233,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
                       let (computedImports, computedAutoMap) =
                             usePrevious idleState' importsAuto
                           computedCache = mkRelative computedCache'
-                      return $ Just Computed{..}
+                      return $ Maybe.just Computed{..}
                     else return $ idleState' ^. ideComputed
 
         -- Update state
@@ -367,9 +367,9 @@ updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ ->
 -- and the running code can be interrupted or interacted with.
 runStmt :: IdeSession -> String -> String -> IO RunActions
 runStmt IdeSession{ideState} m fun = do
-  $modifyMVar ideState $ \state -> case state of
+  modifyMVar ideState $ \state -> case state of
     IdeSessionIdle idleState ->
-     case (idleState ^. ideComputed, idleState ^. ideGenerateCode) of
+     case (toLazyMaybe (idleState ^. ideComputed), idleState ^. ideGenerateCode) of
        (Just comp, True) ->
           -- ideManagedFiles is irrelevant, because only the module name
           -- inside 'module .. where' counts.
@@ -396,7 +396,7 @@ runStmt IdeSession{ideState} m fun = do
       fail "Session already shut down."
   where
     restoreToIdle :: RunResult -> IO ()
-    restoreToIdle _ = $modifyMVar_ ideState $ \state -> case state of
+    restoreToIdle _ = modifyMVar_ ideState $ \state -> case state of
       IdeSessionIdle _ ->
         Ex.throwIO (userError "The impossible happened!")
       IdeSessionRunning _ idleState -> do

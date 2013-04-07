@@ -32,10 +32,10 @@ import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 
 import IdeSession.Types.Private
-import IdeSession.Strict.IntMap (StrictIntMap)
-import qualified IdeSession.Strict.IntMap as IM
-import qualified IdeSession.Strict.Map as Map
-import qualified IdeSession.Strict.Maybe as StrictMaybe
+import IdeSession.Strict.Container
+import qualified IdeSession.Strict.IntMap as IntMap
+import qualified IdeSession.Strict.Map    as Map
+import qualified IdeSession.Strict.Maybe  as Maybe
 
 import Bag
 import DataCon (dataConName)
@@ -69,9 +69,9 @@ import Pretty (showDocWith, Mode(OneLineMode))
   serialization.
 ------------------------------------------------------------------------------}
 
-idPropCacheRef :: IORef (StrictIntMap IdProp)
+idPropCacheRef :: IORef (Strict IntMap IdProp)
 {-# NOINLINE idPropCacheRef #-}
-idPropCacheRef = unsafePerformIO $ newIORef IM.empty
+idPropCacheRef = unsafePerformIO $ newIORef IntMap.empty
 
 filePathCacheRef :: IORef (HashMap FilePath Int, Int)
 {-# NOINLINE filePathCacheRef #-}
@@ -81,7 +81,7 @@ modifyIdPropCache :: MonadIO m => IdPropPtr -> (IdProp -> IdProp) -> m ()
 modifyIdPropCache ptr f = liftIO $ do
   cache <- readIORef idPropCacheRef
   let uniq = idPropPtr ptr
-  writeIORef idPropCacheRef $ IM.adjust f uniq cache
+  writeIORef idPropCacheRef $ IntMap.adjust f uniq cache
 
 extendIdPropCache :: MonadIO m => IdPropPtr -> IdProp -> m ()
 extendIdPropCache ptr prop = liftIO $ do
@@ -89,7 +89,7 @@ extendIdPropCache ptr prop = liftIO $ do
   -- Don't overwrite existing entries, because we might lose type information
   -- that we gleaned earlier
   let uniq = idPropPtr ptr
-  writeIORef idPropCacheRef $ IM.insertWith (\_new old -> old) uniq prop cache
+  writeIORef idPropCacheRef $ IntMap.insertWith (\_new old -> old) uniq prop cache
 
 mkFilePathPtr :: FilePath -> IO FilePathPtr
 mkFilePathPtr path = do
@@ -111,10 +111,10 @@ constructExplicitSharingCache = do
     -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
     -- for long-running sessions with many added and removed definitions.
     idPropCache <- readIORef idPropCacheRef
-    liftIO $ writeIORef idPropCacheRef IM.empty
+    liftIO $ writeIORef idPropCacheRef IntMap.empty
 
     (filePathHash, _) <- readIORef filePathCacheRef
-    let filePathCache = IM.fromList . map convert $ HashMap.toList filePathHash
+    let filePathCache = IntMap.fromList . map convert $ HashMap.toList filePathHash
 
     return ExplicitSharingCache {..}
   where
@@ -334,7 +334,7 @@ recordType _header uniq typ = do
 #endif
   let idPropPtr = IdPropPtr $ getKey uniq
   modifyIdPropCache idPropPtr $ \idInfo -> idInfo {
-      idType = StrictMaybe.Just $ Text.pack typStr
+      idType = Maybe.just $ Text.pack typStr
     }
 
 -- | Construct an IdInfo for a 'Name'. We assume the @GlobalRdrElt@ is
@@ -355,7 +355,7 @@ idInfoForName dflags name idIsBinder mElt = do
       occ     = Name.nameOccName name
       idName  = Text.pack $ Name.occNameString occ
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
-      idType  = StrictMaybe.Nothing  -- after renamer but before typechecker
+      idType  = Maybe.nothing  -- after renamer but before typechecker
 
       constructScope :: MonadIO m => m (Maybe IdScope)
       constructScope
@@ -427,7 +427,7 @@ idInfoForName dflags name idIsBinder mElt = do
                         $ stripPrefix prefixPN showPN
                 packageName = init $ tail errPN
                 pkgVersion  = Packages.pkgVersion sourcePkgId
-                packageVersion = StrictMaybe.Just $ case showVersion pkgVersion of
+                packageVersion = Maybe.just $ case showVersion pkgVersion of
                   -- See http://www.haskell.org/ghc/docs/7.4.2//html/libraries/ghc/Module.html#g:3.
                   -- The version of wired-in packages is completely wiped out,
                   -- but we use a leak in the form of a Cabal package id
@@ -451,7 +451,7 @@ idInfoForName dflags name idIsBinder mElt = do
       mainPackage :: PackageId
       mainPackage = PackageId {
           packageName    = Text.pack $ Module.packageIdString Module.mainPackageId
-        , packageVersion = StrictMaybe.Nothing -- the only case of no version
+        , packageVersion = Maybe.nothing -- the only case of no version
         }
 
       extractImportInfo :: MonadIO m => [RdrName.ImportSpec] -> m (GHC.ModuleName, EitherSpan, String)

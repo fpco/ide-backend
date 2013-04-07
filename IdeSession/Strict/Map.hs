@@ -3,11 +3,10 @@
 -- the Map is. containers-0.5 provides this out of the box, but alas ghc 7.4
 -- is built against containers-0.4.
 module IdeSession.Strict.Map (
-    StrictMap -- Abstract
-  , toMap
-  , toList
+    toList
   , fromList
   , map
+  , mapWithKey
   , mapKeys
   , empty
   , insert
@@ -20,78 +19,69 @@ module IdeSession.Strict.Map (
   , member
   , (!)
   , keys
+  , delete
   ) where
 
 import Prelude hiding (map, lookup)
-import Data.Map (Map)
 import Data.Set (Set)
 import qualified Data.Map as Map
-import Data.Aeson (FromJSON(..), ToJSON(..))
 
-newtype StrictMap k v = StrictMap { toMap :: Map k v }
+import IdeSession.Strict.Container
 
--- For some reason Aeson doesn't have a built-in instance for map,
--- so we cannot use deriveJSON
-instance (Ord k, FromJSON k, FromJSON v) => FromJSON (StrictMap k v) where
-  parseJSON = fmap fromList . parseJSON
+toList :: Strict (Map k) v -> [(k, v)]
+toList = Map.toList . toLazyMap
 
-instance (ToJSON k, ToJSON v) => ToJSON (StrictMap k v) where
-  toJSON = toJSON . toList
+fromList :: Ord k => [(k, v)] -> Strict (Map k) v
+fromList = force . Map.fromList
 
-fromMap :: Map k v -> StrictMap k v
-fromMap m = StrictMap $ forceValues m `seq` m
-  where
-    forceValues :: Map k v -> ()
-    forceValues = Map.foldr' seq ()
+map :: (a -> b) -> Strict (Map k) a  -> Strict (Map k) b
+map f = force . Map.map f . toLazyMap
 
-toList :: StrictMap k v -> [(k, v)]
-toList = Map.toList . toMap
+mapWithKey :: (k -> a -> b) -> Strict (Map k) a  -> Strict (Map k) b
+mapWithKey f = force . Map.mapWithKey f . toLazyMap
 
-fromList :: Ord k => [(k, v)] -> StrictMap k v
-fromList = fromMap . Map.fromList
-
-map :: (a -> b) -> StrictMap k a  -> StrictMap k b
-map f = fromMap . Map.map f . toMap
-
-mapKeys :: Ord k' => (k -> k') -> StrictMap k v -> StrictMap k' v
+mapKeys :: Ord k' => (k -> k') -> Strict (Map k) v -> Strict (Map k') v
 -- Maps are already strict in keys
-mapKeys f = StrictMap . Map.mapKeys f . toMap
+mapKeys f = StrictMap . Map.mapKeys f . toLazyMap
 
-empty :: StrictMap k v
+empty :: Strict (Map k) v
 empty = StrictMap Map.empty
 
-insert :: Ord k => k -> v -> StrictMap k v -> StrictMap k v
-insert k v = StrictMap . Map.insertWith' const k v . toMap
+insert :: Ord k => k -> v -> Strict (Map k) v -> Strict (Map k) v
+insert k v = StrictMap . Map.insertWith' const k v . toLazyMap
 
-union :: Ord k => StrictMap k v -> StrictMap k v -> StrictMap k v
-union a b = StrictMap $ Map.union (toMap a) (toMap b)
+union :: Ord k => Strict (Map k) v -> Strict (Map k) v -> Strict (Map k) v
+union a b = StrictMap $ Map.union (toLazyMap a) (toLazyMap b)
 
-filterWithKey :: Ord k => (k -> v -> Bool) -> StrictMap k v -> StrictMap k v
-filterWithKey p = StrictMap . Map.filterWithKey p . toMap
+filterWithKey :: Ord k => (k -> v -> Bool) -> Strict (Map k) v -> Strict (Map k) v
+filterWithKey p = StrictMap . Map.filterWithKey p . toLazyMap
 
-keysSet :: StrictMap k v -> Set k
-keysSet = Map.keysSet . toMap
+keysSet :: Strict (Map k) v -> Set k
+keysSet = Map.keysSet . toLazyMap
 
-lookup :: Ord k => k -> StrictMap k v -> Maybe v
-lookup k = Map.lookup k . toMap
+lookup :: Ord k => k -> Strict (Map k) v -> Maybe v
+lookup k = Map.lookup k . toLazyMap
 
-(\\) :: Ord k => StrictMap k a -> StrictMap k b -> StrictMap k a
-(\\) a b = StrictMap $ (Map.\\) (toMap a) (toMap b)
+(\\) :: Ord k => Strict (Map k) a -> Strict (Map k) b -> Strict (Map k) a
+(\\) a b = StrictMap $ (Map.\\) (toLazyMap a) (toLazyMap b)
 
 alter :: forall k a. Ord k
-      => (Maybe a -> Maybe a) -> k -> StrictMap k a -> StrictMap k a
-alter f k = StrictMap . Map.alter aux k . toMap
+      => (Maybe a -> Maybe a) -> k -> Strict (Map k) a -> Strict (Map k) a
+alter f k = StrictMap . Map.alter aux k . toLazyMap
   where
     aux :: Maybe a -> Maybe a
     aux ma = case f ma of
                Nothing -> Nothing
                Just a  -> a `seq` Just a
 
-member :: Ord k => k -> StrictMap k v -> Bool
-member k = Map.member k . toMap
+member :: Ord k => k -> Strict (Map k) v -> Bool
+member k = Map.member k . toLazyMap
 
-(!) :: Ord k => StrictMap k v -> k -> v
-(!) = (Map.!) . toMap
+(!) :: Ord k => Strict (Map k) v -> k -> v
+(!) = (Map.!) . toLazyMap
 
-keys :: StrictMap k a -> [k]
-keys = Map.keys . toMap
+keys :: Strict (Map k) a -> [k]
+keys = Map.keys . toLazyMap
+
+delete :: Ord k => k -> Strict (Map k) a -> Strict (Map k) a
+delete k = StrictMap . Map.delete k . toLazyMap

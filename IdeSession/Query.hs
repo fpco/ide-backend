@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 -- | Session queries
 --
 -- We have to be very careful in the types in this module. We should not be
@@ -32,7 +31,6 @@ import Data.List (isInfixOf)
 import Data.Accessor ((^.), getVal)
 import Data.Trie (Trie)
 import qualified Data.Trie as Trie
-import Data.Map (Map)
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
@@ -43,10 +41,11 @@ import IdeSession.State
 import IdeSession.Types.Translation
 import IdeSession.Types.Public
 import IdeSession.Types.Private (ExplicitSharingCache)
-import IdeSession.BlockingOps (withMVar)
 import IdeSession.GHC.Server (GhcServer)
-import IdeSession.Strict.Map (StrictMap)
-import qualified IdeSession.Strict.Map as StrictMap
+import IdeSession.Strict.Container
+import qualified IdeSession.Strict.Map  as StrictMap
+import qualified IdeSession.Strict.List as StrictList
+import IdeSession.Strict.MVar (withMVar)
 
 {------------------------------------------------------------------------------
   Types
@@ -148,7 +147,7 @@ getManagedFiles = simpleQuery $ translate . getVal ideManagedFiles
 -- makes a big difference.
 getSourceErrors :: Query [SourceError]
 getSourceErrors = computedQuery $ \Computed{..} ->
-  map (removeExplicitSharing computedCache) computedErrors
+  toLazyList $ StrictList.map (removeExplicitSharing computedCache) computedErrors
 
 -- | Get the list of correctly compiled modules, as reported by the compiler,
 -- together with a mapping from symbol uses to symbol info.
@@ -170,7 +169,9 @@ getExplicitSharingCache = computedQuery computedCache
 --
 -- This information is available even for modules with parse/type errors
 getImports :: Query (Map ModuleName [Import])
-getImports = computedQuery $ StrictMap.toMap . computedImports
+getImports = computedQuery $ toLazyMap
+                           . StrictMap.map toLazyList
+                           . computedImports
 
 -- | Autocompletion
 --
@@ -183,15 +184,14 @@ getAutocompletion = computedQuery $ \Computed{..} ->
     autocomplete computedCache computedAutoMap
   where
     autocomplete :: ExplicitSharingCache
-                 -> StrictMap ModuleName (Trie [XShared IdInfo])
+                 -> Strict (Map ModuleName) (Trie (Strict [] (XShared IdInfo)))
                  -> ModuleName -> String
                  -> [IdInfo]
     autocomplete cache mapOfTries modName name =
         let name' = BSSC.pack name
             n     = last (BSSC.split '.' name')
         in filter (\idInfo -> name `isInfixOf` idInfoQN idInfo)
-             $ map (removeExplicitSharing cache)
-             . concat
+             $ concatMap (toLazyList . StrictList.map (removeExplicitSharing cache))
              . Trie.elems
              . Trie.submap n
              $ mapOfTries StrictMap.! modName
@@ -202,7 +202,7 @@ getAutocompletion = computedQuery $ \Computed{..} ->
 
 withIdleState :: IdeSession -> (IdeIdleState -> IO a) -> IO a
 withIdleState IdeSession{ideState} f =
-  $withMVar ideState $ \st ->
+  withMVar ideState $ \st ->
     case st of
       IdeSessionIdle      idleState -> f idleState
       IdeSessionRunning _ idleState -> f idleState
@@ -210,7 +210,7 @@ withIdleState IdeSession{ideState} f =
 
 withComputedState :: IdeSession -> (IdeIdleState -> Computed -> IO a) -> IO a
 withComputedState session f = withIdleState session $ \idleState ->
-  case idleState ^. ideComputed of
+  case toLazyMaybe (idleState ^. ideComputed) of
     Just computed -> f idleState computed
     Nothing       -> fail "This session state does not admit queries."
 

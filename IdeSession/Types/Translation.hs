@@ -10,9 +10,9 @@ import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.Map as Map
 import qualified Data.ByteString.Char8 as BSSC
 
+import IdeSession.Strict.Container
 import qualified IdeSession.Types.Public  as Public
 import qualified IdeSession.Types.Private as Private
-import qualified IdeSession.Strict.Maybe  as StrictMaybe
 import qualified IdeSession.Strict.IntMap as StrictIntMap
 import qualified IdeSession.Strict.Map    as StrictMap
 
@@ -71,7 +71,7 @@ instance ExplicitSharing Public.IdProp where
   removeExplicitSharing _cache Private.IdProp{..} = Public.IdProp {
       Public.idName  = idName
     , Public.idSpace = idSpace
-    , Public.idType  = StrictMaybe.toMaybe idType
+    , Public.idType  = toLazyMaybe idType
     }
 
 instance ExplicitSharing Public.IdInfo where
@@ -89,7 +89,7 @@ instance ExplicitSharing Public.ModuleId where
 instance ExplicitSharing Public.PackageId where
   removeExplicitSharing _cache Private.PackageId{..} = Public.PackageId {
       Public.packageName    = packageName
-    , Public.packageVersion = StrictMaybe.toMaybe packageVersion
+    , Public.packageVersion = toLazyMaybe packageVersion
     }
 
 instance ExplicitSharing Public.IdScope where
@@ -132,11 +132,11 @@ instance ExplicitSharing Public.SourceError where
 
 instance ExplicitSharing Public.IdMap where
   removeExplicitSharing cache = Public.IdMap
-                              . StrictMap.toMap
+                              . toLazyMap
                               . StrictMap.map (removeExplicitSharing cache)
                               . StrictMap.mapKeys (removeExplicitSharing cache)
                               . Private.idMapToMap
 
 instance ExplicitSharing Public.LoadedModules where
   removeExplicitSharing cache = Map.map (removeExplicitSharing cache)
-                              . StrictMap.toMap
+                              . toLazyMap

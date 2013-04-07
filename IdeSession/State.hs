@@ -30,12 +30,10 @@ module IdeSession.State
 
 -- TODOs:
 -- 1. StrictTrie instead of Trie
--- 2. StrictMVar instread of MVar
 
 import Data.Trie (Trie)
 import Data.Digest.Pure.MD5 (MD5Digest)
 import Data.Accessor (Accessor, accessor)
-import Control.Concurrent.MVar (MVar)
 import System.FilePath ((</>))
 import System.Posix.Types (EpochTime)
 
@@ -43,24 +41,25 @@ import IdeSession.Types.Private
 import IdeSession.Config
 import IdeSession.GHC.Server (RunActions, GhcServer)
 import IdeSession.GHC.Run (RunBufferMode)
-import IdeSession.Strict.Map (StrictMap)
+import IdeSession.Strict.Container
+import IdeSession.Strict.MVar (StrictMVar)
 
 data Computed = Computed {
     -- | Last compilation and run errors
-    computedErrors :: [SourceError]
+    computedErrors :: !(Strict [] SourceError)
     -- | Modules that got loaded okay together with their mappings
     -- from source locations to information about identifiers there
-  , computedLoadedModules :: LoadedModules
+  , computedLoadedModules :: !LoadedModules
     -- | Import information. This is (usually) available even for modules
     -- with parsing or type errors
-  , computedImports :: !(StrictMap ModuleName [Import])
+  , computedImports :: !(Strict (Map ModuleName) (Strict [] Import))
     -- | Autocompletion map
     --
     -- Mapping, per module, from prefixes to fully qualified names
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
-  , computedAutoMap :: !(StrictMap ModuleName (Trie [IdInfo]))
+  , computedAutoMap :: !(Strict (Map ModuleName) (Trie (Strict [] IdInfo)))
     -- | We access IdProps indirectly through this cache
   , computedCache :: !ExplicitSharingCache
   }
@@ -75,7 +74,7 @@ data Computed = Computed {
 --
 data IdeSession = IdeSession {
     ideStaticInfo :: IdeStaticInfo
-  , ideState      :: MVar IdeSessionState
+  , ideState      :: StrictMVar IdeSessionState
   }
 
 data IdeStaticInfo = IdeStaticInfo {
@@ -98,30 +97,30 @@ type LogicalTimestamp = EpochTime
 data IdeIdleState = IdeIdleState {
     -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7473.
     -- Logical timestamps (used to force ghc to recompile files)
-    _ideLogicalTimestamp :: LogicalTimestamp
+    _ideLogicalTimestamp :: !LogicalTimestamp
     -- The result computed by the last 'updateSession' invocation.
-  , _ideComputed         :: Maybe Computed
+  , _ideComputed         :: !(Strict Maybe Computed)
     -- Compiler dynamic options. If they are not set, the options from
     -- SessionConfig are used.
-  , _ideNewOpts          :: Maybe [String]
+  , _ideNewOpts          :: !(Maybe [String])
     -- Whether to generate code in addition to type-checking.
-  , _ideGenerateCode     :: Bool
+  , _ideGenerateCode     :: !Bool
     -- Files submitted by the user and not deleted yet.
-  , _ideManagedFiles     :: ManagedFilesInternal
+  , _ideManagedFiles     :: !ManagedFilesInternal
     -- Environment overrides
-  , _ideEnv              :: [(String, Maybe String)]
+  , _ideEnv              :: ![(String, Maybe String)]
     -- The GHC server (this is replaced in 'restartSession')
-  , _ideGhcServer        :: GhcServer
+  , _ideGhcServer        :: !GhcServer
     -- Buffer mode for standard output for 'runStmt'
-  , _ideStdoutBufferMode :: RunBufferMode
+  , _ideStdoutBufferMode :: !RunBufferMode
     -- Buffer mode for standard error for 'runStmt'
-  , _ideStderrBufferMode :: RunBufferMode
+  , _ideStderrBufferMode :: !RunBufferMode
     -- Has the environment (as recorded in this state) diverged from the
     -- environment on the server?
-  , _ideUpdatedEnv       :: Bool
+  , _ideUpdatedEnv       :: !Bool
     -- Has the code diverged from what has been loaded into GHC on the last
     -- call to 'updateSession'?
-  , _ideUpdatedCode      :: Bool
+  , _ideUpdatedCode      :: !Bool
   }
 
 -- | The collection of source and data files submitted by the user.
@@ -142,7 +141,7 @@ internalFile ideSourcesDir m = ideSourcesDir </> m
 ------------------------------------------------------------------------------}
 
 ideLogicalTimestamp :: Accessor IdeIdleState LogicalTimestamp
-ideComputed         :: Accessor IdeIdleState (Maybe Computed)
+ideComputed         :: Accessor IdeIdleState (Strict Maybe Computed)
 ideNewOpts          :: Accessor IdeIdleState (Maybe [String])
 ideGenerateCode     :: Accessor IdeIdleState Bool
 ideManagedFiles     :: Accessor IdeIdleState ManagedFilesInternal

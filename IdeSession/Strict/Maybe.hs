@@ -1,24 +1,20 @@
 {-# LANGUAGE TemplateHaskell, DeriveFunctor #-}
 -- | Version of maybe that is strict in its argument
 module IdeSession.Strict.Maybe (
-    StrictMaybe(..) -- Abstract
-  , toMaybe
-  , fromMaybe
+    nothing
+  , just
+  , maybe
   ) where
 
-import Prelude hiding (Nothing, Just)
-import qualified Prelude
-import Data.Aeson.TH (deriveJSON)
+import Prelude hiding (maybe)
+import IdeSession.Strict.Container
+import qualified Data.Maybe as Maybe
 
-data StrictMaybe a = Nothing | Just !a
-  deriving (Eq, Functor)
+nothing :: Strict Maybe a
+nothing = force $ Nothing
 
-$(deriveJSON id ''StrictMaybe)
+just :: a -> Strict Maybe a
+just = force . Just
 
-toMaybe :: StrictMaybe a -> Maybe a
-toMaybe Nothing  = Prelude.Nothing
-toMaybe (Just x) = Prelude.Just x
-
-fromMaybe :: Maybe a -> StrictMaybe a
-fromMaybe Prelude.Nothing  = Nothing
-fromMaybe (Prelude.Just x) = Just x
+maybe :: b -> (a -> b) -> Strict Maybe a -> b
+maybe x f =  Maybe.maybe x f . toLazyMaybe
