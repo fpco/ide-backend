@@ -29,8 +29,6 @@ module IdeSession.Query (
 
 import Data.List (isInfixOf)
 import Data.Accessor ((^.), getVal)
-import Data.Trie (Trie)
-import qualified Data.Trie as Trie
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
@@ -45,6 +43,7 @@ import IdeSession.GHC.Server (GhcServer)
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map  as StrictMap
 import qualified IdeSession.Strict.List as StrictList
+import qualified IdeSession.Strict.Trie as StrictTrie
 import IdeSession.Strict.MVar (withMVar)
 
 {------------------------------------------------------------------------------
@@ -184,7 +183,7 @@ getAutocompletion = computedQuery $ \Computed{..} ->
     autocomplete computedCache computedAutoMap
   where
     autocomplete :: ExplicitSharingCache
-                 -> Strict (Map ModuleName) (Trie (Strict [] (XShared IdInfo)))
+                 -> Strict (Map ModuleName) (Strict Trie (Strict [] (XShared IdInfo)))
                  -> ModuleName -> String
                  -> [IdInfo]
     autocomplete cache mapOfTries modName name =
@@ -192,8 +191,8 @@ getAutocompletion = computedQuery $ \Computed{..} ->
             n     = last (BSSC.split '.' name')
         in filter (\idInfo -> name `isInfixOf` idInfoQN idInfo)
              $ concatMap (toLazyList . StrictList.map (removeExplicitSharing cache))
-             . Trie.elems
-             . Trie.submap n
+             . StrictTrie.elems
+             . StrictTrie.submap n
              $ mapOfTries StrictMap.! modName
 
 {------------------------------------------------------------------------------

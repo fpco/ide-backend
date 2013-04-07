@@ -35,7 +35,6 @@ import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSS
-import Data.Trie (Trie)
 import qualified System.Directory as Dir
 import System.FilePath (takeDirectory, makeRelative, (</>))
 import System.Posix.Files (setFileTimes)
@@ -209,9 +208,9 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         -- from the RPC compilationi process.
         let usePrevious :: IdeIdleState
                         -> Strict (Map ModuleName) (Diff ( Strict [] Import
-                                                         , Trie (Strict [] IdInfo)))
+                                                         , Strict Trie (Strict [] IdInfo)))
                         -> ( Strict (Map ModuleName) (Strict [] Import)
-                           , Strict (Map ModuleName) (Trie (Strict [] IdInfo))
+                           , Strict (Map ModuleName) (Strict Trie (Strict [] IdInfo))
                            )
             usePrevious idleSt importsAuto =
               ( applyMapDiff (Map.map (fmap fst) importsAuto)

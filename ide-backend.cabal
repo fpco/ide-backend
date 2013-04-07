@@ -34,6 +34,7 @@ library
                       IdeSession.Strict.List,
                       IdeSession.Strict.Map,
                       IdeSession.Strict.Maybe,
+                      IdeSession.Strict.Trie,
                       IdeSession.Strict.MVar
   if impl(ghc == 7.4.*)
     other-modules:    IdeSession.GHC.MakeFixed

@@ -28,10 +28,6 @@ module IdeSession.State
   , managedData
   ) where
 
--- TODOs:
--- 1. StrictTrie instead of Trie
-
-import Data.Trie (Trie)
 import Data.Digest.Pure.MD5 (MD5Digest)
 import Data.Accessor (Accessor, accessor)
 import System.FilePath ((</>))
@@ -59,7 +55,7 @@ data Computed = Computed {
     -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
-  , computedAutoMap :: !(Strict (Map ModuleName) (Trie (Strict [] IdInfo)))
+  , computedAutoMap :: !(Strict (Map ModuleName) (Strict Trie (Strict [] IdInfo)))
     -- | We access IdProps indirectly through this cache
   , computedCache :: !ExplicitSharingCache
   }

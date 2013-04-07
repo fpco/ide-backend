@@ -39,8 +39,6 @@ import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import Data.IORef
 import System.Exit (ExitCode)
 import qualified Data.Set as Set
-import Data.Trie (Trie)
-import qualified Data.Trie.Convenience as Trie
 import qualified Data.Text as Text
 
 import System.Directory (doesFileExist)
@@ -63,6 +61,7 @@ import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map    as StrictMap
 import qualified IdeSession.Strict.IntMap as StrictIntMap
 import qualified IdeSession.Strict.List   as StrictList
+import qualified IdeSession.Strict.Trie   as StrictTrie
 
 import Paths_ide_backend
 
@@ -429,7 +428,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> IO ( Strict [] SourceError
                  , LoadedModules
                  , Strict (Map ModuleName) (Diff ( Strict [] Import
-                                                 , Trie (Strict [] IdInfo)
+                                                 , Strict Trie (Strict [] IdInfo)
                                                  ))
                  , ExplicitSharingCache
                  )
@@ -450,8 +449,8 @@ rpcCompile server opts dir genCode callback =
                            )
     go
 
-constructAuto :: ExplicitSharingCache -> Strict [] IdInfo -> Trie (Strict [] IdInfo)
-constructAuto cache lk = Trie.fromListWith (StrictList.++) $ map aux (toLazyList lk)
+constructAuto :: ExplicitSharingCache -> Strict [] IdInfo -> Strict Trie (Strict [] IdInfo)
+constructAuto cache lk = StrictTrie.fromListWith (StrictList.++) $ map aux (toLazyList lk)
   where
     aux :: IdInfo -> (BSS.ByteString, Strict [] IdInfo)
     aux idInfo@IdInfo{idProp = k} =
