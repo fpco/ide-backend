@@ -76,8 +76,7 @@ data GhcCompileResponse =
   | GhcCompileDone ( Strict [] SourceError
                    , LoadedModules
                    , Strict (Map ModuleName)
-                            (Diff ( Strict [] Import
-                                  , Strict [] IdInfo))
+                            (Diff (Strict [] Import, Strict [] IdInfo))
                    , ExplicitSharingCache
                    )
 data GhcRunResponse =
@@ -119,8 +118,6 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
   -- Set up references for the current session of Ghc monad computations.
-  -- TODOs: These should become StrictIORefs to that we don't build up
-  -- unnecessary thunks
   pluginRef      <- newIORef StrictMap.empty
   idMapRef       <- newIORef StrictMap.empty
   importsAutoRef <- newIORef StrictMap.empty
@@ -172,7 +169,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     (  errs          :: Strict [] SourceError
      , loadedModules :: [ModuleName]
      , importsAuto   :: Strict (Map ModuleName) ( Strict [] Import
-                                                  , Strict [] IdInfo)) <-
+                                                , Strict [] IdInfo )) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
@@ -182,14 +179,15 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
                                        (\_ -> return ()) -- TODO: log?
     cache <- liftIO $ constructExplicitSharingCache
 --    liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ (unlines $ map (showNormalized cache) errs)
-    -- Kyes of @pluginIdMaps@ are the modules changed in this GHC call.
+    -- Keys of @pluginIdMaps@ are the modules changed in this GHC call.
     pluginIdMaps <- liftIO $ readIORef pluginRef
     accIdMaps <- liftIO $ readIORef idMapRef
     let idMaps = pluginIdMaps `StrictMap.union` accIdMaps
         loadedModulesSet = Set.fromList loadedModules
         -- Filter out modules that got unloaded.
         filteredIdMaps =
-          StrictMap.filterWithKey (\k _ -> k `Set.member` loadedModulesSet) idMaps
+          StrictMap.filterWithKey (\k _ -> k `Set.member` loadedModulesSet)
+                                  idMaps
         filteredKeySet = StrictMap.keysSet filteredIdMaps
     liftIO $ writeIORef pluginRef StrictMap.empty
     liftIO $ writeIORef idMapRef filteredIdMaps
@@ -197,17 +195,13 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
     when (loadedModulesSet /= filteredKeySet) $ do
       error $ "ghcHandleCompile: loaded modules do not match id info maps: "
               ++ show (loadedModulesSet, filteredKeySet)
-    -- Compute and send only diffs (encoded as Maybes) of the map of imports
-    -- and autocompletion data. The data for a module does not need to be sent
+    -- Compute and send only diffs of the map of imports and
+    -- autocompletion data. The data for a module does not need to be sent
     -- if the imports of the module are unchanged (even if the module is)
     -- and the modules it imports are not recompiled. (It's not enough
     -- to determine that their exports are unchanged (which would be
     -- reasonably fast using @mi_exp_hash@) because the types
     -- could have changed and we send full idMaps, including types.)
-    -- Note that we really don't recompute the unneeded autocompletion
-    -- data, because it's generated in a lazy way and we don't force it
-    -- (we don't force unneeded elements of @currentImportsAuto@).
-    -- TODO: is the above comment still true/relevant now that we use strict types?
     previousImportsAuto <- liftIO $ readIORef importsAutoRef
     let changedModuleSet = StrictMap.keysSet pluginIdMaps
 
@@ -429,9 +423,10 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ( Strict [] SourceError
                  , LoadedModules
-                 , Strict (Map ModuleName) (Diff ( Strict [] Import
-                                                 , Strict Trie (Strict [] IdInfo)
-                                                 ))
+                 , Strict (Map ModuleName)
+                          (Diff ( Strict [] Import
+                                , Strict Trie (Strict [] IdInfo)
+                                ))
                  , ExplicitSharingCache
                  )
 rpcCompile server opts dir genCode callback =
@@ -451,13 +446,16 @@ rpcCompile server opts dir genCode callback =
                            )
     go
 
-constructAuto :: ExplicitSharingCache -> Strict [] IdInfo -> Strict Trie (Strict [] IdInfo)
-constructAuto cache lk = StrictTrie.fromListWith (StrictList.++) $ map aux (toLazyList lk)
+constructAuto :: ExplicitSharingCache -> Strict [] IdInfo
+              -> Strict Trie (Strict [] IdInfo)
+constructAuto cache lk =
+  StrictTrie.fromListWith (StrictList.++) $ map aux (toLazyList lk)
   where
     aux :: IdInfo -> (BSS.ByteString, Strict [] IdInfo)
     aux idInfo@IdInfo{idProp = k} =
       let idProp = idPropCache cache StrictIntMap.! idPropPtr k
-      in (BSSC.pack . Text.unpack . idName $ idProp, StrictList.singleton idInfo)
+      in ( BSSC.pack . Text.unpack . idName $ idProp
+         , StrictList.singleton idInfo )
 
 -- | Handles to the running code, through which one can interact with the code.
 data RunActions = RunActions {
