@@ -6,7 +6,10 @@
 -- | Implementation details of the calls to GHC that compute information
 -- based on source files, provides progress information while doing so
 -- and optionally compiles, links and executes code.
--- Only this file should import the GHC-internals modules.
+--
+-- Only @IdeSession.GHC.Run@ and @IdeSession.GHC.HsWalk@ should import
+-- any modules from the ghc package and the modules should not be reexported
+-- anywhere else, with the exception of @IdeSession.GHC.Server@.
 module IdeSession.GHC.Run
   ( -- * Re-expored GHC API
     Ghc

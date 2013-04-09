@@ -63,11 +63,8 @@ data IdProp = IdProp {
 
 -- TODO: Ideally, we would have
 -- 1. SourceSpan for Local rather than EitherSpan
--- 2. Don't have Maybe Text or Maybe Package in the import case
---    (under which circumstances do we not get package information? -- the unit
---    tests give us examples)
--- 3. SourceSpan for idImportSpan
--- 4. Have a idImportedFromPackage, but unfortunately ghc doesn't give us
+-- 2. SourceSpan for idImportSpan
+-- 3. Have a idImportedFromPackage, but unfortunately ghc doesn't give us
 --    this information (it's marked as a TODO in RdrName.lhs)
 data IdScope =
     -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
@@ -172,8 +169,6 @@ instance Show IdProp where
     ++ "(" ++ show idSpace ++ ")"
     ++ (case idType of Just typ -> " :: " ++ Text.unpack typ; Nothing -> [])
 
--- TODO: If these Maybes stay, we should have a prettier Show instance
--- (but hopefully they will go)
 instance Show IdScope where
   show Binder          = "binding occurrence"
   show (Local {..})    = "defined at " ++ show idDefSpan
@@ -270,4 +265,3 @@ idInfoAtLocation line col = filter inRange . idMapToList
       (line   > spanFromLine || (line == spanFromLine && col >= spanFromColumn)) &&
       (line   < spanToLine   || (line == spanToLine   && col <= spanToColumn))
 -}
-

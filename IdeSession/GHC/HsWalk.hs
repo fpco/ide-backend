@@ -1,6 +1,12 @@
 {-# LANGUAGE CPP, DeriveDataTypeable, FlexibleInstances,
              GeneralizedNewtypeDeriving, MultiParamTypeClasses, TemplateHaskell,
              TypeSynonymInstances, ScopedTypeVariables #-}
+-- | A few specialized walks over the Haskell AST. Heavily depends
+-- on the GHC patches.
+--
+-- Only @IdeSession.GHC.Run@ and @IdeSession.GHC.HsWalk@ should import
+-- any modules from the ghc package and the modules should not be reexported
+-- anywhere else, with the exception of @IdeSession.GHC.Server@.
 module IdeSession.GHC.HsWalk
   ( extractIdsPlugin
   , extractSourceSpan
