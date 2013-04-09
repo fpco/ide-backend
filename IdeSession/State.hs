@@ -35,8 +35,7 @@ import System.Posix.Types (EpochTime)
 
 import IdeSession.Types.Private
 import IdeSession.Config
-import IdeSession.GHC.Server (RunActions, GhcServer)
-import IdeSession.GHC.Run (RunBufferMode)
+import IdeSession.GHC.Server (RunActions, GhcServer, RunBufferMode)
 import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
 

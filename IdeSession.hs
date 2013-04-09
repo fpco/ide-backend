@@ -195,4 +195,3 @@ import IdeSession.Types.Private (ExplicitSharingCache)
 import IdeSession.Types.Translation
 import IdeSession.Types.Progress
 import IdeSession.GHC.Server
-import IdeSession.GHC.Run (RunResult(..), RunBufferMode(..))

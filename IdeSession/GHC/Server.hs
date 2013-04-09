@@ -1,11 +1,11 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 -- | Implementation of the server that controls the long-running GHC instance.
--- This is the place where the GHC-specific part joins the part
--- implementing the general RPC infrastructure.
+-- This is the place where the GHC-specific part joins the parts
+-- implementing the general RPC infrastructure and session management.
 --
 -- The modules importing any GHC internals, as well as the modules
--- implementing the  RPC infrastructure, should be accessible to the rest
--- of the program only indirectly, through the @GhcServer@ module.
+-- implementing the RPC infrastructure, should be accessible to the rest
+-- of the program only indirectly, through @IdeSession.GHC.Server@.
 module IdeSession.GHC.Server
   ( -- * A handle to the server
     GhcServer
@@ -22,6 +22,8 @@ module IdeSession.GHC.Server
   , shutdownGhcServer
   , forceShutdownGhcServer
   , getGhcExitCode
+  , RunResult(..)
+  , RunBufferMode(..)
   ) where
 
 import Control.Arrow (second)

@@ -43,7 +43,6 @@ import qualified Data.Text as Text
 
 import IdeSession.State
 import IdeSession.Config
-import IdeSession.GHC.Run (RunBufferMode(..), RunResult(..))
 import IdeSession.GHC.Server
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
