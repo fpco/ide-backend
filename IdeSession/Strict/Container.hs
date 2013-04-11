@@ -30,7 +30,7 @@ class StrictContainer t where
 instance StrictContainer IntMap where
   newtype Strict IntMap v = StrictIntMap { toLazyIntMap :: IntMap v }
 
-  force m = IntMap.foldr' seq () m `seq` StrictIntMap m
+  force m = IntMap.foldl' (flip seq) () m `seq` StrictIntMap m
   project = toLazyIntMap
 
 instance FromJSON v => FromJSON (Strict IntMap v) where
@@ -63,7 +63,7 @@ instance ToJSON a => ToJSON (Strict [] a) where
 instance StrictContainer (Map k) where
   newtype Strict (Map k) v = StrictMap { toLazyMap :: Map k v }
 
-  force m = Map.foldr' seq () m `seq` StrictMap m
+  force m = Map.foldl' (flip seq) () m `seq` StrictMap m
   project = toLazyMap
 
 instance (Ord k, FromJSON k, FromJSON v) => FromJSON (Strict (Map k) v) where
@@ -101,5 +101,5 @@ instance Functor (Strict Maybe) where
 instance StrictContainer Trie where
   newtype Strict Trie a = StrictTrie { toLazyTrie :: Trie a }
 
-  force m = Foldable.foldr seq () m `seq` StrictTrie m
+  force m = Foldable.foldl (flip seq) () m `seq` StrictTrie m
   project = toLazyTrie
