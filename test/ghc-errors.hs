@@ -63,16 +63,20 @@ loadModulesFrom session originalSourcesDir = do
 
 -- | Run the specified action with a new IDE session, configured to use a
 -- temporary directory
-withConfiguredSession :: [String] -> (IdeSession -> IO a) -> IO a
-withConfiguredSession opts io = do
+withConfiguredSessionModInfo :: Bool -> [String] -> (IdeSession -> IO a)
+                             -> IO a
+withConfiguredSessionModInfo configGenerateModInfo opts io = do
   slashTmp <- getTemporaryDirectory
   withTempDirectory slashTmp "ide-backend-test." $ \configDir -> do
     let sessionConfig = SessionConfig{ configDir
                                      , configStaticOpts = opts
                                      , configInProcess  = False
-                                     , configGenerateModInfo = True
+                                     , configGenerateModInfo
                                      }
     withSession sessionConfig io
+
+withConfiguredSession :: [String] -> (IdeSession -> IO a) -> IO a
+withConfiguredSession = withConfiguredSessionModInfo True
 
 -- | Run the specified action with a new IDE session
 withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
@@ -2000,18 +2004,19 @@ projects =
 -- Driver
 tests :: [Test]
 tests =
-  let groupProject ((featureName, check), k) =
-        testGroup featureName $ map (caseFeature featureName check k) projects
-      caseFeature featureName check k
+  let groupProject genModInfo ((featureName, check), k) =
+        testGroup featureName
+        $ map (caseFeature genModInfo featureName check k) projects
+      caseFeature genModInfo featureName check k
                   (projectName, originalSourcesDir, opts) = do
         let caseName = projectName ++ " (" ++ show k ++ ")"
         testCase caseName $ do
           debug dVerbosity $ featureName ++ " / " ++ caseName ++ ":"
-          withConfiguredSession opts $ \session -> do
+          withConfiguredSessionModInfo genModInfo opts $ \session -> do
             (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
             check session originalUpdate lm
   in [ testGroup "Full integration tests on multiple projects"
-       $ map groupProject $ zip multipleTests [1 :: Int ..]
+       $ map (groupProject False) $ zip multipleTests [1 :: Int ..]
      , testGroup "Synthetic integration tests"
        $ map (uncurry testCase) syntheticTests
      ]
