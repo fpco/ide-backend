@@ -365,14 +365,15 @@ updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ ->
 -- The function resembles a query, but it's not instantaneous
 -- and the running code can be interrupted or interacted with.
 runStmt :: IdeSession -> String -> String -> IO RunActions
-runStmt IdeSession{ideState} m fun = do
+runStmt IdeSession{ideStaticInfo, ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
     IdeSessionIdle idleState ->
      case (toLazyMaybe (idleState ^. ideComputed), idleState ^. ideGenerateCode) of
        (Just comp, True) ->
           -- ideManagedFiles is irrelevant, because only the module name
           -- inside 'module .. where' counts.
-          if Text.pack m `Map.member` computedLoadedModules comp
+          if not configGenerateModInfo
+             || Text.pack m `Map.member` computedLoadedModules comp
           then do
             runActions <- rpcRun (idleState ^. ideGhcServer)
                                  m fun
@@ -402,3 +403,4 @@ runStmt IdeSession{ideState} m fun = do
         return $ IdeSessionIdle idleState
       IdeSessionShutdown ->
         return state
+    SessionConfig{configGenerateModInfo} = ideConfig ideStaticInfo
