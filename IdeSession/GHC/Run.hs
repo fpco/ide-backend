@@ -190,7 +190,8 @@ invalidateModSummaryCache =
 
 compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this call
-             -> Bool                -- ^ whether to generate code
+             -> Bool                -- ^ should we generate code
+             -> Bool                -- ^ should we generate per-module info
              -> Int                 -- ^ verbosity level
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
@@ -202,7 +203,7 @@ compileInGhc :: FilePath            -- ^ target directory
                                               )
                     )
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
-             generateCode verbosity
+             generateCode generateModInfo verbosity
              errsRef handlerOutput handlerRemaining = do
     -- Reset errors storage.
     liftIO $ writeIORef errsRef StrictList.nil
@@ -261,7 +262,10 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     graph   <- getModuleGraph
     errs   <- liftIO $ readIORef errsRef
     loaded <- filterM isLoaded (map ms_mod_name graph)
-    importsAuto <- liftIO $ extractImportsAuto flags session graph
+    importsAuto <-
+      if generateModInfo
+      then liftIO $ extractImportsAuto flags session graph
+      else return StrictMap.empty
     return ( StrictList.reverse errs
            , map (Text.pack . moduleNameString) loaded
            , importsAuto

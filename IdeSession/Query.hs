@@ -221,4 +221,3 @@ simpleQuery f session = withIdleState session $ return . f
 
 computedQuery :: (Computed -> a) -> Query a
 computedQuery f session = withComputedState session $ const (return . f)
-

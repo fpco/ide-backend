@@ -32,7 +32,7 @@ import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
 import qualified Control.Exception as Ex
-import Control.Monad (forM_, forever, unless, when)
+import Control.Monad (void, forM_, forever, unless, when)
 import Data.Aeson (decode', encode)
 import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
@@ -106,15 +106,16 @@ conversation (InProcess conv _)  = ($ conv)
 -- | Start the RPC server. Used from within the server executable.
 ghcServer :: [String] -> IO ()
 ghcServer fdsAndOpts = do
-  let (opts, markerAndFds) = span (/= "--ghc-opts-end") fdsAndOpts
-  rpcServer (tail markerAndFds) (ghcServerEngine opts)
+  let (opts, "--ghc-opts-end" : configGenerateModInfo : fds) =
+        span (/= "--ghc-opts-end") fdsAndOpts
+  rpcServer fds (ghcServerEngine (read configGenerateModInfo) opts)
 
 -- | The GHC server engine proper.
 --
 -- This function runs in end endless loop inside the @Ghc@ monad, making
 -- incremental compilation possible.
-ghcServerEngine :: [String] -> RpcConversation -> IO ()
-ghcServerEngine staticOpts conv@RpcConversation{..} = do
+ghcServerEngine :: Bool -> [String] -> RpcConversation -> IO ()
+ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
   -- Set up references for the current session of Ghc monad computations.
@@ -124,12 +125,13 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
-    -- Initialize the dynamic flags
-    dynFlags <- getSessionDynFlags
-    let dynFlags' = dynFlags {
-          sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins dynFlags
-        }
-    setSessionDynFlags dynFlags'
+    when configGenerateModInfo $ do
+      -- Register our plugin in dynamic flags.
+      dynFlags <- getSessionDynFlags
+      let dynFlags' = dynFlags {
+            sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins dynFlags
+          }
+      void $ setSessionDynFlags dynFlags'
 
     -- Start handling RPC calls
     forever $ do
@@ -137,7 +139,8 @@ ghcServerEngine staticOpts conv@RpcConversation{..} = do
       case req of
         ReqCompile opts dir genCode ->
           ghcHandleCompile
-            conv dOpts opts pluginRef idMapRef importsAutoRef dir genCode
+            conv dOpts opts pluginRef idMapRef importsAutoRef dir
+            genCode configGenerateModInfo
         ReqRun m fun outBMode errBMode ->
           ghcHandleRun conv m fun outBMode errBMode
         ReqSetEnv env ->
@@ -161,9 +164,11 @@ ghcHandleCompile :: RpcConversation
                                         -- ^ ref for previous imports and auto
                  -> FilePath            -- ^ source directory
                  -> Bool                -- ^ should we generate code
+                 -> Bool                -- ^ should we generate per-module info
                  -> Ghc ()
-ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
-                 importsAutoRef configSourcesDir ideGenerateCode = do
+ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
+                 pluginRef idMapRef importsAutoRef configSourcesDir
+                 ideGenerateCode configGenerateModInfo = do
     errsRef <- liftIO $ newIORef StrictList.nil
     counter <- liftIO $ newIORef initialProgress
     (  errs          :: Strict [] SourceError
@@ -173,58 +178,64 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts pluginRef idMapRef
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
+                                       configGenerateModInfo
                                        verbosity
                                        errsRef
                                        (progressCallback counter)
                                        (\_ -> return ()) -- TODO: log?
+    (filteredIdMaps, diffMap) <-
+      if not configGenerateModInfo
+      then return (StrictMap.empty, StrictMap.empty)
+      else do
+        -- Keys of @pluginIdMaps@ are the modules changed in this GHC call.
+        pluginIdMaps <- liftIO $ readIORef pluginRef
+        accIdMaps <- liftIO $ readIORef idMapRef
+        let idMaps = pluginIdMaps `StrictMap.union` accIdMaps
+            loadedModulesSet = Set.fromList loadedModules
+            -- Filter out modules that got unloaded.
+            filteredIdMaps =
+              StrictMap.filterWithKey (\k _ -> k `Set.member` loadedModulesSet)
+                                      idMaps
+            filteredKeySet = StrictMap.keysSet filteredIdMaps
+        liftIO $ writeIORef pluginRef StrictMap.empty
+        liftIO $ writeIORef idMapRef filteredIdMaps
+        -- Verify the plugin and @compileInGhc@ agree on which modules are loaded.
+        when (loadedModulesSet /= filteredKeySet) $ do
+          error $ "ghcHandleCompile: loaded modules do not match id info maps: "
+                  ++ show (loadedModulesSet, filteredKeySet)
+        -- Compute and send only diffs of the map of imports and
+        -- autocompletion data. The data for a module does not need to be sent
+        -- if the imports of the module are unchanged (even if the module is)
+        -- and the modules it imports are not recompiled. (It's not enough
+        -- to determine that their exports are unchanged (which would be
+        -- reasonably fast using @mi_exp_hash@) because the types
+        -- could have changed and we send full idMaps, including types.)
+        previousImportsAuto <- liftIO $ readIORef importsAutoRef
+        let changedModuleSet = StrictMap.keysSet pluginIdMaps
+
+            diff :: ModuleName
+                 -> (Strict [] Import, Strict [] IdInfo)
+                 -> Diff (Strict [] Import, Strict [] IdInfo)
+            diff m ia = case StrictMap.lookup m previousImportsAuto of
+                Nothing -> Insert ia
+                Just iaOld
+                  | m `Set.member` changedModuleSet && fst iaOld /= fst ia
+                        -> Insert ia
+                  | StrictList.any (`Set.member` changedModuleSet) imports
+                        -> Insert ia
+                  | otherwise
+                        -> Keep
+              where
+                imports = StrictList.map importModule $ fst ia
+
+            removedModules = previousImportsAuto StrictMap.\\ importsAuto
+            diffMap = StrictMap.mapWithKey diff importsAuto
+                      `StrictMap.union` StrictMap.map (const Remove) removedModules
+        liftIO $ writeIORef importsAutoRef
+               $ applyMapDiff diffMap previousImportsAuto
+        return (filteredIdMaps, diffMap)
     cache <- liftIO $ constructExplicitSharingCache
 --    liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ (unlines $ map (showNormalized cache) errs)
-    -- Keys of @pluginIdMaps@ are the modules changed in this GHC call.
-    pluginIdMaps <- liftIO $ readIORef pluginRef
-    accIdMaps <- liftIO $ readIORef idMapRef
-    let idMaps = pluginIdMaps `StrictMap.union` accIdMaps
-        loadedModulesSet = Set.fromList loadedModules
-        -- Filter out modules that got unloaded.
-        filteredIdMaps =
-          StrictMap.filterWithKey (\k _ -> k `Set.member` loadedModulesSet)
-                                  idMaps
-        filteredKeySet = StrictMap.keysSet filteredIdMaps
-    liftIO $ writeIORef pluginRef StrictMap.empty
-    liftIO $ writeIORef idMapRef filteredIdMaps
-    -- Verify the plugin and @compileInGhc@ agree on which modules are loaded.
-    when (loadedModulesSet /= filteredKeySet) $ do
-      error $ "ghcHandleCompile: loaded modules do not match id info maps: "
-              ++ show (loadedModulesSet, filteredKeySet)
-    -- Compute and send only diffs of the map of imports and
-    -- autocompletion data. The data for a module does not need to be sent
-    -- if the imports of the module are unchanged (even if the module is)
-    -- and the modules it imports are not recompiled. (It's not enough
-    -- to determine that their exports are unchanged (which would be
-    -- reasonably fast using @mi_exp_hash@) because the types
-    -- could have changed and we send full idMaps, including types.)
-    previousImportsAuto <- liftIO $ readIORef importsAutoRef
-    let changedModuleSet = StrictMap.keysSet pluginIdMaps
-
-        diff :: ModuleName
-             -> (Strict [] Import, Strict [] IdInfo)
-             -> Diff (Strict [] Import, Strict [] IdInfo)
-        diff m ia = case StrictMap.lookup m previousImportsAuto of
-            Nothing -> Insert ia
-            Just iaOld
-              | m `Set.member` changedModuleSet && fst iaOld /= fst ia
-                    -> Insert ia
-              | StrictList.any (`Set.member` changedModuleSet) imports
-                    -> Insert ia
-              | otherwise
-                    -> Keep
-          where
-            imports = StrictList.map importModule $ fst ia
-
-        removedModules = previousImportsAuto StrictMap.\\ importsAuto
-        diffMap = StrictMap.mapWithKey diff importsAuto
-                  `StrictMap.union` StrictMap.map (const Remove) removedModules
-    liftIO $ writeIORef importsAutoRef
-           $ applyMapDiff diffMap previousImportsAuto
     -- Ship the results.
     liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, diffMap, cache)
   where
@@ -390,8 +401,8 @@ setupEnv env = forM_ env $ \(var, mVal) ->
 
 type InProcess = Bool
 
-forkGhcServer :: [String] -> Maybe String -> InProcess -> IO GhcServer
-forkGhcServer opts workingDir False = do
+forkGhcServer :: Bool -> [String] -> Maybe String -> InProcess -> IO GhcServer
+forkGhcServer configGenerateModInfo opts workingDir False = do
   bindir <- getBinDir
   let prog = bindir </> "ide-backend-server"
 
@@ -400,9 +411,12 @@ forkGhcServer opts workingDir False = do
     fail $ "The 'ide-backend-server' program was expected to "
         ++ "be at location " ++ prog ++ " but it is not."
 
-  server <- forkRpcServer prog (opts ++ ["--ghc-opts-end"]) workingDir
+  server <- forkRpcServer prog
+                          (opts ++ [ "--ghc-opts-end"
+                                   , show configGenerateModInfo ])
+                          workingDir
   return (OutProcess server)
-forkGhcServer opts workingDir True = do
+forkGhcServer configGenerateModInfo opts workingDir True = do
   let conv a b = RpcConversation {
                    get = do bs <- $readChan a
                             case decode' bs of
@@ -412,7 +426,7 @@ forkGhcServer opts workingDir True = do
                  }
   a   <- newChan
   b   <- newChan
-  tid <- forkIO $ ghcServerEngine opts (conv a b)
+  tid <- forkIO $ ghcServerEngine configGenerateModInfo opts (conv a b)
   return $ InProcess (conv b a) tid
 
 -- | Compile or typecheck

@@ -70,6 +70,7 @@ withConfiguredSession opts io = do
     let sessionConfig = SessionConfig{ configDir
                                      , configStaticOpts = opts
                                      , configInProcess  = False
+                                     , configGenerateModInfo = True
                                      }
     withSession sessionConfig io
 
@@ -1104,6 +1105,7 @@ syntheticTests =
            let sessionConfig = SessionConfig{ configDir        = relativePath
                                             , configStaticOpts = defOpts
                                             , configInProcess  = False
+                                            , configGenerateModInfo = True
                                             }
            withSession sessionConfig $ \session -> do
              let upd = (updateCodeGeneration True)

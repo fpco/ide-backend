@@ -60,12 +60,12 @@ import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_)
 -- | Create a fresh session, using some initial configuration.
 --
 initSession :: SessionConfig -> IO IdeSession
-initSession ideConfig'@SessionConfig{configStaticOpts,configInProcess} = do
-  configDir <- Dir.canonicalizePath $ configDir ideConfig'
+initSession SessionConfig{..} = do
+  configDirCanon <- Dir.canonicalizePath configDir
   let ideConfig = SessionConfig {..}
-  ideSourcesDir <- createTempDirectory configDir "src."
-  ideDataDir    <- createTempDirectory configDir "data."
-  _ideGhcServer <- forkGhcServer configStaticOpts (Just ideDataDir) configInProcess
+  ideSourcesDir <- createTempDirectory configDirCanon "src."
+  ideDataDir    <- createTempDirectory configDirCanon "data."
+  _ideGhcServer <- forkGhcServer configGenerateModInfo configStaticOpts (Just ideDataDir) configInProcess
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
   -- a workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
@@ -153,7 +153,9 @@ restartSession IdeSession{ideStaticInfo, ideState} = do
     restart :: IdeIdleState -> IO IdeSessionState
     restart idleState = do
       forceShutdownGhcServer $ _ideGhcServer idleState
-      server <- forkGhcServer opts workingDir (configInProcess config)
+      server <-
+        forkGhcServer
+          configGenerateModInfo configStaticOpts workingDir configInProcess
       return . IdeSessionIdle
              . (ideComputed    ^= Maybe.nothing)
              . (ideUpdatedEnv  ^= True)
@@ -162,8 +164,7 @@ restartSession IdeSession{ideStaticInfo, ideState} = do
              $ idleState
 
     workingDir = Just (ideDataDir ideStaticInfo)
-    config     = ideConfig ideStaticInfo
-    opts       = configStaticOpts config
+    SessionConfig{..} = ideConfig ideStaticInfo
 
 {------------------------------------------------------------------------------
   Session updates

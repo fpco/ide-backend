@@ -15,5 +15,6 @@ data SessionConfig = SessionConfig {
   , configStaticOpts :: [String]
     -- | Should the GHC client run in-process?
   , configInProcess  :: InProcess
+    -- Whether to generate module type/autocompletion info.
+  , configGenerateModInfo :: Bool
   }
-
