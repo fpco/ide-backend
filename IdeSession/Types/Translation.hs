@@ -3,6 +3,7 @@
 module IdeSession.Types.Translation (
     XShared
   , ExplicitSharing(..)
+  , IntroduceSharing(..)
   , showNormalized
   ) where
 
@@ -43,6 +44,10 @@ type instance MShared Private.IdMap         = Public.IdMap
 type instance MShared Private.LoadedModules = Public.LoadedModules
 type instance MShared Private.ModuleId      = Public.ModuleId
 type instance MShared Private.PackageId     = Public.PackageId
+
+{------------------------------------------------------------------------------
+  Removing explicit sharing
+------------------------------------------------------------------------------}
 
 -- | Many of the public data types that we export in "IdeSession" have a
 -- corresponding private @XShared@ version. For instance, we have @IdProp@ and
@@ -140,3 +145,28 @@ instance ExplicitSharing Public.IdMap where
 instance ExplicitSharing Public.LoadedModules where
   removeExplicitSharing cache = Map.map (removeExplicitSharing cache)
                               . toLazyMap
+
+{------------------------------------------------------------------------------
+  Introducing explicit sharing
+------------------------------------------------------------------------------}
+
+-- | Introduce explicit sharing
+--
+-- This provides the opposite translation to removeExplicitSharing. Note however
+-- that this is a partial function -- we never extend the cache, so if a
+-- required value is missing from the cache we return @Nothing@.
+class IntroduceSharing a where
+  introduceExplicitSharing :: Private.ExplicitSharingCache -> a -> Maybe (XShared a)
+
+instance IntroduceSharing Public.SourceSpan where
+  introduceExplicitSharing cache Public.SourceSpan{..} = do
+    ptr <- StrictIntMap.reverseLookup (Private.filePathCache cache)
+                                      (BSSC.pack spanFilePath)
+    return Private.SourceSpan {
+        Private.spanFilePath   = Private.FilePathPtr ptr
+      , Private.spanFromLine   = spanFromLine
+      , Private.spanFromColumn = spanFromColumn
+      , Private.spanToLine     = spanToLine
+      , Private.spanToColumn   = spanToColumn
+      }
+

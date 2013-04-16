@@ -94,8 +94,6 @@ check opts what configDir = do
       update = mconcat (map updateModuleFromFile modules)
 
   updateSession session update displayCounter
-  errs  <- getSourceErrors session
-  cache <- getExplicitSharingCache session
-  let errs' = map (removeExplicitSharing cache) errs
-  putStrLn $ "\nErrors and warnings:\n" ++ unlines (map show errs')
+  errs <- getSourceErrors session
+  putStrLn $ "\nErrors and warnings:\n" ++ unlines (map show errs)
   shutdownSession session

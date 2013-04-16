@@ -11,10 +11,13 @@ module IdeSession.Strict.IntMap (
   , adjust
   , insertWith
   , map
+  , reverseLookup
   ) where
 
 import Prelude hiding (map)
+import Data.Tuple (swap)
 import qualified Data.IntMap as IntMap
+import qualified Data.List as List
 
 import IdeSession.Strict.Container
 
@@ -43,3 +46,7 @@ insertWith f i v = StrictIntMap . IntMap.insertWith' f i v . toLazyIntMap
 
 map :: (a -> b) -> Strict IntMap a -> Strict IntMap b
 map f = force . IntMap.map f . toLazyIntMap
+
+-- O(n)
+reverseLookup :: Eq v => Strict IntMap v -> v -> Maybe Int
+reverseLookup m v = lookup v $ List.map swap $ toList m

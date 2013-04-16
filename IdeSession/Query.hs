@@ -22,11 +22,14 @@ module IdeSession.Query (
     -- * Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
-  , getExplicitSharingCache
+  , getIdInfo
   , getImports
   , getAutocompletion
+    -- * Debugging (internal use only)
+  , dumpIdInfo
   ) where
 
+import Prelude hiding (mod, span)
 import Data.List (isInfixOf)
 import Data.Accessor ((^.), getVal)
 import qualified System.FilePath.Find as Find
@@ -38,7 +41,7 @@ import IdeSession.Config
 import IdeSession.State
 import IdeSession.Types.Translation
 import IdeSession.Types.Public
-import IdeSession.Types.Private (ExplicitSharingCache)
+import qualified IdeSession.Types.Private as Private
 import IdeSession.GHC.Server (GhcServer)
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map  as StrictMap
@@ -144,44 +147,36 @@ getManagedFiles = simpleQuery $ translate . getVal ideManagedFiles
 -- getSourceErrors does internal normalization. This simplifies the life of the
 -- client and anyway there shouldn't be that many soruce errors that it really
 -- makes a big difference.
-getSourceErrors :: Query [XShared SourceError]
-getSourceErrors = computedQuery $ toLazyList . computedErrors
+getSourceErrors :: Query [SourceError]
+getSourceErrors = computedQuery $ \Computed{..} ->
+  toLazyList $ StrictList.map (removeExplicitSharing computedCache) computedErrors
 
--- | Get the list of correctly compiled modules, as reported by the compiler,
--- together with a mapping from symbol uses to symbol info.
--- That is, given a symbol used at a particular location in a source module
--- the mapping tells us where that symbol is defined, either locally in a
--- source module or a top-level symbol imported from another package,
--- what is the type of this symbol and some more information.
--- This information lets us, e.g, construct Haddock URLs for symbols,
--- like @parallel-3.2.0.3/Control-Parallel.html#v:pseq@.
-getLoadedModules :: Query (XShared LoadedModules)
-getLoadedModules = computedQuery computedLoadedModules
+-- | Get the list of correctly compiled modules, as reported by the compiler
+getLoadedModules :: Query [ModuleName]
+getLoadedModules = computedQuery $ \Computed{..} ->
+  StrictMap.keys $ computedLoadedModules
 
--- | The cache necessary to resolve explicit sharing
--- (i.e., to translate from @XShared Foo@ to @Foo@)
-getExplicitSharingCache :: Query ExplicitSharingCache
-getExplicitSharingCache = computedQuery computedCache
+-- | Get information about an identifier at a specific location
+getIdInfo :: Query (ModuleName -> SourceSpan -> Maybe IdInfo)
+getIdInfo = computedQuery $ \Computed{..} mod span -> do
+  span'  <- introduceExplicitSharing computedCache span
+  idMap  <- StrictMap.lookup mod computedLoadedModules
+  idInfo <- StrictMap.lookup span' (Private.idMapToMap idMap)
+  return (removeExplicitSharing computedCache idInfo)
 
 -- | Get import information
 --
 -- This information is available even for modules with parse/type errors
-getImports :: Query (Map ModuleName [Import])
-getImports = computedQuery $ toLazyMap
-                           . StrictMap.map toLazyList
-                           . computedImports
+getImports :: Query (ModuleName -> Maybe [Import])
+getImports = computedQuery $ \Computed{..} mod ->
+  fmap toLazyList $ StrictMap.lookup mod computedImports
 
 -- | Autocompletion
---
--- TODO: At the moment, this returns a function with internally does
--- normalization.  Hence, this is not useful for explicit sharing. If the
--- autocompletion info needs to be shipped, we need to change this to a list
--- and avoid normalization here.
 getAutocompletion :: Query (ModuleName -> String -> [IdInfo])
 getAutocompletion = computedQuery $ \Computed{..} ->
     autocomplete computedCache computedAutoMap
   where
-    autocomplete :: ExplicitSharingCache
+    autocomplete :: Private.ExplicitSharingCache
                  -> Strict (Map ModuleName) (Strict Trie (Strict [] (XShared IdInfo)))
                  -> ModuleName -> String
                  -> [IdInfo]
@@ -193,6 +188,14 @@ getAutocompletion = computedQuery $ \Computed{..} ->
              . StrictTrie.elems
              . StrictTrie.submap n
              $ mapOfTries StrictMap.! modName
+
+{------------------------------------------------------------------------------
+  Debugging
+------------------------------------------------------------------------------}
+
+dumpIdInfo :: IdeSession -> IO ()
+dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
+  print (removeExplicitSharing computedCache computedLoadedModules)
 
 {------------------------------------------------------------------------------
   Auxiliary
