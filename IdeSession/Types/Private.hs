@@ -21,10 +21,12 @@ module IdeSession.Types.Private (
   , Public.Import(..)
     -- * Cache
   , ExplicitSharingCache(..)
+    -- * Util
+  , unlocatedSourceError
   ) where
 
-import Prelude (Eq, Ord, Int, id, (.), fmap)
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.ByteString (ByteString)
 import Data.Aeson.TH (deriveJSON)
 
@@ -140,3 +142,13 @@ $(deriveJSON id ''PackageId)
 $(deriveJSON id ''IdProp)
 $(deriveJSON id ''IdMap)
 $(deriveJSON id ''ExplicitSharingCache)
+
+{------------------------------------------------------------------------------
+  Util
+------------------------------------------------------------------------------}
+
+unlocatedSourceError :: String -> SourceError
+unlocatedSourceError str =
+  SourceError Public.KindError
+              (TextSpan (Text.pack "No location info"))
+              (Text.pack str)

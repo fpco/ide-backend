@@ -177,10 +177,11 @@ module IdeSession (
 --, idInfoAtLocation
   , haddockLink
     -- * Types with explicit sharing (abstract)
-  , ExplicitSharingCache
+  , Private.ExplicitSharingCache
   , XShared
   , ExplicitSharing(..)
   , showNormalized
+  , unlocatedSourceError
   -- * For internal use only
   , ghcServer
   , getGhcExitCode
@@ -191,7 +192,15 @@ import IdeSession.Update
 import IdeSession.Query
 import IdeSession.State (IdeSession)
 import IdeSession.Types.Public
-import IdeSession.Types.Private (ExplicitSharingCache)
+import qualified IdeSession.Types.Private as Private
 import IdeSession.Types.Translation
 import IdeSession.Types.Progress
 import IdeSession.GHC.Server
+
+{------------------------------------------------------------------------------
+  Redefinitions with different types
+------------------------------------------------------------------------------}
+
+-- | Create a source error (error, not warning) without a location
+unlocatedSourceError :: String -> XShared SourceError
+unlocatedSourceError = Private.unlocatedSourceError
