@@ -144,9 +144,8 @@ getManagedFiles = simpleQuery $ translate . getVal ideManagedFiles
 -- getSourceErrors does internal normalization. This simplifies the life of the
 -- client and anyway there shouldn't be that many soruce errors that it really
 -- makes a big difference.
-getSourceErrors :: Query [SourceError]
-getSourceErrors = computedQuery $ \Computed{..} ->
-  toLazyList $ StrictList.map (removeExplicitSharing computedCache) computedErrors
+getSourceErrors :: Query [XShared SourceError]
+getSourceErrors = computedQuery $ toLazyList . computedErrors
 
 -- | Get the list of correctly compiled modules, as reported by the compiler,
 -- together with a mapping from symbol uses to symbol info.

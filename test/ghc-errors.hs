@@ -100,20 +100,13 @@ multipleTests =
   [ ( "Overwrite with error"
     , \session originalUpdate lm -> do
         updateSessionD session originalUpdate (length lm)
-        msgs <- getSourceErrors session
         -- No errors in the original test code.
-        assertNoErrors msgs
+        assertNoErrors session
         -- Overwrite one of the copied files.
         (_, ms) <- getModules session
         let update = loadModule (head ms) "a = unknownX"
         updateSessionD session update 1  -- at most 1 recompiled
-        msgs2 <- getSourceErrors session
-        -- Error reported due to the overwrite.
-        case msgs2 of
-          [SourceError _ _ msg] ->
-            assertEqual "" "Not in scope: `unknownX'" (Text.unpack msg)
-          _ ->
-            assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
+        assertSourceErrors' session ["Not in scope: `unknownX'"]
     )
   , ( "Overwrite with the same module name in all files"
     , \session originalUpdate lm -> do
@@ -121,57 +114,35 @@ multipleTests =
               updateModule m (BSLC.pack "module Wrong where\na = 1")
             update = originalUpdate <> mconcat (map upd lm)
         updateSessionD session update 2
-        msgs <- getSourceErrors session
         if length lm >= 2
-          then case msgs of
-            [SourceError _ (TextSpan _) s ] ->
-              assertBool "Wrong error message"
-              $ isPrefixOf "module `main:Wrong' is defined in multiple files" (Text.unpack s)
-            _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
-          else assertNoErrors msgs
+          then assertSourceErrors' session ["module `main:Wrong' is defined in multiple files"]
+          else assertNoErrors session
     )
   , ( "Overwrite modules many times"
     , \session originalUpdate lm0 -> do
         let doubleUpdate = mempty <> originalUpdate <> originalUpdate <> mempty
         -- Updates are idempotent, so no errors and no recompilation.
         updateSessionD session doubleUpdate (length lm0)
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         -- Overwrite one of the copied files with an error.
         (_, lm) <- getModules session
         let update1 =
               updateCodeGeneration False
               <> loadModule (head lm) "a = unknownX"
         updateSessionD session update1 1
-        msgs1 <- getSourceErrors session
-        case msgs1 of
-          [SourceError _ _ msg] ->
-            assertEqual "" "Not in scope: `unknownX'" (Text.unpack msg)
-          _ ->
-            assertFailure $ "Unexpected source errors: " ++ show3errors msgs1
+        assertSourceErrors' session ["Not in scope: `unknownX'"]
         updateSessionD session mempty 1  -- was an error, so trying again
-        msgs2 <- getSourceErrors session
-        case msgs2 of
-          [SourceError _ _ msg] ->
-            assertEqual "" "Not in scope: `unknownX'" (Text.unpack msg)
-          _ ->
-            assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
+        assertSourceErrors' session ["Not in scope: `unknownX'"]
         -- Overwrite all files, many times, with correct code eventually.
         let upd m = loadModule m "x = unknownX"
                     <> loadModule m "y = 2"
                     <> updateCodeGeneration True
             update2 = mconcat $ map upd lm
         updateSessionD session update2 (length lm)
-        msgs4 <- getSourceErrors session
-        assertNoErrors msgs4
+        assertNoErrors session
         -- Overwrite again with the error.
         updateSessionD session update1 1  -- drop bytecode, don't recompile
-        msgs5 <- getSourceErrors session
-        case msgs5 of
-          [SourceError _ _ msg] ->
-            assertEqual "" "Not in scope: `unknownX'" (Text.unpack msg)
-          _ ->
-            assertFailure $ "Unexpected source errors: " ++ show3errors msgs5
+        assertSourceErrors' session ["Not in scope: `unknownX'"]
         assertRaises "runStmt session Main main"
           (== userError "Cannot run before the code is generated.")
           (runStmt session "Main" "main")
@@ -181,8 +152,7 @@ multipleTests =
         updateSessionD session originalUpdate (length lm)
         let update = updateCodeGeneration True
         updateSessionD session update (length lm)  -- all recompiled
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         mex <- Ex.try $ runStmt session "Main" "main"
         case mex of
           Right runActions -> void $ runWaitAll runActions
@@ -201,8 +171,7 @@ multipleTests =
         let update2 = update <> updateCodeGeneration True
         -- Compile from scratch, generating code from the start.
         updateSessionD session update2 (length lm + 1)
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         runActions <- runStmt session "TotallyMain" "main"
         (output, result) <- runWaitAll runActions
         case result of
@@ -220,14 +189,12 @@ multipleTests =
         updateSessionD session originalUpdate (length lm)
         let updateDel = mconcat $ map updateModuleDelete lm
         updateSessionD session updateDel 0
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         -- The updates cancel each other out.
         updateSessionD session (originalUpdate <> updateDel) 0
         let update2 = updateCodeGeneration True
         updateSessionD session update2 0  -- 0: nothing to generate code from
-        msgs2 <- getSourceErrors session
-        assertNoErrors msgs2
+        assertNoErrors session
       )
     , ( "Make sure restartSession does not lose source files"
       , \session originalUpdate lm -> do
@@ -240,8 +207,7 @@ multipleTests =
           Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
         restartSession session
         updateSessionD session mempty (length lm)  -- all compiled anew
-        msgs0 <- getSourceErrors session
-        assertNoErrors msgs0
+        assertNoErrors session
         mex2 <- Ex.try $ runStmt session "Main" "main"
         case mex2 of
           Right runActions -> void $ runWaitAll runActions  -- now runWaitAll
@@ -249,8 +215,7 @@ multipleTests =
         restartSession session
         let update2 = mconcat $ map updateModuleDelete lm
         updateSessionD session update2 0  -- if any file missing, would yell
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         let update3 = updateCodeGeneration True
         updateSessionD session update3 0  -- 0: nothing to generate code from
         exitCodeBefore <- getGhcExitCode serverBefore
@@ -349,50 +314,30 @@ syntheticTests =
           withSession' (tweakConfig 4 config) $ \_s4 -> do
            let update2 = loadModule "M.hs" "a = unknownX"
            updateSessionD s2 update2 1
-           msgs2 <- getSourceErrors s2
-           assertOneError msgs2
+           assertOneError s2
            withSession' (tweakConfig 5 config) $ \s5 -> do
             let update3 = loadModule "M.hs" "a = 3"
             updateSessionD s3 update3 1
-            msgs3 <- getSourceErrors s3
-            assertNoErrors msgs3
+            assertNoErrors session
             shutdownSession s5 -- <-- duplicate "nested" shutdown
     )
   , ( "Compile a project: A depends on B, error in A"
     , withConfiguredSession defOpts $ \session -> do
         loadModulesFrom session "test/AerrorB"
-        msgs <- getSourceErrors session
-        case msgs of
-          [] -> assertFailure $ "Missing source errors"
-          [SourceError _ (ProperSpan (SourceSpan fn _ _ _ _)) s] -> do
-            assertBool "Wrong file reported for the error"
-              $ isSuffixOf "A.hs" fn
-            assertBool "Wrong error message"
-              $ isPrefixOf "No instance for (Num (IO ()))" (Text.unpack s)
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
+        assertSourceErrors session [(Just "A.hs", "No instance for (Num (IO ()))")]
      )
   , ( "Compile a project: A depends on B, error in B"
     , withConfiguredSession defOpts $ \session -> do
         loadModulesFrom session "test/ABerror"
-        msgs <- getSourceErrors session
-        case msgs of
-          [] -> assertFailure $ "Missing source errors"
-          [SourceError _ (ProperSpan (SourceSpan fn _ _ _ _)) s] -> do
-            assertBool "Wrong file reported for the error"
-              $ isSuffixOf "B.hs" fn
-            assertBool "Wrong error message"
-              $ isPrefixOf "No instance for (Num (IO ()))" (Text.unpack s)
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
+        assertSourceErrors session [(Just "B.hs", "No instance for (Num (IO ()))")]
     )
   , ( "Compile and run a project with some .lhs files"
     , withConfiguredSession defOpts $ \session -> do
         loadModulesFrom session "test/compiler/utils"
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         let update2 = updateCodeGeneration True
         updateSessionD session update2 3
-        msgs2 <- getSourceErrors session
-        assertNoErrors msgs2
+        assertNoErrors session
         runActions <- runStmt session "Maybes" "main"
         (output, result) <- runWaitAll runActions
         case result of
@@ -437,8 +382,7 @@ syntheticTests =
         let update2 = loadModule "Main.hs"
               "main = readFile \"datafile.dat\" >>= putStrLn"
         updateSessionD session update2 1
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         let update3 = updateCodeGeneration True
         updateSessionD session update3 1
         runActions <- runStmt session "Main" "main"
@@ -486,11 +430,10 @@ syntheticTests =
   , ( "Test recursive modules"
     , withConfiguredSession defOpts $ \session -> do
         loadModulesFrom session "test/bootMods"
-        msgs <- getSourceErrors session
         -- Fails, because special support is needed, similar to .h files.
         -- Proabably, the .hs-boot files should be copied to the src dir,
         -- but not made GHC.load targets.
-        assertOneError msgs
+        assertOneError session
     )
   , ( "Test TH; code generation on"
     , let packageOpts = defOpts ++ ["-package template-haskell"]
@@ -498,8 +441,7 @@ syntheticTests =
         (originalUpdate, lm) <- getModulesFrom session "test/TH"
         let update = originalUpdate <> updateCodeGeneration True
         updateSessionD session update (length lm)
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         runActions <- runStmt session "TH" "main"
         (output, result) <- runWaitAll runActions
         case result of
@@ -520,8 +462,7 @@ syntheticTests =
               , "x = mappend [] []"
               ]
         updateSessionD session update 1
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         cache <- getExplicitSharingCache session
         idMaps' <- getLoadedModules session
         let idMaps = removeExplicitSharing cache idMaps'
@@ -552,21 +493,11 @@ syntheticTests =
         let update = updateModule "M.hs"
                                   (BSLC.pack "module very-wrong where")
         updateSessionD session update 1
-        msgs <- getSourceErrors session
-        case msgs of
-          [SourceError _ _ msg] ->
-            assertEqual "" "parse error on input `very'\n" (Text.unpack msg)
-          _ ->
-            assertFailure $ "Unexpected source errors: " ++ show3errors msgs
+        assertSourceErrors' session ["parse error on input `very'\n"]
         let update2 = updateModule "M.hs"
                                    (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update2 1
-        msgs2 <- getSourceErrors session
-        case msgs2 of
-          [SourceError _ _ msg] ->
-            assertEqual "" "parse error on input `.'\n" (Text.unpack msg)
-          _ ->
-            assertFailure $ "Unexpected source errors: " ++ show3errors msgs2
+        assertSourceErrors' session ["parse error on input `.'\n"]
     )
   , ( "Interrupt runStmt (after 1 sec)"
     , withConfiguredSession defOpts $ \session -> do
@@ -578,8 +509,7 @@ syntheticTests =
                     , "loop = threadDelay 100000 >> loop"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "loop"
         threadDelay 1000000
         interrupt runActions
@@ -598,8 +528,7 @@ syntheticTests =
                     , "loop = threadDelay 100000 >> loop"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "loop"
         interrupt runActions
         resOrEx <- runWait runActions
@@ -616,8 +545,7 @@ syntheticTests =
                     , "loop = loop"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "loop"
         threadDelay 1000000
         interrupt runActions
@@ -635,8 +563,7 @@ syntheticTests =
                     , "hello = putStrLn \"Hello World\""
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         case result of
@@ -652,8 +579,7 @@ syntheticTests =
                     , "hello = putStr \"Hello World\""
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         case result of
@@ -671,8 +597,7 @@ syntheticTests =
                     , "hello = hSetBuffering stdout LineBuffering >> putStr \"hello\" >> threadDelay 1000000 >> putStr \"hi\""
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         case result of
@@ -690,8 +615,7 @@ syntheticTests =
                     , "           putStrLn \"Hello World 3\""
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         case result of
@@ -709,8 +633,7 @@ syntheticTests =
                     , "           putStrLn \"Hello World 3\""
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         case result of
@@ -726,8 +649,7 @@ syntheticTests =
                     , "echo = getLine >>= putStrLn"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "echo"
         supplyStdin runActions (BSSC.pack "ECHO!\n")
         (output, result) <- runWaitAll runActions
@@ -747,8 +669,7 @@ syntheticTests =
                     , "          forever $ getLine >>= putStrLn"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "echo"
 
         do supplyStdin runActions (BSSC.pack "ECHO 1!\n")
@@ -776,8 +697,7 @@ syntheticTests =
                     , "echoReverse = getLine >>= putStrLn . reverse"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
 
         do runActions <- runStmt session "M" "echo"
            supplyStdin runActions (BSSC.pack "ECHO!\n")
@@ -802,8 +722,7 @@ syntheticTests =
                     , "echo = (getLine >>= putStrLn) >> echo"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         _runActions <- runStmt session "M" "echo"
         return ()
      )
@@ -817,8 +736,7 @@ syntheticTests =
                     , "hello = hPutStrLn stderr \"Hello World\""
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         case result of
@@ -842,8 +760,7 @@ syntheticTests =
                     , "           hPutStr   stdout \"Hello World 8\""
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         let expectedOutput = "Hello World 1\n"
@@ -870,8 +787,7 @@ syntheticTests =
                     , "printBar = getEnv \"Bar\" >>= putStr"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
 
         -- At the start, both Foo and Bar are undefined
         do runActions <- runStmt session "M" "printFoo"
@@ -933,8 +849,7 @@ syntheticTests =
                     , "loop = loop"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         _runActions <- runStmt session "M" "loop"
         assertRaises ""
           (== userError "Cannot update session in running mode")
@@ -949,14 +864,19 @@ syntheticTests =
                     , "loop = loop"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        case msgs of
-          -- We expect a 'top-level identifier without type' warning
-          [SourceError KindWarning _ _] -> return ()
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
+        assertSourceErrors' session ["Warning: Top-level binding with no type signature"]
+
+        msgs1  <- getSourceErrors session
+        cache1 <- getExplicitSharingCache session
+        let msgs1' = map (removeExplicitSharing cache1) msgs1
+
         _runActions <- runStmt session "M" "loop"
-        msgs' <- getSourceErrors session
-        assertEqual "Running code does not affect getSourceErrors" msgs msgs'
+
+        msgs2  <- getSourceErrors session
+        cache2 <- getExplicitSharingCache session
+        let msgs2' = map (removeExplicitSharing cache2) msgs2
+
+        assertEqual "Running code does not affect getSourceErrors" msgs1' msgs2'
     )
   , ( "getLoadedModules during run"
     , withConfiguredSession defOpts $ \session -> do
@@ -1052,8 +972,7 @@ syntheticTests =
 
         -- Compile and run the code on the first server
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
            case result of
@@ -1066,8 +985,7 @@ syntheticTests =
 
         -- Compile the code on the new server
         updateSessionD session upd 1
-        msgs2 <- getSourceErrors session
-        assertNoErrors msgs2
+        assertNoErrors session
 
         -- Make sure the old server exited
         exitCodeBefore <- getGhcExitCode serverBefore
@@ -1119,8 +1037,7 @@ syntheticTests =
                          , "hello = putStr \"Hello World\""
                          ])
              updateSessionD session upd 1
-             msgs <- getSourceErrors session
-             assertEqual "This should compile without errors" [] msgs
+             assertNoErrors session
              runActions <- runStmt session "M" "hello"
              (output, result) <- runWaitAll runActions
              case result of
@@ -1136,8 +1053,7 @@ syntheticTests =
                     , "hello = putStrLn \"Hello World\""
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         case result of
@@ -1158,8 +1074,7 @@ syntheticTests =
                     , "loop = threadDelay 100000 >> loop"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "loop"
         threadDelay 1000000
         interrupt runActions
@@ -1182,8 +1097,7 @@ syntheticTests =
                     , "loop = threadDelay 100000 >> loop"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "loop"
         threadDelay 1000000
         restartSession session
@@ -1208,8 +1122,7 @@ syntheticTests =
                     , "slowHello = threadDelay 2000000 >> putStrLn \"Oh, hello\""
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
 
         -- Start first snippet and wait for it to terminate
         runActions1 <- runStmt session "M" "hello"
@@ -1444,8 +1357,7 @@ syntheticTests =
                     , "hello = putStrLn \"你好\""
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         case result of
@@ -1464,8 +1376,7 @@ syntheticTests =
                     , "hello = liftIO $ print 5"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         case result of
@@ -1479,8 +1390,7 @@ syntheticTests =
               , updateModuleFromFile "test/FFI/Main.hs"
               ]
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertOneError msgs
+        assertOneError session
         {-
         assertEqual "This should compile without errors" [] msgs
         runActions <- runStmt session "M" "hello"
@@ -1500,8 +1410,7 @@ syntheticTests =
                     , "d = foldr"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         cache <- getExplicitSharingCache session
         idMaps' <- getLoadedModules session
         let idMaps = removeExplicitSharing cache idMaps'
@@ -1532,8 +1441,7 @@ syntheticTests =
                     , "data T = MkT"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         cache <- getExplicitSharingCache session
         idMaps' <- getLoadedModules session
         let idMaps = removeExplicitSharing cache idMaps'
@@ -1566,8 +1474,7 @@ syntheticTests =
                     , "    h2go = \\x y -> x"
                     ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         cache <- getExplicitSharingCache session
         idMaps' <- getLoadedModules session
         let idMaps = removeExplicitSharing cache idMaps'
@@ -1627,8 +1534,7 @@ syntheticTests =
                     , "foo = MkT"
                     ])
         updateSessionD session upd 2
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         cache <- getExplicitSharingCache session
         idMaps' <- getLoadedModules session
         let idMaps = removeExplicitSharing cache idMaps'
@@ -1677,8 +1583,7 @@ syntheticTests =
                     , "i x = x"
                     ])
         updateSessionD session upd 2
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         cache <- getExplicitSharingCache session
         idMaps' <- getLoadedModules session
         let idMaps = removeExplicitSharing cache idMaps'
@@ -1745,8 +1650,7 @@ syntheticTests =
                     , "    f6 (x, y) = x"
                     ])
         updateSessionD session upd 2
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         cache <- getExplicitSharingCache session
         idMaps' <- getLoadedModules session
         let idMaps = removeExplicitSharing cache idMaps'
@@ -1805,8 +1709,7 @@ syntheticTests =
                     , "foo = (fromJust, Data.List.and, F.on)"
                     ])
         updateSessionD session upd 2
-        msgs <- getSourceErrors session
-        assertEqual "This should compile without errors" [] msgs
+        assertNoErrors session
         cache <- getExplicitSharingCache session
         idMaps'  <- getLoadedModules session
         let idMaps = removeExplicitSharing cache idMaps'
@@ -1832,8 +1735,7 @@ syntheticTests =
               , "  where style = Disp.Style {}"
               ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertOneError msgs
+        assertOneError session
     )
   , ( "Test internal consistency of imported id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
@@ -1851,8 +1753,7 @@ syntheticTests =
               , "        }"
               ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
     )
   , ( "Autocomplete 1: Imports for partial module"
     , withConfiguredSession ("-XPackageImports" : defOpts) $ \session -> do
@@ -1865,10 +1766,7 @@ syntheticTests =
               , "foo ="
               ])
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        case msgs of
-          [SourceError KindError _ msg] | "parse error" `isPrefixOf` (Text.unpack msg) -> return ()
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors msgs
+        assertSourceErrors' session ["parse error"]
         imports <- getImports session
         assertSameSet "imports: " (imports Map.! Text.pack "M") [
             Import {
@@ -2039,9 +1937,11 @@ displayCounter i p = do
 updateSessionD :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
 updateSessionD session update i = do
   updateSession session update (displayCounter i)
+  {-
   msgs <- getSourceErrors session
   debug dVerbosity $ "getSourceErrors after update: "
                      ++ List.intercalate "\n" (map show msgs)
+  -}
 
 -- Extra test tools.
 --
@@ -2074,25 +1974,51 @@ loadModule file contents =
                       []              -> Nothing
                       (_ : haystack') -> substr needle haystack'
 
-assertNoErrors :: [SourceError] -> Assertion
-assertNoErrors msgs =
-  assertBool ("Unexpected errors: " ++ show3errors msgs)
-    $ null msgs
+assertSourceErrors' :: IdeSession -> [String] -> Assertion
+assertSourceErrors' session = assertSourceErrors session . map
+  (\err -> (Nothing, err))
 
-assertSomeErrors :: [SourceError] -> Assertion
+assertSourceErrors :: IdeSession -> [(Maybe FilePath, String)] -> Assertion
+assertSourceErrors session expected = do
+  errs  <- getSourceErrors session
+  cache <- getExplicitSharingCache session
+  let errs' = map (removeExplicitSharing cache) errs
+  if length errs' /= length expected
+    then assertFailure $ "Unexpected source errors: " ++ show3errors cache errs
+    else forM_ (zip expected errs') $ \((mFilePath, expectedErr), SourceError _ loc actual) -> do
+           case mFilePath of
+             Nothing           -> return ()
+             Just expectedPath -> case loc of
+                                    ProperSpan (SourceSpan actualPath _ _ _ _) ->
+                                      assertBool "Wrong file" $ expectedPath `isSuffixOf` actualPath
+                                    _ ->
+                                      assertFailure $ "Expected location"
+           assertBool ("Unexpected error: " ++ Text.unpack actual) $
+             expectedErr `isPrefixOf` Text.unpack actual
+
+assertNoErrors :: IdeSession -> Assertion
+assertNoErrors session = do
+  errs  <- getSourceErrors session
+  cache <- getExplicitSharingCache session
+  assertBool ("Unexpected errors: " ++ show3errors cache errs) $ null errs
+
+assertSomeErrors :: [XShared SourceError] -> Assertion
 assertSomeErrors msgs = do
   assertBool "Type error lost" $ length msgs >= 1
 
-assertOneError :: [SourceError] -> Assertion
-assertOneError msgs = do
+assertOneError :: IdeSession -> Assertion
+assertOneError session = do
+  msgs  <- getSourceErrors session
+  cache <- getExplicitSharingCache session
   assertSomeErrors msgs
-  assertBool ("Too many type errors: " ++ show3errors msgs)
+  assertBool ("Too many type errors: " ++ show3errors cache msgs)
     $ length msgs <= 1
 
-show3errors :: [SourceError] -> String
-show3errors msgs =
-  let shown = List.intercalate "\n" (map show $ take 3 $ msgs)
-      more | length msgs > 3 = "\n... and more ..."
+show3errors :: ExplicitSharingCache -> [XShared SourceError] -> String
+show3errors cache errs =
+  let errs' = map (removeExplicitSharing cache) errs
+      shown = List.intercalate "\n" (map show $ take 3 $ errs')
+      more | length errs > 3 = "\n... and more ..."
            | otherwise       = ""
   in shown ++ more
 
@@ -2105,8 +2031,7 @@ restartRun code exitCode =
 
         -- Compile and run the code on the first server
         updateSessionD session upd 1
-        msgs <- getSourceErrors session
-        assertNoErrors msgs
+        assertNoErrors session
         runActionsBefore <- runStmt session "M" "loop"
 
         -- Start a new server
@@ -2116,8 +2041,7 @@ restartRun code exitCode =
 
         -- Compile the code on the new server
         updateSessionD session upd 1
-        msgs2 <- getSourceErrors session
-        assertNoErrors msgs2
+        assertNoErrors session
 
         -- Make sure the old server exited
         exitCodeBefore <- getGhcExitCode serverBefore
@@ -2156,8 +2080,7 @@ testBufferMode bufferMode =
                 ])
 
     updateSessionD session upd 1
-    msgs <- getSourceErrors session
-    assertNoErrors msgs
+    assertNoErrors session
 
     runActions <- runStmt session "M" "printCs"
     let go acc = do ret <- runWait runActions
