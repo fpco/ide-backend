@@ -145,7 +145,7 @@ getManagedFiles = simpleQuery $ translate . getVal ideManagedFiles
 -- would return all warnings (as if you did clean and rebuild each time).
 --
 -- getSourceErrors does internal normalization. This simplifies the life of the
--- client and anyway there shouldn't be that many soruce errors that it really
+-- client and anyway there shouldn't be that many source errors that it really
 -- makes a big difference.
 getSourceErrors :: Query [SourceError]
 getSourceErrors = computedQuery $ \Computed{..} ->

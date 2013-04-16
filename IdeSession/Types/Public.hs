@@ -208,13 +208,22 @@ instance Show IdMap where
   JSON instances
 
   We only have JSON instances for those types that are shared between
-  the public and private types. Generally speaking, the public types are
-  not meant to be serialized.
+  the public and private types, and for the "small" types that are the result of
+  IDE session queries. We don't want JSON instances for entire LoadedModules
+  maps and other "large" types.
 ------------------------------------------------------------------------------}
 
 $(deriveJSON id ''IdNameSpace)
 $(deriveJSON id ''SourceErrorKind)
 $(deriveJSON id ''Import)
+$(deriveJSON id ''SourceError)
+$(deriveJSON id ''IdProp)
+$(deriveJSON id ''IdScope)
+$(deriveJSON id ''SourceSpan)
+$(deriveJSON id ''EitherSpan)
+$(deriveJSON id ''ModuleId)
+$(deriveJSON id ''PackageId)
+$(deriveJSON id ''IdInfo)
 
 {------------------------------------------------------------------------------
   Util
