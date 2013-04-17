@@ -221,7 +221,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                 Just iaOld
                   | m `Set.member` changedModuleSet && fst iaOld /= fst ia
                         -> Insert ia
-                  | StrictList.any (`Set.member` changedModuleSet) imports
+                  | StrictList.any (`Set.member` changedModuleSet) (StrictList.map moduleName imports)
                         -> Insert ia
                   | otherwise
                         -> Keep

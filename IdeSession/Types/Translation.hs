@@ -23,27 +23,31 @@ type family XShared a
 -- | The inverse of MShared, only for decidability of type checking
 type family MShared a
 
-type instance XShared Public.IdProp         = Private.IdProp
-type instance XShared Public.IdInfo         = Private.IdInfo
-type instance XShared Public.IdScope        = Private.IdScope
-type instance XShared Public.SourceSpan     = Private.SourceSpan
-type instance XShared Public.EitherSpan     = Private.EitherSpan
-type instance XShared Public.SourceError    = Private.SourceError
-type instance XShared Public.IdMap          = Private.IdMap
-type instance XShared Public.LoadedModules  = Private.LoadedModules
-type instance XShared Public.ModuleId       = Private.ModuleId
-type instance XShared Public.PackageId      = Private.PackageId
+type instance XShared Public.IdProp          = Private.IdProp
+type instance XShared Public.IdInfo          = Private.IdInfo
+type instance XShared Public.IdScope         = Private.IdScope
+type instance XShared Public.SourceSpan      = Private.SourceSpan
+type instance XShared Public.EitherSpan      = Private.EitherSpan
+type instance XShared Public.SourceError     = Private.SourceError
+type instance XShared Public.IdMap           = Private.IdMap
+type instance XShared Public.LoadedModules   = Private.LoadedModules
+type instance XShared Public.ModuleId        = Private.ModuleId
+type instance XShared Public.PackageId       = Private.PackageId
+type instance XShared Public.ImportEntities  = Private.ImportEntities
+type instance XShared Public.Import          = Private.Import
 
-type instance MShared Private.IdProp        = Public.IdProp
-type instance MShared Private.IdInfo        = Public.IdInfo
-type instance MShared Private.IdScope       = Public.IdScope
-type instance MShared Private.SourceSpan    = Public.SourceSpan
-type instance MShared Private.EitherSpan    = Public.EitherSpan
-type instance MShared Private.SourceError   = Public.SourceError
-type instance MShared Private.IdMap         = Public.IdMap
-type instance MShared Private.LoadedModules = Public.LoadedModules
-type instance MShared Private.ModuleId      = Public.ModuleId
-type instance MShared Private.PackageId     = Public.PackageId
+type instance MShared Private.IdProp         = Public.IdProp
+type instance MShared Private.IdInfo         = Public.IdInfo
+type instance MShared Private.IdScope        = Public.IdScope
+type instance MShared Private.SourceSpan     = Public.SourceSpan
+type instance MShared Private.EitherSpan     = Public.EitherSpan
+type instance MShared Private.SourceError    = Public.SourceError
+type instance MShared Private.IdMap          = Public.IdMap
+type instance MShared Private.LoadedModules  = Public.LoadedModules
+type instance MShared Private.ModuleId       = Public.ModuleId
+type instance MShared Private.PackageId      = Public.PackageId
+type instance MShared Private.ImportEntities = Public.ImportEntities
+type instance MShared Private.Import         = Public.Import
 
 {------------------------------------------------------------------------------
   Removing explicit sharing
@@ -145,6 +149,22 @@ instance ExplicitSharing Public.IdMap where
 instance ExplicitSharing Public.LoadedModules where
   removeExplicitSharing cache = Map.map (removeExplicitSharing cache)
                               . toLazyMap
+
+instance ExplicitSharing Public.ImportEntities where
+  removeExplicitSharing _cache entities = case entities of
+    Private.ImportAll          -> Public.ImportAll
+    Private.ImportHiding names -> Public.ImportHiding (toLazyList names)
+    Private.ImportOnly   names -> Public.ImportOnly (toLazyList names)
+
+instance ExplicitSharing Public.Import where
+  removeExplicitSharing cache Private.Import{..} = Public.Import {
+      Public.importModule     = removeExplicitSharing cache $ importModule
+    , Public.importPackage    = toLazyMaybe importPackage
+    , Public.importQualified  = importQualified
+    , Public.importImplicit   = importImplicit
+    , Public.importAs         = toLazyMaybe importAs
+    , Public.importEntities   = removeExplicitSharing cache $ importEntities
+    }
 
 {------------------------------------------------------------------------------
   Introducing explicit sharing

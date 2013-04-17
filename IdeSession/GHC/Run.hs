@@ -78,7 +78,6 @@ import GHC hiding (flags, ModuleName, RunResult(..))
 import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM, void)
 import Control.Applicative ((<$>))
-import Control.Arrow (second)
 import Data.List ((\\))
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -87,7 +86,7 @@ import System.Process
 
 import Data.Aeson.TH (deriveJSON)
 
-import IdeSession.GHC.HsWalk (extractSourceSpan, idInfoForName)
+import IdeSession.GHC.HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
 import IdeSession.Types.Private
 import IdeSession.Debug
 import IdeSession.Util
@@ -316,13 +315,18 @@ extractImportsAuto dflags session graph = do
 
     goImp :: Located (ImportDecl RdrName) -> Import
     goImp (L _ decl) = Import {
-        importModule    = Text.pack $ moduleNameString (unLoc (ideclName decl))
-      , importPackage   = (Text.pack . unpackFS) <$> ideclPkgQual decl
+        importModule    = moduleNameToId dflags (unLoc (ideclName decl))
+      , importPackage   = force $ ((Text.pack . unpackFS) <$> ideclPkgQual decl)
       , importQualified = ideclQualified decl
       , importImplicit  = ideclImplicit decl
-      , importAs        = (Text.pack . moduleNameString) <$> ideclAs decl
-      , importHiding    = second (map unLIE) <$> ideclHiding decl
+      , importAs        = force $ ((Text.pack . moduleNameString) <$> ideclAs decl)
+      , importEntities  = mkImportEntities (ideclHiding decl)
       }
+
+    mkImportEntities :: Maybe (Bool, [LIE RdrName]) -> ImportEntities
+    mkImportEntities Nothing               = ImportAll
+    mkImportEntities (Just (True, names))  = ImportHiding (force $ map unLIE names)
+    mkImportEntities (Just (False, names)) = ImportOnly   (force $ map unLIE names)
 
     -- TODO: This is lossy. We might want a more accurate data type.
     unLIE :: LIE RdrName -> Text

@@ -18,7 +18,8 @@ module IdeSession.Types.Private (
   , PackageId(..)
   , IdMap(..)
   , LoadedModules
-  , Public.Import(..)
+  , ImportEntities(..)
+  , Import(..)
     -- * Cache
   , ExplicitSharingCache(..)
   ) where
@@ -34,7 +35,6 @@ newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
   deriving (Eq, Ord)
 
 newtype IdPropPtr = IdPropPtr { idPropPtr :: Int }
-  deriving (Eq, Ord)
 
 data IdInfo = IdInfo {
     idProp  :: {-# UNPACK #-} !IdPropPtr
@@ -46,7 +46,6 @@ data IdProp = IdProp {
   , idSpace :: !Public.IdNameSpace
   , idType  :: !(Strict Maybe Text)
   }
-  deriving (Eq)
 
 data IdScope =
     -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
@@ -71,7 +70,6 @@ data IdScope =
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
-  deriving (Eq)
 
 data SourceSpan = SourceSpan
   { spanFilePath   :: {-# UNPACK #-} !FilePathPtr
@@ -85,30 +83,45 @@ data SourceSpan = SourceSpan
 data EitherSpan =
     ProperSpan {-# UNPACK #-} !SourceSpan
   | TextSpan !Text
-  deriving (Eq)
 
 data SourceError = SourceError
   { errorKind :: !Public.SourceErrorKind
   , errorSpan :: !EitherSpan
   , errorMsg  :: !Text
   }
-  deriving (Eq)
 
 data ModuleId = ModuleId
   { moduleName    :: !Public.ModuleName
   , modulePackage :: {-# UNPACK #-} !PackageId
   }
-  deriving (Eq)
+  deriving Eq
 
 data PackageId = PackageId
   { packageName    :: !Text
   , packageVersion :: !(Strict Maybe Text)
   }
-  deriving (Eq)
+  deriving Eq
 
 newtype IdMap = IdMap { idMapToMap :: Strict (Map SourceSpan) IdInfo }
 
 type LoadedModules = Strict (Map Public.ModuleName) IdMap
+
+data ImportEntities =
+    ImportOnly   !(Strict [] Text)
+  | ImportHiding !(Strict [] Text)
+  | ImportAll
+  deriving Eq
+
+data Import = Import {
+    importModule    :: !ModuleId
+  -- | Used only for ghc's PackageImports extension
+  , importPackage   :: !(Strict Maybe Text)
+  , importQualified :: !Bool
+  , importImplicit  :: !Bool
+  , importAs        :: !(Strict Maybe Public.ModuleName)
+  , importEntities  :: !ImportEntities
+  }
+  deriving Eq
 
 {------------------------------------------------------------------------------
   Cache
@@ -138,4 +151,6 @@ $(deriveJSON id ''ModuleId)
 $(deriveJSON id ''PackageId)
 $(deriveJSON id ''IdProp)
 $(deriveJSON id ''IdMap)
+$(deriveJSON id ''ImportEntities)
+$(deriveJSON id ''Import)
 $(deriveJSON id ''ExplicitSharingCache)

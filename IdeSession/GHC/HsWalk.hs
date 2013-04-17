@@ -12,6 +12,9 @@ module IdeSession.GHC.HsWalk
   , extractSourceSpan
   , idInfoForName
   , constructExplicitSharingCache
+  , moduleNameToId
+  , fillVersion
+  , mainPackage
   ) where
 
 -- TODO: make sure all the caches and state is updated strictly
@@ -393,72 +396,12 @@ idInfoForName dflags name idIsBinder mElt = do
             idDefSpan      = span
           , idDefinedIn    = ModuleId
               { moduleName    = Text.pack $ moduleNameString $ Module.moduleName mod
-              , modulePackage = fillVersion $ Module.modulePackageId mod
+              , modulePackage = fillVersion dflags $ Module.modulePackageId mod
               }
-          , idImportedFrom = ModuleId
-              { moduleName    = Text.pack $ moduleNameString $ impMod
-              , modulePackage = modToPkg impMod
-              }
+          , idImportedFrom = moduleNameToId dflags impMod
           , idImportSpan   = impSpan
           , idImportQual   = Text.pack $ impQual
           }
-
-      modToPkg :: GHC.ModuleName -> PackageId
-      modToPkg impMod =
-        let pkgAll = Packages.lookupModuleInAllPackages dflags impMod
-            pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
-        in case pkgExposed of
-          [] -> mainPackage  -- we assume otherwise GHC would signal an error
-          [p] -> fillVersion $ Packages.packageConfigId $ fst p
-          _ -> let pkgIds = map (first (Module.packageIdString
-                                        . Packages.packageConfigId)) pkgExposed
-               in error $ "modToPkg: " ++ moduleNameString impMod
-                          ++ ": " ++ show pkgIds
-
-      fillVersion :: Module.PackageId -> PackageId
-      fillVersion p =
-        case Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) p of
-          Nothing -> if p == Module.mainPackageId
-                     then mainPackage
-                     else error $ "fillVersion:" ++ Module.packageIdString p
-          Just pkgCfg ->
-            let sourcePkgId = Packages.sourcePackageId pkgCfg
-                pkgName = Packages.pkgName sourcePkgId
-                prefixPN = "PackageName "
-                showPN = show pkgName
-                -- A hack to avoid importing Distribution.Package.
-                errPN = fromMaybe (error $ "stripPrefixPN "
-                                           ++ prefixPN ++ " "
-                                           ++ showPN)
-                        $ stripPrefix prefixPN showPN
-                packageName = init $ tail errPN
-                pkgVersion  = Packages.pkgVersion sourcePkgId
-                packageVersion = Maybe.just $ case showVersion pkgVersion of
-                  -- See http://www.haskell.org/ghc/docs/7.4.2//html/libraries/ghc/Module.html#g:3.
-                  -- The version of wired-in packages is completely wiped out,
-                  -- but we use a leak in the form of a Cabal package id
-                  -- for the same package, which still contains a version.
-                  "" -> let installedPkgId = Packages.installedPackageId pkgCfg
-                            prefixPV = "InstalledPackageId "
-                                       ++ "\"" ++ packageName ++ "-"
-                            showPV = show installedPkgId
-                            -- A hack to avoid cabal dependency, in particular.
-                            errPV = fromMaybe (error $ "stripPrefixPV "
-                                                       ++ prefixPV ++ " "
-                                                       ++ showPV)
-                                    $ stripPrefix prefixPV showPV
-                        in reverse $ tail $ snd $ break (=='-') $ reverse errPV
-                  s  -> s
-            in PackageId {
-                   packageName    = Text.pack packageName
-                 , packageVersion = Text.pack <$> packageVersion
-                 }
-
-      mainPackage :: PackageId
-      mainPackage = PackageId {
-          packageName    = Text.pack $ Module.packageIdString Module.mainPackageId
-        , packageVersion = Maybe.nothing -- the only case of no version
-        }
 
       extractImportInfo :: MonadIO m => [RdrName.ImportSpec] -> m (GHC.ModuleName, EitherSpan, String)
       extractImportInfo (RdrName.ImpSpec decl item:_) = do
@@ -473,6 +416,72 @@ idInfoForName dflags name idIsBinder mElt = do
               else ""
           )
       extractImportInfo _ = fail "ghc invariant violated"
+
+moduleNameToId :: DynFlags -> GHC.ModuleName -> ModuleId
+moduleNameToId dflags impMod = ModuleId {
+      moduleName    = Text.pack $ moduleNameString $ impMod
+    , modulePackage = packageId
+    }
+  where
+    -- | Translate a module name to a PackageId (i.e., add package information)
+    packageId :: PackageId
+    packageId = case pkgExposed of
+      []  -> mainPackage  -- we assume otherwise GHC would signal an error
+      [p] -> fillVersion dflags $ Packages.packageConfigId $ fst p
+      _   -> let pkgIds = map (first (Module.packageIdString
+                                       . Packages.packageConfigId)) pkgExposed
+             in error $ "modToPkg: " ++ moduleNameString impMod
+                     ++ ": " ++ show pkgIds
+
+    pkgAll     = Packages.lookupModuleInAllPackages dflags impMod
+    pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
+
+-- | Attempt to find out the version of a package
+fillVersion :: DynFlags -> Module.PackageId -> PackageId
+fillVersion dflags p =
+  case Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) p of
+    Nothing -> if p == Module.mainPackageId
+               then mainPackage
+               else error $ "fillVersion:" ++ Module.packageIdString p
+    Just pkgCfg ->
+      let sourcePkgId = Packages.sourcePackageId pkgCfg
+          pkgName = Packages.pkgName sourcePkgId
+          prefixPN = "PackageName "
+          showPN = show pkgName
+          -- A hack to avoid importing Distribution.Package.
+          errPN = fromMaybe (error $ "stripPrefixPN "
+                                     ++ prefixPN ++ " "
+                                     ++ showPN)
+                  $ stripPrefix prefixPN showPN
+          packageName = init $ tail errPN
+          pkgVersion  = Packages.pkgVersion sourcePkgId
+          packageVersion = Maybe.just $ case showVersion pkgVersion of
+            -- See http://www.haskell.org/ghc/docs/7.4.2//html/libraries/ghc/Module.html#g:3.
+            -- The version of wired-in packages is completely wiped out,
+            -- but we use a leak in the form of a Cabal package id
+            -- for the same package, which still contains a version.
+            "" -> let installedPkgId = Packages.installedPackageId pkgCfg
+                      prefixPV = "InstalledPackageId "
+                                 ++ "\"" ++ packageName ++ "-"
+                      showPV = show installedPkgId
+                      -- A hack to avoid cabal dependency, in particular.
+                      errPV = fromMaybe (error $ "stripPrefixPV "
+                                                 ++ prefixPV ++ " "
+                                                 ++ showPV)
+                              $ stripPrefix prefixPV showPV
+                  in reverse $ tail $ snd $ break (=='-') $ reverse errPV
+            s  -> s
+      in PackageId {
+             packageName    = Text.pack packageName
+           , packageVersion = Text.pack <$> packageVersion
+           }
+
+-- | PackageId of the main package
+mainPackage :: PackageId
+mainPackage = PackageId {
+    packageName    = Text.pack $ Module.packageIdString Module.mainPackageId
+  , packageVersion = Maybe.nothing -- the only case of no version
+  }
 
 extractSourceSpan :: MonadIO m => SrcSpan -> m EitherSpan
 extractSourceSpan (RealSrcSpan srcspan) = liftIO $ do

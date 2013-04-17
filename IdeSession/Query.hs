@@ -169,7 +169,8 @@ getIdInfo = computedQuery $ \Computed{..} mod span -> do
 -- This information is available even for modules with parse/type errors
 getImports :: Query (ModuleName -> Maybe [Import])
 getImports = computedQuery $ \Computed{..} mod ->
-  fmap toLazyList $ StrictMap.lookup mod computedImports
+  fmap (toLazyList . StrictList.map (removeExplicitSharing computedCache)) $
+    StrictMap.lookup mod computedImports
 
 -- | Autocompletion
 getAutocompletion :: Query (ModuleName -> String -> [IdInfo])

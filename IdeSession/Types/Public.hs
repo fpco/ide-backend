@@ -15,6 +15,7 @@ module IdeSession.Types.Public (
   , PackageId(..)
   , IdMap(..)
   , LoadedModules
+  , ImportEntities(..)
   , Import(..)
     -- * Util
   , idInfoQN
@@ -126,32 +127,34 @@ data ModuleId = ModuleId
   { moduleName    :: !ModuleName
   , modulePackage :: {-# UNPACK #-} !PackageId
   }
-  deriving (Eq)
+  deriving (Eq, Ord)
 
 data PackageId = PackageId
   { packageName    :: !Text
   , packageVersion :: !(Maybe Text)
   }
-  deriving (Eq)
+  deriving (Eq, Ord)
 
 newtype IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
 
 type LoadedModules = Map ModuleName IdMap
 
-data Import = Import {
-    importModule    :: ModuleName
-  -- | Used only for ghc's PackageImports extension
-  , importPackage   :: Maybe Text
-  , importQualified :: Bool
-  , importImplicit  :: Bool
-  , importAs        :: Maybe ModuleName
-  -- | @Just (True, ..)@ for @import M hiding (..)@,
-  -- @Just (False, ..)@ for @import M (..)@, or
-  -- @Nothing@ otherwise.
-  , importHiding    :: Maybe (Bool, [Text])
-  }
+data ImportEntities =
+    ImportOnly   ![Text]
+  | ImportHiding ![Text]
+  | ImportAll
   deriving (Show, Eq, Ord)
 
+data Import = Import {
+    importModule    :: !ModuleId
+  -- | Used only for ghc's PackageImports extension
+  , importPackage   :: !(Maybe Text)
+  , importQualified :: !Bool
+  , importImplicit  :: !Bool
+  , importAs        :: !(Maybe ModuleName)
+  , importEntities  :: !ImportEntities
+  }
+  deriving (Show, Eq, Ord)
 
 {------------------------------------------------------------------------------
   Show instances
@@ -215,6 +218,7 @@ instance Show IdMap where
 
 $(deriveJSON id ''IdNameSpace)
 $(deriveJSON id ''SourceErrorKind)
+$(deriveJSON id ''ImportEntities)
 $(deriveJSON id ''Import)
 $(deriveJSON id ''SourceError)
 $(deriveJSON id ''IdProp)

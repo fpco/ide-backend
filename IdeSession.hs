@@ -171,6 +171,7 @@ module IdeSession (
   , PackageId(..)
   , IdMap(..)
   , LoadedModules
+  , ImportEntities(..)
   , Import(..)
     -- ** Util
   , idInfoQN

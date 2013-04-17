@@ -1689,58 +1689,83 @@ syntheticTests =
         assertNoErrors session
     )
   , ( "Autocomplete 1: Imports for partial module"
-    , withConfiguredSession ("-XPackageImports" : defOpts) $ \session -> do
+    , withConfiguredSession ("-XPackageImports" : "-package parallel" : defOpts) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import Control.Monad"
               , "import Control.Category hiding (id)"
               , "import qualified Control.Arrow as A (second)"
               , "import qualified \"base\" Data.List"
+              , "import Control.Parallel"
               , "foo ="
               ])
         updateSessionD session upd 1
         assertSourceErrors' session ["parse error"]
         imports <- getImports session
+        -- TODO: This test will fail if the user happens to have installed
+        -- slightly different versions of these packages
+        let base mod = ModuleId {
+                moduleName    = Text.pack mod
+              , modulePackage = PackageId {
+                    packageName    = Text.pack "base"
+                  , packageVersion = Just (Text.pack "4.5.1.0")
+                  }
+              }
+            par mod = ModuleId {
+                moduleName    = Text.pack mod
+              , modulePackage = PackageId {
+                    packageName    = Text.pack "parallel"
+                  , packageVersion = Just (Text.pack "3.2.0.3")
+                  }
+              }
         assertSameSet "imports: " (fromJust . imports $ Text.pack "M") $ [
             Import {
-                importModule    = Text.pack "Prelude"
+                importModule    = base "Prelude"
               , importPackage   = Nothing
               , importQualified = False
               , importImplicit  = True
               , importAs        = Nothing
-              , importHiding    = Nothing
+              , importEntities  = ImportAll
               }
           , Import {
-                importModule    = Text.pack "Control.Monad"
+                importModule    = base "Control.Monad"
               , importPackage   = Nothing
               , importQualified = False
               , importImplicit  = False
               , importAs        = Nothing
-              , importHiding    = Nothing
+              , importEntities  = ImportAll
               }
           , Import {
-                importModule    = Text.pack "Control.Category"
+                importModule    = base "Control.Category"
               , importPackage   = Nothing
               , importQualified = False
               , importImplicit  = False
               , importAs        = Nothing
-              , importHiding    = Just (True, [Text.pack "id"])
+              , importEntities  = ImportHiding [Text.pack "id"]
               }
           , Import {
-                importModule     = Text.pack "Control.Arrow"
+                importModule     = base "Control.Arrow"
               , importPackage    = Nothing
               , importQualified  = True
               , importImplicit   = False
               , importAs         = Just (Text.pack "A")
-              , importHiding     = Just (False, [Text.pack "second"])
+              , importEntities   = ImportOnly [Text.pack "second"]
               }
           , Import {
-                importModule    = Text.pack "Data.List"
+                importModule    = base "Data.List"
               , importPackage   = Just (Text.pack "base")
               , importQualified = True
               , importImplicit  = False
               , importAs        = Nothing
-              , importHiding    = Nothing
+              , importEntities  = ImportAll
+              }
+          , Import {
+                importModule    = par "Control.Parallel"
+              , importPackage   = Nothing
+              , importQualified = False
+              , importImplicit  = False
+              , importAs        = Nothing
+              , importEntities  = ImportAll
               }
           ]
         autocomplete <- getAutocompletion session
