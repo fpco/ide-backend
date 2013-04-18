@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
@@ -22,11 +23,13 @@ module IdeSession.Update (
   , updateStderrBufferMode
     -- * Running code
   , runStmt
+    -- * Debugging
+  , forceRecompile
   )
   where
 
-import Control.Monad (when, void)
-import Control.Monad.State (StateT, execStateT)
+import Control.Monad (when, void, forM)
+import Control.Monad.State (MonadState, StateT, execStateT)
 import Control.Monad.IO.Class (liftIO)
 import qualified Control.Exception as Ex
 import Data.List (delete)
@@ -276,11 +279,17 @@ updateModule m bs = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
     Just (oldHash, oldTS) | oldHash == newHash ->
       liftIO $ setFileTimes internal oldTS oldTS
     _ -> do
-      newTS <- get ideLogicalTimestamp
+      newTS <- nextLogicalTimestamp
       liftIO $ setFileTimes internal newTS newTS
-      modify ideLogicalTimestamp (+ 1)
       set (ideManagedFiles .> managedSource .> lookup' m) (Just (newHash, newTS))
       set ideUpdatedCode True
+
+-- | Get the next available logical timestamp
+nextLogicalTimestamp :: MonadState IdeIdleState m => m LogicalTimestamp
+nextLogicalTimestamp = do
+  newTS <- get ideLogicalTimestamp
+  modify ideLogicalTimestamp (+ 1)
+  return newTS
 
 -- | Like 'updateModule' except that instead of passing the module source by
 -- value, it's given by reference to an existing file, which will be copied.
@@ -404,3 +413,18 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
       IdeSessionShutdown ->
         return state
     SessionConfig{configGenerateModInfo} = ideConfig ideStaticInfo
+
+{------------------------------------------------------------------------------
+  Debugging
+------------------------------------------------------------------------------}
+
+-- | Force recompilation of all modules. For debugging only.
+forceRecompile :: IdeSessionUpdate
+forceRecompile = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir} -> do
+  sources  <- get (ideManagedFiles .> managedSource)
+  sources' <- forM sources $ \(path, (digest, _oldTS)) -> do
+    newTS <- nextLogicalTimestamp
+    liftIO $ setFileTimes (internalFile ideSourcesDir path) newTS newTS
+    return (path, (digest, newTS))
+  set (ideManagedFiles .> managedSource) sources'
+  set ideUpdatedCode True

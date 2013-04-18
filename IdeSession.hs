@@ -177,9 +177,10 @@ module IdeSession (
   , idInfoQN
 --, idInfoAtLocation
   , haddockLink
-  -- * For internal use only
+  -- * For internal/debugging use only
   , ghcServer
   , getGhcExitCode
+  , forceRecompile
 ) where
 
 import IdeSession.Config
