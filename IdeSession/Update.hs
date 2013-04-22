@@ -21,6 +21,7 @@ module IdeSession.Update (
   , updateEnv
   , updateStdoutBufferMode
   , updateStderrBufferMode
+  , buildExe
     -- * Running code
   , runStmt
     -- * Debugging
@@ -45,6 +46,7 @@ import System.IO.Temp (createTempDirectory)
 import qualified Data.Text as Text
 
 import IdeSession.State
+import IdeSession.Cabal (buildExecutable)
 import IdeSession.Config
 import IdeSession.GHC.Server
 import IdeSession.Types.Private
@@ -68,6 +70,7 @@ initSession SessionConfig{..} = do
   let ideConfig = SessionConfig {..}
   ideSourcesDir <- createTempDirectory configDirCanon "src."
   ideDataDir    <- createTempDirectory configDirCanon "data."
+  ideDistDir    <- createTempDirectory configDirCanon "dist."
   _ideGhcServer <- forkGhcServer configGenerateModInfo configStaticOpts (Just ideDataDir) configInProcess
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
@@ -413,6 +416,10 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
       IdeSessionShutdown ->
         return state
     SessionConfig{configGenerateModInfo} = ideConfig ideStaticInfo
+
+buildExe :: FilePath -> IdeSessionUpdate
+buildExe m = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir, ideDistDir} ->
+  liftIO $ buildExecutable ideSourcesDir ideDistDir m
 
 {------------------------------------------------------------------------------
   Debugging

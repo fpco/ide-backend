@@ -80,6 +80,8 @@ data IdeStaticInfo = IdeStaticInfo {
     -- | The directory to use for data files that may be accessed by the
     -- running program. The running program will have this as its CWD.
   , ideDataDir    :: FilePath
+    -- Cabal "dist" prefix.
+  , ideDistDir    :: FilePath
   }
 
 data IdeSessionState =

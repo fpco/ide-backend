@@ -1387,6 +1387,17 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
         -}
     )
+  , ( "Build an executable"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package parallel"
+                        , "-package old-time"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        loadModulesFrom session "test/MainModule"
+        let upd = buildExe "ParFib/Main.hs"
+        updateSessionD session upd 1
+    )
   , ( "Type information 1: Local identifiers and Prelude"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $

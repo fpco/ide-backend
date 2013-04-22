@@ -11,6 +11,7 @@ module IdeSession.Query (
   , getSessionConfig
   , getSourcesDir
   , getDataDir
+  , getBuildDir
   , getSourceModule
   , getDataFile
   , getAllDataFiles
@@ -82,6 +83,12 @@ getSourcesDir = staticQuery $ return . ideSourcesDir
 -- | Obtain the data files directory for this session.
 getDataDir :: Query FilePath
 getDataDir = staticQuery $ return . ideDataDir
+
+-- | Obtain the directory prefix for executables compiled in this session.
+-- Each executable is in a subdirectory with the same name as the file, e.g.:
+-- "BUILD_DIR/typecheck-dir/typecheck-dir".
+getBuildDir :: Query FilePath
+getBuildDir = staticQuery $ return . (</> "build") . ideDistDir
 
 -- | Read the current value of one of the source modules.
 getSourceModule :: FilePath -> Query BSL.ByteString

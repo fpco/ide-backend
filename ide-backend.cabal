@@ -15,6 +15,7 @@ library
   exposed-modules:    IdeSession
   other-modules:      IdeSession.State,
                       IdeSession.Config,
+                      IdeSession.Cabal,
                       IdeSession.Query,
                       IdeSession.Update,
                       IdeSession.GHC.Run,

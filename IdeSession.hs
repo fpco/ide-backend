@@ -123,6 +123,7 @@ module IdeSession (
   , updateEnv
   , updateStdoutBufferMode
   , updateStderrBufferMode
+  , buildExe
     -- ** Progress
   , Progress(..)
   , initialProgress
