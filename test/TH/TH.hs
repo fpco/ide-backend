@@ -1,8 +1,8 @@
 {-# LANGUAGE TemplateHaskell #-}
-module TH where
+module TH.TH where
 
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
-import BlockingOps (modifyMVar, modifyMVar_, putMVar, readMVar, takeMVar)
+import TH.BlockingOps (modifyMVar, modifyMVar_, putMVar, readMVar, takeMVar)
 
 main = do
   mv <- newEmptyMVar

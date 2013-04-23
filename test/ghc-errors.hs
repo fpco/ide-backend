@@ -164,15 +164,15 @@ multipleTests =
             update =
               originalUpdate
               <> updateModule
-                   "TotallyMain.hs"
+                   "Central/TotallyMain.hs"
                    (BSLC.pack
-                      "module TotallyMain where\nmain = print \"test run\"")
+                      "module Central.TotallyMain where\nmain = print \"test run\"")
               <> mconcat (map upd lm)
         let update2 = update <> updateCodeGeneration True
         -- Compile from scratch, generating code from the start.
         updateSessionD session update2 (length lm + 1)
         assertNoErrors session
-        runActions <- runStmt session "TotallyMain" "main"
+        runActions <- runStmt session "Central.TotallyMain" "main"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" output (BSLC.pack "\"test run\"\n")
@@ -438,11 +438,13 @@ syntheticTests =
   , ( "Test TH; code generation on"
     , let packageOpts = defOpts ++ ["-package template-haskell"]
       in withConfiguredSession packageOpts $ \session -> do
-        (originalUpdate, lm) <- getModulesFrom session "test/TH"
+        setCurrentDirectory "test"
+        (originalUpdate, lm) <- getModulesFrom session "TH"
         let update = originalUpdate <> updateCodeGeneration True
         updateSessionD session update (length lm)
+        setCurrentDirectory "../"
         assertNoErrors session
-        runActions <- runStmt session "TH" "main"
+        runActions <- runStmt session "TH.TH" "main"
         (output, result) <- runWaitAll runActions
         case result of
           RunOk _ -> assertEqual "" output (BSLC.pack "(True,43)\n")
@@ -1394,9 +1396,11 @@ syntheticTests =
                         , "-package old-time"
                         ]
       in withConfiguredSession packageOpts $ \session -> do
-        loadModulesFrom session "test/MainModule"
+        setCurrentDirectory "test/MainModule"
+        loadModulesFrom session "."
+        setCurrentDirectory "../../"
         let upd = buildExe ["base", "parallel", "old-time"]
-                  "test/MainModule/ParFib/Main.hs"
+                  "ParFib/Main.hs"
         updateSessionD session upd 1
     )
   , ( "Type information 1: Local identifiers and Prelude"
