@@ -417,9 +417,10 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
         return state
     SessionConfig{configGenerateModInfo} = ideConfig ideStaticInfo
 
-buildExe :: FilePath -> IdeSessionUpdate
-buildExe m = IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir, ideDistDir} ->
-  liftIO $ buildExecutable ideSourcesDir ideDistDir m
+buildExe :: [String] -> FilePath -> IdeSessionUpdate
+buildExe deps m =
+  IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir, ideDistDir} ->
+    liftIO $ buildExecutable ideSourcesDir ideDistDir deps m
 
 {------------------------------------------------------------------------------
   Debugging

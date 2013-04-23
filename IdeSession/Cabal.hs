@@ -8,10 +8,11 @@ import Distribution.PackageDescription
 import Distribution.Package
 import qualified Distribution.Simple.Build as Build
 import Distribution.Simple.Configure (configure)
+import Distribution.Simple.LocalBuildInfo (localPkgDescr)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
 import Distribution.Version (anyVersion)
-import System.FilePath ((</>), takeFileName)
+import System.FilePath (takeBaseName)
 
 pIdent :: PackageIdentifier
 pIdent = PackageIdentifier
@@ -24,8 +25,8 @@ buildDeps deps =
   let depOfName name = Dependency (PackageName name) anyVersion
   in map depOfName deps
 
-packageDesc :: [String] -> Executable -> PackageDescription
-packageDesc deps executable = PackageDescription
+packageDesc :: PackageDescription
+packageDesc = PackageDescription
   { -- the following are required by all packages:
     package        = pIdent
   , license        = OtherLicense
@@ -43,12 +44,12 @@ packageDesc deps executable = PackageDescription
   , description    = ""
   , category       = ""
   , customFieldsPD = []
-  , buildDepends   = buildDeps deps
+  , buildDepends   = []
   , specVersionRaw = Left $ Version [0, 14, 0] []
   , buildType      = Just Simple
     -- components
   , library        = Nothing
-  , executables    = [executable]
+  , executables    = []  -- ignored when inside @GenericPackageDescription@
   , testSuites     = []
   , benchmarks     = []
   , dataFiles      = []
@@ -64,26 +65,30 @@ exeDesc ideSourcesDir modulePath =
         , hsSourceDirs = [ideSourcesDir]
         }
   in Executable
-       { exeName = takeFileName modulePath
+       { exeName = takeBaseName modulePath
        , modulePath
        , buildInfo
        }
 
-buildExecutable :: FilePath -> FilePath -> FilePath -> IO ()
-buildExecutable ideSourcesDir ideDistDir m = do
-  let deps = []  -- TODO
-      modulePath = ideSourcesDir </> m
+buildExecutable :: FilePath -> FilePath -> [String] -> FilePath -> IO ()
+buildExecutable ideSourcesDir ideDistDir deps modulePath = do
+  let pDesc = packageDesc
       executable = exeDesc ideSourcesDir modulePath
-      pDesc = packageDesc deps executable
       gpDesc = GenericPackageDescription
         { packageDescription = pDesc
         , genPackageFlags    = []
         , condLibrary        = Nothing
-        , condExecutables    = []
+        , condExecutables    = [( exeName executable
+                                , CondNode executable (buildDeps deps) [])]
         , condTestSuites     = []
         , condBenchmarks     = []
         }
       confFlags = (Setup.defaultConfigFlags defaultProgramConfiguration)
-                    {Setup.configDistPref = Setup.Flag ideDistDir}
+                    { Setup.configDistPref = Setup.Flag ideDistDir
+                    , Setup.configUserInstall = Setup.Flag True
+--                    , Setup.configVerbosity = Setup.Flag maxBound
+                    }
+  -- putStrLn $ "pDesc: " ++ show pDesc
   lbi <- configure (gpDesc, (Nothing, [])) confFlags
-  Build.build pDesc lbi Setup.defaultBuildFlags []
+  -- putStrLn $ "lbi: " ++ show lbi
+  Build.build (localPkgDescr lbi) lbi Setup.defaultBuildFlags []

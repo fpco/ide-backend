@@ -58,11 +58,10 @@ main = do
               error "usage: typecheck-dir [source-dir [ghc-options]]"
             [dir] -> (dir, defOpts)
             dir : optsArg -> (dir, optsArg)
-            [] -> ("test/Cabal",
+            [] -> ("test/MainModule/ParFib/",
                    defOpts)
       slashTmp <- getTemporaryDirectory
-      withTempDirectory slashTmp "typecheck-dir."
-        $ check opts originalSourcesDir
+      check opts originalSourcesDir $ slashTmp ++ "/typecheck-dir"
 
 check :: [String] -> FilePath -> FilePath -> IO ()
 check opts what configDir = do
@@ -96,4 +95,7 @@ check opts what configDir = do
   updateSession session update displayCounter
   errs <- getSourceErrors session
   putStrLn $ "\nErrors and warnings:\n" ++ unlines (map show errs)
+  let upd = buildExe ["base", "parallel", "old-time"]
+                     "test/MainModule/ParFib/Main.hs"
+  updateSession session upd displayCounter
   shutdownSession session

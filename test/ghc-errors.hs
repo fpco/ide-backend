@@ -1395,7 +1395,8 @@ syntheticTests =
                         ]
       in withConfiguredSession packageOpts $ \session -> do
         loadModulesFrom session "test/MainModule"
-        let upd = buildExe "ParFib/Main.hs"
+        let upd = buildExe ["base", "parallel", "old-time"]
+                  "test/MainModule/ParFib/Main.hs"
         updateSessionD session upd 1
     )
   , ( "Type information 1: Local identifiers and Prelude"
