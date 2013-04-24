@@ -1396,11 +1396,10 @@ syntheticTests =
                         , "-package old-time"
                         ]
       in withConfiguredSession packageOpts $ \session -> do
-        setCurrentDirectory "test/MainModule"
+        setCurrentDirectory "test/MainModule/ParFib"
         loadModulesFrom session "."
-        setCurrentDirectory "../../"
-        let upd = buildExe ["base", "parallel", "old-time"]
-                  "ParFib/Main.hs"
+        setCurrentDirectory "../../../"
+        let upd = buildExe $ Text.pack "Main"
         updateSessionD session upd 1
     )
   , ( "Type information 1: Local identifiers and Prelude"

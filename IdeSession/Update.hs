@@ -30,7 +30,7 @@ module IdeSession.Update (
   where
 
 import Control.Monad (when, void, forM)
-import Control.Monad.State (MonadState, StateT, execStateT)
+import Control.Monad.State (MonadState, StateT, execStateT, lift)
 import Control.Monad.IO.Class (liftIO)
 import qualified Control.Exception as Ex
 import Data.List (delete)
@@ -417,10 +417,11 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
         return state
     SessionConfig{configGenerateModInfo} = ideConfig ideStaticInfo
 
-buildExe :: [String] -> FilePath -> IdeSessionUpdate
-buildExe deps m =
-  IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir, ideDistDir} ->
-    liftIO $ buildExecutable ideSourcesDir ideDistDir deps m
+buildExe :: ModuleName -> IdeSessionUpdate
+buildExe m =
+  IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir, ideDistDir} -> do
+    mcomputed <- get ideComputed
+    lift $ buildExecutable ideSourcesDir ideDistDir mcomputed m
 
 {------------------------------------------------------------------------------
   Debugging
