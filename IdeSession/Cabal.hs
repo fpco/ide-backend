@@ -3,8 +3,9 @@ module IdeSession.Cabal (
   ) where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.Version (Version (..))
+import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
+import Text.ParserCombinators.ReadP (readP_to_S)
 
 import Distribution.License (License (..))
 import Distribution.PackageDescription
@@ -14,7 +15,7 @@ import Distribution.Simple.Configure (configure)
 import Distribution.Simple.LocalBuildInfo (localPkgDescr)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
-import Distribution.Version (anyVersion)
+import Distribution.Version (anyVersion, thisVersion)
 
 import IdeSession.State
 import IdeSession.Strict.Container
@@ -74,15 +75,29 @@ exeDesc ideSourcesDir m modulePath =
        , buildInfo
        }
 
-buildDeps :: [PackageId] -> [Package.Dependency]
+-- TODO: we could do the parsing early and export parsed Versions via our API,
+-- but we'd need to define our own strict internal variant of Version, etc.
+parseVersionString :: Monad m => String -> m Version
+parseVersionString versionString = do
+  let parser = readP_to_S parseVersion
+  case [ v | (v, "") <- parser versionString] of
+    [v] -> return v
+    _ -> fail $ "buildDeps: can't parse package version: "
+                ++ versionString
+
+buildDeps :: Monad m => [PackageId] -> m [Package.Dependency]
 buildDeps pkgs =
   let depOfName PackageId{packageName, packageVersion = Nothing} =
-        Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
-                           anyVersion
-      depOfName PackageId{packageName, packageVersion = Just ver} =
-        Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
-                           anyVersion  -- TODO
-  in map depOfName pkgs
+        return $
+          Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
+                             anyVersion
+      depOfName PackageId{packageName, packageVersion = Just versionText} = do
+        let versionString = Text.unpack versionText
+        version <- parseVersionString versionString
+        return $
+          Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
+                             (thisVersion version)
+  in mapM depOfName pkgs
 
 configureAndBuild :: FilePath -> FilePath -> [PackageId] -> ModuleName -> IO ()
 configureAndBuild ideSourcesDir ideDistDir pkgs m = do
@@ -91,8 +106,8 @@ configureAndBuild ideSourcesDir ideDistDir pkgs m = do
         ++ ".hs"  -- Cabal requires ".hs" even for preprocessed files
       pDesc = packageDesc m
       executable = exeDesc ideSourcesDir m modulePath
-      deps = buildDeps pkgs
-      gpDesc = GenericPackageDescription
+  deps <- buildDeps pkgs
+  let gpDesc = GenericPackageDescription
         { packageDescription = pDesc
         , genPackageFlags    = []
         , condLibrary        = Nothing
