@@ -13,6 +13,7 @@ import qualified Distribution.Package as Package
 import qualified Distribution.Simple.Build as Build
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.LocalBuildInfo (localPkgDescr)
+import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
 import Distribution.Version (anyVersion, thisVersion)
@@ -109,7 +110,7 @@ configureAndBuild ideSourcesDir ideDistDir pkgs m = do
   deps <- buildDeps pkgs
   let gpDesc = GenericPackageDescription
         { packageDescription = pDesc
-        , genPackageFlags    = []
+        , genPackageFlags    = []  -- seem unused
         , condLibrary        = Nothing
         , condExecutables    = [( exeName executable
                                 , CondNode executable deps [] )]
@@ -121,12 +122,18 @@ configureAndBuild ideSourcesDir ideDistDir pkgs m = do
                      , Setup.configUserInstall = Setup.Flag True
 --                     , Setup.configVerbosity = Setup.Flag maxBound
                      }
+      -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
---                     { Setup.buildVerbosity = Setup.Flag maxBound }
-  -- putStrLn $ "pDesc: " ++ show pDesc
-  lbi <- configure (gpDesc, (Nothing, [])) confFlags
-  -- putStrLn $ "lbi: " ++ show lbi
-  Build.build (localPkgDescr lbi) lbi buildFlags []
+                     { Setup.buildDistPref = Setup.Flag ideDistDir
+--                     , Setup.buildVerbosity = Setup.Flag maxBound
+                     }
+      preprocessors :: [PPSuffixHandler]
+      preprocessors = []
+      hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
+--   putStrLn $ "pDesc: " ++ show pDesc
+  lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+--   putStrLn $ "lbi: " ++ show lbi
+  Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
 
 buildExecutable :: FilePath -> FilePath -> Strict Maybe Computed -> ModuleName
                 -> IO ()
