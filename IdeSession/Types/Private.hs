@@ -16,20 +16,28 @@ module IdeSession.Types.Private (
   , Public.ModuleName
   , ModuleId(..)
   , PackageId(..)
+  , IdList
   , IdMap(..)
   , LoadedModules
   , ImportEntities(..)
   , Import(..)
     -- * Cache
   , ExplicitSharingCache(..)
+    -- * Util
+  , idListToMap
+  , immediateDominator
   ) where
 
+import Prelude hiding (span)
 import Data.Text (Text)
 import Data.ByteString (ByteString)
 import Data.Aeson.TH (deriveJSON)
+import Control.Arrow (first)
 
 import qualified IdeSession.Types.Public as Public
 import IdeSession.Strict.Container
+import IdeSession.Strict.IntervalMap (StrictIntervalMap, Interval(..))
+import qualified IdeSession.Strict.IntervalMap as IntervalMap
 
 newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
   deriving (Eq, Ord)
@@ -102,7 +110,10 @@ data PackageId = PackageId
   }
   deriving Eq
 
-newtype IdMap = IdMap { idMapToMap :: Strict (Map SourceSpan) IdInfo }
+-- | Used before we convert it to an IdMap
+type IdList = [(SourceSpan, IdInfo)]
+
+newtype IdMap = IdMap { idMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) IdInfo }
 
 type LoadedModules = Strict (Map Public.ModuleName) IdMap
 
@@ -150,7 +161,29 @@ $(deriveJSON id ''IdPropPtr)
 $(deriveJSON id ''ModuleId)
 $(deriveJSON id ''PackageId)
 $(deriveJSON id ''IdProp)
-$(deriveJSON id ''IdMap)
+-- $(deriveJSON id ''IdMap) {- We don't transmit IdMap atm -}
 $(deriveJSON id ''ImportEntities)
 $(deriveJSON id ''Import)
 $(deriveJSON id ''ExplicitSharingCache)
+
+{------------------------------------------------------------------------------
+  Util
+------------------------------------------------------------------------------}
+
+idListToMap :: IdList -> IdMap
+idListToMap = IdMap . IntervalMap.fromList . map (first spanToInterval)
+
+immediateDominator :: SourceSpan -> IdMap -> Maybe (SourceSpan, IdInfo)
+immediateDominator span (IdMap idMap) = do
+  (ival, idInfo) <- IntervalMap.immediateDominator (spanToInterval span) idMap
+  return (intervalToSpan ival, idInfo)
+
+spanToInterval :: SourceSpan -> Interval (FilePathPtr, Int, Int)
+spanToInterval SourceSpan{..} =
+  Interval (spanFilePath, spanFromLine, spanFromColumn)
+           (spanFilePath, spanToLine, spanToColumn)
+
+intervalToSpan :: Interval (FilePathPtr, Int, Int) -> SourceSpan
+intervalToSpan (Interval (spanFilePath, spanFromLine, spanFromColumn)
+                         (_,            spanToLine, spanToColumn)) =
+  SourceSpan{..}

@@ -27,19 +27,16 @@ module IdeSession.Query (
   , getImports
   , getAutocompletion
     -- * Debugging (internal use only)
-  , dumpIdInfo
+--  , dumpIdInfo
   ) where
 
 import Prelude hiding (mod, span)
-import Data.List (isInfixOf, sortBy)
+import Data.List (isInfixOf)
 import Data.Accessor ((^.), getVal)
-import Data.Maybe (listToMaybe)
-import Data.Function (on)
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
 import System.FilePath ((</>))
-import Control.Applicative ((<$>))
 
 import IdeSession.Config
 import IdeSession.State
@@ -169,31 +166,12 @@ getLoadedModules = computedQuery $ \Computed{..} ->
 -- | Get information about an identifier at a specific location
 getIdInfo :: Query (ModuleName -> SourceSpan -> Maybe (SourceSpan, IdInfo))
 getIdInfo = computedQuery $ \Computed{..} mod span -> do
-    span'     <- introduceExplicitSharing computedCache span
-    idMap     <- Private.idMapToMap <$> StrictMap.lookup mod computedLoadedModules
-    enclosing <- enclosingSpan span' (StrictMap.keys idMap)
-    idInfo    <- StrictMap.lookup enclosing idMap
-    return ( removeExplicitSharing computedCache enclosing
-           , removeExplicitSharing computedCache idInfo
-           )
-  where
-    -- TODO: replace data structure so that we can do a O(log n) search rather
-    -- than linear search.
-    enclosingSpan :: Private.SourceSpan -> [Private.SourceSpan] -> Maybe Private.SourceSpan
-    enclosingSpan span = listToMaybe
-                       . reverse
-                       . sortBy (compare `on` start)
-                       . filter (`encloses` span)
-
-    encloses :: Private.SourceSpan -> Private.SourceSpan -> Bool
-    a `encloses` b = Private.spanFilePath a == Private.spanFilePath b
-                  && start a <= start b && end a >= end b
-
-    start :: Private.SourceSpan -> (Int, Int)
-    start Private.SourceSpan{..} = (spanFromLine, spanFromColumn)
-
-    end :: Private.SourceSpan -> (Int, Int)
-    end Private.SourceSpan{..} = (spanToLine, spanToColumn)
+  span' <- introduceExplicitSharing computedCache span
+  idMap <- StrictMap.lookup mod computedLoadedModules
+  (domSpan, idInfo) <- Private.immediateDominator span' idMap
+  return ( removeExplicitSharing computedCache domSpan
+         , removeExplicitSharing computedCache idInfo
+         )
 
 -- | Get import information
 --
@@ -225,9 +203,11 @@ getAutocompletion = computedQuery $ \Computed{..} ->
   Debugging
 ------------------------------------------------------------------------------}
 
+{-
 dumpIdInfo :: IdeSession -> IO ()
 dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
   print (removeExplicitSharing computedCache computedLoadedModules)
+-}
 
 {------------------------------------------------------------------------------
   Auxiliary

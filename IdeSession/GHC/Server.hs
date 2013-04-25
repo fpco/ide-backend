@@ -74,7 +74,7 @@ data GhcRequest
 data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone ( Strict [] SourceError
-                   , LoadedModules
+                   , Strict (Map ModuleName) IdList
                    , Strict (Map ModuleName)
                             (Diff (Strict [] Import, Strict [] IdInfo))
                    , ExplicitSharingCache
@@ -156,8 +156,8 @@ ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
 ghcHandleCompile :: RpcConversation
                  -> DynamicOpts         -- ^ startup dynamic flags
                  -> Maybe [String]      -- ^ new, user-submitted dynamic flags
-                 -> StrictIORef LoadedModules -- ^ ref for newly generated IdMaps
-                 -> StrictIORef LoadedModules -- ^ ref for accumulated IdMaps
+                 -> StrictIORef (Strict (Map ModuleName) IdList) -- ^ ref for newly generated IdMaps
+                 -> StrictIORef (Strict (Map ModuleName) IdList) -- ^ ref for accumulated IdMaps
                  -> StrictIORef (Strict (Map ModuleName) ( Strict [] Import
                                                          , Strict [] IdInfo
                                                          ))
@@ -436,7 +436,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ( Strict [] SourceError
-                 , LoadedModules
+                 , Strict (Map ModuleName) IdList
                  , Strict (Map ModuleName)
                           (Diff ( Strict [] Import
                                 , Strict Trie (Strict [] IdInfo)

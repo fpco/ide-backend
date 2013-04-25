@@ -139,16 +139,20 @@ instance ExplicitSharing Public.SourceError where
     , Public.errorMsg  = errorMsg
     }
 
+{-
 instance ExplicitSharing Public.IdMap where
   removeExplicitSharing cache = Public.IdMap
                               . toLazyMap
                               . StrictMap.map (removeExplicitSharing cache)
                               . StrictMap.mapKeys (removeExplicitSharing cache)
                               . Private.idMapToMap
+-}
 
+{-
 instance ExplicitSharing Public.LoadedModules where
   removeExplicitSharing cache = Map.map (removeExplicitSharing cache)
                               . toLazyMap
+-}
 
 instance ExplicitSharing Public.ImportEntities where
   removeExplicitSharing _cache entities = case entities of

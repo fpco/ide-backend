@@ -225,21 +225,22 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
                 $ Maybe.maybe Map.empty computedAutoMap $ idleSt ^. ideComputed
               )
         -- Update code
-        computed <- if (idleState' ^. ideUpdatedCode) then do
-                      ( computedErrors
-                       , computedLoadedModules
-                       , importsAuto
-                       , computedCache'
-                       ) <- rpcCompile (idleState ^. ideGhcServer)
-                                       (idleState' ^. ideNewOpts)
-                                       (ideSourcesDir ideStaticInfo)
-                                       (idleState' ^. ideGenerateCode)
-                                       callback
-                      let (computedImports, computedAutoMap) =
-                            usePrevious idleState' importsAuto
-                          computedCache = mkRelative computedCache'
-                      return $ Maybe.just Computed{..}
-                    else return $ idleState' ^. ideComputed
+        computed <- if (idleState' ^. ideUpdatedCode)
+          then do
+            ( computedErrors
+             , computedLoaded'
+             , importsAuto
+             , computedCache'
+             ) <- rpcCompile (idleState ^. ideGhcServer)
+                             (idleState' ^. ideNewOpts)
+                             (ideSourcesDir ideStaticInfo)
+                             (idleState' ^. ideGenerateCode)
+                             callback
+            let (computedImports, computedAutoMap) = usePrevious idleState' importsAuto
+                computedCache         = mkRelative computedCache'
+                computedLoadedModules = Map.map idListToMap computedLoaded'
+            return $ Maybe.just Computed{..}
+          else return $ idleState' ^. ideComputed
 
         -- Update state
         return . IdeSessionIdle
@@ -260,6 +261,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         filePathCache = IntMap.map aux filePathCache
       , idPropCache   = idPropCache
       }
+
 
 
 -- | A session update that changes a source module by giving a new value for

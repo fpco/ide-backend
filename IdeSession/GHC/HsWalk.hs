@@ -146,7 +146,7 @@ fromGhcNameSpace ns
   Extract an IdMap from information returned by the ghc type checker
 ------------------------------------------------------------------------------}
 
-extractIdsPlugin :: StrictIORef LoadedModules -> HscPlugin
+extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) IdList) -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
   let processedModule = tcg_mod env
       processedName   = Text.pack $ moduleNameString $ GHC.moduleName processedModule
@@ -206,13 +206,13 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
 ------------------------------------------------------------------------------}
 
 newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StrictStateT (TidyEnv, IdMap) m) a
+      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StrictStateT (TidyEnv, IdList) m) a
     )
-  deriving (Functor, Monad, MonadState (TidyEnv, IdMap), MonadReader (DynFlags, RdrName.GlobalRdrEnv))
+  deriving (Functor, Monad, MonadState (TidyEnv, IdList), MonadReader (DynFlags, RdrName.GlobalRdrEnv))
 
-execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> ExtractIdsT m () -> m IdMap
+execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> ExtractIdsT m () -> m IdList
 execExtractIdsT dynFlags rdrEnv (ExtractIdsT m) = do
-  (_, idMap) <- execStateT (runReaderT m (dynFlags, rdrEnv)) (emptyTidyEnv, IdMap Map.empty)
+  (_, idMap) <- execStateT (runReaderT m (dynFlags, rdrEnv)) (emptyTidyEnv, [])
   return idMap
 
 instance MonadTrans ExtractIdsT where
@@ -231,8 +231,8 @@ getGlobalRdrEnv = asks snd
 extendIdMap :: MonadIO m => SourceSpan -> IdInfo -> ExtractIdsT m ()
 extendIdMap span info = modify (second aux)
   where
-    aux :: IdMap -> IdMap
-    aux = IdMap  . Map.insert span info . idMapToMap
+    aux :: IdList -> IdList
+    aux = (:) (span, info)
 
 tidyType :: Monad m => Type -> ExtractIdsT m Type
 tidyType typ = state $ \(tidyEnv, idMap) ->

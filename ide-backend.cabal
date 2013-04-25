@@ -36,6 +36,7 @@ library
                       IdeSession.Strict.Map,
                       IdeSession.Strict.Maybe,
                       IdeSession.Strict.Trie,
+                      IdeSession.Strict.IntervalMap
                       IdeSession.Strict.MVar
                       IdeSession.Strict.IORef
                       IdeSession.Strict.StateT
@@ -60,6 +61,7 @@ library
                       bytestring-trie      >= 0.2     && < 0.3,
                       unordered-containers >= 0.2.3   && < 0.3,
                       text                 >= 0.11    && < 0.12,
+                      fingertree           >= 0.0.1, 
                       attoparsec,
                       template-haskell,
                       data-accessor,
@@ -118,6 +120,7 @@ test-suite typecheck-dir
                       bytestring-trie      >= 0.2     && < 0.3,
                       unordered-containers >= 0.2.3   && < 0.3,
                       text                 >= 0.11    && < 0.12,
+                      fingertree           >= 0.0.1, 
                       attoparsec,
                       template-haskell,
                       data-accessor,
@@ -166,6 +169,7 @@ test-suite ghc-errors
                       bytestring-trie      >= 0.2     && < 0.3,
                       unordered-containers >= 0.2.3   && < 0.3,
                       text                 >= 0.11    && < 0.12,
+                      fingertree           >= 0.0.1, 
                       attoparsec,
                       data-accessor,
                       data-accessor-mtl,
