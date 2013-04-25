@@ -143,6 +143,7 @@ module IdeSession (
   , getSessionConfig
   , getSourcesDir
   , getDataDir
+  , getBuildDir
   , getSourceModule
   , getDataFile
   , getAllDataFiles

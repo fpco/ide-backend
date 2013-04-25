@@ -19,6 +19,7 @@ import System.Exit (ExitCode (..))
 import System.FilePath (dropExtension, (</>), takeBaseName)
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
+import System.Process (readProcess)
 import System.Random (randomRIO)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -1399,8 +1400,14 @@ syntheticTests =
         setCurrentDirectory "test/MainModule/ParFib"
         loadModulesFrom session "."
         setCurrentDirectory "../../../"
-        let upd = buildExe $ Text.pack "Main"
+        let m = "Main"
+            upd = buildExe $ Text.pack "Main"
         updateSessionD session upd 1
+        buildDir <- getBuildDir session
+        fibOut <- readProcess (buildDir </> m </> m) [] []
+        assertEqual "ParFib exe output"
+                    "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                    fibOut
     )
   , ( "Type information 1: Local identifiers and Prelude"
     , withConfiguredSession defOpts $ \session -> do
