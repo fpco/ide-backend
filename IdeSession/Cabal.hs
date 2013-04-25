@@ -5,7 +5,6 @@ module IdeSession.Cabal (
 import Control.Monad.IO.Class (liftIO)
 import Data.Version (Version (..))
 import qualified Data.Text as Text
-import System.FilePath (takeBaseName)
 
 import Distribution.License (License (..))
 import Distribution.PackageDescription
@@ -24,27 +23,17 @@ import IdeSession.Types.Translation
 import qualified IdeSession.Strict.List   as StrictList
 import qualified IdeSession.Strict.Map    as StrictMap
 
-pIdent :: Package.PackageIdentifier
-pIdent = Package.PackageIdentifier
-  { pkgName    = Package.PackageName "main_package"
+pIdent :: ModuleName -> Package.PackageIdentifier
+pIdent m = Package.PackageIdentifier
+  { pkgName    = Package.PackageName $ "executable_" ++ Text.unpack m
   , pkgVersion = Version [1, 0] []
   }
 
-buildDeps :: [PackageId] -> [Package.Dependency]
-buildDeps pkgs =
-  let depOfName PackageId{packageName, packageVersion = Nothing} =
-        Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
-                          anyVersion
-      depOfName PackageId{packageName, packageVersion = Just ver} =
-        Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
-                          anyVersion  -- TODO
-  in map depOfName pkgs
-
-packageDesc :: PackageDescription
-packageDesc = PackageDescription
+packageDesc :: ModuleName -> PackageDescription
+packageDesc m = PackageDescription
   { -- the following are required by all packages:
-    package        = pIdent
-  , license        = OtherLicense
+    package        = pIdent m -- for errors reported by GHC
+  , license        = AllRightsReserved  -- dummy
   , licenseFile    = ""
   , copyright      = ""
   , maintainer     = ""
@@ -59,7 +48,7 @@ packageDesc = PackageDescription
   , description    = ""
   , category       = ""
   , customFieldsPD = []
-  , buildDepends   = []
+  , buildDepends   = []  -- probably ignored
   , specVersionRaw = Left $ Version [0, 14, 0] []
   , buildType      = Just Simple
     -- components
@@ -67,34 +56,48 @@ packageDesc = PackageDescription
   , executables    = []  -- ignored when inside @GenericPackageDescription@
   , testSuites     = []
   , benchmarks     = []
-  , dataFiles      = []
-  , dataDir        = ""
+  , dataFiles      = []  -- TODO: should we mention all of managedData?
+  , dataDir        = ""  -- TODO: should we put ideDataDir?
   , extraSrcFiles  = []
   , extraTmpFiles  = []
   }
 
-exeDesc :: FilePath -> FilePath -> Executable
-exeDesc ideSourcesDir modulePath =
+exeDesc :: FilePath -> ModuleName -> FilePath -> Executable
+exeDesc ideSourcesDir m modulePath =
   let buildInfo = emptyBuildInfo
         { buildable = True
         , hsSourceDirs = [ideSourcesDir]
         }
   in Executable
-       { exeName = takeBaseName modulePath
+       { exeName = Text.unpack m
        , modulePath
        , buildInfo
        }
 
-configureAndBuild :: FilePath -> FilePath -> [PackageId] -> FilePath -> IO ()
-configureAndBuild ideSourcesDir ideDistDir deps modulePath = do
-  let pDesc = packageDesc
-      executable = exeDesc ideSourcesDir modulePath
+buildDeps :: [PackageId] -> [Package.Dependency]
+buildDeps pkgs =
+  let depOfName PackageId{packageName, packageVersion = Nothing} =
+        Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
+                           anyVersion
+      depOfName PackageId{packageName, packageVersion = Just ver} =
+        Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
+                           anyVersion  -- TODO
+  in map depOfName pkgs
+
+configureAndBuild :: FilePath -> FilePath -> [PackageId] -> ModuleName -> IO ()
+configureAndBuild ideSourcesDir ideDistDir pkgs m = do
+  let modulePath =
+        map (\c -> if c == '.' then '/' else c) (Text.unpack m)
+        ++ ".hs"  -- Cabal requires ".hs" even for preprocessed files
+      pDesc = packageDesc m
+      executable = exeDesc ideSourcesDir m modulePath
+      deps = buildDeps pkgs
       gpDesc = GenericPackageDescription
         { packageDescription = pDesc
         , genPackageFlags    = []
         , condLibrary        = Nothing
         , condExecutables    = [( exeName executable
-                                , CondNode executable (buildDeps deps) [] )]
+                                , CondNode executable deps [] )]
         , condTestSuites     = []
         , condBenchmarks     = []
         }
@@ -123,8 +126,5 @@ buildExecutable ideSourcesDir ideDistDir mcomputed m = do
         Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not found."
         Just imports -> do
           let deps = map (modulePackage . importModule) imports
-          let modulePath =
-                map (\c -> if c == '.' then '/' else c) (Text.unpack m)
-                ++ ".hs"  -- not ".lhs" at this time
-          liftIO $ configureAndBuild ideSourcesDir ideDistDir deps modulePath
+          liftIO $ configureAndBuild ideSourcesDir ideDistDir deps m
           -- TODO: keep a list of built (and up-to-date?) executables?
