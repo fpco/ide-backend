@@ -1678,6 +1678,23 @@ syntheticTests =
         assertIdInfo idInfo "A" (5,33,5,37) "on (VarName) :: forall b1 c1 a2. (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 (defined in base-4.5.1.0:Data.Function at <no location info>; imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36)"
         assertIdInfo idInfo "A" (5,8,5,16) "fromJust (VarName) :: forall a2. Data.Maybe.Maybe a2 -> a2 (defined in base-4.5.1.0:Data.Maybe at <no location info>; imported from base-4.5.1.0:Data.Maybe at A.hs@2:1-2:18)"
     )
+  , ( "Type information 8: Imprecise source spans"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "main = print True"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getIdInfo session
+        let infoPrint = "print (VarName) :: forall a. GHC.Show.Show a => a -> GHC.Types.IO () (defined in base-4.5.1.0:System.IO at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
+        assertIdInfo idInfo "A" (2,8,2,13) infoPrint
+        assertIdInfo idInfo "A" (2,8,2,8) infoPrint
+        assertIdInfo idInfo "A" (2,8,2,9) infoPrint
+        assertIdInfo idInfo "A" (2,9,2,9) infoPrint
+        assertIdInfo idInfo "A" (2,9,2,10) infoPrint
+        assertIdInfo idInfo "A" (2,9,2,13) infoPrint
+    )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
@@ -1954,13 +1971,13 @@ loadModule file contents =
                       []              -> Nothing
                       (_ : haystack') -> substr needle haystack'
 
-assertIdInfo :: (Text -> SourceSpan -> Maybe IdInfo)
+assertIdInfo :: (Text -> SourceSpan -> Maybe (SourceSpan, IdInfo))
              -> String
              -> (Int, Int, Int, Int)
              -> String
              -> Assertion
 assertIdInfo idInfo mod (frLine, frCol, toLine, toCol) typ =
-    assertEqual "" (Just typ) (show `fmap` idInfo (Text.pack mod) span)
+    assertEqual "" typ (show . snd . fromJust $ idInfo (Text.pack mod) span)
   where
     span = SourceSpan { spanFilePath   = mod ++ ".hs"
                       , spanFromLine   = frLine
