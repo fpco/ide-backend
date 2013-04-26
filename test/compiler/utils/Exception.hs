@@ -104,3 +104,6 @@ gonException :: (ExceptionMonad m) => m a -> m b -> m a
 gonException ioA cleanup = ioA `gcatch` \e ->
                              do _ <- cleanup
                                 throw (e :: SomeException)
+
+main :: IO ()
+main = return ()

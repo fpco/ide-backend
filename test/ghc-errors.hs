@@ -345,6 +345,21 @@ syntheticTests =
           RunOk _ -> assertEqual "" output (BSLC.pack "False\n")
           _ -> assertFailure "Unexpected snippet run result"
     )
+  , ( "Build executable from some .lhs files"
+    , withConfiguredSession defOpts $ \session -> do
+        setCurrentDirectory "test/compiler/utils"
+        loadModulesFrom session "."
+        setCurrentDirectory "../../../"
+        assertNoErrors session
+        let m = "Maybes"
+            upd = buildExe [Text.pack m, Text.pack "Exception"]
+        updateSessionD session upd 1
+        buildDir <- getBuildDir session
+        out <- readProcess (buildDir </> m </> m) [] []
+        assertEqual "Maybes exe output"
+                    "False\n"
+                    out
+    )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package mtl"
@@ -450,6 +465,24 @@ syntheticTests =
         case result of
           RunOk _ -> assertEqual "" output (BSLC.pack "(True,43)\n")
           _ -> assertFailure "Unexpected snippet run result"
+    )
+  , ( "Build executable from TH"
+    , let packageOpts = defOpts ++ ["-package template-haskell"]
+      in withConfiguredSession packageOpts $ \session -> do
+        setCurrentDirectory "test"
+        (originalUpdate, lm) <- getModulesFrom session "TH"
+        let update = originalUpdate <> updateCodeGeneration True
+        updateSessionD session update (length lm)
+        setCurrentDirectory "../"
+        assertNoErrors session
+        let m = "TH.TH"
+            upd = buildExe [Text.pack m]
+        updateSessionD session upd 1
+        buildDir <- getBuildDir session
+        out <- readProcess (buildDir </> m </> m) [] []
+        assertEqual "TH.TH exe output"
+                    "(True,43)\n"
+                    out
     )
   , ( "Test CPP: ifdefed module header"
     , let packageOpts = defOpts ++ ["-XCPP"]
