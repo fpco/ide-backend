@@ -8,6 +8,7 @@ import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 
 import Distribution.License (License (..))
+import qualified Distribution.ModuleName as Distribution.ModuleName
 import Distribution.PackageDescription
 import qualified Distribution.Package as Package
 import qualified Distribution.Simple.Build as Build
@@ -18,6 +19,7 @@ import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
 import Distribution.Version (anyVersion, thisVersion)
+import Language.Haskell.Extension (Language (Haskell2010))
 
 import IdeSession.State
 import IdeSession.Strict.Container
@@ -26,16 +28,22 @@ import IdeSession.Types.Translation
 import qualified IdeSession.Strict.List   as StrictList
 import qualified IdeSession.Strict.Map    as StrictMap
 
-pIdent :: ModuleName -> Package.PackageIdentifier
-pIdent m = Package.PackageIdentifier
-  { pkgName    = Package.PackageName $ "executable_" ++ Text.unpack m
-  , pkgVersion = Version [1, 0] []
+pkgName :: Package.PackageName
+pkgName = Package.PackageName "main-package"
+
+pkgVersion :: Version
+pkgVersion = Version [1, 0] []
+
+pkgIdent :: Package.PackageIdentifier
+pkgIdent = Package.PackageIdentifier
+  { pkgName    = pkgName
+  , pkgVersion = pkgVersion
   }
 
-packageDesc :: ModuleName -> PackageDescription
-packageDesc m = PackageDescription
+pkgDesc :: PackageDescription
+pkgDesc = PackageDescription
   { -- the following are required by all packages:
-    package        = pIdent m -- for errors reported by GHC
+    package        = pkgIdent
   , license        = AllRightsReserved  -- dummy
   , licenseFile    = ""
   , copyright      = ""
@@ -52,31 +60,44 @@ packageDesc m = PackageDescription
   , category       = ""
   , customFieldsPD = []
   , buildDepends   = []  -- probably ignored
-  , specVersionRaw = Left $ Version [0, 14, 0] []
+  , specVersionRaw = Left $ Version [1, 14, 0] []
   , buildType      = Just Simple
     -- components
-  , library        = Nothing
+  , library        = Nothing  -- ignored inside @GenericPackageDescription@
   , executables    = []  -- ignored when inside @GenericPackageDescription@
   , testSuites     = []
   , benchmarks     = []
-  , dataFiles      = []  -- TODO: should we mention all of managedData?
-  , dataDir        = ""  -- TODO: should we put ideDataDir?
+  , dataFiles      = []  -- for now, we don't mention files from managedData?
+  , dataDir        = ""  -- for now we don't put ideDataDir?
   , extraSrcFiles  = []
   , extraTmpFiles  = []
   }
 
+bInfo :: FilePath -> Maybe [String] -> BuildInfo
+bInfo ideSourcesDir ghcOpts =
+  emptyBuildInfo
+    { buildable = True
+    , hsSourceDirs = [ideSourcesDir]
+    , defaultLanguage = Just Haskell2010
+    , options = maybe [] (\opts -> [(GHC, opts)]) ghcOpts
+    }
+
 exeDesc :: FilePath -> Maybe [String] -> ModuleName -> FilePath -> Executable
 exeDesc ideSourcesDir ghcOpts m modulePath =
-  let buildInfo = emptyBuildInfo
-        { buildable = True
-        , hsSourceDirs = [ideSourcesDir]
-        , options = maybe [] (\opts -> [(GHC, opts)]) ghcOpts
-        }
-  in Executable
-       { exeName = Text.unpack m
-       , modulePath
-       , buildInfo
-       }
+  Executable
+    { exeName = Text.unpack m
+    , modulePath
+    , buildInfo = bInfo ideSourcesDir ghcOpts
+    }
+
+libDesc :: FilePath -> Maybe [String] -> [Distribution.ModuleName.ModuleName]
+        -> Library
+libDesc ideSourcesDir ghcOpts ms =
+  Library
+    { exposedModules = ms
+    , libExposed = False
+    , libBuildInfo = bInfo ideSourcesDir ghcOpts
+    }
 
 -- TODO: we could do the parsing early and export parsed Versions via our API,
 -- but we'd need to define our own strict internal variant of Version, etc.
@@ -85,11 +106,11 @@ parseVersionString versionString = do
   let parser = readP_to_S parseVersion
   case [ v | (v, "") <- parser versionString] of
     [v] -> return v
-    _ -> fail $ "buildDeps: can't parse package version: "
+    _ -> fail $ "parseVersionString: can't parse package version: "
                 ++ versionString
 
-buildDeps :: Monad m => [PackageId] -> m [Package.Dependency]
-buildDeps pkgs =
+externalDeps :: Monad m => [PackageId] -> m [Package.Dependency]
+externalDeps pkgs =
   let depOfName PackageId{packageName, packageVersion = Nothing} =
         return $
           Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
@@ -102,20 +123,23 @@ buildDeps pkgs =
                              (thisVersion version)
   in mapM depOfName pkgs
 
-configureAndBuild :: FilePath -> FilePath
-                  -> Maybe [String] -> [PackageId] -> ModuleName
+configureAndBuild :: FilePath -> FilePath -> Maybe [String]
+                  -> [PackageId] -> [ModuleName] -> ModuleName
                   -> IO ()
-configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs m = do
-  let modulePath =
-        map (\c -> if c == '.' then '/' else c) (Text.unpack m)
-        ++ ".hs"  -- Cabal requires ".hs" even for preprocessed files
-      pDesc = packageDesc m
+configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM m = do
+  let dotToSlash = map (\c -> if c == '.' then '/' else c)
+      -- Cabal requires ".hs" here,  even for preprocessed files.
+      modulePath = dotToSlash (Text.unpack m) ++ ".hs"
       executable = exeDesc ideSourcesDir ghcOpts m modulePath
-  deps <- buildDeps pkgs
-  let gpDesc = GenericPackageDescription
-        { packageDescription = pDesc
+      allProjectModules =
+        map (Distribution.ModuleName.fromString . Text.unpack) loadedM
+      library = libDesc ideSourcesDir ghcOpts allProjectModules
+  eDeps <- externalDeps pkgs
+  let deps = Package.Dependency pkgName (thisVersion pkgVersion) : eDeps
+      gpDesc = GenericPackageDescription
+        { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
-        , condLibrary        = Nothing
+        , condLibrary        = Just $ CondNode library eDeps []
         , condExecutables    = [( exeName executable
                                 , CondNode executable deps [] )]
         , condTestSuites     = []
@@ -139,8 +163,8 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs m = do
 --   putStrLn $ "lbi: " ++ show lbi
   Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
 
-buildExecutable :: FilePath -> FilePath
-                -> Maybe [String] -> Strict Maybe Computed -> ModuleName
+buildExecutable :: FilePath -> FilePath -> Maybe [String]
+                -> Strict Maybe Computed -> ModuleName
                 -> IO ()
 buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed m = do
   case toLazyMaybe mcomputed of
@@ -150,8 +174,10 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed m = do
                                                           computedCache)) $
                        StrictMap.lookup m computedImports
       case mimports of
-        Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not found."
+        Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
         Just imports -> do
-          let deps = map (modulePackage . importModule) imports
-          liftIO $ configureAndBuild ideSourcesDir ideDistDir ghcOpts deps m
+          let pkgs = map (modulePackage . importModule) imports
+              loadedM = StrictMap.keys $ computedLoadedModules
+          liftIO
+            $ configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM m
           -- TODO: keep a list of built (and up-to-date?) executables?
