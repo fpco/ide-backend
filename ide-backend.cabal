@@ -61,7 +61,7 @@ library
                       bytestring-trie      >= 0.2     && < 0.3,
                       unordered-containers >= 0.2.3   && < 0.3,
                       text                 >= 0.11    && < 0.12,
-                      fingertree           >= 0.0.1, 
+                      fingertree           >= 0.0.1,
                       attoparsec,
                       template-haskell,
                       data-accessor,
@@ -120,7 +120,7 @@ test-suite typecheck-dir
                       bytestring-trie      >= 0.2     && < 0.3,
                       unordered-containers >= 0.2.3   && < 0.3,
                       text                 >= 0.11    && < 0.12,
-                      fingertree           >= 0.0.1, 
+                      fingertree           >= 0.0.1,
                       attoparsec,
                       template-haskell,
                       data-accessor,
@@ -169,7 +169,7 @@ test-suite ghc-errors
                       bytestring-trie      >= 0.2     && < 0.3,
                       unordered-containers >= 0.2.3   && < 0.3,
                       text                 >= 0.11    && < 0.12,
-                      fingertree           >= 0.0.1, 
+                      fingertree           >= 0.0.1,
                       attoparsec,
                       data-accessor,
                       data-accessor-mtl,
@@ -196,8 +196,10 @@ test-suite ghc-errors
                       BangPatterns, RecordWildCards, NamedFieldPuns
   other-extensions:   CPP, TemplateHaskell, ScopedTypeVariables,
                       DeriveDataTypeable
-  ghc-options:        -Wall -fno-warn-unused-do-bind -threaded
-  ghc-options:        -with-rtsopts=-N
+  ghc-options:        -Wall -fno-warn-unused-do-bind
+-- TODO: setCurrentDirectory interacts badly with this
+--  ghc-options:        -threaded
+--  ghc-options:        -with-rtsopts=-N
 
 
 test-suite rpc-server
