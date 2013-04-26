@@ -6,9 +6,11 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
+import System.FilePath ((</>))
+import System.IO.Temp (createTempDirectory)
 
 import Distribution.License (License (..))
-import qualified Distribution.ModuleName as Distribution.ModuleName
+import qualified Distribution.ModuleName
 import Distribution.PackageDescription
 import qualified Distribution.Package as Package
 import qualified Distribution.Simple.Build as Build
@@ -25,8 +27,8 @@ import IdeSession.State
 import IdeSession.Strict.Container
 import IdeSession.Types.Public
 import IdeSession.Types.Translation
-import qualified IdeSession.Strict.List   as StrictList
-import qualified IdeSession.Strict.Map    as StrictMap
+import qualified IdeSession.Strict.List as StrictList
+import qualified IdeSession.Strict.Map  as StrictMap
 
 pkgName :: Package.PackageName
 pkgName = Package.PackageName "main-package"
@@ -74,21 +76,36 @@ pkgDesc = PackageDescription
   }
 
 bInfo :: FilePath -> Maybe [String] -> BuildInfo
-bInfo ideSourcesDir ghcOpts =
+bInfo sourceDir ghcOpts =
   emptyBuildInfo
     { buildable = True
-    , hsSourceDirs = [ideSourcesDir]
+    , hsSourceDirs = [sourceDir]
     , defaultLanguage = Just Haskell2010
     , options = maybe [] (\opts -> [(GHC, opts)]) ghcOpts
     }
 
-exeDesc :: FilePath -> Maybe [String] -> ModuleName -> FilePath -> Executable
-exeDesc ideSourcesDir ghcOpts m modulePath =
-  Executable
-    { exeName = Text.unpack m
-    , modulePath
-    , buildInfo = bInfo ideSourcesDir ghcOpts
-    }
+exeDesc :: FilePath -> FilePath -> Maybe [String] -> ModuleName
+        -> IO Executable
+exeDesc ideSourcesDir ideDistDir ghcOpts m = do
+  let exeName = Text.unpack m
+  if exeName == "Main" then  -- that's what Cabal expects, no wrapper needed
+    return $ Executable
+      { exeName
+      , modulePath = "Main.hs"
+      , buildInfo = bInfo ideSourcesDir ghcOpts
+      }
+  else do
+    mDir <- createTempDirectory ideDistDir exeName
+    -- Cabal insists on "Main" and on ".hs".
+    let modulePath = mDir </> "Main.hs"
+        wrapper = "import qualified " ++ exeName ++ "\n"
+                  ++ "main = " ++ exeName ++ ".main"
+    writeFile modulePath wrapper
+    return $ Executable
+      { exeName
+      , modulePath
+      , buildInfo = bInfo mDir ghcOpts
+      }
 
 libDesc :: FilePath -> Maybe [String] -> [Distribution.ModuleName.ModuleName]
         -> Library
@@ -127,11 +144,8 @@ configureAndBuild :: FilePath -> FilePath -> Maybe [String]
                   -> [PackageId] -> [ModuleName] -> ModuleName
                   -> IO ()
 configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM m = do
-  let dotToSlash = map (\c -> if c == '.' then '/' else c)
-      -- Cabal requires ".hs" here,  even for preprocessed files.
-      modulePath = dotToSlash (Text.unpack m) ++ ".hs"
-      executable = exeDesc ideSourcesDir ghcOpts m modulePath
-      allProjectModules =
+  executable <- exeDesc ideSourcesDir ideDistDir ghcOpts m
+  let allProjectModules =
         map (Distribution.ModuleName.fromString . Text.unpack) loadedM
       library = libDesc ideSourcesDir ghcOpts allProjectModules
   eDeps <- externalDeps pkgs

@@ -1390,18 +1390,37 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
         -}
     )
-  , ( "Build an executable"
+  , ( "Build executable from Main"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"
                         , "-package parallel"
                         , "-package old-time"
                         ]
       in withConfiguredSession packageOpts $ \session -> do
-        setCurrentDirectory "test/MainModule/ParFib"
+        setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
-        setCurrentDirectory "../../../"
+        setCurrentDirectory "../../"
         let m = "Main"
-            upd = buildExe $ Text.pack "Main"
+            upd = buildExe $ Text.pack m
+        updateSessionD session upd 1
+        buildDir <- getBuildDir session
+        fibOut <- readProcess (buildDir </> m </> m) [] []
+        assertEqual "ParFib exe output"
+                    "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                    fibOut
+    )
+  , ( "Build executable from ParFib.Main"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package parallel"
+                        , "-package old-time"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        setCurrentDirectory "test/MainModule"
+        loadModulesFrom session "."
+        setCurrentDirectory "../../"
+        let m = "ParFib.Main"
+            upd = buildExe $ Text.pack m
         updateSessionD session upd 1
         buildDir <- getBuildDir session
         fibOut <- readProcess (buildDir </> m </> m) [] []

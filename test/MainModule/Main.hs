@@ -2,8 +2,6 @@
 -- A parallel implementation of fib in Haskell using semi-explicit
 -- parallelism expressed with `par` and `pseq`
 
-module ParFib.Main
-where
 import System.Time
 import Control.Parallel
 import System.Mem
