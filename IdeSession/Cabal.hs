@@ -11,6 +11,7 @@ import Distribution.License (License (..))
 import Distribution.PackageDescription
 import qualified Distribution.Package as Package
 import qualified Distribution.Simple.Build as Build
+import Distribution.Simple.Compiler (CompilerFlavor (GHC))
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.LocalBuildInfo (localPkgDescr)
 import Distribution.Simple.PreProcess (PPSuffixHandler)
@@ -64,11 +65,12 @@ packageDesc m = PackageDescription
   , extraTmpFiles  = []
   }
 
-exeDesc :: FilePath -> ModuleName -> FilePath -> Executable
-exeDesc ideSourcesDir m modulePath =
+exeDesc :: FilePath -> Maybe [String] -> ModuleName -> FilePath -> Executable
+exeDesc ideSourcesDir ghcOpts m modulePath =
   let buildInfo = emptyBuildInfo
         { buildable = True
         , hsSourceDirs = [ideSourcesDir]
+        , options = maybe [] (\opts -> [(GHC, opts)]) ghcOpts
         }
   in Executable
        { exeName = Text.unpack m
@@ -100,13 +102,15 @@ buildDeps pkgs =
                              (thisVersion version)
   in mapM depOfName pkgs
 
-configureAndBuild :: FilePath -> FilePath -> [PackageId] -> ModuleName -> IO ()
-configureAndBuild ideSourcesDir ideDistDir pkgs m = do
+configureAndBuild :: FilePath -> FilePath
+                  -> Maybe [String] -> [PackageId] -> ModuleName
+                  -> IO ()
+configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs m = do
   let modulePath =
         map (\c -> if c == '.' then '/' else c) (Text.unpack m)
         ++ ".hs"  -- Cabal requires ".hs" even for preprocessed files
       pDesc = packageDesc m
-      executable = exeDesc ideSourcesDir m modulePath
+      executable = exeDesc ideSourcesDir ghcOpts m modulePath
   deps <- buildDeps pkgs
   let gpDesc = GenericPackageDescription
         { packageDescription = pDesc
@@ -135,9 +139,10 @@ configureAndBuild ideSourcesDir ideDistDir pkgs m = do
 --   putStrLn $ "lbi: " ++ show lbi
   Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
 
-buildExecutable :: FilePath -> FilePath -> Strict Maybe Computed -> ModuleName
+buildExecutable :: FilePath -> FilePath
+                -> Maybe [String] -> Strict Maybe Computed -> ModuleName
                 -> IO ()
-buildExecutable ideSourcesDir ideDistDir mcomputed m = do
+buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed m = do
   case toLazyMaybe mcomputed of
     Nothing -> fail "This session state does not admit buidling executables."
     Just Computed{..} -> do
@@ -148,5 +153,5 @@ buildExecutable ideSourcesDir ideDistDir mcomputed m = do
         Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not found."
         Just imports -> do
           let deps = map (modulePackage . importModule) imports
-          liftIO $ configureAndBuild ideSourcesDir ideDistDir deps m
+          liftIO $ configureAndBuild ideSourcesDir ideDistDir ghcOpts deps m
           -- TODO: keep a list of built (and up-to-date?) executables?

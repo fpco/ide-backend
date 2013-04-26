@@ -423,7 +423,8 @@ buildExe :: ModuleName -> IdeSessionUpdate
 buildExe m =
   IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir, ideDistDir} -> do
     mcomputed <- get ideComputed
-    lift $ buildExecutable ideSourcesDir ideDistDir mcomputed m
+    ghcOpts <- get ideNewOpts
+    lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed m
 
 {------------------------------------------------------------------------------
   Debugging
