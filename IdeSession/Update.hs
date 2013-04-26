@@ -419,12 +419,12 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
         return state
     SessionConfig{configGenerateModInfo} = ideConfig ideStaticInfo
 
-buildExe :: ModuleName -> IdeSessionUpdate
-buildExe m =
+buildExe :: [ModuleName] -> IdeSessionUpdate
+buildExe ms =
   IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir, ideDistDir} -> do
     mcomputed <- get ideComputed
     ghcOpts <- get ideNewOpts
-    lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed m
+    lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed ms
 
 {------------------------------------------------------------------------------
   Debugging

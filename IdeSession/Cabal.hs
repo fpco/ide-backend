@@ -2,7 +2,9 @@ module IdeSession.Cabal (
     buildExecutable
   ) where
 
+import Control.Monad
 import Control.Monad.IO.Class (liftIO)
+import Data.Maybe (catMaybes)
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
@@ -31,7 +33,7 @@ import qualified IdeSession.Strict.List as StrictList
 import qualified IdeSession.Strict.Map  as StrictMap
 
 pkgName :: Package.PackageName
-pkgName = Package.PackageName "main-package"
+pkgName = Package.PackageName "main"  -- matches the import default
 
 pkgVersion :: Version
 pkgVersion = Version [1, 0] []
@@ -128,34 +130,36 @@ parseVersionString versionString = do
 
 externalDeps :: Monad m => [PackageId] -> m [Package.Dependency]
 externalDeps pkgs =
-  let depOfName PackageId{packageName, packageVersion = Nothing} =
-        return $
-          Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
-                             anyVersion
+  let depOfName :: Monad m => PackageId -> m (Maybe Package.Dependency)
+      depOfName PackageId{packageName, packageVersion = Nothing} = do
+        let packageN = Package.PackageName $ Text.unpack $ packageName
+        if packageN == pkgName then return Nothing
+        else return $ Just $ Package.Dependency packageN anyVersion
       depOfName PackageId{packageName, packageVersion = Just versionText} = do
-        let versionString = Text.unpack versionText
+        let packageN = Package.PackageName $ Text.unpack $ packageName
+            versionString = Text.unpack versionText
         version <- parseVersionString versionString
-        return $
-          Package.Dependency (Package.PackageName $ Text.unpack $ packageName)
-                             (thisVersion version)
-  in mapM depOfName pkgs
+        return $ Just $ Package.Dependency packageN (thisVersion version)
+  in liftM catMaybes $ mapM depOfName pkgs
 
 configureAndBuild :: FilePath -> FilePath -> Maybe [String]
-                  -> [PackageId] -> [ModuleName] -> ModuleName
+                  -> [PackageId] -> [ModuleName] -> [ModuleName]
                   -> IO ()
-configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM m = do
-  executable <- exeDesc ideSourcesDir ideDistDir ghcOpts m
+configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM ms = do
+  libDeps <- externalDeps pkgs
+  let mainDep = Package.Dependency pkgName (thisVersion pkgVersion)
+      exeDeps = mainDep : libDeps
+  executables <- mapM (exeDesc ideSourcesDir ideDistDir ghcOpts) ms
+  let condExe exe = (exeName exe, CondNode exe exeDeps [])
+      condExecutables = map condExe executables
   let allProjectModules =
         map (Distribution.ModuleName.fromString . Text.unpack) loadedM
       library = libDesc ideSourcesDir ghcOpts allProjectModules
-  eDeps <- externalDeps pkgs
-  let deps = Package.Dependency pkgName (thisVersion pkgVersion) : eDeps
       gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
-        , condLibrary        = Just $ CondNode library eDeps []
-        , condExecutables    = [( exeName executable
-                                , CondNode executable deps [] )]
+        , condLibrary        = Just $ CondNode library libDeps []
+        , condExecutables
         , condTestSuites     = []
         , condBenchmarks     = []
         }
@@ -178,20 +182,24 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM m = do
   Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
 
 buildExecutable :: FilePath -> FilePath -> Maybe [String]
-                -> Strict Maybe Computed -> ModuleName
+                -> Strict Maybe Computed -> [ModuleName]
                 -> IO ()
-buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed m = do
+buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed ms = do
   case toLazyMaybe mcomputed of
     Nothing -> fail "This session state does not admit buidling executables."
     Just Computed{..} -> do
-      let mimports = fmap (toLazyList . StrictList.map (removeExplicitSharing
-                                                          computedCache)) $
-                       StrictMap.lookup m computedImports
-      case mimports of
-        Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
-        Just imports -> do
-          let pkgs = map (modulePackage . importModule) imports
-              loadedM = StrictMap.keys $ computedLoadedModules
-          liftIO
-            $ configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM m
-          -- TODO: keep a list of built (and up-to-date?) executables?
+      let loadedM = StrictMap.keys $ computedLoadedModules
+          imp m = do
+            let mimports =
+                  fmap (toLazyList . StrictList.map (removeExplicitSharing
+                                                       computedCache)) $
+                    StrictMap.lookup m computedImports
+            case mimports of
+              Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
+              Just imports ->
+                return $ map (modulePackage . importModule) imports
+      imps <- mapM imp loadedM
+      let pkgs = concat imps
+      liftIO $ configureAndBuild
+                 ideSourcesDir ideDistDir ghcOpts pkgs loadedM ms
+      -- TODO: keep a list of built (and up-to-date?) executables?

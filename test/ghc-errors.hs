@@ -1401,7 +1401,7 @@ syntheticTests =
         loadModulesFrom session "."
         setCurrentDirectory "../../"
         let m = "Main"
-            upd = buildExe $ Text.pack m
+            upd = buildExe [Text.pack m]
         updateSessionD session upd 1
         buildDir <- getBuildDir session
         fibOut <- readProcess (buildDir </> m </> m) [] []
@@ -1420,7 +1420,7 @@ syntheticTests =
         loadModulesFrom session "."
         setCurrentDirectory "../../"
         let m = "ParFib.Main"
-            upd = buildExe $ Text.pack m
+            upd = buildExe [Text.pack m, Text.pack "Main"]
         updateSessionD session upd 1
         buildDir <- getBuildDir session
         fibOut <- readProcess (buildDir </> m </> m) [] []
