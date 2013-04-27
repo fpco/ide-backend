@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 module TH.TH where
 
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)

@@ -77,16 +77,16 @@ pkgDesc = PackageDescription
   , extraTmpFiles  = []
   }
 
-bInfo :: FilePath -> Maybe [String] -> BuildInfo
+bInfo :: FilePath -> [String] -> BuildInfo
 bInfo sourceDir ghcOpts =
   emptyBuildInfo
     { buildable = True
     , hsSourceDirs = [sourceDir]
     , defaultLanguage = Just Haskell2010
-    , options = maybe [] (\opts -> [(GHC, opts)]) ghcOpts
+    , options = [(GHC, ghcOpts)]
     }
 
-exeDesc :: FilePath -> FilePath -> Maybe [String] -> ModuleName
+exeDesc :: FilePath -> FilePath -> [String] -> ModuleName
         -> IO Executable
 exeDesc ideSourcesDir ideDistDir ghcOpts m = do
   let exeName = Text.unpack m
@@ -109,7 +109,7 @@ exeDesc ideSourcesDir ideDistDir ghcOpts m = do
       , buildInfo = bInfo mDir ghcOpts
       }
 
-libDesc :: FilePath -> Maybe [String] -> [Distribution.ModuleName.ModuleName]
+libDesc :: FilePath -> [String] -> [Distribution.ModuleName.ModuleName]
         -> Library
 libDesc ideSourcesDir ghcOpts ms =
   Library
@@ -142,7 +142,7 @@ externalDeps pkgs =
         return $ Just $ Package.Dependency packageN (thisVersion version)
   in liftM catMaybes $ mapM depOfName pkgs
 
-configureAndBuild :: FilePath -> FilePath -> Maybe [String]
+configureAndBuild :: FilePath -> FilePath -> [String]
                   -> [PackageId] -> [ModuleName] -> [ModuleName]
                   -> IO ()
 configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM ms = do
@@ -181,7 +181,7 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM ms = do
 --   putStrLn $ "lbi: " ++ show lbi
   Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
 
-buildExecutable :: FilePath -> FilePath -> Maybe [String]
+buildExecutable :: FilePath -> FilePath -> [String]
                 -> Strict Maybe Computed -> [ModuleName]
                 -> IO ()
 buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed ms = do

@@ -452,7 +452,8 @@ syntheticTests =
         assertOneError session
     )
   , ( "Test TH; code generation on"
-    , let packageOpts = defOpts ++ ["-package template-haskell"]
+    , let packageOpts =
+            defOpts ++ ["-package template-haskell", "-XTemplateHaskell"]
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test"
         (originalUpdate, lm) <- getModulesFrom session "TH"
@@ -467,7 +468,7 @@ syntheticTests =
           _ -> assertFailure "Unexpected snippet run result"
     )
   , ( "Build executable from TH"
-    , let packageOpts = defOpts ++ ["-package template-haskell"]
+    , let packageOpts = defOpts ++ ["-package template-haskell", "-XTemplateHaskell"]
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test"
         (originalUpdate, lm) <- getModulesFrom session "TH"

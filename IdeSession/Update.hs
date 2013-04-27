@@ -39,6 +39,7 @@ import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSS
+import Data.Maybe (fromMaybe)
 import qualified System.Directory as Dir
 import System.FilePath (takeDirectory, makeRelative, (</>))
 import System.Posix.Files (setFileTimes)
@@ -421,9 +422,10 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
 
 buildExe :: [ModuleName] -> IdeSessionUpdate
 buildExe ms =
-  IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir, ideDistDir} -> do
+  IdeSessionUpdate $ \IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
     mcomputed <- get ideComputed
-    ghcOpts <- get ideNewOpts
+    ghcNewOpts <- get ideNewOpts
+    let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
     lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed ms
 
 {------------------------------------------------------------------------------
