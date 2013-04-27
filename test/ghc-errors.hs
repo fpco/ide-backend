@@ -352,13 +352,22 @@ syntheticTests =
         setCurrentDirectory "../../../"
         assertNoErrors session
         let m = "Maybes"
-            upd = buildExe [Text.pack m, Text.pack "Exception"]
-        updateSessionD session upd 1
+            upd = buildExe [Text.pack m]
+        updateSessionD session upd 0
+        let m2 = "Exception"
+            upd2 = buildExe [Text.pack m2]
+        updateSessionD session upd2 0
+        let upd3 = buildExe [Text.pack m]
+        updateSessionD session upd3 0
         buildDir <- getBuildDir session
         out <- readProcess (buildDir </> m </> m) [] []
         assertEqual "Maybes exe output"
                     "False\n"
                     out
+        out2 <- readProcess (buildDir </> m2 </> m2) [] []
+        assertEqual "Exception exe output"
+                    ""
+                    out2
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = [ "-hide-all-packages"
@@ -478,7 +487,7 @@ syntheticTests =
         assertNoErrors session
         let m = "TH.TH"
             upd = buildExe [Text.pack m]
-        updateSessionD session upd 1
+        updateSessionD session upd 0
         buildDir <- getBuildDir session
         out <- readProcess (buildDir </> m </> m) [] []
         assertEqual "TH.TH exe output"
@@ -1436,7 +1445,7 @@ syntheticTests =
         setCurrentDirectory "../../"
         let m = "Main"
             upd = buildExe [Text.pack m]
-        updateSessionD session upd 1
+        updateSessionD session upd 0
         buildDir <- getBuildDir session
         fibOut <- readProcess (buildDir </> m </> m) [] []
         assertEqual "ParFib exe output"
@@ -1455,7 +1464,9 @@ syntheticTests =
         setCurrentDirectory "../../"
         let m = "ParFib.Main"
             upd = buildExe [Text.pack m, Text.pack "Main"]
-        updateSessionD session upd 1
+        updateSessionD session upd 0
+        let upd2 = buildExe [Text.pack "Main"]
+        updateSessionD session upd2 0
         buildDir <- getBuildDir session
         fibOut <- readProcess (buildDir </> m </> m) [] []
         assertEqual "ParFib exe output"
