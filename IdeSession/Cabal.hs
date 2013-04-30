@@ -9,6 +9,7 @@ import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.FilePath ((</>))
+import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.IO.Temp (createTempDirectory)
 
 import Distribution.License (License (..))
@@ -27,6 +28,7 @@ import Language.Haskell.Extension (Language (Haskell2010))
 
 import IdeSession.State
 import IdeSession.Strict.Container
+import IdeSession.Types.Progress
 import IdeSession.Types.Public
 import IdeSession.Types.Translation
 import qualified IdeSession.Strict.List as StrictList
@@ -143,13 +145,21 @@ externalDeps pkgs =
   in liftM catMaybes $ mapM depOfName pkgs
 
 configureAndBuild :: FilePath -> FilePath -> [String]
-                  -> [PackageId] -> [ModuleName] -> [ModuleName]
+                  -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
+                  -> [ModuleName]
                   -> IO ()
-configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM ms = do
+configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM callback ms = do
+  counter <- newIORef initialProgress
+  let markProgress = do
+        oldCounter <- readIORef counter
+        modifyIORef counter (updateProgress "")
+        callback oldCounter
+  markProgress
   libDeps <- externalDeps pkgs
   let mainDep = Package.Dependency pkgName (thisVersion pkgVersion)
       exeDeps = mainDep : libDeps
   executables <- mapM (exeDesc ideSourcesDir ideDistDir ghcOpts) ms
+  markProgress
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
   let allProjectModules =
@@ -177,12 +187,16 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM ms = do
       preprocessors = []
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
   lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+  markProgress
   Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
+  markProgress
+  -- TODO: add a callback hook to Cabal that is applied to GHC messages
+  -- as they are emitted, similarly as log_action in GHC API
 
 buildExecutable :: FilePath -> FilePath -> [String]
-                -> Strict Maybe Computed -> [ModuleName]
+                -> Strict Maybe Computed -> (Progress -> IO ()) -> [ModuleName]
                 -> IO ()
-buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed ms = do
+buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed callback ms = do
   case toLazyMaybe mcomputed of
     Nothing -> fail "This session state does not admit buidling executables."
     Just Computed{..} -> do
@@ -199,5 +213,5 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed ms = do
       imps <- mapM imp loadedM
       let pkgs = concat imps
       liftIO $ configureAndBuild
-                 ideSourcesDir ideDistDir ghcOpts pkgs loadedM ms
+                 ideSourcesDir ideDistDir ghcOpts pkgs loadedM callback ms
       -- TODO: keep a list of built (and up-to-date?) executables?

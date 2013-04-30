@@ -353,12 +353,12 @@ syntheticTests =
         assertNoErrors session
         let m = "Maybes"
             upd = buildExe [Text.pack m]
-        updateSessionD session upd 0
+        updateSessionD session upd 4
         let m2 = "Exception"
             upd2 = buildExe [Text.pack m2]
-        updateSessionD session upd2 0
+        updateSessionD session upd2 4
         let upd3 = buildExe [Text.pack m]
-        updateSessionD session upd3 0
+        updateSessionD session upd3 4
         buildDir <- getBuildDir session
         out <- readProcess (buildDir </> m </> m) [] []
         assertEqual "Maybes exe output"
@@ -487,7 +487,7 @@ syntheticTests =
         assertNoErrors session
         let m = "TH.TH"
             upd = buildExe [Text.pack m]
-        updateSessionD session upd 0
+        updateSessionD session upd 4
         buildDir <- getBuildDir session
         out <- readProcess (buildDir </> m </> m) [] []
         assertEqual "TH.TH exe output"
@@ -1445,7 +1445,7 @@ syntheticTests =
         setCurrentDirectory "../../"
         let m = "Main"
             upd = buildExe [Text.pack m]
-        updateSessionD session upd 0
+        updateSessionD session upd 4
         buildDir <- getBuildDir session
         fibOut <- readProcess (buildDir </> m </> m) [] []
         assertEqual "ParFib exe output"
@@ -1464,9 +1464,9 @@ syntheticTests =
         setCurrentDirectory "../../"
         let m = "ParFib.Main"
             upd = buildExe [Text.pack m, Text.pack "Main"]
-        updateSessionD session upd 0
+        updateSessionD session upd 4
         let upd2 = buildExe [Text.pack "Main"]
-        updateSessionD session upd2 0
+        updateSessionD session upd2 4
         buildDir <- getBuildDir session
         fibOut <- readProcess (buildDir </> m </> m) [] []
         assertEqual "ParFib exe output"

@@ -427,11 +427,13 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
 
 buildExe :: [ModuleName] -> IdeSessionUpdate
 buildExe ms = IdeSessionUpdate
-              $ \_ IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
+              $ \callback
+                 IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
     let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
-    lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed ms
+    lift
+      $ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed callback ms
 
 {------------------------------------------------------------------------------
   Debugging
