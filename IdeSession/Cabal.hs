@@ -166,19 +166,17 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM ms = do
       confFlags = (Setup.defaultConfigFlags defaultProgramConfiguration)
                      { Setup.configDistPref = Setup.Flag ideDistDir
                      , Setup.configUserInstall = Setup.Flag True
---                     , Setup.configVerbosity = Setup.Flag maxBound
+                     , Setup.configVerbosity = Setup.Flag minBound
                      }
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
                      { Setup.buildDistPref = Setup.Flag ideDistDir
---                     , Setup.buildVerbosity = Setup.Flag maxBound
+                     , Setup.buildVerbosity = Setup.Flag minBound
                      }
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
---   putStrLn $ "pDesc: " ++ show pDesc
   lbi <- configure (gpDesc, hookedBuildInfo) confFlags
---   putStrLn $ "lbi: " ++ show lbi
   Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
 
 buildExecutable :: FilePath -> FilePath -> [String]
