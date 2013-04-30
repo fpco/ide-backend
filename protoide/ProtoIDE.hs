@@ -4,9 +4,10 @@ import Graphics.UI.Gtk
 import Data.IORef
 import System.IO.Temp (withSystemTempDirectory)
 import Data.ByteString.Lazy (fromChunks)
-import Control.Monad.Reader
+import Control.Monad (void)
 import System.Process
-import qualified Data.Map as Map
+import Data.Traversable (forM)
+import qualified Data.Text as Text
 
 #ifndef darwin_HOST_OS
 import System.GIO.File.AppInfo
@@ -81,15 +82,16 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
 
   -- Start IDE session
   let cfg = SessionConfig {
-                configDir        = tempDir
-              , configStaticOpts = []
-              , configInProcess = False
+                configDir             = tempDir
+              , configStaticOpts      = []
+              , configInProcess       = False
+              , configGenerateModInfo = True
               }
   ideSession <- initSession cfg
 
   -- Whenever the buffer changes, reload the module into ghc
   -- TODO: this is overkill..
-  idMapRef <- newIORef []
+  idMapRef <- newIORef (\_ _ -> Nothing) :: IO (IORef (ModuleName -> SourceSpan -> Maybe (SourceSpan, IdInfo)))
   on textBuffer bufferChanged $ do
     (start, end) <- textBufferGetBounds textBuffer
     src <- textBufferGetByteString textBuffer start end False
@@ -97,9 +99,9 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     let upd = updateModule "M.hs" (fromChunks [src])
     updateSession ideSession upd (const $ return ())
     errors <- getSourceErrors ideSession
-    idMaps <- getLoadedModules ideSession
+    idInfo <- getIdInfo ideSession
     textBufferSetText errorsBuff (show errors)
-    writeIORef idMapRef (Map.elems idMaps)
+    writeIORef idMapRef idInfo
 
   -- Highlight the identifier under the cursor
   on textBuffer markSet $ \iter _mark -> do
@@ -112,7 +114,14 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     line   <- textIterGetLine iter
     col    <- textIterGetLineOffset iter
     idMap  <- readIORef idMapRef
-    let idInfos = concatMap (idInfoAtLocation (line + 1) (col + 1)) idMap
+    let cursorSpan = SourceSpan {
+                      spanFilePath   = "M.hs"
+                    , spanFromLine   = line + 1
+                    , spanFromColumn = col  + 1
+                    , spanToLine     = line + 1
+                    , spanToColumn   = col  + 1
+                    }
+        mIdInfo = idMap (Text.pack "M") cursorSpan
         tagSpan sp tag = do
           iterStart <- textBufferGetIterAtLineOffset textBuffer
                          (spanFromLine   sp - 1)
@@ -123,7 +132,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
           textBufferApplyTag textBuffer tag iterStart iterEnd
 
     -- And highlight if it's defined in the current module
-    idInfoText <- forM idInfos $ \(srcSpan, idInfo) -> do
+    void . forM mIdInfo $ \(srcSpan, idInfo) -> do
       case idScope idInfo of
         Imported{idImportSpan} -> do
           tagSpan srcSpan linkTag
@@ -136,10 +145,11 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
             _               -> return ()
         _ ->
           return ()
-      return $ show idInfo ++ " " ++ haddockLink idInfo
 
-    textBufferSetText idInfoBuff (unlines idInfoText)
+      textBufferSetText idInfoBuff (show idInfo)
+        -- ++ " " ++ haddockLink idInfo {- TODO: reenable -}
 
+{- TODO: reenable
   textView `on` keyPressEvent $ tryEvent $ do
     "a" <- eventKeyName
     [Control] <- eventModifier
@@ -161,6 +171,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
       (_, info) : _ -> do
         -- DEBUG: liftIO $ putStrLn $ root ++ haddockLink info
         liftIO $ openUrlBySystemTool $ root ++ haddockLink info
+-}
 
   widgetShowAll window
   mainGUI
