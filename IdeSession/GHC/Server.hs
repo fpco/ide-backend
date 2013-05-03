@@ -27,7 +27,7 @@ module IdeSession.GHC.Server
   ) where
 
 import Control.Arrow (second)
-import Control.Concurrent (ThreadId, myThreadId, throwTo, forkIO, killThread)
+import Control.Concurrent (ThreadId, throwTo, forkIO, killThread)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
@@ -57,7 +57,7 @@ import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Debug
 import IdeSession.Util
-import IdeSession.BlockingOps (modifyMVar, modifyMVar_, putMVar, readChan, readMVar, wait)
+import IdeSession.BlockingOps (modifyMVar, modifyMVar_, readChan, readMVar, wait)
 import IdeSession.Strict.IORef
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map    as StrictMap
@@ -286,9 +286,7 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
     --    'Nothing'
 
     runOutcome <- ghandle ghcException . ghandleJust isUserInterrupt return $ do
-      liftIO $ myThreadId >>= $putMVar ghcThread . Just
-      outcome <- runInGhc (m, fun) outBMode errBMode
-      liftIO $ $modifyMVar ghcThread $ \_ -> return (Nothing, outcome)
+      runInGhc (m, fun) outBMode errBMode ghcThread
 
     liftIO $ do
       -- Restore stdin and stdout

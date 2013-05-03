@@ -38,7 +38,7 @@ module IdeSession.GHC.Run
 
 import Bag (bagToList)
 import qualified Config as GHC
-import DynFlags (dopt_unset, defaultDynFlags)
+import DynFlags (defaultDynFlags)
 import qualified ErrUtils
 import Exception (ghandle)
 import FastString ( unpackFS )
@@ -83,6 +83,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import System.FilePath.Find (find, always, extension)
 import System.Process
+import Control.Concurrent (MVar, ThreadId)
 
 import Data.Aeson.TH (deriveJSON)
 
@@ -226,10 +227,6 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
                          log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
 #endif
                        }
-#if __GLASGOW_HASKELL__ < 707
-  -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/1381.
-                   `dopt_unset` Opt_GhciSandbox
-#endif
     handleErrors flags $ do
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
@@ -366,8 +363,9 @@ extractImportsAuto dflags session graph = do
 runInGhc :: (String, String)  -- ^ module and function to execute
          -> RunBufferMode     -- ^ Buffer mode for stdout
          -> RunBufferMode     -- ^ Buffer mode for stderr
+         -> MVar (Maybe ThreadId)
          -> Ghc RunResult
-runInGhc (m, fun) outBMode errBMode = do
+runInGhc (m, fun) outBMode errBMode tidMVar = do
   flags <- getSessionDynFlags
   -- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
   -- Set GHC verbosity to avoid stray GHC messages, e.g., from the linker.
@@ -382,7 +380,7 @@ runInGhc (m, fun) outBMode errBMode = do
 --    _debugPpContext flags "context after setContext"
 --    liftIO $ writeFile "/Users/fpco/fpco/ide-backend/RunStmt.hs" expr
     handleErrors $ do
-      runRes <- runStmt expr RunToCompletion
+      runRes <- runStmt expr RunToCompletion tidMVar
       case runRes of
         GHC.RunOk [name] ->
           -- TODO: ignore @name@; this was only useful for debug
