@@ -1,4 +1,4 @@
-From 535e0a17be3c3fd60ab0588af5847fa149b5da2f Mon Sep 17 00:00:00 2001
+From 2684a8f9aeaec8189e4ebbc01fe657469253d9e8 Mon Sep 17 00:00:00 2001
 From: Edsko de Vries <edsko@well-typed.com>
 Date: Fri, 3 May 2013 09:46:20 +0100
 Subject: [PATCH] Provide access to the TID of the runStmt sandbox
@@ -10,12 +10,12 @@ some thunk due to some unsafePerformIO, thrown every time we touched that
 thunk?). Hard to reproduce and even harder to figure out what's going on
 precisely. My moving this to inside ghc we hopefully avoid this problem.
 ---
- compiler/main/InteractiveEval.hs | 18 +++++++++++-------
+ compiler/main/InteractiveEval.hs | 17 ++++++++++-------
  ghc/GhciMonad.hs                 |  4 +++-
- 2 files changed, 14 insertions(+), 8 deletions(-)
+ 2 files changed, 13 insertions(+), 8 deletions(-)
 
 diff --git a/compiler/main/InteractiveEval.hs b/compiler/main/InteractiveEval.hs
-index b4cf6b8..5d9f03c 100644
+index b4cf6b8..0a82d5b 100644
 --- a/compiler/main/InteractiveEval.hs
 +++ b/compiler/main/InteractiveEval.hs
 @@ -186,14 +186,14 @@ findEnclosingDecls hsc_env inf =
@@ -45,7 +45,7 @@ index b4cf6b8..5d9f03c 100644
                
          let ic = hsc_IC hsc_env
              bindings = (ic_tythings ic, ic_rn_gbl_env ic)
-@@ -381,10 +381,14 @@ foreign import ccall "&rts_breakpoint_io_action"
+@@ -381,10 +381,13 @@ foreign import ccall "&rts_breakpoint_io_action"
  -- thread blocked (forkIO inherits mask from the parent, #1048), and unblock
  -- only while we execute the user's code.  We can't afford to lose the final
  -- putMVar, otherwise deadlock ensues. (#1583, #1922, #1946)
@@ -55,10 +55,9 @@ index b4cf6b8..5d9f03c 100644
 +sandboxIO dflags statusMVar tidMVar thing =
     mask $ \restore -> -- fork starts blocked
 -     let runIt = liftM Complete $ try (restore $ rethrow dflags thing)
-+     let thing' = do myThreadId >>= putMVar tidMVar . Just 
-+                     result <- thing 
-+                     modifyMVar_ tidMVar (\_ -> return Nothing) 
-+                     return result
++     let thing' = gbracket (myThreadId >>= putMVar tidMVar . Just)
++                           (\() -> modifyMVar_ tidMVar (\_ -> return Nothing))
++                           (\() -> thing)
 +         runIt  = liftM Complete $ try (restore $ rethrow dflags thing')
       in if dopt Opt_GhciSandbox dflags
          then do tid <- forkIO $ do res <- runIt

@@ -57,7 +57,7 @@ import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Debug
 import IdeSession.Util
-import IdeSession.BlockingOps (modifyMVar, modifyMVar_, readChan, readMVar, wait)
+import IdeSession.BlockingOps (modifyMVar, modifyMVar_, readChan, withMVar, wait)
 import IdeSession.Strict.IORef
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map    as StrictMap
@@ -314,10 +314,10 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
       let go = do request <- get
                   case request of
                     GhcRunInterrupt -> do
-                      mTid <- $readMVar ghcThread
-                      case mTid of
-                        Just tid -> throwTo tid Ex.UserInterrupt
-                        Nothing  -> return () -- See above
+                      $withMVar ghcThread $ \mTid -> do
+                        case mTid of
+                          Just tid -> throwTo tid Ex.UserInterrupt
+                          Nothing  -> return () -- See above
                       go
                     GhcRunInput bs -> do
                       BSS.hPut stdInputWr bs
