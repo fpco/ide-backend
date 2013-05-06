@@ -56,11 +56,10 @@ import qualified Control.Exception as Ex
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newMVar)
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BSL (ByteString, hPut, hGetContents)
 import qualified Data.ByteString.Lazy.Char8 as BSL (pack, unpack)
-import Data.Attoparsec (parse, IResult(Fail, Partial, Done))
 import qualified Data.Attoparsec as Attoparsec
+import Data.Attoparsec.Lazy (parse, Result(..))
 import Data.IORef (IORef, writeIORef, readIORef, newIORef)
 import Control.Concurrent.Async (async)
 
@@ -242,7 +241,8 @@ forkRpcServer path args workingDir = do
   errorsR'   <- fdToHandle errorsR
 
   st     <- newMVar RpcRunning
-  parser <- newStreamParser json' responseR'
+  input  <- BSL.hGetContents responseR'
+  parser <- newStreamParser json' input
   return RpcServer {
       rpcRequestW  = requestW'
     , rpcErrorsR   = errorsR'
@@ -295,14 +295,11 @@ rpcConversation server handler = withRpcServer server $ \st ->
       , get = do verifyScope
                  value <- mapIOToExternal server $
                             nextInStream (rpcParser server)
-                 case fromJSON <$> value of
-                   Just (Success (Response resp)) ->
+                 case fromJSON value of
+                   Success (Response resp) ->
                      return resp
-                   Just (Error err) ->
+                   Error err ->
                      Ex.throwIO (userError err)
-                   Nothing ->
-                     mapIOToExternal server $
-                       Ex.throwIO (userError "Unexpected EOF")
       }
 
 illscopedConversationException :: Ex.IOException
@@ -375,21 +372,22 @@ getRpcExitCode RpcServer{rpcProc} = getProcessExitCode rpcProc
 -- | Decode messages from a handle and forward them to a channel.
 -- The boolean result indicates whether the shutdown is forced.
 readRequests :: Handle -> Chan Value -> IO ()
-readRequests h ch = newStreamParser json' h >>= go
+readRequests h ch = do
+    input  <- BSL.hGetContents h
+    parser <- newStreamParser json' input
+    go parser
   where
     go :: StreamParser Value -> IO ()
     go parser = do
       value <- nextInStream parser
-      case fromJSON <$> value of
-        Just (Success req) ->
+      case fromJSON value of
+        Success req ->
           case req of
             Request req'         -> writeChan ch req' >> go parser
             RequestShutdown      -> return ()
             RequestForceShutdown -> exitImmediately (ExitFailure 1)
-        Just (Error err) ->
+        Error err ->
           Ex.throwIO (userError err)
-        Nothing ->
-          return () -- EOF
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: Chan Value -> Handle -> IO ()
@@ -442,42 +440,17 @@ ignoreIOExceptions = Ex.handle ignore
 
 data StreamParser a = StreamParser {
     streamParser    :: Attoparsec.Parser a
-  , streamHandle    :: Handle
-  , streamRemainder :: IORef BS.ByteString
+  , streamRemainder :: IORef BSL.ByteString
   }
 
-newStreamParser :: Attoparsec.Parser a -> Handle -> IO (StreamParser a)
-newStreamParser streamParser streamHandle = do
-  streamRemainder <- newIORef BS.empty
+newStreamParser :: Attoparsec.Parser a -> BSL.ByteString -> IO (StreamParser a)
+newStreamParser streamParser streamSource = do
+  streamRemainder <- newIORef streamSource
   return StreamParser{..}
 
-nextInStream :: forall a. StreamParser a -> IO (Maybe a)
+nextInStream :: forall a. StreamParser a -> IO a
 nextInStream StreamParser{..} = do
     bs <- readIORef streamRemainder
-    if BS.null bs
-      then do bs' <-  BS.hGetSome streamHandle blockSize
-              if BS.null bs' then return Nothing -- EOF
-                             else goResult (streamParser `parse` bs')
-      else goResult (streamParser `parse` bs)
-  where
-    -- hGetSome
-    --   1. will return the empty bytestring is EOF has been reached
-    --   2. may return a shorter ByteString is there are not enough bytes
-    --      immediately available to satisfy the whole request
-    --   3. only blocks if there is no data available, and EOF has not yet
-    --      been reached
-
-    goResult :: Attoparsec.Result a -> IO (Maybe a)
-    goResult (Fail _ _ err) = Ex.throwIO (userError err)
-    goResult (Partial k)    = goPartial k
-    goResult (Done bs r)    = writeIORef streamRemainder bs >> return (Just r)
-
-    goPartial :: (BS.ByteString -> Attoparsec.Result a) -> IO (Maybe a)
-    goPartial partial = do
-      bs <- BS.hGetSome streamHandle blockSize
-      if BS.null bs then Ex.throwIO (userError "Unexpected EOF")
-                    else goResult (partial bs)
-
-    -- TODO: What is a good value for this
-    blockSize :: Int
-    blockSize = 4096
+    case streamParser `parse` bs of
+      Fail _ _ err -> Ex.throwIO (userError err)
+      Done bs' r   -> writeIORef streamRemainder bs' >> return r
