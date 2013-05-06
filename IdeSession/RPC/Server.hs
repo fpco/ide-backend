@@ -374,20 +374,16 @@ getRpcExitCode RpcServer{rpcProc} = getProcessExitCode rpcProc
 readRequests :: Handle -> Chan Value -> IO ()
 readRequests h ch = do
     input  <- BSL.hGetContents h
-    parser <- newStreamParser json' input
+    parser <- newStreamParser (parseJSON json') input
     go parser
   where
-    go :: StreamParser Value -> IO ()
+    go :: StreamParser (Request Value) -> IO ()
     go parser = do
-      value <- nextInStream parser
-      case fromJSON value of
-        Success req ->
-          case req of
-            Request req'         -> writeChan ch req' >> go parser
-            RequestShutdown      -> return ()
-            RequestForceShutdown -> exitImmediately (ExitFailure 1)
-        Error err ->
-          Ex.throwIO (userError err)
+      req <- nextInStream parser
+      case req of
+        Request req'         -> writeChan ch req' >> go parser
+        RequestShutdown      -> return ()
+        RequestForceShutdown -> exitImmediately (ExitFailure 1)
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: Chan Value -> Handle -> IO ()
@@ -454,3 +450,10 @@ nextInStream StreamParser{..} = do
     case streamParser `parse` bs of
       Fail _ _ err -> Ex.throwIO (userError err)
       Done bs' r   -> writeIORef streamRemainder bs' >> return r
+
+parseJSON :: FromJSON a => Attoparsec.Parser Value -> Attoparsec.Parser a
+parseJSON pvalue = do
+  val <- pvalue
+  case fromJSON val of
+    Success r -> return r
+    Error err -> fail err
