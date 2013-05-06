@@ -57,8 +57,8 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newMVar)
 import qualified Data.ByteString as BS
-import Data.ByteString.Lazy (ByteString, hPut, hGetContents)
-import Data.ByteString.Lazy.Char8 (pack, unpack)
+import qualified Data.ByteString.Lazy as BSL (ByteString, hPut, hGetContents)
+import qualified Data.ByteString.Lazy.Char8 as BSL (pack, unpack)
 import Data.Attoparsec (parse, IResult(Fail, Partial, Done))
 import qualified Data.Attoparsec as Attoparsec
 import Data.IORef (IORef, writeIORef, readIORef, newIORef)
@@ -162,7 +162,7 @@ rpcServer' hin hout herr server = do
     tryShowException :: Either Ex.SomeException () -> IO ()
     tryShowException (Left ex) =
       -- We don't want to throw an exception showing the previous exception
-      ignoreIOExceptions $ hPutFlush herr . pack . show $ ex
+      ignoreIOExceptions $ hPutFlush herr . BSL.pack . show $ ex
     tryShowException (Right ()) =
       return ()
 
@@ -420,14 +420,14 @@ setBinaryBlockBuffered =
 mapIOToExternal :: RpcServer -> IO a -> IO a
 mapIOToExternal server p = Ex.catch p $ \ex -> do
   let _ = ex :: Ex.IOException
-  merr <- unpack <$> hGetContents (rpcErrorsR server)
+  merr <- BSL.unpack <$> BSL.hGetContents (rpcErrorsR server)
   if null merr
     then Ex.throwIO (serverKilledException (Just ex))
     else Ex.throwIO (ExternalException merr (Just ex))
 
 -- | Write a bytestring to a buffer and flush
-hPutFlush :: Handle -> ByteString -> IO ()
-hPutFlush h bs = hPut h bs >> hFlush h
+hPutFlush :: Handle -> BSL.ByteString -> IO ()
+hPutFlush h bs = BSL.hPut h bs >> hFlush h
 
 -- | Ignore IO exceptions
 ignoreIOExceptions :: IO () -> IO ()
