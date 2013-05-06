@@ -42,12 +42,13 @@ import System.Directory (canonicalizePath, getPermissions, executable)
 import Data.Typeable (Typeable)
 import Data.Aeson
   ( FromJSON
+  , ToJSON
   , fromJSON
-  , ToJSON(toJSON)
   , encode
   , json'
   , Result(Success, Error)
   , Value
+  , decode'
   )
 import Data.Aeson.TH (deriveJSON)
 import Control.Applicative ((<$>))
@@ -99,15 +100,24 @@ serverKilledException ex = ExternalException "Server killed" ex
 -- arrays; by wrapping them the user does not have to worry about this.       --
 -- Second, it allows us to send control messages back and worth when we need  --
 -- to.                                                                        --
+--
+-- TODO: Once we get rid of JSON, get rid of Response and UserRequest
 --------------------------------------------------------------------------------
 
-data Request  a = Request { _request :: a }
-                | RequestForceShutdown
-                | RequestShutdown
-data Response a = Response { _response :: a }
+-- TODO: Might want to use a wrapper around BSL.Bytestring which provides
+-- incremental framing (i.e., doesn't require the length of the bytestring
+-- upfront)
+
+data Request  = Request { _request :: BSL.ByteString } -- encoding of UserRequest
+              | RequestForceShutdown
+              | RequestShutdown
+
+data UserRequest  a = UserRequest  { _userRequest  :: a }
+data UserResponse a = UserResponse { _userResponse :: a }
 
 $(deriveJSON tail ''Request)
-$(deriveJSON tail ''Response)
+$(deriveJSON tail ''UserRequest)
+$(deriveJSON tail ''UserResponse)
 
 --------------------------------------------------------------------------------
 -- Server-side API                                                            --
@@ -145,8 +155,8 @@ rpcServer' :: Handle                     -- ^ Input
            -> (RpcConversation -> IO ()) -- ^ The request server
            -> IO ()
 rpcServer' hin hout herr server = do
-    requests   <- newChan :: IO (Chan Value)
-    responses  <- newChan :: IO (Chan Value)
+    requests   <- newChan :: IO (Chan BSL.ByteString)
+    responses  <- newChan :: IO (Chan BSL.ByteString)
 
     setBinaryBlockBuffered [hin, hout, herr]
 
@@ -290,13 +300,14 @@ rpcConversation server handler = withRpcServer server $ \st ->
     conversation verifyScope = RpcConversation {
         put = \req -> do
                  verifyScope
-                 mapIOToExternal server $
-                   hPutFlush (rpcRequestW server) . encode . Request $ req
+                 mapIOToExternal server $ do
+                   let msg = encode $ Request (encode (UserRequest req))
+                   hPutFlush (rpcRequestW server) msg
       , get = do verifyScope
                  value <- mapIOToExternal server $
                             nextInStream (rpcParser server)
                  case fromJSON value of
-                   Success (Response resp) ->
+                   Success (UserResponse resp) ->
                      return resp
                    Error err ->
                      Ex.throwIO (userError err)
@@ -327,20 +338,14 @@ forceShutdown server = withRpcServer server $ \_ -> do
 -- | Terminate the external process
 terminate :: RpcServer -> IO ()
 terminate server = do
-    ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode requestShutdown)
+    ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode RequestShutdown)
     void $ waitForProcess (rpcProc server)
-  where
-    requestShutdown :: Request ()
-    requestShutdown = RequestShutdown
 
 -- | Force-terminate the external process
 forceTerminate :: RpcServer -> IO ()
 forceTerminate server = do
-    ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode requestForceShutdown)
+    ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode RequestForceShutdown)
     void $ waitForProcess (rpcProc server)
-  where
-    requestForceShutdown :: Request ()
-    requestForceShutdown = RequestForceShutdown
 
 -- | Like modifyMVar, but terminate the server on exceptions
 withRpcServer :: RpcServer
@@ -371,13 +376,13 @@ getRpcExitCode RpcServer{rpcProc} = getProcessExitCode rpcProc
 
 -- | Decode messages from a handle and forward them to a channel.
 -- The boolean result indicates whether the shutdown is forced.
-readRequests :: Handle -> Chan Value -> IO ()
+readRequests :: Handle -> Chan BSL.ByteString -> IO ()
 readRequests h ch = do
     input  <- BSL.hGetContents h
     parser <- newStreamParser (parseJSON json') input
     go parser
   where
-    go :: StreamParser (Request Value) -> IO ()
+    go :: StreamParser Request -> IO ()
     go parser = do
       req <- nextInStream parser
       case req of
@@ -386,21 +391,23 @@ readRequests h ch = do
         RequestForceShutdown -> exitImmediately (ExitFailure 1)
 
 -- | Encode messages from a channel and forward them on a handle
-writeResponses :: Chan Value -> Handle -> IO ()
-writeResponses ch h = forever $ $readChan ch >>= hPutFlush h . encode . Response
+writeResponses :: Chan BSL.ByteString -> Handle -> IO ()
+writeResponses ch h = forever $ $readChan ch >>= hPutFlush h
 
 -- | Run a handler repeatedly, given input and output channels
-channelHandler :: Chan Value
-               -> Chan Value
+channelHandler :: Chan BSL.ByteString
+               -> Chan BSL.ByteString
                -> (RpcConversation -> IO ())
                -> IO ()
 channelHandler requests responses server =
   server RpcConversation {
-      get = do value <- $readChan requests
-               case fromJSON value of
-                 Success req -> return req
-                 Error err   -> Ex.throwIO (userError err)
-    , put = writeChan responses . toJSON
+      get = do bs <- $readChan requests
+               case decode' bs of
+                 Just (UserRequest req) ->
+                   return req
+                 Nothing ->
+                   Ex.throwIO (userError $ "Could not decode JSON value " ++ show (BSL.unpack bs) ++ " in server.get")
+    , put = writeChan responses . encode . UserResponse
     }
 
 -- | Set all the specified handles to binary mode and block buffering
