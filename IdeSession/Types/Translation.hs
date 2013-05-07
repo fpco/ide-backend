@@ -7,9 +7,9 @@ module IdeSession.Types.Translation (
   , showNormalized
   ) where
 
-import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.Map as Map
 import qualified Data.ByteString.Char8 as BSSC
+import Data.Binary (Binary)
 
 import IdeSession.Strict.Container
 import qualified IdeSession.Types.Public  as Public
@@ -67,9 +67,7 @@ type instance MShared Private.Import         = Public.Import
 -- The @MShared (XShared a) ~ a@ condition on the @ExplicitSharing@ type class
 -- is there for technical reasons only (it convinces GHC that the @XShared@
 -- type family is a bijection).
-class ( MShared (XShared a) ~ a
-      , FromJSON (XShared a), ToJSON (XShared a)
-      ) => ExplicitSharing a where
+class (MShared (XShared a) ~ a, Binary (XShared a)) => ExplicitSharing a where
   removeExplicitSharing :: Private.ExplicitSharingCache -> XShared a -> a
 
 showNormalized :: forall a. (Show a, ExplicitSharing a)

@@ -9,14 +9,15 @@ module IdeSession.Strict.Container
   , Trie
   ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.List as List
+import Control.Applicative ((<$>))
 import Data.Trie (Trie)
 import Data.Foldable as Foldable
+import Data.Binary (Binary(..))
 
 class StrictContainer t where
   data Strict (t :: * -> *) :: * -> *
@@ -33,11 +34,9 @@ instance StrictContainer IntMap where
   force m = IntMap.foldl' (flip seq) () m `seq` StrictIntMap m
   project = toLazyIntMap
 
-instance FromJSON v => FromJSON (Strict IntMap v) where
-  parseJSON = fmap (force . IntMap.fromList) . parseJSON
-
-instance ToJSON v => ToJSON (Strict IntMap v) where
-  toJSON = toJSON . IntMap.toList . toLazyIntMap
+instance Binary v => Binary (Strict IntMap v) where
+  put = put . IntMap.toList . toLazyIntMap
+  get = (force . IntMap.fromList) <$> get
 
 {------------------------------------------------------------------------------
   Lists
@@ -50,11 +49,10 @@ instance StrictContainer [] where
   force m = List.foldl' (flip seq) () m `seq` StrictList m
   project = toLazyList
 
-instance FromJSON a => FromJSON (Strict [] a) where
-  parseJSON = fmap force . parseJSON
-
-instance ToJSON a => ToJSON (Strict [] a) where
-  toJSON = toJSON . toLazyList
+-- TODO: we can do better than this if we cache the length of the list
+instance Binary a => Binary (Strict [] a) where
+  put = put . toLazyList
+  get = force <$> get
 
 {------------------------------------------------------------------------------
   Map
@@ -66,11 +64,9 @@ instance StrictContainer (Map k) where
   force m = Map.foldl' (flip seq) () m `seq` StrictMap m
   project = toLazyMap
 
-instance (Ord k, FromJSON k, FromJSON v) => FromJSON (Strict (Map k) v) where
-  parseJSON = fmap (force . Map.fromList) . parseJSON
-
-instance (ToJSON k, ToJSON v) => ToJSON (Strict (Map k) v) where
-  toJSON = toJSON . Map.toList . toLazyMap
+instance (Ord k, Binary k, Binary v) => Binary (Strict (Map k) v) where
+  put = put . Map.toList . toLazyMap
+  get = (force . Map.fromList) <$> get
 
 {------------------------------------------------------------------------------
   Maybe
@@ -83,11 +79,9 @@ instance StrictContainer Maybe where
   force (Just x) = x `seq` StrictMaybe $ Just x
   project = toLazyMaybe
 
-instance FromJSON a => FromJSON (Strict Maybe a) where
-  parseJSON = fmap force . parseJSON
-
-instance ToJSON a => ToJSON (Strict Maybe a) where
-  toJSON = toJSON . toLazyMaybe
+instance Binary a => Binary (Strict Maybe a) where
+  put = put . toLazyMaybe
+  get = force <$> get
 
 deriving instance Eq a => Eq (Strict Maybe a)
 

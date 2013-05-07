@@ -77,15 +77,14 @@ import GHC hiding (flags, ModuleName, RunResult(..))
 
 import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM, void)
-import Control.Applicative ((<$>))
+import Control.Applicative ((<$>), (<*>))
 import Data.List ((\\))
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Binary (Binary(..), getWord8, putWord8)
 import System.FilePath.Find (find, always, extension)
 import System.Process
 import Control.Concurrent (MVar, ThreadId)
-
-import Data.Aeson.TH (deriveJSON)
 
 import IdeSession.GHC.HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
 import IdeSession.Types.Private
@@ -138,8 +137,36 @@ data RunBufferMode =
                       }
   deriving Show
 
-$(deriveJSON id ''RunResult)
-$(deriveJSON id ''RunBufferMode)
+instance Binary RunResult where
+  put (RunOk str)            = putWord8 0 >> put str
+  put (RunProgException str) = putWord8 1 >> put str
+  put (RunGhcException str)  = putWord8 2 >> put str
+  put RunForceCancelled      = putWord8 3
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> RunOk <$> get
+      1 -> RunProgException <$> get
+      2 -> RunGhcException <$> get
+      3 -> return RunForceCancelled
+      _ -> fail "RunResult.get: invalid header"
+
+instance Binary RunBufferMode where
+  put RunNoBuffering        = putWord8 0
+  put RunLineBuffering{..}  = do putWord8 1
+                                 put runBufferTimeout
+  put RunBlockBuffering{..} = do putWord8 2
+                                 put runBufferBlockSize
+                                 put runBufferTimeout
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return RunNoBuffering
+      1 -> RunLineBuffering <$> get
+      2 -> RunBlockBuffering <$> get <*> get
+      _ -> fail "RunBufferMode.get: invalid header"
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts

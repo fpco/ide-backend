@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module IdeSession.Util (
     -- * Misc util
     showExWithClass
@@ -17,12 +18,15 @@ import qualified Data.ByteString as BSS
 import qualified Data.ByteString.Lazy as BSL
 import Data.Tagged (Tagged, untag)
 import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
+import Data.Binary (Binary(..), getWord8, putWord8)
+import Control.Applicative ((<$>))
 import Crypto.Types (BitLength)
 import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
 import System.FilePath (splitFileName, (<.>))
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
 import System.IO (Handle, hClose, openBinaryTempFile)
-import Data.Aeson.TH (deriveJSON)
+import Data.Text (Text)
+import qualified Data.Text.Encoding as Text
 
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map as StrictMap
@@ -109,6 +113,10 @@ makeBlocks n = go . BSL.toChunks
             []         -> [bs]
             (bs':bss') -> go (BSS.append bs bs' : bss')
 
+instance Binary Text where
+  put = put . Text.encodeUtf8
+  get = Text.decodeUtf8 <$> get
+
 {------------------------------------------------------------------------------
   Simple diffs
 ------------------------------------------------------------------------------}
@@ -116,7 +124,18 @@ makeBlocks n = go . BSL.toChunks
 data Diff a = Keep | Remove | Insert a
   deriving Functor
 
-$(deriveJSON id ''Diff)
+instance Binary a => Binary (Diff a) where
+  put Keep       = putWord8 0
+  put Remove     = putWord8 1
+  put (Insert a) = putWord8 2 >> put a
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return Keep
+      1 -> return Remove
+      2 -> Insert <$> get
+      _ -> fail "Diff.get: invalid header"
 
 applyMapDiff :: forall k v. Ord k
              => Strict (Map k) (Diff v)

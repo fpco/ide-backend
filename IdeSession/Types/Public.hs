@@ -24,11 +24,14 @@ module IdeSession.Types.Public (
   ) where
 
 import Prelude hiding (span)
+import Control.Applicative ((<$>), (<*>))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Aeson.TH (deriveJSON)
+import Data.Binary (Binary(..), getWord8, putWord8)
+
+import IdeSession.Util () -- Binary instance for Text
 
 {------------------------------------------------------------------------------
   Types
@@ -208,26 +211,134 @@ instance Show IdMap where
     in unlines . map showIdInfo . Map.toList . idMapToMap
 
 {------------------------------------------------------------------------------
-  JSON instances
+  Binary instances
 
-  We only have JSON instances for those types that are shared between
+  We only have Binary instances for those types that are shared between
   the public and private types, and for the "small" types that are the result of
-  IDE session queries. We don't want JSON instances for entire LoadedModules
+  IDE session queries. We don't want Binary instances for entire LoadedModules
   maps and other "large" types.
 ------------------------------------------------------------------------------}
 
-$(deriveJSON id ''IdNameSpace)
-$(deriveJSON id ''SourceErrorKind)
-$(deriveJSON id ''ImportEntities)
-$(deriveJSON id ''Import)
-$(deriveJSON id ''SourceError)
-$(deriveJSON id ''IdProp)
-$(deriveJSON id ''IdScope)
-$(deriveJSON id ''SourceSpan)
-$(deriveJSON id ''EitherSpan)
-$(deriveJSON id ''ModuleId)
-$(deriveJSON id ''PackageId)
-$(deriveJSON id ''IdInfo)
+instance Binary IdNameSpace where
+  put VarName   = putWord8 0
+  put DataName  = putWord8 1
+  put TvName    = putWord8 2
+  put TcClsName = putWord8 3
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return VarName
+      1 -> return DataName
+      2 -> return TvName
+      3 -> return TcClsName
+      _ -> fail "IdNameSpace.get: invalid header"
+
+instance Binary SourceErrorKind where
+  put KindError   = putWord8 0
+  put KindWarning = putWord8 1
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return KindError
+      1 -> return KindWarning
+      _ -> fail "SourceErrorKind.get: invalid header"
+
+instance Binary ImportEntities where
+  put (ImportOnly names)   = putWord8 0 >> put names
+  put (ImportHiding names) = putWord8 1 >> put names
+  put ImportAll            = putWord8 2
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> ImportOnly   <$> get
+      1 -> ImportHiding <$> get
+      2 -> return ImportAll
+      _ -> fail "ImportEntities.get: invalid header"
+
+instance Binary Import where
+  put Import{..} = do
+    put importModule
+    put importPackage
+    put importQualified
+    put importImplicit
+    put importAs
+    put importEntities
+
+  get = Import <$> get <*> get <*> get <*> get <*> get <*> get
+
+instance Binary SourceError where
+  put SourceError{..} = do
+    put errorKind
+    put errorSpan
+    put errorMsg
+
+  get = SourceError <$> get <*> get <*> get
+
+instance Binary IdProp where
+  put IdProp{..} = do
+    put idName
+    put idSpace
+    put idType
+
+  get = IdProp <$> get <*> get <*> get
+
+instance Binary IdScope where
+  put Binder       = putWord8 0
+  put Local{..}    = do putWord8 1
+                        put idDefSpan
+  put Imported{..} = do putWord8 2
+                        put idDefSpan
+                        put idDefinedIn
+                        put idImportedFrom
+                        put idImportSpan
+                        put idImportQual
+  put WiredIn      = putWord8 3
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return Binder
+      1 -> Local <$> get
+      2 -> Imported <$> get <*> get <*> get <*> get <*> get
+      3 -> return WiredIn
+      _ -> fail "IdScope.get: invalid header"
+
+instance Binary SourceSpan where
+  put (SourceSpan{..}) = do
+    put spanFilePath
+    put spanFromLine
+    put spanFromColumn
+    put spanToLine
+    put spanToColumn
+
+  get = SourceSpan <$> get <*> get <*> get <*> get <*> get
+
+instance Binary EitherSpan where
+  put (ProperSpan span) = putWord8 0 >> put span
+  put (TextSpan text)   = putWord8 1 >> put text
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> ProperSpan <$> get
+      1 -> TextSpan <$> get
+      _ -> fail "EitherSpan.get: invalid header"
+
+instance Binary ModuleId where
+  put ModuleId{..} = put moduleName >> put modulePackage
+  get = ModuleId <$> get <*> get
+
+instance Binary PackageId where
+  put PackageId{..} = put packageName >> put packageVersion
+  get = PackageId <$> get <*> get
+
+instance Binary IdInfo where
+  put IdInfo{..} = put idProp >> put idScope
+  get = IdInfo <$> get <*> get
+
 
 {------------------------------------------------------------------------------
   Util

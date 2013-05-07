@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DeriveDataTypeable, RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DeriveDataTypeable, RankNTypes, GADTs #-}
 {-# OPTIONS_GHC -Wall #-}
 module IdeSession.RPC.Server
   ( -- * Server-side
@@ -22,7 +22,7 @@ import System.IO
   ( Handle
   , hSetBinaryMode
   , hSetBuffering
-  , BufferMode(BlockBuffering, BlockBuffering)
+  , BufferMode(BlockBuffering)
   , hFlush
   )
 import System.Process
@@ -40,29 +40,19 @@ import System.Posix.Process (exitImmediately)
 import System.Exit (ExitCode(ExitFailure))
 import System.Directory (canonicalizePath, getPermissions, executable)
 import Data.Typeable (Typeable)
-import Data.Aeson
-  ( FromJSON
-  , ToJSON
-  , fromJSON
-  , encode
-  , json'
-  , Result(Success, Error)
-  , Value
-  , decode'
-  )
-import Data.Aeson.TH (deriveJSON)
 import Control.Applicative ((<$>))
 import Control.Monad (void, forever, unless)
 import qualified Control.Exception as Ex
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newMVar)
-import qualified Data.ByteString.Lazy as BSL (ByteString, hPut, hGetContents)
-import qualified Data.ByteString.Lazy.Char8 as BSL (pack, unpack)
-import qualified Data.Attoparsec as Attoparsec
-import Data.Attoparsec.Lazy (parse, Result(..))
+import qualified Data.ByteString.Lazy.Char8 as BSL
+import qualified Data.ByteString.Lazy.Internal as BSL
 import Data.IORef (IORef, writeIORef, readIORef, newIORef)
 import Control.Concurrent.Async (async)
+import Data.Binary (Binary, encode, decode)
+import qualified Data.Binary as Binary
+import qualified Data.Binary.Get as Binary
 
 import IdeSession.BlockingOps (putMVar, takeMVar, readChan, waitAnyCatchCancel, waitCatch)
 
@@ -92,32 +82,66 @@ instance Ex.Exception ExternalException
 serverKilledException :: Maybe Ex.IOException -> ExternalException
 serverKilledException ex = ExternalException "Server killed" ex
 
---------------------------------------------------------------------------------
--- Internal data types                                                        --
---                                                                            --
--- We wrap the requests and responses to and from the RPC server in a custom  --
--- data type for two reasons. First, top-level JSON values must be objects or --
--- arrays; by wrapping them the user does not have to worry about this.       --
--- Second, it allows us to send control messages back and worth when we need  --
--- to.                                                                        --
---
--- TODO: Once we get rid of JSON, get rid of Response and UserRequest
---------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-- Lazy bytestring with an incremental Binary instance                       --
+--                                                                           --
+-- Note only does this avoid loading the entire ByteString into memory when  --
+-- serializing stuff, the standard Binary instance for Lazy bytestring is    --
+-- actually broken in 0.5 (http://hpaste.org/87401; fixed in 0.7, but even   --
+-- there still requires the length of the bytestring upfront).               --
+-------------------------------------------------------------------------------
+
+newtype IncBS = IncBS { unIncBS :: BSL.ByteString }
+
+instance Binary IncBS where
+  put (IncBS BSL.Empty)        = Binary.putWord8 0
+  put (IncBS (BSL.Chunk b bs)) = do Binary.putWord8 1
+                                    Binary.put b
+                                    Binary.put (IncBS bs)
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> return $ IncBS BSL.Empty
+      1 -> do b        <- Binary.get
+              IncBS bs <- Binary.get
+              return (IncBS (BSL.Chunk b bs))
+      _ -> fail "IncBS.get: invalid header"
+
+instance Show IncBS where
+  show = show . unIncBS
+
+-------------------------------------------------------------------------------
+-- Internal data types                                                       --
+-------------------------------------------------------------------------------
 
 -- TODO: Might want to use a wrapper around BSL.Bytestring which provides
 -- incremental framing (i.e., doesn't require the length of the bytestring
 -- upfront)
 
-data Request  = Request { _request :: BSL.ByteString } -- encoding of UserRequest
-              | RequestForceShutdown
+data Request  = Request IncBS
               | RequestShutdown
+              | RequestForceShutdown
+  deriving Show
 
-data UserRequest  a = UserRequest  { _userRequest  :: a }
-data UserResponse a = UserResponse { _userResponse :: a }
+newtype Response = Response IncBS
 
-$(deriveJSON tail ''Request)
-$(deriveJSON tail ''UserRequest)
-$(deriveJSON tail ''UserResponse)
+instance Binary Request where
+  put (Request bs)         = Binary.putWord8 0 >> Binary.put bs
+  put RequestShutdown      = Binary.putWord8 1
+  put RequestForceShutdown = Binary.putWord8 2
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> Request <$> Binary.get
+      1 -> return RequestShutdown
+      2 -> return RequestForceShutdown
+      _ -> fail "Request.get: invalid header"
+
+instance Binary Response where
+  put (Response bs) = Binary.put bs
+  get = Response <$> Binary.get
 
 --------------------------------------------------------------------------------
 -- Server-side API                                                            --
@@ -144,8 +168,8 @@ rpcServer fds handler = do
   rpcServer' requestR' responseW' errorsW' handler
 
 data RpcConversation = RpcConversation {
-    get :: forall a. FromJSON a => IO a
-  , put :: forall a. ToJSON a => a -> IO ()
+    get :: forall a. Binary a => IO a
+  , put :: forall a. Binary a => a -> IO ()
   }
 
 -- | Start the RPC server
@@ -187,8 +211,8 @@ data RpcServer = RpcServer {
   , rpcErrorsR   :: Handle
     -- | Handle on the server process itself
   , rpcProc :: ProcessHandle
-    -- | Parser for the server input
-  , rpcParser :: StreamParser Value
+    -- | IORef containing the server response stream
+  , rpcResponseR :: Stream Response
     -- | Server state
   , rpcState :: MVar RpcClientSideState
   }
@@ -250,15 +274,14 @@ forkRpcServer path args workingDir = do
   responseR' <- fdToHandle responseR
   errorsR'   <- fdToHandle errorsR
 
-  st     <- newMVar RpcRunning
-  input  <- BSL.hGetContents responseR'
-  parser <- newStreamParser json' input
+  st    <- newMVar RpcRunning
+  input <- newStream responseR'
   return RpcServer {
       rpcRequestW  = requestW'
     , rpcErrorsR   = errorsR'
     , rpcProc      = ph
     , rpcState     = st
-    , rpcParser    = parser
+    , rpcResponseR = input
     }
   where
     pathToExecutable :: FilePath -> IO FilePath
@@ -271,7 +294,7 @@ forkRpcServer path args workingDir = do
 
 -- | Specialized form of 'rpcConversation' to do single request and wait for
 -- a single response.
-rpc :: (ToJSON req, FromJSON resp) => RpcServer -> req -> IO resp
+rpc :: (Binary req, Binary resp) => RpcServer -> req -> IO resp
 rpc server req = rpcConversation server $ \RpcConversation{..} -> put req >> get
 
 -- | Run an RPC conversation. If the handler throws an exception during
@@ -301,16 +324,12 @@ rpcConversation server handler = withRpcServer server $ \st ->
         put = \req -> do
                  verifyScope
                  mapIOToExternal server $ do
-                   let msg = encode $ Request (encode (UserRequest req))
+                   let msg = encode $ Request (IncBS $ encode req)
                    hPutFlush (rpcRequestW server) msg
       , get = do verifyScope
-                 value <- mapIOToExternal server $
-                            nextInStream (rpcParser server)
-                 case fromJSON value of
-                   Success (UserResponse resp) ->
-                     return resp
-                   Error err ->
-                     Ex.throwIO (userError err)
+                 mapIOToExternal server $ do
+                   Response resp <- nextInStream (rpcResponseR server)
+                   Ex.evaluate $ decode (unIncBS resp)
       }
 
 illscopedConversationException :: Ex.IOException
@@ -377,22 +396,21 @@ getRpcExitCode RpcServer{rpcProc} = getProcessExitCode rpcProc
 -- | Decode messages from a handle and forward them to a channel.
 -- The boolean result indicates whether the shutdown is forced.
 readRequests :: Handle -> Chan BSL.ByteString -> IO ()
-readRequests h ch = do
-    input  <- BSL.hGetContents h
-    parser <- newStreamParser (parseJSON json') input
-    go parser
+readRequests h ch = newStream h >>= go
   where
-    go :: StreamParser Request -> IO ()
-    go parser = do
-      req <- nextInStream parser
+    go :: Stream Request -> IO ()
+    go input = do
+      req <- nextInStream input
       case req of
-        Request req'         -> writeChan ch req' >> go parser
+        Request req'         -> writeChan ch (unIncBS req') >> go input
         RequestShutdown      -> return ()
         RequestForceShutdown -> exitImmediately (ExitFailure 1)
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: Chan BSL.ByteString -> Handle -> IO ()
-writeResponses ch h = forever $ $readChan ch >>= hPutFlush h
+writeResponses ch h = forever $ do
+  bs <- $readChan ch
+  hPutFlush h $ encode (Response (IncBS bs))
 
 -- | Run a handler repeatedly, given input and output channels
 channelHandler :: Chan BSL.ByteString
@@ -401,13 +419,8 @@ channelHandler :: Chan BSL.ByteString
                -> IO ()
 channelHandler requests responses server =
   server RpcConversation {
-      get = do bs <- $readChan requests
-               case decode' bs of
-                 Just (UserRequest req) ->
-                   return req
-                 Nothing ->
-                   Ex.throwIO (userError $ "Could not decode JSON value " ++ show (BSL.unpack bs) ++ " in server.get")
-    , put = writeChan responses . encode . UserResponse
+      get = $readChan requests >>= Ex.evaluate . decode
+    , put = writeChan responses . encode
     }
 
 -- | Set all the specified handles to binary mode and block buffering
@@ -441,26 +454,35 @@ ignoreIOExceptions = Ex.handle ignore
 -- Wrapper around Attoparsec                                                  --
 --------------------------------------------------------------------------------
 
-data StreamParser a = StreamParser {
-    streamParser    :: Attoparsec.Parser a
-  , streamRemainder :: IORef BSL.ByteString
-  }
+data Stream a where
+  Stream :: Binary a => IORef BSL.ByteString -> Stream a
 
-newStreamParser :: Attoparsec.Parser a -> BSL.ByteString -> IO (StreamParser a)
-newStreamParser streamParser streamSource = do
+newStream :: Binary a => Handle -> IO (Stream a)
+newStream h = do
+  streamSource    <- BSL.hGetContents h
   streamRemainder <- newIORef streamSource
-  return StreamParser{..}
+  return (Stream streamRemainder)
 
-nextInStream :: forall a. StreamParser a -> IO a
-nextInStream StreamParser{..} = do
+nextInStream :: Stream a -> IO a
+nextInStream (Stream streamRemainder) = do
     bs <- readIORef streamRemainder
-    case streamParser `parse` bs of
-      Fail _ _ err -> Ex.throwIO (userError err)
-      Done bs' r   -> writeIORef streamRemainder bs' >> return r
+    (bs', r) <- decodeOrFail bs
+    writeIORef streamRemainder bs'
+    return r
 
-parseJSON :: FromJSON a => Attoparsec.Parser Value -> Attoparsec.Parser a
-parseJSON pvalue = do
-  val <- pvalue
-  case fromJSON val of
-    Success r -> return r
-    Error err -> fail err
+-- | Something like this is predefined in binary 0.7, but since ghc relies on
+-- binary 0.5 we're stuck with that. We can't quite emulate the behaviour of
+-- 0.7 because that would involve maintaining some state for the offsets;
+-- however, we don't really need the offsets so that's okay.
+--
+-- We also translate ErrorCall exceptions to the newer binary's IOExceptions
+decodeOrFail :: Binary a => BSL.ByteString -> IO (BSL.ByteString, a)
+decodeOrFail bs = do
+  -- This will force the exception to be thrown at this point (if any)
+  -- traceEvent "Running decodeOrFail.."
+  mResult <- Ex.try . Ex.evaluate $ Binary.runGetState Binary.get bs 0
+  case mResult of
+    Left ex -> do -- traceEvent $ "Decode exception: " ++ show ex
+                  Ex.throwIO . userError . show $ (ex :: Ex.ErrorCall)
+    Right (val, bs', _) -> do -- traceEvent $ "Got " ++ show val
+                              return (bs', val)

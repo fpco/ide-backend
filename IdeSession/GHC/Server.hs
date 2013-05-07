@@ -31,16 +31,17 @@ import Control.Concurrent (ThreadId, throwTo, forkIO, killThread)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
+import Control.Applicative ((<$>), (<*>))
 import qualified Control.Exception as Ex
 import Control.Monad (void, forM_, forever, unless, when)
-import Data.Aeson (decode', encode)
-import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import System.Exit (ExitCode)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
+import Data.Binary (Binary)
+import qualified Data.Binary as Binary
 
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -68,29 +69,107 @@ import qualified IdeSession.Strict.Trie   as StrictTrie
 import Paths_ide_backend
 
 data GhcRequest
-  = ReqCompile (Maybe [String]) FilePath Bool
-  | ReqRun     String String RunBufferMode RunBufferMode
-  | ReqSetEnv  [(String, Maybe String)]
+  = ReqCompile {
+        reqCompileOptions   :: Maybe [String]
+      , reqCompileSourceDir :: FilePath
+      , reqCompileGenCode   :: Bool
+      }
+  | ReqRun {
+        reqRunModule   :: String
+      , reqRunFun      :: String
+      , reqRunOutBMode :: RunBufferMode
+      , reqRunErrBMode :: RunBufferMode
+      }
+  | ReqSetEnv {
+         reqSetEnv :: [(String, Maybe String)]
+       }
+
 data GhcCompileResponse =
-    GhcCompileProgress Progress
-  | GhcCompileDone ( Strict [] SourceError
-                   , Strict (Map ModuleName) IdList
-                   , Strict (Map ModuleName)
-                            (Diff (Strict [] Import, Strict [] IdInfo))
-                   , ExplicitSharingCache
-                   )
+    GhcCompileProgress {
+        ghcCompileProgress :: Progress
+      }
+  | GhcCompileDone {
+        ghcCompileErrors :: Strict [] SourceError
+      , ghcCompileLoaded :: Strict (Map ModuleName) IdList
+      , ghcCompileInfo   :: Strict (Map ModuleName)
+                              (Diff (Strict [] Import, Strict [] IdInfo))
+      , ghcCompileCache  :: ExplicitSharingCache
+      }
+
 data GhcRunResponse =
     GhcRunOutp BSS.ByteString
   | GhcRunDone RunResult
+
 data GhcRunRequest =
     GhcRunInput BSS.ByteString
   | GhcRunInterrupt
   | GhcRunAckDone
 
-$(deriveJSON id ''GhcRequest)
-$(deriveJSON id ''GhcCompileResponse)
-$(deriveJSON id ''GhcRunResponse)
-$(deriveJSON id ''GhcRunRequest)
+instance Binary GhcRequest where
+  put ReqCompile{..} = do
+    Binary.putWord8 0
+    Binary.put reqCompileOptions
+    Binary.put reqCompileSourceDir
+    Binary.put reqCompileGenCode
+  put ReqRun{..} = do
+    Binary.putWord8 1
+    Binary.put reqRunModule
+    Binary.put reqRunFun
+    Binary.put reqRunOutBMode
+    Binary.put reqRunErrBMode
+  put ReqSetEnv{..} = do
+    Binary.putWord8 2
+    Binary.put reqSetEnv
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> ReqCompile <$> Binary.get <*> Binary.get <*> Binary.get
+      1 -> ReqRun <$> Binary.get <*> Binary.get <*> Binary.get <*> Binary.get
+      2 -> ReqSetEnv <$> Binary.get
+      _ -> fail "GhcRequest.Binary.get: invalid header"
+
+instance Binary GhcCompileResponse where
+  put GhcCompileProgress {..} = do
+    Binary.putWord8 0
+    Binary.put ghcCompileProgress
+  put GhcCompileDone {..} = do
+    Binary.putWord8 1
+    Binary.put ghcCompileErrors
+    Binary.put ghcCompileLoaded
+    Binary.put ghcCompileInfo
+    Binary.put ghcCompileCache
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> GhcCompileProgress <$> Binary.get
+      1 -> GhcCompileDone <$> Binary.get <*> Binary.get <*> Binary.get <*> Binary.get
+      _ -> fail "GhcCompileRespone.Binary.get: invalid header"
+
+instance Binary GhcRunResponse where
+  put (GhcRunOutp bs) = Binary.putWord8 0 >> Binary.put bs
+  put (GhcRunDone r)  = Binary.putWord8 1 >> Binary.put r
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> GhcRunOutp <$> Binary.get
+      1 -> GhcRunDone <$> Binary.get
+      _ -> fail "GhcRunResponse.get: invalid header"
+
+instance Binary GhcRunRequest where
+  put (GhcRunInput bs) = Binary.putWord8 0 >> Binary.put bs
+  put GhcRunInterrupt  = Binary.putWord8 1
+  put GhcRunAckDone    = Binary.putWord8 2
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> GhcRunInput <$> Binary.get
+      1 -> return GhcRunInterrupt
+      2 -> return GhcRunAckDone
+      _ -> fail "GhcRunRequest.get: invalid header"
 
 data GhcServer = OutProcess RpcServer
                | InProcess RpcConversation ThreadId
@@ -237,7 +316,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
     cache <- liftIO $ constructExplicitSharingCache
 --    liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ (unlines $ map (showNormalized cache) errs)
     -- Ship the results.
-    liftIO $ put $ GhcCompileDone (errs, filteredIdMaps, diffMap, cache)
+    liftIO $ put $ GhcCompileDone errs filteredIdMaps diffMap cache
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -414,6 +493,7 @@ forkGhcServer configGenerateModInfo opts workingDir False = do
                                    , show configGenerateModInfo ])
                           workingDir
   return (OutProcess server)
+{- TODO: Reenable in-process
 forkGhcServer configGenerateModInfo opts workingDir True = do
   let conv a b = RpcConversation {
                    get = do bs <- $readChan a
@@ -426,6 +506,7 @@ forkGhcServer configGenerateModInfo opts workingDir True = do
   b   <- newChan
   tid <- forkIO $ ghcServerEngine configGenerateModInfo opts (conv a b)
   return $ InProcess (conv b a) tid
+-}
 
 -- | Compile or typecheck
 rpcCompile :: GhcServer           -- ^ GHC server
@@ -449,7 +530,7 @@ rpcCompile server opts dir genCode callback =
                 case response of
                   GhcCompileProgress pcounter ->
                     callback pcounter >> go
-                  GhcCompileDone (errs, loaded, importsAuto, cache) ->
+                  GhcCompileDone errs loaded importsAuto cache ->
                     return ( errs
                            , loaded
                            , StrictMap.map (fmap $ second $ constructAuto cache)

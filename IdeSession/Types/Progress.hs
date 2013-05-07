@@ -6,13 +6,16 @@ module IdeSession.Types.Progress (
   , progressStep
   ) where
 
-import Data.Aeson.TH (deriveJSON)
+import Data.Binary (Binary(..))
+import Control.Applicative ((<$>))
 
 -- | This type represents intermediate progress information during compilation.
 newtype Progress = Progress Int
   deriving (Show, Eq, Ord)
 
-$(deriveJSON id ''Progress)
+instance Binary Progress where
+  put (Progress i) = put i
+  get = Progress <$> get
 
 initialProgress :: Progress
 initialProgress = Progress 1  -- the progress indicates a start of a step

@@ -5,13 +5,14 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, modifyMVar_, newMVar)
 import qualified Control.Exception as Ex
 import Control.Monad (forM_, forever)
-import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON))
-import Data.Aeson.TH (deriveFromJSON, deriveJSON, deriveToJSON)
+import Control.Applicative ((<$>), (<*>))
 import Data.Function (on)
-import Data.List (isInfixOf)
+import Data.List (isPrefixOf, isInfixOf)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
 import System.Posix.Signals (sigKILL)
+import Data.Binary (Binary)
+import qualified Data.Binary as Binary
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -31,7 +32,7 @@ forkTestServer test = do
   forkRpcServer prog ["--server", test] Nothing
 
 -- | Do an RPC call and verify the result
-assertRpcEqual :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp)
+assertRpcEqual :: (Binary req, Binary resp, Show req, Show resp, Eq resp)
                => RpcServer -- ^ RPC server
                -> req       -- ^ Request
                -> resp      -- ^ Expected response
@@ -41,7 +42,7 @@ assertRpcEqual server req resp =
 
 -- | Like 'assertRpcEqual' but verify a number of responses, before throwing
 -- the specified exception (if any)
-assertRpcEquals :: (ToJSON req, FromJSON resp, Show req, Show resp, Eq resp)
+assertRpcEquals :: (Binary req, Binary resp, Show req, Show resp, Eq resp)
                 => RpcServer -- ^ RPC server
                 -> req       -- ^ Request
                 -> [resp]    -- ^ Expected responses
@@ -50,8 +51,8 @@ assertRpcEquals server req resps =
   assertRpc server (Put req $ foldr Get Done resps)
 
 data Conversation =
-    forall req.  (ToJSON req) => Put req  Conversation
-  | forall resp. (FromJSON resp, Show resp, Eq resp) => Get resp Conversation
+    forall req.  (Binary req) => Put req  Conversation
+  | forall resp. (Binary resp, Show resp, Eq resp) => Get resp Conversation
   | Done
 
 assertRpc :: RpcServer -> Conversation -> Assertion
@@ -71,9 +72,9 @@ isServerKilledException :: ExternalException -> Bool
 isServerKilledException =
   ((==) `on` externalStdErr) (serverKilledException undefined)
 
-isServerIOException :: Ex.IOException -> ExternalException -> Bool
-isServerIOException ex =
-  (== show ex) . externalStdErr
+isServerIOException :: String -> ExternalException -> Bool
+isServerIOException ex ExternalException{externalStdErr} =
+  ex `isInfixOf` externalStdErr
 
 --------------------------------------------------------------------------------
 -- Feature tests                                                              --
@@ -103,8 +104,27 @@ testStateServer st RpcConversation{..} = forever $ do
 data CountRequest  = Increment | GetCount deriving Show
 data CountResponse = DoneCounting | Count Int deriving (Eq, Show)
 
-$(deriveJSON id ''CountRequest)
-$(deriveJSON id ''CountResponse)
+instance Binary CountRequest where
+  put Increment = Binary.putWord8 0
+  put GetCount  = Binary.putWord8 1
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> return Increment
+      1 -> return GetCount
+      _ -> fail "CountRequest.get: invalid header"
+
+instance Binary CountResponse where
+  put DoneCounting = Binary.putWord8 0
+  put (Count i)    = Binary.putWord8 1 >> Binary.put i
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> return DoneCounting
+      1 -> Count <$> Binary.get
+      _ -> fail "CountResponse.get: invalid header"
 
 testCustom :: RpcServer -> Assertion
 testCustom server = do
@@ -176,9 +196,33 @@ data StartGame  = StartGame Int Int
 data Guess      = Guess Int | GiveUp | Yay      deriving (Eq, Show)
 data GuessReply = GuessCorrect | GuessIncorrect deriving Show
 
-$(deriveJSON id ''StartGame)
-$(deriveJSON id ''Guess)
-$(deriveJSON id ''GuessReply)
+instance Binary StartGame where
+  put (StartGame i j) = Binary.put i >> Binary.put j
+  get = StartGame <$> Binary.get <*> Binary.get
+
+instance Binary Guess where
+  put (Guess i) = Binary.putWord8 0 >> Binary.put i
+  put GiveUp    = Binary.putWord8 1
+  put Yay       = Binary.putWord8 2
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> Guess <$> Binary.get
+      1 -> return GiveUp
+      2 -> return Yay
+      _ -> fail "Guess.get: invalid header"
+
+instance Binary GuessReply where
+  put GuessCorrect   = Binary.putWord8 0
+  put GuessIncorrect = Binary.putWord8 1
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> return GuessCorrect
+      1 -> return GuessIncorrect
+      _ -> fail "GuessReply.get: invalid header"
 
 testConversation :: RpcServer -> Assertion
 testConversation server = do
@@ -205,8 +249,7 @@ testConversation server = do
   where
     typeError :: ExternalException -> Bool
     typeError ExternalException{externalStdErr} =
-      "expected" `isInfixOf` externalStdErr &&
-      "but got"  `isInfixOf` externalStdErr
+      "too few bytes" `isPrefixOf` externalStdErr
 
 testConversationServer :: RpcConversation -> IO ()
 testConversationServer RpcConversation{..} = forever $ do
@@ -233,10 +276,10 @@ testCrash server =
 testCrashServer :: RpcConversation -> IO ()
 testCrashServer RpcConversation{..} = do
   () <- get
-  Ex.throwIO crash
+  Ex.throwIO (userError crash)
 
-crash :: Ex.IOException
-crash = userError "Intentional crash"
+crash :: String
+crash = "Intentional crash"
 
 -- | Test server which gets killed during a request
 testKill :: RpcServer -> Assertion
@@ -272,14 +315,13 @@ testKillAsyncServer RpcConversation{..} = forever $ do
 -- | Test crash during decoding
 data TypeWithFaultyDecoder = TypeWithFaultyDecoder deriving Show
 
-instance FromJSON TypeWithFaultyDecoder where
-  parseJSON _ = fail "Faulty decoder"
-
-$(deriveToJSON id ''TypeWithFaultyDecoder)
+instance Binary TypeWithFaultyDecoder where
+  put _ = Binary.putWord8 0 -- >> return ()
+  get = fail "Faulty decoder"
 
 testFaultyDecoder :: RpcServer -> Assertion
 testFaultyDecoder server =
-  assertRaises "" (isServerIOException (userError "Faulty decoder")) $
+  assertRaises "" (isServerIOException "Faulty decoder") $
     assertRpcEqual server TypeWithFaultyDecoder ()
 
 testFaultyDecoderServer :: RpcConversation -> IO ()
@@ -290,10 +332,9 @@ testFaultyDecoderServer RpcConversation{..} = forever $ do
 -- | Test crash during encoding
 data TypeWithFaultyEncoder = TypeWithFaultyEncoder deriving (Show, Eq)
 
-$(deriveFromJSON id ''TypeWithFaultyEncoder)
-
-instance ToJSON TypeWithFaultyEncoder where
-  toJSON _ = error "Faulty encoder"
+instance Binary TypeWithFaultyEncoder where
+  put _ = fail "Faulty encoder"
+  get = Binary.getWord8 >> return TypeWithFaultyEncoder
 
 testFaultyEncoder :: RpcServer -> Assertion
 testFaultyEncoder server =
@@ -319,7 +360,7 @@ testCrashMultiServer :: RpcConversation -> IO ()
 testCrashMultiServer RpcConversation{..} = forever $ do
   req <- get :: IO Int
   forM_ [req, req - 1 .. 1] $ put
-  Ex.throwIO crash
+  Ex.throwIO (userError crash)
 
 -- | Like 'CrashMulti', but killed rather than an exception
 testKillMulti :: RpcServer -> Assertion
@@ -361,12 +402,13 @@ testIllscoped server = do
 -- (The actual type is the type of the echo server: RpcServer String String)
 testInvalidReqType :: RpcServer -> Assertion
 testInvalidReqType server =
-    assertRaises "" (isServerIOException (userError parseEx)) $
+    assertRaises "" (isServerIOException parseEx) $
       assertRpcEqual server () "ping"
   where
-    -- TODO: do we want to insist on this particular parse error?
-    parseEx = "when expecting a String, encountered Array instead"
+    parseEx = "too few bytes"
 
+{- DISABLED: We cannot detect this reliably anymore, since we don't
+  encode type information anymore since the move to Binary
 -- | Test what happens if the client specifies the wrong response type
 --
 -- Note that since the decoding error now happens *locally*, the exception
@@ -380,6 +422,7 @@ testInvalidRespType server =
   where
     -- TODO: do we want to insist on this particular parse error?
     parseEx = "when expecting a (), encountered String instead"
+-}
 
 --------------------------------------------------------------------------------
 -- Driver                                                                     --
@@ -412,7 +455,7 @@ tests = [
    , testGroup "Client code errors" [
          testRPC "illscoped"        testIllscoped
        , testRPC "invalidReqType"   testInvalidReqType
-       , testRPC "invalidRespType"  testInvalidRespType
+--       , testRPC "invalidRespType"  testInvalidRespType
        ]
   ]
   where
