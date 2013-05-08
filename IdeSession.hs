@@ -171,8 +171,8 @@ module IdeSession (
   , ModuleName
   , ModuleId(..)
   , PackageId(..)
-  , IdMap(..)
-  , LoadedModules
+--  , IdMap(..)
+--  , LoadedModules
   , ImportEntities(..)
   , Import(..)
     -- ** Util
@@ -183,6 +183,7 @@ module IdeSession (
   , ghcServer
   , getGhcExitCode
   , forceRecompile
+  , dumpIdInfo
 ) where
 
 import IdeSession.Config

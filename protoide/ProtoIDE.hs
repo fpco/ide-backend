@@ -101,6 +101,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     errors <- getSourceErrors ideSession
     idInfo <- getIdInfo ideSession
     textBufferSetText errorsBuff (show errors)
+    dumpIdInfo ideSession
     writeIORef idMapRef idInfo
 
   -- Highlight the identifier under the cursor

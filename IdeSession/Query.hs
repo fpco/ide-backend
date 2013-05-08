@@ -27,7 +27,7 @@ module IdeSession.Query (
   , getImports
   , getAutocompletion
     -- * Debugging (internal use only)
---  , dumpIdInfo
+  , dumpIdInfo
   ) where
 
 import Prelude hiding (mod, span)
@@ -37,6 +37,8 @@ import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
 import System.FilePath ((</>))
+import Control.Monad (forM_)
+import qualified Data.Text as Text (unpack)
 
 import IdeSession.Config
 import IdeSession.State
@@ -48,6 +50,7 @@ import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map  as StrictMap
 import qualified IdeSession.Strict.List as StrictList
 import qualified IdeSession.Strict.Trie as StrictTrie
+import qualified IdeSession.Strict.IntervalMap as StrictIntervalMap
 import IdeSession.Strict.MVar (withMVar)
 
 {------------------------------------------------------------------------------
@@ -203,11 +206,15 @@ getAutocompletion = computedQuery $ \Computed{..} ->
   Debugging
 ------------------------------------------------------------------------------}
 
-{-
+-- | Print the id info maps to the stdout (for debugging purposes only)
 dumpIdInfo :: IdeSession -> IO ()
 dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
-  print (removeExplicitSharing computedCache computedLoadedModules)
--}
+  forM_ (StrictMap.toList computedLoadedModules) $ \(mod, idMap) -> do
+    putStrLn $ "*** " ++ Text.unpack mod ++ " ***"
+    forM_ (StrictIntervalMap.toList (Private.idMapToMap idMap)) $ \(i, idInfo) -> do
+      let idInfo' = removeExplicitSharing computedCache idInfo
+          (StrictIntervalMap.Interval (_, fromLine, fromCol) (_, toLine, toCol)) = i
+      putStrLn $ show (fromLine, fromCol, toLine, toCol)  ++ ": " ++ show idInfo'
 
 {------------------------------------------------------------------------------
   Auxiliary

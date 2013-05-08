@@ -13,8 +13,8 @@ module IdeSession.Types.Public (
   , ModuleName
   , ModuleId(..)
   , PackageId(..)
-  , IdMap(..)
-  , LoadedModules
+--  , IdMap(..)
+--  , LoadedModules
   , ImportEntities(..)
   , Import(..)
     -- * Util
@@ -138,9 +138,11 @@ data PackageId = PackageId
   }
   deriving (Eq, Ord)
 
+{-
 newtype IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
 
 type LoadedModules = Map ModuleName IdMap
+-}
 
 data ImportEntities =
     ImportOnly   ![Text]
@@ -205,10 +207,12 @@ instance Show PackageId where
 instance Show IdInfo where
   show IdInfo{..} = show idProp ++ " (" ++ show idScope ++ ")"
 
+{-
 instance Show IdMap where
   show =
     let showIdInfo(span, idInfo) = "(" ++ show span ++ "," ++ show idInfo ++ ")"
     in unlines . map showIdInfo . Map.toList . idMapToMap
+-}
 
 {------------------------------------------------------------------------------
   Binary instances
