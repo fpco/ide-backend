@@ -40,8 +40,6 @@ library
                       IdeSession.Strict.MVar
                       IdeSession.Strict.IORef
                       IdeSession.Strict.StateT
-  if impl(ghc == 7.4.*)
-    other-modules:    IdeSession.GHC.MakeFixed
 
   build-depends:      base                 ==4.*,
                       directory            ==1.*,

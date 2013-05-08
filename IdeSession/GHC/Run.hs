@@ -57,8 +57,7 @@ import ErrUtils   ( Message )
 #if __GLASGOW_HASKELL__ == 704
 -- Import our own version of --make as a workaround for
 -- http://hackage.haskell.org/trac/ghc/ticket/7548
-import IdeSession.GHC.MakeFixed
-import GHC hiding (flags, ModuleName, RunResult(..), load)
+import GHC hiding (flags, ModuleName, RunResult(..))
 import GhcMonad (modifySession)
 import HscTypes (HscEnv(hsc_mod_graph))
 import System.Time
