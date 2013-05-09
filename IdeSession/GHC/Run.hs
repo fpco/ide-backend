@@ -54,9 +54,11 @@ import ErrUtils   ( MsgDoc )
 import ErrUtils   ( Message )
 #endif
 
-#if __GLASGOW_HASKELL__ == 704
--- Import our own version of --make as a workaround for
+#if defined(GHC_761)
 -- http://hackage.haskell.org/trac/ghc/ticket/7548
+-- is not fixed in this version. Compilation should fail,
+-- because the problem is not minor and not easy to spot otherwise.
+#else
 import GHC hiding (flags, ModuleName, RunResult(..))
 import GhcMonad (modifySession)
 import HscTypes (HscEnv(hsc_mod_graph))
@@ -66,12 +68,6 @@ import TcRnMonad (initTc)
 import TcRnTypes (RnM)
 import OccName (occEnvElts)
 import RdrName (GlobalRdrEnv, GlobalRdrElt, gre_name)
-#elif __GLASGOW_HASKELL__ >= 706 && !defined(GHC_761)
--- Use the default tools. They are fixed in these GHC versions.
-import GHC hiding (flags, ModuleName, RunResult(..))
-#else
--- Not fixed in this version and no workaround. Compilation should fail,
--- because the problem is not minor and not easy to spot otherwise.
 #endif
 
 import qualified Control.Exception as Ex
