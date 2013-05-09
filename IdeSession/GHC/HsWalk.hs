@@ -181,9 +181,9 @@ extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
 
 #if DEBUG
 --  liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
-  liftIO $ do
-    cache <- readIORef idPropCacheRef
-    appendFile "/tmp/ghc.log" $ "Cache == " ++ show cache
+-- liftIO $ do
+--    cache <- readIORef idPropCacheRef
+--    appendFile "/tmp/ghc.log" $ "Cache == " ++ show cache
 #endif
   liftIO $ modifyIORef symbolRef (Map.insert processedName identMap)
   return env
@@ -306,7 +306,7 @@ ast _mspan _info cont = do
   return r
 
 #if DEBUG
-astIndent :: IORef Int
+astIndent :: StrictIORef Int
 {-# NOINLINE astIndent #-}
 astIndent = unsafePerformIO $ newIORef 0
 #endif

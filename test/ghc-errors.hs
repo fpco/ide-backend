@@ -1759,6 +1759,34 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,9,2,10) infoPrint
         assertIdInfo idInfo "A" (2,9,2,13) infoPrint
     )
+{- If we fix https://github.com/fpco/fpco/issues/1066 / https://github.com/fpco/ide-backend/issues/57
+   then this test can be used to check that we report the right info in a splice.
+  , ( "Type information 9: Quasi-quotation"
+    , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
+        let upd = updateCodeGeneration True
+               <> (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module A where"
+                    , "import Language.Haskell.TH.Quote"
+                    , "qq = QuasiQuoter {"
+                    , "         quoteExp  = \\_ -> [| True |]"
+                    , "       , quotePat  = undefined"
+                    , "       , quoteType = undefined"
+                    , "       , quoteDec  = undefined"
+                    , "       }"
+                    ])
+               <> (updateModule "B.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE QuasiQuotes #-}"
+                    , "module B where"
+                    , "import A"
+                    , "foo = [qq|bar|]"
+                    ])
+        updateSessionD session upd 2
+        assertNoErrors session
+        idInfo <- getIdInfo session
+        dumpIdInfo session
+    )
+-}
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
