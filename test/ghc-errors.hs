@@ -357,8 +357,11 @@ syntheticTests =
         let m2 = "Exception"
             upd2 = buildExe [Text.pack m2]
         updateSessionD session upd2 4
-        let upd3 = buildExe [Text.pack m]
+        let m3 = "Main"
+            upd3 = buildExe [Text.pack m3]
         updateSessionD session upd3 4
+        let upd4 = buildExe [Text.pack m]
+        updateSessionD session upd4 4
         buildDir <- getBuildDir session
         out <- readProcess (buildDir </> m </> m) [] []
         assertEqual "Maybes exe output"
@@ -368,6 +371,10 @@ syntheticTests =
         assertEqual "Exception exe output"
                     ""
                     out2
+        out3 <- readProcess (buildDir </> m3 </> m3) [] []
+        assertEqual "Main exe output"
+                    ""
+                    out3
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = [ "-hide-all-packages"

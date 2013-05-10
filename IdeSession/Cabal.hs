@@ -10,6 +10,7 @@ import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.FilePath ((</>))
 import Data.IORef (newIORef, readIORef, modifyIORef)
+import System.Directory (doesFileExist)
 import System.IO.Temp (createTempDirectory)
 
 import Distribution.License (License (..))
@@ -92,10 +93,13 @@ exeDesc :: FilePath -> FilePath -> [String] -> ModuleName
         -> IO Executable
 exeDesc ideSourcesDir ideDistDir ghcOpts m = do
   let exeName = Text.unpack m
-  if exeName == "Main" then  -- that's what Cabal expects, no wrapper needed
+  if exeName == "Main" then do  -- that's what Cabal expects, no wrapper needed
+    lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
+    let modulePath | lhsFound  = "Main.lhs"
+                   | otherwise = "Main.hs"
     return $ Executable
       { exeName
-      , modulePath = "Main.hs"
+      , modulePath
       , buildInfo = bInfo ideSourcesDir ghcOpts
       }
   else do
