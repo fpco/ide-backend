@@ -337,7 +337,7 @@ syntheticTests =
         loadModulesFrom session "test/compiler/utils"
         assertNoErrors session
         let update2 = updateCodeGeneration True
-        updateSessionD session update2 3
+        updateSessionD session update2 4
         assertNoErrors session
         runActions <- runStmt session "Maybes" "main"
         (output, result) <- runWaitAll runActions
