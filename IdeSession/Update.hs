@@ -426,7 +426,7 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
         return state
     SessionConfig{configGenerateModInfo} = ideConfig ideStaticInfo
 
-buildExe :: [ModuleName] -> IdeSessionUpdate
+buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
 buildExe ms = IdeSessionUpdate
               $ \callback
                  IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do

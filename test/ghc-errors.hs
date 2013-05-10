@@ -16,7 +16,7 @@ import Data.IORef (IORef, newIORef, writeIORef, readIORef)
 import System.Directory
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..))
-import System.FilePath (dropExtension, (</>), takeBaseName)
+import System.FilePath (dropExtension, (</>), (<.>), takeBaseName)
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
 import System.Process (readProcess)
@@ -352,15 +352,15 @@ syntheticTests =
         setCurrentDirectory "../../../"
         assertNoErrors session
         let m = "Maybes"
-            upd = buildExe [Text.pack m]
+            upd = buildExe [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd 4
         let m2 = "Exception"
-            upd2 = buildExe [Text.pack m2]
+            upd2 = buildExe [(Text.pack m2, m2 <.> "hs")]
         updateSessionD session upd2 4
         let m3 = "Main"
-            upd3 = buildExe [Text.pack m3]
+            upd3 = buildExe [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
         updateSessionD session upd3 4
-        let upd4 = buildExe [Text.pack m]
+        let upd4 = buildExe [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd4 4
         buildDir <- getBuildDir session
         out <- readProcess (buildDir </> m </> m) [] []
@@ -493,7 +493,7 @@ syntheticTests =
         setCurrentDirectory "../"
         assertNoErrors session
         let m = "TH.TH"
-            upd = buildExe [Text.pack m]
+            upd = buildExe [(Text.pack m, "TH/TH.hs")]
         updateSessionD session upd 4
         buildDir <- getBuildDir session
         out <- readProcess (buildDir </> m </> m) [] []
@@ -1451,7 +1451,7 @@ syntheticTests =
         loadModulesFrom session "."
         setCurrentDirectory "../../"
         let m = "Main"
-            upd = buildExe [Text.pack m]
+            upd = buildExe [(Text.pack m, "ParFib.hs")]
         updateSessionD session upd 4
         buildDir <- getBuildDir session
         fibOut <- readProcess (buildDir </> m </> m) [] []
@@ -1470,9 +1470,10 @@ syntheticTests =
         loadModulesFrom session "."
         setCurrentDirectory "../../"
         let m = "ParFib.Main"
-            upd = buildExe [Text.pack m, Text.pack "Main"]
+            upd = buildExe [ (Text.pack m, "ParFib.Main.hs")
+                           , (Text.pack "Main", "ParFib.hs") ]
         updateSessionD session upd 4
-        let upd2 = buildExe [Text.pack "Main"]
+        let upd2 = buildExe [(Text.pack "Main", "ParFib.hs")]
         updateSessionD session upd2 4
         buildDir <- getBuildDir session
         fibOut <- readProcess (buildDir </> m </> m) [] []

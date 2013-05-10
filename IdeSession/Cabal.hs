@@ -4,6 +4,7 @@ module IdeSession.Cabal (
 
 import Control.Monad
 import Control.Monad.IO.Class (liftIO)
+import Data.List (delete)
 import Data.Maybe (catMaybes)
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
@@ -89,20 +90,18 @@ bInfo sourceDir ghcOpts =
     , options = [(GHC, ghcOpts)]
     }
 
-exeDesc :: FilePath -> FilePath -> [String] -> ModuleName
+exeDesc :: FilePath -> FilePath -> [String] -> (ModuleName, FilePath)
         -> IO Executable
-exeDesc ideSourcesDir ideDistDir ghcOpts m = do
+exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
   let exeName = Text.unpack m
   if exeName == "Main" then do  -- that's what Cabal expects, no wrapper needed
-    lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
-    let modulePath | lhsFound  = "Main.lhs"
-                   | otherwise = "Main.hs"
     return $ Executable
       { exeName
-      , modulePath
+      , modulePath = path
       , buildInfo = bInfo ideSourcesDir ghcOpts
       }
   else do
+    -- TODO: Verify @path@ somehow.
     mDir <- createTempDirectory ideDistDir exeName
     -- Cabal insists on "Main" and on ".hs".
     let modulePath = mDir </> "Main.hs"
@@ -150,9 +149,10 @@ externalDeps pkgs =
 
 configureAndBuild :: FilePath -> FilePath -> [String]
                   -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
-                  -> [ModuleName]
+                  -> [(ModuleName, FilePath)]
                   -> IO ()
-configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM callback ms = do
+configureAndBuild ideSourcesDir ideDistDir ghcOpts
+                  pkgs loadedMs callback ms = do
   counter <- newIORef initialProgress
   let markProgress = do
         oldCounter <- readIORef counter
@@ -166,9 +166,20 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM callback ms = do
   markProgress
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
-  let allProjectModules =
-        map (Distribution.ModuleName.fromString . Text.unpack) loadedM
-      library = libDesc ideSourcesDir ghcOpts allProjectModules
+  hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
+  lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
+  -- Cabal can't find the code of @Main@ in subdirectories or in @Foo.hs@.
+  -- TODO: this should be discussed and fixed when we generate .cabal files,
+  -- because if another module depends on such a @Main@, we're in trouble
+  -- (but if the @Main@ is only an executable, we are fine).
+  -- Michael said in https://github.com/fpco/fpco/issues/1049
+  -- "We'll be handling the disambiguation of Main modules ourselves before
+  -- passing the files to you, so that shouldn't be an ide-backend concern.",
+  -- so perhaps there is a plan for that.
+  let soundMs | hsFound || lhsFound = loadedMs
+              | otherwise = delete (Text.pack "Main") loadedMs
+      projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
+      library = libDesc ideSourcesDir ghcOpts projectMs
       gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -198,13 +209,14 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts pkgs loadedM callback ms = do
   -- as they are emitted, similarly as log_action in GHC API
 
 buildExecutable :: FilePath -> FilePath -> [String]
-                -> Strict Maybe Computed -> (Progress -> IO ()) -> [ModuleName]
+                -> Strict Maybe Computed -> (Progress -> IO ())
+                -> [(ModuleName, FilePath)]
                 -> IO ()
 buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed callback ms = do
   case toLazyMaybe mcomputed of
     Nothing -> fail "This session state does not admit buidling executables."
     Just Computed{..} -> do
-      let loadedM = StrictMap.keys $ computedLoadedModules
+      let loadedMs = StrictMap.keys $ computedLoadedModules
           imp m = do
             let mimports =
                   fmap (toLazyList . StrictList.map (removeExplicitSharing
@@ -214,8 +226,8 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed callback ms = do
               Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
               Just imports ->
                 return $ map (modulePackage . importModule) imports
-      imps <- mapM imp loadedM
+      imps <- mapM imp loadedMs
       let pkgs = concat imps
       liftIO $ configureAndBuild
-                 ideSourcesDir ideDistDir ghcOpts pkgs loadedM callback ms
+                 ideSourcesDir ideDistDir ghcOpts pkgs loadedMs callback ms
       -- TODO: keep a list of built (and up-to-date?) executables?
