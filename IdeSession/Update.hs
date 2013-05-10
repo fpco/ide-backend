@@ -26,6 +26,7 @@ module IdeSession.Update (
   , runStmt
     -- * Debugging
   , forceRecompile
+  , crashGhcServer
   )
   where
 
@@ -57,7 +58,7 @@ import IdeSession.Strict.Container
 import qualified IdeSession.Strict.IntMap as IntMap
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
-import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_)
+import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_, withMVar)
 
 {------------------------------------------------------------------------------
   Starting and stopping
@@ -449,3 +450,15 @@ forceRecompile = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
     return (path, (digest, newTS))
   set (ideManagedFiles .> managedSource) sources'
   set ideUpdatedCode True
+
+-- | Crash the GHC server. For debugging only. If the specified delay is
+-- @Nothing@, crash immediately; otherwise, set up a thread that throws
+-- an exception to the main thread after the delay.
+crashGhcServer :: IdeSession -> Maybe Int -> IO ()
+crashGhcServer IdeSession{ideState} delay = do
+  withMVar ideState $ \state ->
+    case state of
+      IdeSessionIdle idleState ->
+        rpcCrash (idleState ^. ideGhcServer) delay
+      _ ->
+        Ex.throwIO (userError "Call to crashGhcServer while state not idle")

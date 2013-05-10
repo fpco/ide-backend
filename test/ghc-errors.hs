@@ -1932,6 +1932,26 @@ syntheticTests =
     -- - Explicitly importing somthing that wasn't exported
     -- - Explicitly hiding something that wasn't exported
     -- - Use of PackageImports without the flag
+  , ( "GHC crash 1: No delay, no further requests"
+    , withConfiguredSession defOpts $ \session -> do
+        crashGhcServer session Nothing
+    )
+  , ( "GHC crash 2: No delay, follow up request"
+    , withConfiguredSession defOpts $ \session -> do
+        crashGhcServer session Nothing
+        assertRaises ""
+          (\(ExternalException stderr _) -> stderr == show (userError "Intentional crash"))
+          (updateSession session (updateEnv "Foo" Nothing) (\_ -> return ()))
+    )
+  , ( "GHC crash 3: Delay, follow up request"
+    , withConfiguredSession defOpts $ \session -> do
+        crashGhcServer session (Just 1000000)
+        updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
+        threadDelay 2000000
+        assertRaises ""
+          (\(ExternalException stderr _) -> stderr == show (userError "Intentional crash"))
+          (updateSession session (updateEnv "Foo" Nothing) (\_ -> return ()))
+    )
   ]
 
 assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion

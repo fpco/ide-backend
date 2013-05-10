@@ -179,11 +179,14 @@ module IdeSession (
   , idInfoQN
 --, idInfoAtLocation
   , haddockLink
+  -- * Exception types
+  , ExternalException(..)
   -- * For internal/debugging use only
   , ghcServer
   , getGhcExitCode
   , forceRecompile
   , dumpIdInfo
+  , crashGhcServer
 ) where
 
 import IdeSession.Config
@@ -193,3 +196,4 @@ import IdeSession.State (IdeSession)
 import IdeSession.Types.Public
 import IdeSession.Types.Progress
 import IdeSession.GHC.Server
+import IdeSession.RPC.Server (ExternalException (..))

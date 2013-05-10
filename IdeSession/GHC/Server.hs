@@ -19,6 +19,7 @@ module IdeSession.GHC.Server
   , runWaitAll
   , rpcRun
   , rpcSetEnv
+  , rpcCrash
   , shutdownGhcServer
   , forceShutdownGhcServer
   , getGhcExitCode
@@ -27,7 +28,7 @@ module IdeSession.GHC.Server
   ) where
 
 import Control.Arrow (second)
-import Control.Concurrent (ThreadId, throwTo, forkIO, killThread)
+import Control.Concurrent (ThreadId, throwTo, forkIO, killThread, myThreadId, threadDelay)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
@@ -83,6 +84,10 @@ data GhcRequest
   | ReqSetEnv {
          reqSetEnv :: [(String, Maybe String)]
        }
+    -- | For debugging only! :)
+  | ReqCrash {
+         reqCrashDelay :: Maybe Int
+       }
 
 data GhcCompileResponse =
     GhcCompileProgress {
@@ -120,13 +125,17 @@ instance Binary GhcRequest where
   put ReqSetEnv{..} = do
     Binary.putWord8 2
     Binary.put reqSetEnv
+  put ReqCrash{..} = do
+    Binary.putWord8 3
+    Binary.put reqCrashDelay
 
   get = do
     header <- Binary.getWord8
     case header of
       0 -> ReqCompile <$> Binary.get <*> Binary.get <*> Binary.get
-      1 -> ReqRun <$> Binary.get <*> Binary.get <*> Binary.get <*> Binary.get
-      2 -> ReqSetEnv <$> Binary.get
+      1 -> ReqRun     <$> Binary.get <*> Binary.get <*> Binary.get <*> Binary.get
+      2 -> ReqSetEnv  <$> Binary.get
+      3 -> ReqCrash   <$> Binary.get
       _ -> fail "GhcRequest.Binary.get: invalid header"
 
 instance Binary GhcCompileResponse where
@@ -144,7 +153,7 @@ instance Binary GhcCompileResponse where
     header <- Binary.getWord8
     case header of
       0 -> GhcCompileProgress <$> Binary.get
-      1 -> GhcCompileDone <$> Binary.get <*> Binary.get <*> Binary.get <*> Binary.get
+      1 -> GhcCompileDone     <$> Binary.get <*> Binary.get <*> Binary.get <*> Binary.get
       _ -> fail "GhcCompileRespone.Binary.get: invalid header"
 
 instance Binary GhcRunResponse where
@@ -224,6 +233,8 @@ ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
           ghcHandleRun conv m fun outBMode errBMode
         ReqSetEnv env ->
           ghcHandleSetEnv conv env
+        ReqCrash delay ->
+          ghcHandleCrash delay
   where
     ideBackendRTSOpts = [
         -- Just in case the user specified -hide-all-packages
@@ -471,6 +482,15 @@ setupEnv env = forM_ env $ \(var, mVal) ->
   case mVal of Just val -> setEnv var val True
                Nothing  -> unsetEnv var
 
+-- | Handle a crash request (debugging)
+ghcHandleCrash :: Maybe Int -> Ghc ()
+ghcHandleCrash delay = liftIO $ do
+    case delay of
+      Nothing -> Ex.throwIO crash
+      Just i  -> do tid <- myThreadId
+                    void . forkIO $ threadDelay i >> throwTo tid crash
+  where
+    crash = userError "Intentional crash"
 
 --------------------------------------------------------------------------------
 -- Client-side operations                                                     --
@@ -667,6 +687,11 @@ rpcRun server m fun outBMode errBMode = do
 rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()
 rpcSetEnv (OutProcess server) env = rpc server (ReqSetEnv env)
 rpcSetEnv (InProcess _ _)     env = setupEnv env
+
+-- | Crash the GHC server (for debugging purposes)
+rpcCrash :: GhcServer -> Maybe Int -> IO ()
+rpcCrash server delay = conversation server $ \RpcConversation{..} ->
+  put (ReqCrash delay)
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer (OutProcess server) = shutdown server
