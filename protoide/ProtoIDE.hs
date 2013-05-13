@@ -86,6 +86,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
               , configStaticOpts      = []
               , configInProcess       = False
               , configGenerateModInfo = True
+              , configDynLink         = False
               }
   ideSession <- initSession cfg
 

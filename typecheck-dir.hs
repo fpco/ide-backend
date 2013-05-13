@@ -73,6 +73,7 @@ check opts what configDir = do
                                    , configStaticOpts = opts
                                    , configInProcess  = True
                                    , configGenerateModInfo = True
+                                   , configDynLink = False
                                    }
   session     <- initSession sessionConfig
   isFile      <- doesFileExist      what

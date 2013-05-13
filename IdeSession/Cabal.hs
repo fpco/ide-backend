@@ -147,11 +147,11 @@ externalDeps pkgs =
         return $ Just $ Package.Dependency packageN (thisVersion version)
   in liftM catMaybes $ mapM depOfName pkgs
 
-configureAndBuild :: FilePath -> FilePath -> [String]
+configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
                   -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
                   -> [(ModuleName, FilePath)]
                   -> IO ()
-configureAndBuild ideSourcesDir ideDistDir ghcOpts
+configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
                   pkgs loadedMs callback ms = do
   counter <- newIORef initialProgress
   let markProgress = do
@@ -192,6 +192,8 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts
                      { Setup.configDistPref = Setup.Flag ideDistDir
                      , Setup.configUserInstall = Setup.Flag True
                      , Setup.configVerbosity = Setup.Flag minBound
+                     , Setup.configSharedLib = Setup.Flag dynlink
+                     , Setup.configDynExe = Setup.Flag dynlink
                      }
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
@@ -208,11 +210,12 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API
 
-buildExecutable :: FilePath -> FilePath -> [String]
+buildExecutable :: FilePath -> FilePath -> [String] -> Bool
                 -> Strict Maybe Computed -> (Progress -> IO ())
                 -> [(ModuleName, FilePath)]
                 -> IO ()
-buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed callback ms = do
+buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink
+                mcomputed callback ms = do
   case toLazyMaybe mcomputed of
     Nothing -> fail "This session state does not admit buidling executables."
     Just Computed{..} -> do
@@ -228,6 +231,6 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed callback ms = do
                 return $ map (modulePackage . importModule) imports
       imps <- mapM imp loadedMs
       let pkgs = concat imps
-      liftIO $ configureAndBuild
-                 ideSourcesDir ideDistDir ghcOpts pkgs loadedMs callback ms
+      liftIO $ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
+                                 pkgs loadedMs callback ms
       -- TODO: keep a list of built (and up-to-date?) executables?

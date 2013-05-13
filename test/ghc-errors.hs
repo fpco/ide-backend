@@ -73,6 +73,7 @@ withConfiguredSessionModInfo configGenerateModInfo opts io = do
                                      , configStaticOpts = opts
                                      , configInProcess  = False
                                      , configGenerateModInfo
+                                     , configDynLink = False
                                      }
     withSession sessionConfig io
 
@@ -1068,6 +1069,7 @@ syntheticTests =
                                             , configStaticOpts = defOpts
                                             , configInProcess  = False
                                             , configGenerateModInfo = True
+                                            , configDynLink = False
                                             }
            withSession sessionConfig $ \session -> do
              let upd = (updateCodeGeneration True)

@@ -433,8 +433,8 @@ buildExe ms = IdeSessionUpdate
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
     let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
-    lift
-      $ buildExecutable ideSourcesDir ideDistDir ghcOpts mcomputed callback ms
+    lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts
+                           (configDynLink ideConfig) mcomputed callback ms
 
 {------------------------------------------------------------------------------
   Debugging
