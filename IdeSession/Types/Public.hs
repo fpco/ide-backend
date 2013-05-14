@@ -30,6 +30,7 @@ import qualified Data.Text as Text
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Binary (Binary(..), getWord8, putWord8)
+import Data.Aeson.TH (deriveJSON)
 
 import IdeSession.Util () -- Binary instance for Text
 
@@ -343,6 +344,25 @@ instance Binary IdInfo where
   put IdInfo{..} = put idProp >> put idScope
   get = IdInfo <$> get <*> get
 
+{------------------------------------------------------------------------------
+  JSON instances
+
+  We provide these for the convenience of client code only; we don't use them
+  internally.
+------------------------------------------------------------------------------}
+
+$(deriveJSON id ''IdNameSpace)
+$(deriveJSON id ''SourceErrorKind)
+$(deriveJSON id ''ImportEntities)
+$(deriveJSON id ''Import)
+$(deriveJSON id ''SourceError)
+$(deriveJSON id ''IdProp)
+$(deriveJSON id ''IdScope)
+$(deriveJSON id ''SourceSpan)
+$(deriveJSON id ''EitherSpan)
+$(deriveJSON id ''ModuleId)
+$(deriveJSON id ''PackageId)
+$(deriveJSON id ''IdInfo)
 
 {------------------------------------------------------------------------------
   Util

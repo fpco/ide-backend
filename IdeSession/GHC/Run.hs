@@ -80,6 +80,7 @@ import Data.Binary (Binary(..), getWord8, putWord8)
 import System.FilePath.Find (find, always, extension)
 import System.Process
 import Control.Concurrent (MVar, ThreadId)
+import Data.Aeson.TH (deriveJSON)
 
 import IdeSession.GHC.HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
 import IdeSession.Types.Private
@@ -162,6 +163,10 @@ instance Binary RunBufferMode where
       1 -> RunLineBuffering <$> get
       2 -> RunBlockBuffering <$> get <*> get
       _ -> fail "RunBufferMode.get: invalid header"
+
+-- | JSON instances for the convenience of client code
+$(deriveJSON id ''RunResult)
+$(deriveJSON id ''RunBufferMode)
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
