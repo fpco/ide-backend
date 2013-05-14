@@ -67,13 +67,12 @@ import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_, withMVar)
 -- | Create a fresh session, using some initial configuration.
 --
 initSession :: SessionConfig -> IO IdeSession
-initSession SessionConfig{..} = do
+initSession ideConfig@SessionConfig{..} = do
   configDirCanon <- Dir.canonicalizePath configDir
-  let ideConfig = SessionConfig {..}
-  ideSourcesDir <- createTempDirectory configDirCanon "src."
-  ideDataDir    <- createTempDirectory configDirCanon "data."
-  ideDistDir    <- createTempDirectory configDirCanon "dist."
-  _ideGhcServer <- forkGhcServer configGenerateModInfo configStaticOpts (Just ideDataDir) configInProcess
+  ideSourcesDir  <- createTempDirectory configDirCanon "src."
+  ideDataDir     <- createTempDirectory configDirCanon "data."
+  ideDistDir     <- createTempDirectory configDirCanon "dist."
+  _ideGhcServer  <- forkGhcServer configGenerateModInfo configStaticOpts (Just ideDataDir) configInProcess
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
   -- a workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.

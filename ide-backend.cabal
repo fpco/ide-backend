@@ -141,6 +141,7 @@ test-suite typecheck-dir
   other-extensions:   CPP, TemplateHaskell, ScopedTypeVariables,
                       DeriveDataTypeable
   ghc-options:        -Wall -fno-warn-unused-do-bind
+  ghc-options:        -with-rtsopts=-K16M
 
 test-suite ghc-errors
   type:               exitcode-stdio-1.0

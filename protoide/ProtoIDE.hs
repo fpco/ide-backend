@@ -81,13 +81,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
   onDestroy window mainQuit
 
   -- Start IDE session
-  let cfg = SessionConfig {
-                configDir             = tempDir
-              , configStaticOpts      = []
-              , configInProcess       = False
-              , configGenerateModInfo = True
-              , configDynLink         = False
-              }
+  let cfg = defaultSessionConfig { configDir = tempDir }
   ideSession <- initSession cfg
 
   -- Whenever the buffer changes, reload the module into ghc

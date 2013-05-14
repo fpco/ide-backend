@@ -69,12 +69,11 @@ withConfiguredSessionModInfo :: Bool -> [String] -> (IdeSession -> IO a)
 withConfiguredSessionModInfo configGenerateModInfo opts io = do
   slashTmp <- getTemporaryDirectory
   withTempDirectory slashTmp "ide-backend-test." $ \configDir -> do
-    let sessionConfig = SessionConfig{ configDir
-                                     , configStaticOpts = opts
-                                     , configInProcess  = False
-                                     , configGenerateModInfo
-                                     , configDynLink = False
-                                     }
+    let sessionConfig = defaultSessionConfig{
+                            configDir
+                          , configStaticOpts = opts
+                          , configGenerateModInfo
+                          }
     withSession sessionConfig io
 
 withConfiguredSession :: [String] -> (IdeSession -> IO a) -> IO a
@@ -1065,12 +1064,10 @@ syntheticTests =
   , ( "Use relative path in SessionConfig"
     , do withTempDirectory "." "ide-backend-test." $ \fullPath -> do
            relativePath <- makeRelativeToCurrentDirectory fullPath
-           let sessionConfig = SessionConfig{ configDir        = relativePath
-                                            , configStaticOpts = defOpts
-                                            , configInProcess  = False
-                                            , configGenerateModInfo = True
-                                            , configDynLink = False
-                                            }
+           let sessionConfig = defaultSessionConfig {
+                                   configDir        = relativePath
+                                 , configStaticOpts = defOpts
+                                 }
            withSession sessionConfig $ \session -> do
              let upd = (updateCodeGeneration True)
                     <> (updateModule "M.hs" . BSLC.pack . unlines $

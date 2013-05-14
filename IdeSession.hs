@@ -102,6 +102,7 @@
 module IdeSession (
     -- * Configuration
     SessionConfig(..)
+  , defaultSessionConfig
   , InProcess
     -- * Updating the session
     -- ** Starting and stopping
