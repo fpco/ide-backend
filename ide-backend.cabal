@@ -230,3 +230,9 @@ test-suite rpc-server
   other-extensions:   CPP, TemplateHaskell, ScopedTypeVariables,
                       DeriveDataTypeable
   ghc-options:        -Wall -fno-warn-unused-do-bind
+
+executable coc
+  main-is:          coc.hs
+  hs-source-dirs:   test
+  build-depends:    ide-backend, base, random, time, bytestring
+  default-language: Haskell2010
