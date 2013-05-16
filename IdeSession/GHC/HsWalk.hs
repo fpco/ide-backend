@@ -147,46 +147,54 @@ fromGhcNameSpace ns
 ------------------------------------------------------------------------------}
 
 extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) IdList) -> HscPlugin
-extractIdsPlugin symbolRef = HscPlugin $ \dynFlags env -> do
-  let processedModule = tcg_mod env
-      processedName   = Text.pack $ moduleNameString $ GHC.moduleName processedModule
-  identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) $ do
+extractIdsPlugin symbolRef = HscPlugin {..}
+  where
+    runHscQQ :: forall m. MonadIO m => DynFlags -> HsQuasiQuote Name -> m (HsQuasiQuote Name)
+    runHscQQ _dynFlags qq = do
+      liftIO $ appendFile "/tmp/ghc.qq" $ showSDoc (ppr qq)
+      return qq
+
+    runHscPlugin :: forall m. MonadIO m => DynFlags -> TcGblEnv -> m TcGblEnv
+    runHscPlugin dynFlags env = do
+      let processedModule = tcg_mod env
+          processedName   = Text.pack $ moduleNameString $ GHC.moduleName processedModule
+      identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) $ do
 #if DEBUG
-    pretty_mod     <- pretty False processedModule
-    pretty_rdr_env <- pretty False (tcg_rdr_env env)
-    liftIO $ writeFile "/tmp/ghc.readerenv" pretty_rdr_env
+        pretty_mod     <- pretty False processedModule
+        pretty_rdr_env <- pretty False (tcg_rdr_env env)
+        liftIO $ writeFile "/tmp/ghc.readerenv" pretty_rdr_env
 #endif
 
-    -- Information provided by the renamer
-    -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
-    -- It is important we do this *first*, because this creates the initial
-    -- cache with the IdInfo objects, which we can then update by processing
-    -- the typed AST and the global type environment.
+        -- Information provided by the renamer
+        -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
+        -- It is important we do this *first*, because this creates the initial
+        -- cache with the IdInfo objects, which we can then update by processing
+        -- the typed AST and the global type environment.
 #if DEBUG
-    liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING RENAMED AST " ++ pretty_mod ++ ">>\n"
+        liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING RENAMED AST " ++ pretty_mod ++ ">>\n"
 #endif
-    extractIds (tcg_rn_decls env)
+        extractIds (tcg_rn_decls env)
 
-    -- Information provided by the type checker
+        -- Information provided by the type checker
 #if DEBUG
-    liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPED AST " ++ pretty_mod ++ ">>\n"
+        liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPED AST " ++ pretty_mod ++ ">>\n"
 #endif
-    extractIds (tcg_binds env)
+        extractIds (tcg_binds env)
 
-    -- Type environment constructed for this module
+        -- Type environment constructed for this module
 #if DEBUG
-    liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPE ENV FOR " ++ pretty_mod ++ ">>\n"
+        liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPE ENV FOR " ++ pretty_mod ++ ">>\n"
 #endif
-    extractTypesFromTypeEnv (tcg_type_env env)
+        extractTypesFromTypeEnv (tcg_type_env env)
 
 #if DEBUG
---  liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
--- liftIO $ do
---    cache <- readIORef idPropCacheRef
---    appendFile "/tmp/ghc.log" $ "Cache == " ++ show cache
+    --  liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
+    -- liftIO $ do
+    --    cache <- readIORef idPropCacheRef
+    --    appendFile "/tmp/ghc.log" $ "Cache == " ++ show cache
 #endif
-  liftIO $ modifyIORef symbolRef (Map.insert processedName identMap)
-  return env
+      liftIO $ modifyIORef symbolRef (Map.insert processedName identMap)
+      return env
 
 extractTypesFromTypeEnv :: forall m. MonadIO m => TypeEnv -> ExtractIdsT m ()
 extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
