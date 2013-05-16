@@ -35,6 +35,7 @@ type instance XShared Public.ModuleId        = Private.ModuleId
 type instance XShared Public.PackageId       = Private.PackageId
 type instance XShared Public.ImportEntities  = Private.ImportEntities
 type instance XShared Public.Import          = Private.Import
+type instance XShared Public.SpanInfo        = Private.SpanInfo
 
 type instance MShared Private.IdProp         = Public.IdProp
 type instance MShared Private.IdInfo         = Public.IdInfo
@@ -48,6 +49,7 @@ type instance MShared Private.ModuleId       = Public.ModuleId
 type instance MShared Private.PackageId      = Public.PackageId
 type instance MShared Private.ImportEntities = Public.ImportEntities
 type instance MShared Private.Import         = Public.Import
+type instance MShared Private.SpanInfo       = Public.SpanInfo
 
 {------------------------------------------------------------------------------
   Removing explicit sharing
@@ -167,6 +169,11 @@ instance ExplicitSharing Public.Import where
     , Public.importAs         = toLazyMaybe importAs
     , Public.importEntities   = removeExplicitSharing cache $ importEntities
     }
+
+instance ExplicitSharing Public.SpanInfo where
+  removeExplicitSharing cache spanInfo = case spanInfo of
+    Private.SpanId idInfo -> Public.SpanId (removeExplicitSharing cache idInfo)
+    Private.SpanQQ        -> Public.SpanQQ
 
 {------------------------------------------------------------------------------
   Introducing explicit sharing

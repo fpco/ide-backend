@@ -236,7 +236,7 @@ getDynFlags = asks fst
 getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
 getGlobalRdrEnv = asks snd
 
-extendIdMap :: MonadIO m => SourceSpan -> IdInfo -> ExtractIdsT m ()
+extendIdMap :: MonadIO m => SourceSpan -> SpanInfo -> ExtractIdsT m ()
 extendIdMap span info = modify (second aux)
   where
     aux :: IdList -> IdList
@@ -513,7 +513,7 @@ instance Record Name where
         info <- idInfoForName dflags name idIsBinder (lookupRdrEnv rdrEnv name)
         case info of
           (idProp, Just idScope) -> do
-            extendIdMap sourceSpan IdInfo{..}
+            extendIdMap sourceSpan $ SpanId IdInfo{..}
           _ ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from

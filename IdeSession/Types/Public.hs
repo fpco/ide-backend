@@ -17,6 +17,7 @@ module IdeSession.Types.Public (
 --  , LoadedModules
   , ImportEntities(..)
   , Import(..)
+  , SpanInfo(..)
     -- * Util
   , idInfoQN
 --, idInfoAtLocation
@@ -162,6 +163,11 @@ data Import = Import {
   }
   deriving (Show, Eq, Ord)
 
+-- | Returned then the IDE asks "what's at this particular location?"
+data SpanInfo =
+    SpanId IdInfo
+  | SpanQQ
+
 {------------------------------------------------------------------------------
   Show instances
 ------------------------------------------------------------------------------}
@@ -207,6 +213,10 @@ instance Show PackageId where
 
 instance Show IdInfo where
   show IdInfo{..} = show idProp ++ " (" ++ show idScope ++ ")"
+
+instance Show SpanInfo where
+  show (SpanId idInfo) = show idInfo
+  show (SpanQQ) = "quasi-quote"
 
 {-
 instance Show IdMap where

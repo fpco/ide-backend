@@ -167,7 +167,7 @@ getLoadedModules = computedQuery $ \Computed{..} ->
   StrictMap.keys $ computedLoadedModules
 
 -- | Get information about an identifier at a specific location
-getIdInfo :: Query (ModuleName -> SourceSpan -> Maybe (SourceSpan, IdInfo))
+getIdInfo :: Query (ModuleName -> SourceSpan -> Maybe (SourceSpan, SpanInfo))
 getIdInfo = computedQuery $ \Computed{..} mod span -> do
   span' <- introduceExplicitSharing computedCache span
   idMap <- StrictMap.lookup mod computedLoadedModules

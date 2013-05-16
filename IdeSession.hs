@@ -176,6 +176,7 @@ module IdeSession (
 --  , LoadedModules
   , ImportEntities(..)
   , Import(..)
+  , SpanInfo(..)
     -- ** Util
   , idInfoQN
 --, idInfoAtLocation

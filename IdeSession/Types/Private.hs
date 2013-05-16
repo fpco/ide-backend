@@ -18,6 +18,7 @@ module IdeSession.Types.Private (
   , PackageId(..)
   , IdList
   , IdMap(..)
+  , SpanInfo(..)
   , LoadedModules
   , ImportEntities(..)
   , Import(..)
@@ -112,9 +113,13 @@ data PackageId = PackageId
   deriving Eq
 
 -- | Used before we convert it to an IdMap
-type IdList = [(SourceSpan, IdInfo)]
+type IdList = [(SourceSpan, SpanInfo)]
 
-newtype IdMap = IdMap { idMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) IdInfo }
+data SpanInfo =
+   SpanId IdInfo
+ | SpanQQ
+
+newtype IdMap = IdMap { idMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) SpanInfo }
 
 type LoadedModules = Strict (Map Public.ModuleName) IdMap
 
@@ -266,6 +271,16 @@ instance Binary ExplicitSharingCache where
 
   get = ExplicitSharingCache <$> get <*> get
 
+instance Binary SpanInfo where
+  put (SpanId idInfo) = putWord8 0 >> put idInfo
+  put SpanQQ          = putWord8 1
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> SpanId <$> get
+      1 -> return SpanQQ
+      _ -> fail "SpanInfo.get: invalid header"
 
 {------------------------------------------------------------------------------
   Util
@@ -274,7 +289,7 @@ instance Binary ExplicitSharingCache where
 idListToMap :: IdList -> IdMap
 idListToMap = IdMap . IntervalMap.fromList . map (first spanToInterval)
 
-immediateDominator :: SourceSpan -> IdMap -> Maybe (SourceSpan, IdInfo)
+immediateDominator :: SourceSpan -> IdMap -> Maybe (SourceSpan, SpanInfo)
 immediateDominator span (IdMap idMap) = do
   (ival, idInfo) <- IntervalMap.immediateDominator (spanToInterval span) idMap
   return (intervalToSpan ival, idInfo)

@@ -1767,7 +1767,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,9,2,13) infoPrint
     )
 {- If we fix https://github.com/fpco/fpco/issues/1066 / https://github.com/fpco/ide-backend/issues/57
-   then this test can be used to check that we report the right info in a splice. -}
+   then this test can be used to check that we report the right info in a splice.
   , ( "Type information 9: Quasi-quotation"
     , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
         let upd = updateCodeGeneration True
@@ -1793,6 +1793,7 @@ syntheticTests =
         idInfo <- getIdInfo session
         dumpIdInfo session
     )
+-}
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
@@ -2089,7 +2090,7 @@ loadModule file contents =
                       []              -> Nothing
                       (_ : haystack') -> substr needle haystack'
 
-assertIdInfo :: (Text -> SourceSpan -> Maybe (SourceSpan, IdInfo))
+assertIdInfo :: (Text -> SourceSpan -> Maybe (SourceSpan, SpanInfo))
              -> String
              -> (Int, Int, Int, Int)
              -> String
