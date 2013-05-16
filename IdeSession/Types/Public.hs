@@ -165,8 +165,10 @@ data Import = Import {
 
 -- | Returned then the IDE asks "what's at this particular location?"
 data SpanInfo =
+    -- | Identifier
     SpanId IdInfo
-  | SpanQQ
+    -- | Quasi-quote. The 'IdInfo' field gives the quasi-quoter
+  | SpanQQ IdInfo
 
 {------------------------------------------------------------------------------
   Show instances
@@ -216,7 +218,7 @@ instance Show IdInfo where
 
 instance Show SpanInfo where
   show (SpanId idInfo) = show idInfo
-  show (SpanQQ) = "quasi-quote"
+  show (SpanQQ idInfo) = "quasi-quote with quoter " ++ show idInfo
 
 {-
 instance Show IdMap where

@@ -117,7 +117,7 @@ type IdList = [(SourceSpan, SpanInfo)]
 
 data SpanInfo =
    SpanId IdInfo
- | SpanQQ
+ | SpanQQ IdInfo
 
 newtype IdMap = IdMap { idMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) SpanInfo }
 
@@ -273,13 +273,13 @@ instance Binary ExplicitSharingCache where
 
 instance Binary SpanInfo where
   put (SpanId idInfo) = putWord8 0 >> put idInfo
-  put SpanQQ          = putWord8 1
+  put (SpanQQ idInfo) = putWord8 1 >> put idInfo
 
   get = do
     header <- getWord8
     case header of
       0 -> SpanId <$> get
-      1 -> return SpanQQ
+      1 -> SpanQQ <$> get
       _ -> fail "SpanInfo.get: invalid header"
 
 {------------------------------------------------------------------------------

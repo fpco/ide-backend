@@ -64,7 +64,7 @@ import TcType (tidyOpenType)
 import Var hiding (idInfo)
 import VarEnv (TidyEnv, emptyTidyEnv)
 import Unique (Unique, Uniquable, getUnique, getKey)
-import HscTypes (TypeEnv)
+import HscTypes (TypeEnv, HscEnv(hsc_dflags))
 import NameEnv (nameEnvUniqueElts)
 import DataCon (dataConRepType)
 import Pretty (showDocWith, Mode(OneLineMode))
@@ -146,19 +146,42 @@ fromGhcNameSpace ns
   Extract an IdMap from information returned by the ghc type checker
 ------------------------------------------------------------------------------}
 
+qqRef :: StrictIORef IdList
+{-# NOINLINE qqRef #-}
+qqRef = unsafePerformIO $ newIORef []
+
 extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) IdList) -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin {..}
   where
-    runHscQQ :: forall m. MonadIO m => DynFlags -> HsQuasiQuote Name -> m (HsQuasiQuote Name)
-    runHscQQ _dynFlags qq = do
-      liftIO $ appendFile "/tmp/ghc.qq" $ showSDoc (ppr qq)
+    runHscQQ :: forall m. MonadIO m => Env TcGblEnv TcLclEnv
+                                    -> HsQuasiQuote Name
+                                    -> m (HsQuasiQuote Name)
+    runHscQQ env qq@(HsQuasiQuote quoter _span _str) = liftIO $ do
+      appendFile "/tmp/ghc.qq" $ showSDoc (ppr qq)
+      idInfo <- readIORef qqRef
+      ProperSpan span' <- extractSourceSpan $ tcl_loc (env_lcl env)
+      let dflags = hsc_dflags  (env_top env)
+          rdrEnv = tcg_rdr_env (env_gbl env)
+      (idProp, Just idScope) <- idInfoForName dflags
+                                              quoter
+                                              False
+                                              (lookupRdrEnv rdrEnv quoter)
+      let quoterInfo = IdInfo{..}
+      let idInfo' = (span', SpanQQ quoterInfo) : idInfo
+      writeIORef qqRef idInfo'
       return qq
 
     runHscPlugin :: forall m. MonadIO m => DynFlags -> TcGblEnv -> m TcGblEnv
     runHscPlugin dynFlags env = do
       let processedModule = tcg_mod env
           processedName   = Text.pack $ moduleNameString $ GHC.moduleName processedModule
-      identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) $ do
+
+      qqs <- liftIO $ do
+        qqs <- readIORef qqRef
+        writeIORef qqRef [] -- Reset for the next module
+        return qqs
+
+      identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) qqs $ do
 #if DEBUG
         pretty_mod     <- pretty False processedModule
         pretty_rdr_env <- pretty False (tcg_rdr_env env)
@@ -218,9 +241,9 @@ newtype ExtractIdsT m a = ExtractIdsT (
     )
   deriving (Functor, Monad, MonadState (TidyEnv, IdList), MonadReader (DynFlags, RdrName.GlobalRdrEnv))
 
-execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> ExtractIdsT m () -> m IdList
-execExtractIdsT dynFlags rdrEnv (ExtractIdsT m) = do
-  (_, idMap) <- execStateT (runReaderT m (dynFlags, rdrEnv)) (emptyTidyEnv, [])
+execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> IdList -> ExtractIdsT m () -> m IdList
+execExtractIdsT dynFlags rdrEnv idList (ExtractIdsT m) = do
+  (_, idMap) <- execStateT (runReaderT m (dynFlags, rdrEnv)) (emptyTidyEnv, idList)
   return idMap
 
 instance MonadTrans ExtractIdsT where

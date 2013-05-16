@@ -173,7 +173,7 @@ instance ExplicitSharing Public.Import where
 instance ExplicitSharing Public.SpanInfo where
   removeExplicitSharing cache spanInfo = case spanInfo of
     Private.SpanId idInfo -> Public.SpanId (removeExplicitSharing cache idInfo)
-    Private.SpanQQ        -> Public.SpanQQ
+    Private.SpanQQ idInfo -> Public.SpanQQ (removeExplicitSharing cache idInfo)
 
 {------------------------------------------------------------------------------
   Introducing explicit sharing
