@@ -1788,6 +1788,7 @@ syntheticTests =
                     [ "{-# LANGUAGE QuasiQuotes #-}"
                     , "module B where"
                     , "import A"
+                    -- 1234567890123
                     , "ex1 = [qq|a|]"
                     , "ex2 = [qq|b|]"
                     , "ex3 = [qq|c|]"
@@ -1796,6 +1797,7 @@ syntheticTests =
         updateSessionD session upd 2
         assertNoErrors session
         idInfo <- getSpanInfo session
+        {-
         let span l c = SourceSpan { spanFilePath   = "B.hs"
                                   , spanFromLine   = l
                                   , spanFromColumn = c
@@ -1806,6 +1808,11 @@ syntheticTests =
         print (idInfo (Text.pack "B") (span 5 11))
         print (idInfo (Text.pack "B") (span 6 11))
         print (idInfo (Text.pack "B") (span 7 11))
+        -}
+        assertIdInfo idInfo "B" (4,11,4,11) "quasi-quote with quoter qq (VarName) :: Language.Haskell.TH.Quote.QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
+        assertIdInfo idInfo "B" (5,11,5,11) "quasi-quote with quoter qq (VarName) :: Language.Haskell.TH.Quote.QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
+        assertIdInfo idInfo "B" (6,11,6,11) "quasi-quote with quoter qq (VarName) :: Language.Haskell.TH.Quote.QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
+        assertIdInfo idInfo "B" (7,11,7,11) "quasi-quote with quoter qq (VarName) :: Language.Haskell.TH.Quote.QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
     )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
