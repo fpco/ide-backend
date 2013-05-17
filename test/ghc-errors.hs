@@ -1814,6 +1814,47 @@ syntheticTests =
         assertIdInfo idInfo "B" (6,11,6,11) "quasi-quote with quoter qq (VarName) :: Language.Haskell.TH.Quote.QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
         assertIdInfo idInfo "B" (7,11,7,11) "quasi-quote with quoter qq (VarName) :: Language.Haskell.TH.Quote.QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
     )
+  , ( "Type information 10: Template Haskell"
+    , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
+        let upd = updateCodeGeneration True
+               <> (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module A where"
+                    , "import Language.Haskell.TH"
+                    , "ex1 :: Q Exp"
+                    , "ex1 = [| \\x -> x |]"
+                    , "ex2 :: Q Type"
+                    , "ex2 = [t| String -> String |]"
+                    ])
+               <> (updateModule "B.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module B where"
+                    , "import A"
+                    , "ex3 :: $ex2"
+                    , "ex3 = $ex1"
+                    ])
+        updateSessionD session upd 2
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        assertIdInfo idInfo "A" (4,1,4,4) "ex1 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Exp (defined at A.hs@5:1-5:4)"
+        assertIdInfo idInfo "A" (4,8,4,9) "Q (TcClsName) (defined in template-haskell-2.7.0.0:Language.Haskell.TH.Syntax at <no location info>; imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27)"
+        assertIdInfo idInfo "A" (4,10,4,13) "Exp (TcClsName) (defined in template-haskell-2.7.0.0:Language.Haskell.TH.Syntax at <no location info>; imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27)"
+        assertIdInfo idInfo "A" (5,1,5,4) "ex1 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Exp (binding occurrence)"
+        assertIdInfo idInfo "A" (5,11,5,12) "x (VarName) (binding occurrence)"
+        assertIdInfo idInfo "A" (5,16,5,17) "x (VarName) (defined at A.hs@5:11-5:12)"
+        assertIdInfo idInfo "A" (6,1,6,4) "ex2 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Type (defined at A.hs@7:1-7:4)"
+        assertIdInfo idInfo "A" (6,8,6,9) "Q (TcClsName) (defined in template-haskell-2.7.0.0:Language.Haskell.TH.Syntax at <no location info>; imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27)"
+        assertIdInfo idInfo "A" (6,10,6,14) "Type (TcClsName) (defined in template-haskell-2.7.0.0:Language.Haskell.TH.Syntax at <no location info>; imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27)"
+        assertIdInfo idInfo "A" (7,1,7,4) "ex2 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Type (binding occurrence)"
+        assertIdInfo idInfo "A" (7,11,7,17) "String (TcClsName) (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
+        assertIdInfo idInfo "A" (7,11,7,17) "String (TcClsName) (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
+        assertIdInfo idInfo "A" (7,21,7,27) "String (TcClsName) (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
+        assertIdInfo idInfo "A" (7,21,7,27) "String (TcClsName) (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
+        assertIdInfo idInfo "B" (4,1,4,4) "ex3 (VarName) :: GHC.Base.String -> GHC.Base.String (defined at B.hs@5:1-5:4)"
+        assertIdInfo idInfo "B" (4,8,4,12) "ex2 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Type (defined in main:A at A.hs@7:1-7:4; imported from main:A at B.hs@3:1-3:9)"
+        assertIdInfo idInfo "B" (5,1,5,4) "ex3 (VarName) :: GHC.Base.String -> GHC.Base.String (binding occurrence)"
+        assertIdInfo idInfo "B" (5,7,5,11) "ex1 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Exp (defined in main:A at A.hs@5:1-5:4; imported from main:A at B.hs@3:1-3:9)"
+    )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
