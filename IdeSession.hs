@@ -156,7 +156,7 @@ module IdeSession (
     -- ** Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
-  , getIdInfo
+  , getSpanInfo
   , getImports
   , getAutocompletion
     -- * Types for identifier info, errors, etc.

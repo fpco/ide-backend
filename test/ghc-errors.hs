@@ -516,7 +516,7 @@ syntheticTests =
               ]
         updateSessionD session update 1
         assertNoErrors session
-        idInfo <- getIdInfo session
+        idInfo <- getSpanInfo session
         assertIdInfo idInfo "Good" (8, 1, 8, 2) "x (VarName) :: forall a. [a] (binding occurrence)"
     )
   , ( "Reject a wrong CPP directive"
@@ -1491,7 +1491,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         assertNoErrors session
-        idInfo <- getIdInfo session
+        idInfo <- getSpanInfo session
         assertIdInfo idInfo "A" (2,1,2,2) "a (VarName) :: GHC.Types.Int (binding occurrence)"
         assertIdInfo idInfo "A" (3,1,3,2) "b (VarName) :: GHC.Types.Int (binding occurrence)"
         assertIdInfo idInfo "A" (3,5,3,6) "a (VarName) :: GHC.Types.Int (defined at A.hs@2:1-2:2)"
@@ -1515,7 +1515,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         assertNoErrors session
-        idInfo <- getIdInfo session
+        idInfo <- getSpanInfo session
         assertIdInfo idInfo "A" (2,10,2,13) "MkT (DataName) :: A.T (binding occurrence)"
         assertIdInfo idInfo "A" (2,6,2,7) "T (TcClsName) (binding occurrence)"
     )
@@ -1541,7 +1541,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         assertNoErrors session
-        idInfo <- getIdInfo session
+        idInfo <- getSpanInfo session
         assertIdInfo idInfo "A" (2,13,2,14) "a (TvName) (binding occurrence)"
         assertIdInfo idInfo "A" (2,17,2,25) "TNothing (DataName) :: forall a. A.TMaybe a (binding occurrence)"
         assertIdInfo idInfo "A" (2,28,2,33) "TJust (DataName) :: forall a. a -> A.TMaybe a (binding occurrence)"
@@ -1594,7 +1594,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 2
         assertNoErrors session
-        idInfo <- getIdInfo session
+        idInfo <- getSpanInfo session
         assertIdInfo idInfo "A" (2,10,2,13) "MkT (DataName) :: A.T (binding occurrence)"
         assertIdInfo idInfo "A" (2,6,2,7) "T (TcClsName) (binding occurrence)"
         assertIdInfo idInfo "B" (3,1,3,4) "foo (VarName) :: A.T (binding occurrence)"
@@ -1631,7 +1631,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 2
         assertNoErrors session
-        idInfo <- getIdInfo session
+        idInfo <- getSpanInfo session
         assertIdInfo idInfo "A" (3,1,3,2) "e (VarName) :: GHC.Types.Bool (binding occurrence)"
         assertIdInfo idInfo "A" (3,10,3,16) "pseq (VarName) :: forall a b. a -> b -> b (defined in parallel-3.2.0.3:Control.Parallel at <no location info>; imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24)"
         assertIdInfo idInfo "A" (3,17,3,22) "False (DataName) (wired in to the compiler)"
@@ -1691,7 +1691,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 2
         assertNoErrors session
-        idInfo <- getIdInfo session
+        idInfo <- getSpanInfo session
         assertIdInfo idInfo "A" (2,1,2,3) "f1 (VarName) :: forall t t1. (t, t1) -> t (binding occurrence)"
         assertIdInfo idInfo "A" (2,13,2,14) "x (VarName) :: t (defined at A.hs@2:5-2:6)"
         assertIdInfo idInfo "A" (2,5,2,6) "x (VarName) :: t (binding occurrence)"
@@ -1743,7 +1743,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 2
         assertNoErrors session
-        idInfo <- getIdInfo session
+        idInfo <- getSpanInfo session
         assertIdInfo idInfo "A" (5,1,5,4) "foo (VarName) :: forall a b c a1. (Data.Maybe.Maybe a -> a, [GHC.Types.Bool] -> GHC.Types.Bool, (b -> b -> c) -> (a1 -> b) -> a1 -> a1 -> c) (binding occurrence)"
         assertIdInfo idInfo "A" (5,18,5,31) "and (VarName) :: [GHC.Types.Bool] -> GHC.Types.Bool (defined in base-4.5.1.0:GHC.List at <no location info>; imported from base-4.5.1.0:Data.List as 'Data.List.' at A.hs@3:1-3:27)"
         assertIdInfo idInfo "A" (5,33,5,37) "on (VarName) :: forall b1 c1 a2. (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 (defined in base-4.5.1.0:Data.Function at <no location info>; imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36)"
@@ -1757,7 +1757,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         assertNoErrors session
-        idInfo <- getIdInfo session
+        idInfo <- getSpanInfo session
         let infoPrint = "print (VarName) :: forall a. GHC.Show.Show a => a -> GHC.Types.IO () (defined in base-4.5.1.0:System.IO at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
         assertIdInfo idInfo "A" (2,8,2,13) infoPrint
         assertIdInfo idInfo "A" (2,8,2,8) infoPrint
@@ -1766,8 +1766,6 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,9,2,10) infoPrint
         assertIdInfo idInfo "A" (2,9,2,13) infoPrint
     )
-{- If we fix https://github.com/fpco/fpco/issues/1066 / https://github.com/fpco/ide-backend/issues/57
-   then this test can be used to check that we report the right info in a splice. -}
   , ( "Type information 9: Quasi-quotation"
     , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
         let upd = updateCodeGeneration True
@@ -1776,7 +1774,11 @@ syntheticTests =
                     , "module A where"
                     , "import Language.Haskell.TH.Quote"
                     , "qq = QuasiQuoter {"
-                    , "         quoteExp  = \\_ -> [| True |]"
+                    , "         quoteExp  = \\str -> case str of"
+                    , "                                \"a\" -> [| True |]"
+                    , "                                \"b\" -> [| id True |]"
+                    , "                                \"c\" -> [| True || False |]"
+                    , "                                \"d\" -> [| False |]"
                     , "       , quotePat  = undefined"
                     , "       , quoteType = undefined"
                     , "       , quoteDec  = undefined"
@@ -1786,12 +1788,24 @@ syntheticTests =
                     [ "{-# LANGUAGE QuasiQuotes #-}"
                     , "module B where"
                     , "import A"
-                    , "foo = [qq|bar|]"
+                    , "ex1 = [qq|a|]"
+                    , "ex2 = [qq|b|]"
+                    , "ex3 = [qq|c|]"
+                    , "ex4 = [qq|d|]"
                     ])
         updateSessionD session upd 2
         assertNoErrors session
-        idInfo <- getIdInfo session
-        dumpIdInfo session
+        idInfo <- getSpanInfo session
+        let span l c = SourceSpan { spanFilePath   = "B.hs"
+                                  , spanFromLine   = l
+                                  , spanFromColumn = c
+                                  , spanToLine     = l
+                                  , spanToColumn   = c
+                                  }
+        print (idInfo (Text.pack "B") (span 4 11))
+        print (idInfo (Text.pack "B") (span 5 11))
+        print (idInfo (Text.pack "B") (span 6 11))
+        print (idInfo (Text.pack "B") (span 7 11))
     )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
@@ -2089,13 +2103,13 @@ loadModule file contents =
                       []              -> Nothing
                       (_ : haystack') -> substr needle haystack'
 
-assertIdInfo :: (Text -> SourceSpan -> Maybe (SourceSpan, SpanInfo))
+assertIdInfo :: (Text -> SourceSpan -> [(SourceSpan, SpanInfo)])
              -> String
              -> (Int, Int, Int, Int)
              -> String
              -> Assertion
 assertIdInfo idInfo mod (frLine, frCol, toLine, toCol) typ =
-    assertEqual "" typ (show . snd . fromJust $ idInfo (Text.pack mod) span)
+    assertEqual "" typ (show . snd . head $ idInfo (Text.pack mod) span)
   where
     span = SourceSpan { spanFilePath   = mod ++ ".hs"
                       , spanFromLine   = frLine

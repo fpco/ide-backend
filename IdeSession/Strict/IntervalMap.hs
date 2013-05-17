@@ -1,6 +1,6 @@
 module IdeSession.Strict.IntervalMap (
     StrictIntervalMap
-  , immediateDominator
+  , dominators
   , fromList
   , toList
   , empty
@@ -9,7 +9,6 @@ module IdeSession.Strict.IntervalMap (
   , Interval(..)
   ) where
 
-import Data.Maybe (listToMaybe)
 import Data.IntervalMap.FingerTree (Interval(..), IntervalMap)
 import qualified Data.IntervalMap.FingerTree as IntervalMap
 
@@ -31,8 +30,8 @@ unionInterval (Interval low1 high1) (Just (Interval low2 high2)) =
       high = max high1 high2
   in low `seq` high `seq` Just (Interval low high)
 
-immediateDominator :: Ord v => Interval v -> StrictIntervalMap v a -> Maybe (Interval v, a)
-immediateDominator i = listToMaybe . IntervalMap.dominators i . toLazyIntervalMap
+dominators :: Ord v => Interval v -> StrictIntervalMap v a -> [(Interval v, a)]
+dominators i = IntervalMap.dominators i . toLazyIntervalMap
 
 empty :: Ord v => StrictIntervalMap v a
 empty = StrictIntervalMap IntervalMap.empty Nothing

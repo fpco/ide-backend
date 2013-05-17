@@ -26,7 +26,7 @@ module IdeSession.Types.Private (
   , ExplicitSharingCache(..)
     -- * Util
   , idListToMap
-  , immediateDominator
+  , dominators
   ) where
 
 import Prelude hiding (span)
@@ -289,10 +289,10 @@ instance Binary SpanInfo where
 idListToMap :: IdList -> IdMap
 idListToMap = IdMap . IntervalMap.fromList . map (first spanToInterval)
 
-immediateDominator :: SourceSpan -> IdMap -> Maybe (SourceSpan, SpanInfo)
-immediateDominator span (IdMap idMap) = do
-  (ival, idInfo) <- IntervalMap.immediateDominator (spanToInterval span) idMap
-  return (intervalToSpan ival, idInfo)
+dominators :: SourceSpan -> IdMap -> [(SourceSpan, SpanInfo)]
+dominators span (IdMap idMap) =
+    map (\(ival, idInfo) -> (intervalToSpan ival, idInfo))
+        (IntervalMap.dominators (spanToInterval span) idMap)
 
 spanToInterval :: SourceSpan -> Interval (FilePathPtr, Int, Int)
 spanToInterval SourceSpan{..} =

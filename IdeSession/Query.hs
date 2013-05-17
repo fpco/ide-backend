@@ -23,7 +23,7 @@ module IdeSession.Query (
     -- * Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
-  , getIdInfo
+  , getSpanInfo
   , getImports
   , getAutocompletion
     -- * Debugging (internal use only)
@@ -167,14 +167,18 @@ getLoadedModules = computedQuery $ \Computed{..} ->
   StrictMap.keys $ computedLoadedModules
 
 -- | Get information about an identifier at a specific location
-getIdInfo :: Query (ModuleName -> SourceSpan -> Maybe (SourceSpan, SpanInfo))
-getIdInfo = computedQuery $ \Computed{..} mod span -> do
-  span' <- introduceExplicitSharing computedCache span
-  idMap <- StrictMap.lookup mod computedLoadedModules
-  (domSpan, idInfo) <- Private.immediateDominator span' idMap
-  return ( removeExplicitSharing computedCache domSpan
-         , removeExplicitSharing computedCache idInfo
-         )
+getSpanInfo :: Query (ModuleName -> SourceSpan -> [(SourceSpan, SpanInfo)])
+getSpanInfo = computedQuery $ \Computed{..} mod span ->
+  let mSpan  = introduceExplicitSharing computedCache span
+      mIdMap = StrictMap.lookup mod computedLoadedModules
+  in case (mSpan, mIdMap) of
+    (Just span', Just idMap) ->
+      let aux (a, b) = ( removeExplicitSharing computedCache a
+                       , removeExplicitSharing computedCache b
+                       )
+      in map aux $ Private.dominators span' idMap
+    _ ->
+      []
 
 -- | Get import information
 --
