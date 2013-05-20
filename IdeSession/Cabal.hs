@@ -1,5 +1,5 @@
 module IdeSession.Cabal (
-    buildExecutable
+    buildExecutable, buildHaddock
   ) where
 
 import Control.Monad
@@ -19,6 +19,7 @@ import qualified Distribution.ModuleName
 import Distribution.PackageDescription
 import qualified Distribution.Package as Package
 import qualified Distribution.Simple.Build as Build
+import qualified Distribution.Simple.Haddock as Haddock
 import Distribution.Simple.Compiler (CompilerFlavor (GHC))
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.LocalBuildInfo (localPkgDescr)
@@ -35,6 +36,10 @@ import IdeSession.Types.Public
 import IdeSession.Types.Translation
 import qualified IdeSession.Strict.List as StrictList
 import qualified IdeSession.Strict.Map  as StrictMap
+
+-- TODO: factor out common parts of exe building and haddock generation
+-- after Cabal and the code that calls it are improved not to require
+-- the configure step, etc.
 
 pkgName :: Package.PackageName
 pkgName = Package.PackageName "main"  -- matches the import default
@@ -210,6 +215,56 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API
 
+configureAndHaddock :: FilePath -> FilePath -> [String] -> Bool
+                    -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
+                    -> IO ()
+configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
+                    pkgs loadedMs callback = do
+  counter <- newIORef initialProgress
+  let markProgress = do
+        oldCounter <- readIORef counter
+        modifyIORef counter (updateProgress "")
+        callback oldCounter
+  markProgress
+  libDeps <- externalDeps pkgs
+  markProgress
+  let condExecutables = []
+  hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
+  lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
+  -- Cabal can't find the code of @Main@, except in the main dir. See above.
+  let soundMs | hsFound || lhsFound = loadedMs
+              | otherwise = delete (Text.pack "Main") loadedMs
+      projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
+      library = libDesc ideSourcesDir ghcOpts projectMs
+      gpDesc = GenericPackageDescription
+        { packageDescription = pkgDesc
+        , genPackageFlags    = []  -- seem unused
+        , condLibrary        = Just $ CondNode library libDeps []
+        , condExecutables
+        , condTestSuites     = []
+        , condBenchmarks     = []
+        }
+      confFlags = (Setup.defaultConfigFlags defaultProgramConfiguration)
+                     { Setup.configDistPref = Setup.Flag ideDistDir
+                     , Setup.configUserInstall = Setup.Flag True
+                     , Setup.configVerbosity = Setup.Flag minBound
+                     , Setup.configSharedLib = Setup.Flag dynlink
+--                     , Setup.configDynExe = Setup.Flag dynlink
+                     }
+      preprocessors :: [PPSuffixHandler]
+      preprocessors = []
+      haddockFlags = Setup.defaultHaddockFlags
+        { Setup.haddockDistPref = Setup.Flag ideDistDir
+        , Setup.haddockVerbosity = Setup.Flag minBound
+        }
+      hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
+  lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+  markProgress
+  Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
+  markProgress
+  -- TODO: add a callback hook to Cabal that is applied to GHC messages
+  -- as they are emitted, similarly as log_action in GHC API
+
 buildExecutable :: FilePath -> FilePath -> [String] -> Bool
                 -> Strict Maybe Computed -> (Progress -> IO ())
                 -> [(ModuleName, FilePath)]
@@ -217,7 +272,7 @@ buildExecutable :: FilePath -> FilePath -> [String] -> Bool
 buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink
                 mcomputed callback ms = do
   case toLazyMaybe mcomputed of
-    Nothing -> fail "This session state does not admit buidling executables."
+    Nothing -> fail "This session state does not admit executable building."
     Just Computed{..} -> do
       let loadedMs = StrictMap.keys $ computedSpanInfo
           imp m = do
@@ -234,3 +289,26 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink
       liftIO $ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
                                  pkgs loadedMs callback ms
       -- TODO: keep a list of built (and up-to-date?) executables?
+
+buildHaddock :: FilePath -> FilePath -> [String] -> Bool
+             -> Strict Maybe Computed -> (Progress -> IO ())
+             -> IO ()
+buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink
+             mcomputed callback = do
+  case toLazyMaybe mcomputed of
+    Nothing -> fail "This session state does not admit haddock generation."
+    Just Computed{..} -> do
+      let loadedMs = StrictMap.keys $ computedSpanInfo
+          imp m = do
+            let mimports =
+                  fmap (toLazyList . StrictList.map (removeExplicitSharing
+                                                       computedCache)) $
+                    StrictMap.lookup m computedImports
+            case mimports of
+              Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
+              Just imports ->
+                return $ map (modulePackage . importModule) imports
+      imps <- mapM imp loadedMs
+      let pkgs = concat imps
+      liftIO $ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
+                                   pkgs loadedMs callback

@@ -12,6 +12,7 @@ module IdeSession.Query (
   , getSourcesDir
   , getDataDir
   , getBuildDir
+  , getDocDir
   , getSourceModule
   , getDataFile
   , getAllDataFiles
@@ -92,6 +93,10 @@ getDataDir = staticQuery $ return . ideDataDir
 -- "BUILD_DIR/typecheck-dir/typecheck-dir".
 getBuildDir :: Query FilePath
 getBuildDir = staticQuery $ return . (</> "build") . ideDistDir
+
+-- | Obtain the directory prefix for documentation built in this session.
+getDocDir :: Query FilePath
+getDocDir = staticQuery $ return . (</> "doc") . ideDistDir
 
 -- | Read the current value of one of the source modules.
 getSourceModule :: FilePath -> Query BSL.ByteString

@@ -16,7 +16,7 @@ import Data.IORef (IORef, newIORef, writeIORef, readIORef)
 import System.Directory
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..))
-import System.FilePath (dropExtension, (</>), (<.>), takeBaseName)
+import System.FilePath
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
 import System.Process (readProcess)
@@ -376,6 +376,18 @@ syntheticTests =
                     ""
                     out3
     )
+  , ( "Build haddocks from some .lhs files"
+    , withConfiguredSession defOpts $ \session -> do
+        setCurrentDirectory "test/compiler/utils"
+        loadModulesFrom session "."
+        setCurrentDirectory "../../../"
+        assertNoErrors session
+        let upd = buildDoc
+        updateSessionD session upd 4
+        docDir <- getDocDir session
+        indexExists <- doesFileExist $ docDir </> "html/main/index.html"
+        assertBool ".lhs haddock files" indexExists
+    )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package mtl"
@@ -500,6 +512,22 @@ syntheticTests =
         assertEqual "TH.TH exe output"
                     "(True,43)\n"
                     out
+    )
+  , ( "Build haddocks from TH"
+    , let packageOpts = defOpts ++ ["-package template-haskell", "-XTemplateHaskell"]
+      in withConfiguredSession packageOpts $ \session -> do
+        setCurrentDirectory "test"
+        (originalUpdate, lm) <- getModulesFrom session "TH"
+        let update = originalUpdate <> updateCodeGeneration True
+        updateSessionD session update (length lm)
+        setCurrentDirectory "../"
+        assertNoErrors session
+        let upd = buildDoc
+        updateSessionD session upd 4
+        docDir <- getDocDir session
+        indexExists <- doesFileExist $ docDir </> "html/main/index.html"
+        assertBool "TH.TH haddock files" indexExists
+
     )
   , ( "Test CPP: ifdefed module header"
     , let packageOpts = defOpts ++ ["-XCPP"]
@@ -1479,6 +1507,22 @@ syntheticTests =
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
+    )
+  , ( "Build haddocks from ParFib"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package parallel"
+                        , "-package old-time"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        setCurrentDirectory "test/MainModule"
+        loadModulesFrom session "."
+        setCurrentDirectory "../../"
+        let upd = buildDoc
+        updateSessionD session upd 4
+        docDir <- getDocDir session
+        indexExists <- doesFileExist $ docDir </> "html/main/index.html"
+        assertBool "ParFib haddock files" indexExists
     )
   , ( "Type information 1: Local identifiers and Prelude"
     , withConfiguredSession defOpts $ \session -> do

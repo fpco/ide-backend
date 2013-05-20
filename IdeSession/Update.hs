@@ -22,6 +22,7 @@ module IdeSession.Update (
   , updateStdoutBufferMode
   , updateStderrBufferMode
   , buildExe
+  , buildDoc
     -- * Running code
   , runStmt
     -- * Debugging
@@ -49,7 +50,7 @@ import qualified Data.Text as Text
 import Control.Applicative ((<$>))
 
 import IdeSession.State
-import IdeSession.Cabal (buildExecutable)
+import IdeSession.Cabal (buildExecutable, buildHaddock)
 import IdeSession.Config
 import IdeSession.GHC.Server
 import IdeSession.Types.Private
@@ -429,6 +430,11 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
         return state
     SessionConfig{configGenerateModInfo} = ideConfig ideStaticInfo
 
+-- | Build an exe from sources added previously via the ide-backend updateModule* mechanism. The modules that contains the @main@ code are indicated by the arguments to @buildExe@. The function can be called multiple times with different arguments.
+--
+-- We assume any indicated module is already successfully processed by GHC API in a compilation mode that makes @computedImports@ available (but no code needs to be generated). The environment (package dependencies, ghc options, preprocessor program options, etc.) for building the exe is the same as when previously compiling the code via GHC API. The module does not have to be called @Main@, but we assume the main function is always @main@ (we don't check this and related conditions, but GHC does when eventually called to build the exe).
+--
+-- The executable files are placed in the filesystem inside the @build/@ directory, in subdirectories corresponding to the given module names. The build directory does not overlap with any of the other used directories and its path can be obtained via a call to @getBuildDir@.
 buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
 buildExe ms = IdeSessionUpdate
               $ \callback
@@ -438,6 +444,20 @@ buildExe ms = IdeSessionUpdate
     let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
     lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts
                            (configDynLink ideConfig) mcomputed callback ms
+
+-- | Build haddock documentation from sources added previously via
+-- the ide-backend updateModule* mechanism. Similarly to 'buildExe',
+-- it needs the project modules to be already loaded within the session
+-- and the generated docs can be found in a subdirectory of @getDocDir@.
+buildDoc :: IdeSessionUpdate
+buildDoc = IdeSessionUpdate
+             $ \callback
+                IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
+    mcomputed <- get ideComputed
+    ghcNewOpts <- get ideNewOpts
+    let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
+    lift $ buildHaddock ideSourcesDir ideDistDir ghcOpts
+                        (configDynLink ideConfig) mcomputed callback
 
 {------------------------------------------------------------------------------
   Debugging

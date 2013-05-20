@@ -125,6 +125,7 @@ module IdeSession (
   , updateStdoutBufferMode
   , updateStderrBufferMode
   , buildExe
+  , buildDoc
     -- ** Progress
   , Progress(..)
   , initialProgress
@@ -145,6 +146,7 @@ module IdeSession (
   , getSourcesDir
   , getDataDir
   , getBuildDir
+  , getDocDir
   , getSourceModule
   , getDataFile
   , getAllDataFiles
