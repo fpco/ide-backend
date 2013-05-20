@@ -56,7 +56,7 @@ import qualified Module
 import MonadUtils (MonadIO (..))
 import qualified Name
 import OccName
-import Outputable
+import Outputable hiding (getPprStyle)
 import qualified Packages
 import qualified RdrName
 import TcRnTypes
@@ -64,10 +64,11 @@ import TcType (tidyOpenType)
 import Var hiding (idInfo)
 import VarEnv (TidyEnv, emptyTidyEnv)
 import Unique (Unique, Uniquable, getUnique, getKey)
-import HscTypes (TypeEnv, HscEnv(hsc_dflags))
+import HscTypes (TypeEnv, HscEnv(hsc_dflags), mkPrintUnqualified)
 import NameEnv (nameEnvUniqueElts)
 import DataCon (dataConRepType)
 import Pretty (showDocWith, Mode(OneLineMode))
+import PprTyThing (pprTypeForUser)
 
 #define DEBUG 0
 
@@ -237,14 +238,16 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
 ------------------------------------------------------------------------------}
 
 newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT (DynFlags, RdrName.GlobalRdrEnv) (StrictStateT (TidyEnv, IdList) m) a
+      ReaderT (DynFlags, RdrName.GlobalRdrEnv, PprStyle) (StrictStateT (TidyEnv, IdList) m) a
     )
-  deriving (Functor, Monad, MonadState (TidyEnv, IdList), MonadReader (DynFlags, RdrName.GlobalRdrEnv))
+  deriving (Functor, Monad, MonadState (TidyEnv, IdList), MonadReader (DynFlags, RdrName.GlobalRdrEnv, PprStyle))
 
 execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> IdList -> ExtractIdsT m () -> m IdList
 execExtractIdsT dynFlags rdrEnv idList (ExtractIdsT m) = do
-  (_, idMap) <- execStateT (runReaderT m (dynFlags, rdrEnv)) (emptyTidyEnv, idList)
-  return idMap
+  let qual = mkPrintUnqualified dynFlags rdrEnv
+      pprStyle = mkUserStyle qual AllTheWay
+  (_, idList') <- execStateT (runReaderT m (dynFlags, rdrEnv, pprStyle)) (emptyTidyEnv, idList)
+  return idList'
 
 instance MonadTrans ExtractIdsT where
   lift = ExtractIdsT . lift . lift
@@ -254,10 +257,13 @@ instance MonadIO m => MonadIO (ExtractIdsT m) where
   liftIO = lift . liftIO
 
 getDynFlags :: Monad m => ExtractIdsT m DynFlags
-getDynFlags = asks fst
+getDynFlags = asks $ \(dflags, _, _) -> dflags
 
 getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
-getGlobalRdrEnv = asks snd
+getGlobalRdrEnv = asks $ \(_, env, _) -> env
+
+getPprStyle :: Monad m => ExtractIdsT m PprStyle
+getPprStyle = asks $ \(_, _, pprStyle) -> pprStyle
 
 extendIdMap :: MonadIO m => SourceSpan -> SpanInfo -> ExtractIdsT m ()
 extendIdMap span info = modify (second aux)
@@ -367,8 +373,11 @@ recordType :: MonadIO m => String -> Unique -> Type -> ExtractIdsT m ()
 recordType _header uniq typ = do
   typ' <- tidyType typ
   -- We don't want line breaks in the types
-  let typStr = showDocWith OneLineMode
-                 (runSDoc (ppr typ') (initSDocContext defaultUserStyle))
+  pprStyle <- getPprStyle
+  let noForalls = False
+      typStr    = showDocWith OneLineMode
+                   (runSDoc (pprTypeForUser noForalls typ')
+                   (initSDocContext pprStyle))
 #if DEBUG
   liftIO $ appendFile "/tmp/ghc.log" $ _header ++ ": recording " ++ typStr ++ " for unique " ++ show (getKey uniq) ++ "\n"
 #endif

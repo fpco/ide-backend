@@ -517,7 +517,7 @@ syntheticTests =
         updateSessionD session update 1
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "Good" (8, 1, 8, 2) "x (VarName) :: forall a. [a] (binding occurrence)"
+        assertIdInfo idInfo "Good" (8, 1, 8, 2) "x (VarName) :: [a] (binding occurrence)"
     )
   , ( "Reject a wrong CPP directive"
     , let packageOpts = [ "-hide-all-packages"
@@ -1492,15 +1492,14 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (2,1,2,2) "a (VarName) :: GHC.Types.Int (binding occurrence)"
-        assertIdInfo idInfo "A" (3,1,3,2) "b (VarName) :: GHC.Types.Int (binding occurrence)"
-        assertIdInfo idInfo "A" (3,5,3,6) "a (VarName) :: GHC.Types.Int (defined at A.hs@2:1-2:2)"
-        assertIdInfo idInfo "A" (3,7,3,8) "+ (VarName) :: forall a. GHC.Num.Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
-        assertIdInfo idInfo "A" (4,1,4,2) "c (VarName) :: GHC.Types.Bool (binding occurrence)"
-        -- TODO: We sidInfo hould have a t
+        assertIdInfo idInfo "A" (2,1,2,2) "a (VarName) :: Int (binding occurrence)"
+        assertIdInfo idInfo "A" (3,1,3,2) "b (VarName) :: Int (binding occurrence)"
+        assertIdInfo idInfo "A" (3,5,3,6) "a (VarName) :: Int (defined at A.hs@2:1-2:2)"
+        assertIdInfo idInfo "A" (3,7,3,8) "+ (VarName) :: Num a => a -> a -> a (defined in base-4.5.1.0:GHC.Num at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
+        assertIdInfo idInfo "A" (4,1,4,2) "c (VarName) :: Bool (binding occurrence)"
         assertIdInfo idInfo "A" (4,5,4,9) "True (DataName) (wired in to the compiler)"
-        assertIdInfo idInfo "A" (5,1,5,2) "d (VarName) :: forall a b. (a -> b -> b) -> b -> [a] -> b (binding occurrence)"
-        assertIdInfo idInfo "A" (5,5,5,10) "foldr (VarName) :: forall a1 b1. (a1 -> b1 -> b1) -> b1 -> [a1] -> b1 (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
+        assertIdInfo idInfo "A" (5,1,5,2) "d (VarName) :: (a -> b -> b) -> b -> [a] -> b (binding occurrence)"
+        assertIdInfo idInfo "A" (5,5,5,10) "foldr (VarName) :: (a1 -> b1 -> b1) -> b1 -> [a1] -> b1 (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
         {- TODO: reenable
         assertEqual "Haddock link for A.b should be correct"
                     "main/latest/doc/html/A.html#v:b" $
@@ -1516,8 +1515,8 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (2,10,2,13) "MkT (DataName) :: A.T (binding occurrence)"
         assertIdInfo idInfo "A" (2,6,2,7) "T (TcClsName) (binding occurrence)"
+        assertIdInfo idInfo "A" (2,10,2,13) "MkT (DataName) :: T (binding occurrence)"
     )
   , ( "Type information 3: Polymorphism"
     , withConfiguredSession defOpts $ \session -> do
@@ -1542,41 +1541,41 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (2,13,2,14) "a (TvName) (binding occurrence)"
-        assertIdInfo idInfo "A" (2,17,2,25) "TNothing (DataName) :: forall a. A.TMaybe a (binding occurrence)"
-        assertIdInfo idInfo "A" (2,28,2,33) "TJust (DataName) :: forall a. a -> A.TMaybe a (binding occurrence)"
-        assertIdInfo idInfo "A" (2,34,2,35) "a (TvName) (defined at A.hs@2:13-2:14)"
         assertIdInfo idInfo "A" (2,6,2,12) "TMaybe (TcClsName) (binding occurrence)"
-        assertIdInfo idInfo "A" (4,1,4,3) "f1 (VarName) :: forall t. t -> t (binding occurrence)"
+        assertIdInfo idInfo "A" (2,13,2,14) "a (TvName) (binding occurrence)"
+        assertIdInfo idInfo "A" (2,17,2,25) "TNothing (DataName) :: TMaybe a (binding occurrence)"
+        assertIdInfo idInfo "A" (2,28,2,33) "TJust (DataName) :: a -> TMaybe a (binding occurrence)"
+        assertIdInfo idInfo "A" (2,34,2,35) "a (TvName) (defined at A.hs@2:13-2:14)"
+        assertIdInfo idInfo "A" (4,1,4,3) "f1 (VarName) :: t -> t (binding occurrence)"
         assertIdInfo idInfo "A" (4,4,4,5) "x (VarName) :: t (binding occurrence)"
         assertIdInfo idInfo "A" (4,8,4,9) "x (VarName) :: t (defined at A.hs@4:4-4:5)"
-        assertIdInfo idInfo "A" (5,1,5,3) "f2 (VarName) :: forall t. t -> t (binding occurrence)"
-        assertIdInfo idInfo "A" (5,12,5,13) "x (VarName) :: t (defined at A.hs@5:7-5:8)"
+        assertIdInfo idInfo "A" (5,1,5,3) "f2 (VarName) :: t -> t (binding occurrence)"
         assertIdInfo idInfo "A" (5,7,5,8) "x (VarName) :: t (binding occurrence)"
-        assertIdInfo idInfo "A" (7,1,7,3) "g1 (VarName) :: forall t t1. t -> t1 -> t (binding occurrence)"
-        assertIdInfo idInfo "A" (7,10,7,11) "x (VarName) :: t (defined at A.hs@7:4-7:5)"
+        assertIdInfo idInfo "A" (5,12,5,13) "x (VarName) :: t (defined at A.hs@5:7-5:8)"
+        assertIdInfo idInfo "A" (7,1,7,3) "g1 (VarName) :: t -> t1 -> t (binding occurrence)"
         assertIdInfo idInfo "A" (7,4,7,5) "x (VarName) :: t (binding occurrence)"
         assertIdInfo idInfo "A" (7,6,7,7) "y (VarName) :: t1 (binding occurrence)"
-        assertIdInfo idInfo "A" (8,1,8,3) "g2 (VarName) :: forall t t1. t -> t1 -> t (binding occurrence)"
-        assertIdInfo idInfo "A" (8,14,8,15) "x (VarName) :: t (defined at A.hs@8:7-8:8)"
+        assertIdInfo idInfo "A" (7,10,7,11) "x (VarName) :: t (defined at A.hs@7:4-7:5)"
+        assertIdInfo idInfo "A" (8,1,8,3) "g2 (VarName) :: t -> t1 -> t (binding occurrence)"
         assertIdInfo idInfo "A" (8,7,8,8) "x (VarName) :: t (binding occurrence)"
         assertIdInfo idInfo "A" (8,9,8,10) "y (VarName) :: t1 (binding occurrence)"
-        assertIdInfo idInfo "A" (10,1,10,3) "h1 (VarName) :: GHC.Types.Bool (binding occurrence)"
+        assertIdInfo idInfo "A" (8,14,8,15) "x (VarName) :: t (defined at A.hs@8:7-8:8)"
+        assertIdInfo idInfo "A" (10,1,10,3) "h1 (VarName) :: Bool (binding occurrence)"
+        assertIdInfo idInfo "A" (10,6,10,10) "h1go (VarName) :: t -> t1 -> t (defined at A.hs@12:5-12:9)"
         assertIdInfo idInfo "A" (10,11,10,15) "True (DataName) (wired in to the compiler)"
         assertIdInfo idInfo "A" (10,16,10,21) "False (DataName) (wired in to the compiler)"
-        assertIdInfo idInfo "A" (10,6,10,10) "h1go (VarName) :: forall t t1. t -> t1 -> t (defined at A.hs@12:5-12:9)"
+        assertIdInfo idInfo "A" (12,5,12,9) "h1go (VarName) :: t -> t1 -> t (binding occurrence)"
         assertIdInfo idInfo "A" (12,10,12,11) "x (VarName) :: t (binding occurrence)"
         assertIdInfo idInfo "A" (12,12,12,13) "y (VarName) :: t1 (binding occurrence)"
         assertIdInfo idInfo "A" (12,16,12,17) "x (VarName) :: t (defined at A.hs@12:10-12:11)"
-        assertIdInfo idInfo "A" (12,5,12,9) "h1go (VarName) :: forall t t1. t -> t1 -> t (binding occurrence)"
-        assertIdInfo idInfo "A" (14,1,14,3) "h2 (VarName) :: GHC.Types.Bool (binding occurrence)"
+        assertIdInfo idInfo "A" (14,1,14,3) "h2 (VarName) :: Bool (binding occurrence)"
+        assertIdInfo idInfo "A" (14,6,14,10) "h2go (VarName) :: t -> t1 -> t (defined at A.hs@16:5-16:9)"
         assertIdInfo idInfo "A" (14,11,14,15) "True (DataName) (wired in to the compiler)"
         assertIdInfo idInfo "A" (14,16,14,21) "False (DataName) (wired in to the compiler)"
-        assertIdInfo idInfo "A" (14,6,14,10) "h2go (VarName) :: forall t t1. t -> t1 -> t (defined at A.hs@16:5-16:9)"
+        assertIdInfo idInfo "A" (16,5,16,9) "h2go (VarName) :: t -> t1 -> t (binding occurrence)"
         assertIdInfo idInfo "A" (16,13,16,14) "x (VarName) :: t (binding occurrence)"
         assertIdInfo idInfo "A" (16,15,16,16) "y (VarName) :: t1 (binding occurrence)"
         assertIdInfo idInfo "A" (16,20,16,21) "x (VarName) :: t (defined at A.hs@16:13-16:14)"
-        assertIdInfo idInfo "A" (16,5,16,9) "h2go (VarName) :: forall t t1. t -> t1 -> t (binding occurrence)"
     )
   , ( "Type information 4: Multiple modules"
     , withConfiguredSession defOpts $ \session -> do
@@ -1595,10 +1594,10 @@ syntheticTests =
         updateSessionD session upd 2
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (2,10,2,13) "MkT (DataName) :: A.T (binding occurrence)"
         assertIdInfo idInfo "A" (2,6,2,7) "T (TcClsName) (binding occurrence)"
-        assertIdInfo idInfo "B" (3,1,3,4) "foo (VarName) :: A.T (binding occurrence)"
-        assertIdInfo idInfo "B" (3,7,3,10) "MkT (DataName) :: A.T (defined in main:A at A.hs@2:10-2:13; imported from main:A at B.hs@2:1-2:9)"
+        assertIdInfo idInfo "A" (2,10,2,13) "MkT (DataName) :: T (binding occurrence)"
+        assertIdInfo idInfo "B" (3,1,3,4) "foo (VarName) :: T (binding occurrence)"
+        assertIdInfo idInfo "B" (3,7,3,10) "MkT (DataName) :: T (defined in main:A at A.hs@2:10-2:13; imported from main:A at B.hs@2:1-2:9)"
     )
   , ( "Type information 5: External packages, type sigs, scoped type vars, kind sigs"
     , let opts = defOpts ++ [
@@ -1632,42 +1631,46 @@ syntheticTests =
         updateSessionD session upd 2
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (3,1,3,2) "e (VarName) :: GHC.Types.Bool (binding occurrence)"
-        assertIdInfo idInfo "A" (3,10,3,16) "pseq (VarName) :: forall a b. a -> b -> b (defined in parallel-3.2.0.3:Control.Parallel at <no location info>; imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24)"
-        assertIdInfo idInfo "A" (3,17,3,22) "False (DataName) (wired in to the compiler)"
+        assertIdInfo idInfo "A" (3,1,3,2) "e (VarName) :: Bool (binding occurrence)"
         assertIdInfo idInfo "A" (3,5,3,9) "True (DataName) (wired in to the compiler)"
-        assertIdInfo idInfo "A" (4,1,4,2) "f (VarName) :: forall a. a -> a (defined at A.hs@5:1-5:2)"
-        assertIdInfo idInfo "A" (4,11,4,12) "a (TvName) (defined at A.hs@4:6-4:7)"
+        assertIdInfo idInfo "A" (3,10,3,16) "pseq (VarName) :: a -> b -> b (defined in parallel-3.2.0.3:Control.Parallel at <no location info>; imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24)"
+        assertIdInfo idInfo "A" (3,17,3,22) "False (DataName) (wired in to the compiler)"
+        assertIdInfo idInfo "A" (4,1,4,2) "f (VarName) :: a -> a (defined at A.hs@5:1-5:2)"
+        -- The IdMap contains both of these:
         assertIdInfo idInfo "A" (4,6,4,7) "a (TvName) (defined at A.hs@4:6-4:7)"
-        assertIdInfo idInfo "A" (5,1,5,2) "f (VarName) :: forall a. a -> a (binding occurrence)"
+--        assertIdInfo idInfo "A" (4,6,4,7) "a (TvName) (binding occurrence)"
+        assertIdInfo idInfo "A" (4,11,4,12) "a (TvName) (defined at A.hs@4:6-4:7)"
+        assertIdInfo idInfo "A" (5,1,5,2) "f (VarName) :: a -> a (binding occurrence)"
         assertIdInfo idInfo "A" (5,3,5,4) "x (VarName) :: a (binding occurrence)"
         assertIdInfo idInfo "A" (5,7,5,8) "x (VarName) :: a (defined at A.hs@5:3-5:4)"
-        assertIdInfo idInfo "A" (6,1,6,2) "g (VarName) :: forall a. a -> a (defined at A.hs@7:1-7:2)"
+        assertIdInfo idInfo "A" (6,1,6,2) "g (VarName) :: a -> a (defined at A.hs@7:1-7:2)"
         assertIdInfo idInfo "A" (6,13,6,14) "a (TvName) (binding occurrence)"
         assertIdInfo idInfo "A" (6,16,6,17) "a (TvName) (defined at A.hs@6:13-6:14)"
         assertIdInfo idInfo "A" (6,21,6,22) "a (TvName) (defined at A.hs@6:13-6:14)"
-        assertIdInfo idInfo "A" (7,1,7,2) "g (VarName) :: forall a. a -> a (binding occurrence)"
+        assertIdInfo idInfo "A" (7,1,7,2) "g (VarName) :: a -> a (binding occurrence)"
         assertIdInfo idInfo "A" (7,3,7,4) "x (VarName) :: a (binding occurrence)"
         assertIdInfo idInfo "A" (7,7,7,8) "x (VarName) :: a (defined at A.hs@7:3-7:4)"
-        assertIdInfo idInfo "A" (8,1,8,2) "h (VarName) :: forall a. a -> a (defined at A.hs@9:1-9:2)"
+        assertIdInfo idInfo "A" (8,1,8,2) "h (VarName) :: a -> a (defined at A.hs@9:1-9:2)"
         assertIdInfo idInfo "A" (8,13,8,14) "a (TvName) (binding occurrence)"
         assertIdInfo idInfo "A" (8,16,8,17) "a (TvName) (defined at A.hs@8:13-8:14)"
         assertIdInfo idInfo "A" (8,21,8,22) "a (TvName) (defined at A.hs@8:13-8:14)"
-        assertIdInfo idInfo "A" (9,1,9,2) "h (VarName) :: forall a. a -> a (binding occurrence)"
+        assertIdInfo idInfo "A" (9,1,9,2) "h (VarName) :: a -> a (binding occurrence)"
         assertIdInfo idInfo "A" (9,3,9,4) "x (VarName) :: a (binding occurrence)"
         assertIdInfo idInfo "A" (9,7,9,8) "y (VarName) :: a (defined at A.hs@12:5-12:6)"
-        assertIdInfo idInfo "A" (11,10,11,11) "a (TvName) (defined at A.hs@8:13-8:14)"
         assertIdInfo idInfo "A" (11,5,11,6) "y (VarName) :: a (defined at A.hs@12:5-12:6)"
+        assertIdInfo idInfo "A" (11,5,11,6) "y (VarName) :: a (defined at A.hs@12:5-12:6)"
+        assertIdInfo idInfo "A" (11,10,11,11) "a (TvName) (defined at A.hs@8:13-8:14)"
+        assertIdInfo idInfo "A" (11,10,11,11) "a (TvName) (defined at A.hs@8:13-8:14)"
         assertIdInfo idInfo "A" (12,5,12,6) "y (VarName) :: a (binding occurrence)"
         assertIdInfo idInfo "A" (12,9,12,10) "x (VarName) :: a (defined at A.hs@9:3-9:4)"
-        assertIdInfo idInfo "A" (13,1,13,2) "i (VarName) :: forall (t :: * -> *) a. t a -> t a (defined at A.hs@14:1-14:2)"
+        assertIdInfo idInfo "A" (13,1,13,2) "i (VarName) :: t a -> t a (defined at A.hs@14:1-14:2)"
         assertIdInfo idInfo "A" (13,13,13,26) "t (TvName) (binding occurrence)"
         assertIdInfo idInfo "A" (13,27,13,28) "a (TvName) (binding occurrence)"
         assertIdInfo idInfo "A" (13,30,13,31) "t (TvName) (defined at A.hs@13:13-13:26)"
         assertIdInfo idInfo "A" (13,32,13,33) "a (TvName) (defined at A.hs@13:27-13:28)"
         assertIdInfo idInfo "A" (13,37,13,38) "t (TvName) (defined at A.hs@13:13-13:26)"
         assertIdInfo idInfo "A" (13,39,13,40) "a (TvName) (defined at A.hs@13:27-13:28)"
-        assertIdInfo idInfo "A" (14,1,14,2) "i (VarName) :: forall (t :: * -> *) a. t a -> t a (binding occurrence)"
+        assertIdInfo idInfo "A" (14,1,14,2) "i (VarName) :: t a -> t a (binding occurrence)"
         assertIdInfo idInfo "A" (14,3,14,4) "x (VarName) :: t a (binding occurrence)"
         assertIdInfo idInfo "A" (14,7,14,8) "x (VarName) :: t a (defined at A.hs@14:3-14:4)"
     )
@@ -1692,45 +1695,50 @@ syntheticTests =
         updateSessionD session upd 2
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (2,1,2,3) "f1 (VarName) :: forall t t1. (t, t1) -> t (binding occurrence)"
-        assertIdInfo idInfo "A" (2,13,2,14) "x (VarName) :: t (defined at A.hs@2:5-2:6)"
+        assertIdInfo idInfo "A" (2,1,2,3) "f1 (VarName) :: (t, t1) -> t (binding occurrence)"
         assertIdInfo idInfo "A" (2,5,2,6) "x (VarName) :: t (binding occurrence)"
         assertIdInfo idInfo "A" (2,8,2,9) "y (VarName) :: t1 (binding occurrence)"
-        assertIdInfo idInfo "A" (3,1,3,3) "f2 (VarName) :: forall t t1. (t, t1) -> t (binding occurrence)"
-        assertIdInfo idInfo "A" (3,13,3,14) "x (VarName) :: t (defined at A.hs@3:5-3:6)"
+        assertIdInfo idInfo "A" (2,13,2,14) "x (VarName) :: t (defined at A.hs@2:5-2:6)"
+        assertIdInfo idInfo "A" (3,1,3,3) "f2 (VarName) :: (t, t1) -> t (binding occurrence)"
         assertIdInfo idInfo "A" (3,5,3,6) "x (VarName) :: t (binding occurrence)"
         assertIdInfo idInfo "A" (3,8,3,9) "y (VarName) :: t1 (binding occurrence)"
-        assertIdInfo idInfo "A" (4,1,4,3) "f3 (VarName) :: forall t t1. (t, t1) -> t (binding occurrence)"
-        assertIdInfo idInfo "A" (4,13,4,15) "f4 (VarName) :: forall t2 t3. (t2, t3) -> t2 (defined at A.hs@6:5-6:7)"
-        assertIdInfo idInfo "A" (4,17,4,18) "x (VarName) :: t (defined at A.hs@4:5-4:6)"
-        assertIdInfo idInfo "A" (4,20,4,21) "y (VarName) :: t1 (defined at A.hs@4:8-4:9)"
+        assertIdInfo idInfo "A" (3,13,3,14) "x (VarName) :: t (defined at A.hs@3:5-3:6)"
+        assertIdInfo idInfo "A" (4,1,4,3) "f3 (VarName) :: (t, t1) -> t (binding occurrence)"
         assertIdInfo idInfo "A" (4,5,4,6) "x (VarName) :: t (binding occurrence)"
         assertIdInfo idInfo "A" (4,8,4,9) "y (VarName) :: t1 (binding occurrence)"
+        assertIdInfo idInfo "A" (4,13,4,15) "f4 (VarName) :: (t2, t3) -> t2 (defined at A.hs@6:5-6:7)"
+        assertIdInfo idInfo "A" (4,17,4,18) "x (VarName) :: t (defined at A.hs@4:5-4:6)"
+        assertIdInfo idInfo "A" (4,20,4,21) "y (VarName) :: t1 (defined at A.hs@4:8-4:9)"
+        assertIdInfo idInfo "A" (6,5,6,7) "f4 (VarName) :: (t2, t3) -> t2 (binding occurrence)"
+        assertIdInfo idInfo "A" (6,9,6,10) "x (VarName) :: t2 (binding occurrence)"
         assertIdInfo idInfo "A" (6,12,6,13) "y (VarName) :: t3 (binding occurrence)"
         assertIdInfo idInfo "A" (6,17,6,18) "x (VarName) :: t2 (defined at A.hs@6:9-6:10)"
-        assertIdInfo idInfo "A" (6,5,6,7) "f4 (VarName) :: forall t2 t3. (t2, t3) -> t2 (binding occurrence)"
-        assertIdInfo idInfo "A" (6,9,6,10) "x (VarName) :: t2 (binding occurrence)"
-        assertIdInfo idInfo "A" (7,1,7,3) "f5 (VarName) :: forall t t1. (t, t1) -> t (defined at A.hs@8:1-8:3)"
+        assertIdInfo idInfo "A" (7,1,7,3) "f5 (VarName) :: (t, t1) -> t (defined at A.hs@8:1-8:3)"
         assertIdInfo idInfo "A" (7,14,7,15) "t (TvName) (binding occurrence)"
         assertIdInfo idInfo "A" (7,16,7,18) "t1 (TvName) (binding occurrence)"
         assertIdInfo idInfo "A" (7,21,7,22) "t (TvName) (defined at A.hs@7:14-7:15)"
         assertIdInfo idInfo "A" (7,24,7,26) "t1 (TvName) (defined at A.hs@7:16-7:18)"
         assertIdInfo idInfo "A" (7,31,7,32) "t (TvName) (defined at A.hs@7:14-7:15)"
-        assertIdInfo idInfo "A" (8,1,8,3) "f5 (VarName) :: forall t t1. (t, t1) -> t (binding occurrence)"
-        assertIdInfo idInfo "A" (8,13,8,15) "f6 (VarName) :: forall t2. (t, t2) -> t (defined at A.hs@11:5-11:7)"
-        assertIdInfo idInfo "A" (8,17,8,18) "x (VarName) :: t (defined at A.hs@8:5-8:6)"
-        assertIdInfo idInfo "A" (8,20,8,21) "y (VarName) :: t1 (defined at A.hs@8:8-8:9)"
+        assertIdInfo idInfo "A" (8,1,8,3) "f5 (VarName) :: (t, t1) -> t (binding occurrence)"
         assertIdInfo idInfo "A" (8,5,8,6) "x (VarName) :: t (binding occurrence)"
         assertIdInfo idInfo "A" (8,8,8,9) "y (VarName) :: t1 (binding occurrence)"
+        assertIdInfo idInfo "A" (8,13,8,15) "f6 (VarName) :: (t, t2) -> t (defined at A.hs@11:5-11:7)"
+        assertIdInfo idInfo "A" (8,17,8,18) "x (VarName) :: t (defined at A.hs@8:5-8:6)"
+        assertIdInfo idInfo "A" (8,20,8,21) "y (VarName) :: t1 (defined at A.hs@8:8-8:9)"
+        assertIdInfo idInfo "A" (10,5,10,7) "f6 (VarName) :: (t, t2) -> t (defined at A.hs@11:5-11:7)"
+        assertIdInfo idInfo "A" (10,5,10,7) "f6 (VarName) :: (t, t2) -> t (defined at A.hs@11:5-11:7)"
+        assertIdInfo idInfo "A" (10,18,10,20) "t2 (TvName) (binding occurrence)"
         assertIdInfo idInfo "A" (10,18,10,20) "t2 (TvName) (binding occurrence)"
         assertIdInfo idInfo "A" (10,23,10,24) "t (TvName) (defined at A.hs@7:14-7:15)"
+        assertIdInfo idInfo "A" (10,23,10,24) "t (TvName) (defined at A.hs@7:14-7:15)"
+        assertIdInfo idInfo "A" (10,26,10,28) "t2 (TvName) (defined at A.hs@10:18-10:20)"
         assertIdInfo idInfo "A" (10,26,10,28) "t2 (TvName) (defined at A.hs@10:18-10:20)"
         assertIdInfo idInfo "A" (10,33,10,34) "t (TvName) (defined at A.hs@7:14-7:15)"
-        assertIdInfo idInfo "A" (10,5,10,7) "f6 (VarName) :: forall t2. (t, t2) -> t (defined at A.hs@11:5-11:7)"
+        assertIdInfo idInfo "A" (10,33,10,34) "t (TvName) (defined at A.hs@7:14-7:15)"
+        assertIdInfo idInfo "A" (11,5,11,7) "f6 (VarName) :: (t, t2) -> t (binding occurrence)"
+        assertIdInfo idInfo "A" (11,9,11,10) "x (VarName) :: t (binding occurrence)"
         assertIdInfo idInfo "A" (11,12,11,13) "y (VarName) :: t2 (binding occurrence)"
         assertIdInfo idInfo "A" (11,17,11,18) "x (VarName) :: t (defined at A.hs@11:9-11:10)"
-        assertIdInfo idInfo "A" (11,5,11,7) "f6 (VarName) :: forall t2. (t, t2) -> t (binding occurrence)"
-        assertIdInfo idInfo "A" (11,9,11,10) "x (VarName) :: t (binding occurrence)"
     )
   , ( "Type information 7: Qualified imports"
     , withConfiguredSession defOpts $ \session -> do
@@ -1744,10 +1752,10 @@ syntheticTests =
         updateSessionD session upd 2
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (5,1,5,4) "foo (VarName) :: forall a b c a1. (Data.Maybe.Maybe a -> a, [GHC.Types.Bool] -> GHC.Types.Bool, (b -> b -> c) -> (a1 -> b) -> a1 -> a1 -> c) (binding occurrence)"
-        assertIdInfo idInfo "A" (5,18,5,31) "and (VarName) :: [GHC.Types.Bool] -> GHC.Types.Bool (defined in base-4.5.1.0:GHC.List at <no location info>; imported from base-4.5.1.0:Data.List as 'Data.List.' at A.hs@3:1-3:27)"
-        assertIdInfo idInfo "A" (5,33,5,37) "on (VarName) :: forall b1 c1 a2. (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 (defined in base-4.5.1.0:Data.Function at <no location info>; imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36)"
-        assertIdInfo idInfo "A" (5,8,5,16) "fromJust (VarName) :: forall a2. Data.Maybe.Maybe a2 -> a2 (defined in base-4.5.1.0:Data.Maybe at <no location info>; imported from base-4.5.1.0:Data.Maybe at A.hs@2:1-2:18)"
+        assertIdInfo idInfo "A" (5,1,5,4) "foo (VarName) :: (Maybe a -> a, [Bool] -> Bool, (b -> b -> c) -> (a1 -> b) -> a1 -> a1 -> c) (binding occurrence)"
+        assertIdInfo idInfo "A" (5,8,5,16) "fromJust (VarName) :: Maybe a2 -> a2 (defined in base-4.5.1.0:Data.Maybe at <no location info>; imported from base-4.5.1.0:Data.Maybe at A.hs@2:1-2:18)"
+        assertIdInfo idInfo "A" (5,18,5,31) "and (VarName) :: [Bool] -> Bool (defined in base-4.5.1.0:GHC.List at <no location info>; imported from base-4.5.1.0:Data.List as 'Data.List.' at A.hs@3:1-3:27)"
+        assertIdInfo idInfo "A" (5,33,5,37) "on (VarName) :: (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 (defined in base-4.5.1.0:Data.Function at <no location info>; imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36)"
     )
   , ( "Type information 8: Imprecise source spans"
     , withConfiguredSession defOpts $ \session -> do
@@ -1758,7 +1766,7 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
         idInfo <- getSpanInfo session
-        let infoPrint = "print (VarName) :: forall a. GHC.Show.Show a => a -> GHC.Types.IO () (defined in base-4.5.1.0:System.IO at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
+        let infoPrint = "print (VarName) :: Show a => a -> IO () (defined in base-4.5.1.0:System.IO at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
         assertIdInfo idInfo "A" (2,8,2,13) infoPrint
         assertIdInfo idInfo "A" (2,8,2,8) infoPrint
         assertIdInfo idInfo "A" (2,8,2,9) infoPrint
@@ -1809,10 +1817,10 @@ syntheticTests =
         print (idInfo (Text.pack "B") (span 6 11))
         print (idInfo (Text.pack "B") (span 7 11))
         -}
-        assertIdInfo idInfo "B" (4,11,4,11) "quasi-quote with quoter qq (VarName) :: Language.Haskell.TH.Quote.QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
-        assertIdInfo idInfo "B" (5,11,5,11) "quasi-quote with quoter qq (VarName) :: Language.Haskell.TH.Quote.QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
-        assertIdInfo idInfo "B" (6,11,6,11) "quasi-quote with quoter qq (VarName) :: Language.Haskell.TH.Quote.QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
-        assertIdInfo idInfo "B" (7,11,7,11) "quasi-quote with quoter qq (VarName) :: Language.Haskell.TH.Quote.QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
+        assertIdInfo idInfo "B" (4,7,4,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
+        assertIdInfo idInfo "B" (5,7,5,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
+        assertIdInfo idInfo "B" (6,7,6,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
+        assertIdInfo idInfo "B" (7,7,7,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter (defined in main:A at A.hs@4:1-4:3; imported from main:A at B.hs@3:1-3:9)"
     )
   , ( "Type information 10: Template Haskell"
     , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
@@ -1836,24 +1844,74 @@ syntheticTests =
         updateSessionD session upd 2
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (4,1,4,4) "ex1 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Exp (defined at A.hs@5:1-5:4)"
+        assertIdInfo idInfo "A" (4,1,4,4) "ex1 (VarName) :: Q Exp (defined at A.hs@5:1-5:4)"
         assertIdInfo idInfo "A" (4,8,4,9) "Q (TcClsName) (defined in template-haskell-2.7.0.0:Language.Haskell.TH.Syntax at <no location info>; imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27)"
         assertIdInfo idInfo "A" (4,10,4,13) "Exp (TcClsName) (defined in template-haskell-2.7.0.0:Language.Haskell.TH.Syntax at <no location info>; imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27)"
-        assertIdInfo idInfo "A" (5,1,5,4) "ex1 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Exp (binding occurrence)"
+        assertIdInfo idInfo "A" (5,1,5,4) "ex1 (VarName) :: Q Exp (binding occurrence)"
+        assertIdInfo idInfo "A" (5,11,5,12) "x (VarName) (binding occurrence)"
         assertIdInfo idInfo "A" (5,11,5,12) "x (VarName) (binding occurrence)"
         assertIdInfo idInfo "A" (5,16,5,17) "x (VarName) (defined at A.hs@5:11-5:12)"
-        assertIdInfo idInfo "A" (6,1,6,4) "ex2 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Type (defined at A.hs@7:1-7:4)"
+        assertIdInfo idInfo "A" (5,16,5,17) "x (VarName) (defined at A.hs@5:11-5:12)"
+        assertIdInfo idInfo "A" (6,1,6,4) "ex2 (VarName) :: Q Type (defined at A.hs@7:1-7:4)"
         assertIdInfo idInfo "A" (6,8,6,9) "Q (TcClsName) (defined in template-haskell-2.7.0.0:Language.Haskell.TH.Syntax at <no location info>; imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27)"
         assertIdInfo idInfo "A" (6,10,6,14) "Type (TcClsName) (defined in template-haskell-2.7.0.0:Language.Haskell.TH.Syntax at <no location info>; imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27)"
-        assertIdInfo idInfo "A" (7,1,7,4) "ex2 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Type (binding occurrence)"
+        assertIdInfo idInfo "A" (7,1,7,4) "ex2 (VarName) :: Q Type (binding occurrence)"
         assertIdInfo idInfo "A" (7,11,7,17) "String (TcClsName) (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
         assertIdInfo idInfo "A" (7,11,7,17) "String (TcClsName) (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
         assertIdInfo idInfo "A" (7,21,7,27) "String (TcClsName) (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
         assertIdInfo idInfo "A" (7,21,7,27) "String (TcClsName) (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
-        assertIdInfo idInfo "B" (4,1,4,4) "ex3 (VarName) :: GHC.Base.String -> GHC.Base.String (defined at B.hs@5:1-5:4)"
-        assertIdInfo idInfo "B" (4,8,4,12) "ex2 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Type (defined in main:A at A.hs@7:1-7:4; imported from main:A at B.hs@3:1-3:9)"
-        assertIdInfo idInfo "B" (5,1,5,4) "ex3 (VarName) :: GHC.Base.String -> GHC.Base.String (binding occurrence)"
-        assertIdInfo idInfo "B" (5,7,5,11) "ex1 (VarName) :: Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Exp (defined in main:A at A.hs@5:1-5:4; imported from main:A at B.hs@3:1-3:9)"
+        assertIdInfo idInfo "B" (4,1,4,4) "ex3 (VarName) :: String -> String (defined at B.hs@5:1-5:4)"
+        assertIdInfo idInfo "B" (4,8,4,12) "ex2 (VarName) :: Q Type (defined in main:A at A.hs@7:1-7:4; imported from main:A at B.hs@3:1-3:9)"
+        assertIdInfo idInfo "B" (5,1,5,4) "ex3 (VarName) :: String -> String (binding occurrence)"
+        assertIdInfo idInfo "B" (5,7,5,11) "ex1 (VarName) :: Q Exp (defined in main:A at A.hs@5:1-5:4; imported from main:A at B.hs@3:1-3:9)"
+    )
+  , ( "Type information 11: Take advantage of scope (1)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "main = print True"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        assertIdInfo idInfo "A" (2,8,2,13) "print (VarName) :: Show a => a -> IO () (defined in base-4.5.1.0:System.IO at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
+    )
+  , ( "Type information 12: Take advantage of scope (2)"
+    , withConfiguredSession ("-package bytestring" : defOpts) $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "import Data.ByteString (append)"
+                    , "foo = append"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        assertIdInfo idInfo "A" (3,7,3,13) "append (VarName) :: Data.ByteString.Internal.ByteString -> Data.ByteString.Internal.ByteString -> Data.ByteString.Internal.ByteString (defined in bytestring-0.9.2.1:Data.ByteString at <no location info>; imported from bytestring-0.9.2.1:Data.ByteString at A.hs@2:25-2:31)"
+    )
+  , ( "Type information 13: Take advantage of scope (3)"
+    , withConfiguredSession ("-package bytestring" : defOpts) $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "import Data.ByteString"
+                    , "foo = append"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        assertIdInfo idInfo "A" (3,7,3,13) "append (VarName) :: ByteString -> ByteString -> ByteString (defined in bytestring-0.9.2.1:Data.ByteString at <no location info>; imported from bytestring-0.9.2.1:Data.ByteString at A.hs@2:1-2:23)"
+    )
+  , ( "Type information 14: Take advantage of scope (4)"
+    , withConfiguredSession ("-package bytestring" : defOpts) $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "import Data.ByteString (append)"
+                    , "import qualified Data.ByteString as BS"
+                    , "foo = append"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        assertIdInfo idInfo "A" (4,7,4,13) "append (VarName) :: BS.ByteString -> BS.ByteString -> BS.ByteString (defined in bytestring-0.9.2.1:Data.ByteString at <no location info>; imported from bytestring-0.9.2.1:Data.ByteString as 'BS.' at A.hs@3:1-3:39)"
     )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
