@@ -180,13 +180,14 @@ testStdoutServer RpcConversation{..} = forever $ do
 testConcurrentGetPut :: RpcServer -> Assertion
 testConcurrentGetPut server =
   rpcConversation server $ \RpcConversation{..} -> do
-    forkIO $ threadDelay 1000000 >> put ()
-    get
+    forkIO $ threadDelay 1000000 >> put (1 :: Int)
+    Right 1 <- Ex.try get :: IO (Either Ex.SomeException Int)
+    return ()
 
 testConcurrentGetPutServer :: RpcConversation -> IO ()
-testConcurrentGetPutServer RpcConversation{..} = do
-  () <- get
-  put ()
+testConcurrentGetPutServer RpcConversation{..} = forever $ do
+  i <- get
+  put (i :: Int)
 
 --------------------------------------------------------------------------------
 -- Test generalized conversations                                             --
