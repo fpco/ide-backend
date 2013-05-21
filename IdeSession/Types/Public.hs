@@ -375,6 +375,7 @@ $(deriveJSON id ''EitherSpan)
 $(deriveJSON id ''ModuleId)
 $(deriveJSON id ''PackageId)
 $(deriveJSON id ''IdInfo)
+$(deriveJSON id ''SpanInfo)
 
 {------------------------------------------------------------------------------
   Util
