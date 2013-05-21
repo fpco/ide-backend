@@ -12,8 +12,12 @@ module IdeSession.Util (
   , suppressStdOutput
   , redirectStdOutput
   , restoreStdOutput
+  , suppressStdError
+  , redirectStdError
+  , restoreStdError
   ) where
 
+import Control.Monad (void)
 import Data.Typeable (typeOf)
 import qualified Control.Exception as Ex
 import Data.Accessor (Accessor, accessor)
@@ -27,7 +31,7 @@ import Crypto.Types (BitLength)
 import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
 import System.FilePath (splitFileName, (<.>))
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
-import System.IO (Handle, hClose, openBinaryTempFile, hFlush, stdout)
+import System.IO (Handle, hClose, openBinaryTempFile, hFlush, stdout, stderr)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import System.Posix (Fd)
@@ -154,31 +158,56 @@ applyMapDiff diff = foldr (.) id (map aux $ StrictMap.toList diff)
     aux (k, Remove)   = StrictMap.delete k
     aux (k, Insert x) = StrictMap.insert k x
 
-type StdOutputBackup = Fd
+-- Manipulations with stdout and stderr.
 
-suppressStdOutput :: IO StdOutputBackup
-suppressStdOutput = do
-  hFlush stdout
-  stdOutputBackup <- dup stdOutput
-  closeFd stdOutput
-  -- Will use next available file descriptor: that is, stdout.
+type FdBackup = Fd
+
+suppressStdOutput :: IO FdBackup
+suppressStdOutput = suppressHandle stdout stdOutput
+
+redirectStdOutput :: FilePath -> IO FdBackup
+redirectStdOutput = redirectHandle stdout stdOutput
+
+restoreStdOutput :: FdBackup -> IO ()
+restoreStdOutput = restoreHandle stdout stdOutput
+
+suppressStdError :: IO FdBackup
+suppressStdError = suppressHandle stderr stdError
+
+redirectStdError :: FilePath -> IO FdBackup
+redirectStdError = redirectHandle stderr stdError
+
+restoreStdError :: FdBackup -> IO ()
+restoreStdError = restoreHandle stderr stdError
+
+suppressHandle :: Handle -> Fd -> IO FdBackup
+suppressHandle h fd = do
+  hFlush h
+  fdBackup <- dup fd
+  closeFd fd
+  -- Will use next available file descriptor: that of h, e.g., stdout.
   _ <- openFd (BSSC.pack "/dev/null") WriteOnly Nothing defaultFileFlags
-  return stdOutputBackup
+  return fdBackup
 
--- | Redirects stdout to a file, Creates the file, if needed.
-redirectStdOutput :: FilePath -> IO StdOutputBackup
-redirectStdOutput file = do
-  hFlush stdout
-  stdOutputBackup <- dup stdOutput
-  closeFd stdOutput
+-- | Redirects a handle (e.g., stdout) to a file, Creates the file, if needed,
+-- just truncates, if not.
+redirectHandle :: Handle -> Fd -> FilePath -> IO FdBackup
+redirectHandle h fd file = do
   let mode = Files.unionFileModes Files.ownerReadMode Files.ownerWriteMode
-  -- Will use next available file descriptor: that is, stdout.
-  _ <- openFd (BSSC.pack file) WriteOnly (Just mode) defaultFileFlags
-  return stdOutputBackup
+      fileBS = BSSC.pack file
+  -- The file can't be created down there in openFd, because then
+  -- a wrong fd gets captured.
+  void $ createFile fileBS mode
+  hFlush h
+  fdBackup <- dup fd
+  closeFd fd
+  -- Will use next available file descriptor: that of h, e.g., stdout.
+  _ <- openFd fileBS WriteOnly Nothing defaultFileFlags
+  return fdBackup
 
-restoreStdOutput :: StdOutputBackup -> IO ()
-restoreStdOutput stdOutputBackup = do
-  hFlush stdout
-  closeFd stdOutput
-  dup stdOutputBackup
-  closeFd stdOutputBackup
+restoreHandle :: Handle -> Fd -> FdBackup -> IO ()
+restoreHandle h fd fdBackup = do
+  hFlush h
+  closeFd fd
+  dup fdBackup
+  closeFd fdBackup
