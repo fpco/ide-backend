@@ -48,7 +48,7 @@ import Data.List ((\\))
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
 
-import System.IO (Handle, hFlush, stdout)
+import System.IO (Handle, hFlush)
 import System.Posix (Fd)
 import System.Posix.Env (setEnv, unsetEnv)
 import System.Posix.IO.ByteString
@@ -716,7 +716,7 @@ getGhcExitCode (OutProcess server) = getRpcExitCode server
 -- Auxiliary                                                                  --
 --------------------------------------------------------------------------------
 
- -- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
+-- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
 -- We suppress stdout during compilation to avoid stray messages, e.g. from
 -- the linker.
 -- TODO: send all suppressed messages to a debug log file.
@@ -726,21 +726,3 @@ suppressGhcStdout p = do
   x <- p
   liftIO $ restoreStdOutput stdOutputBackup
   return x
-
-type StdOutputBackup = Fd
-
-suppressStdOutput :: IO StdOutputBackup
-suppressStdOutput = do
-  hFlush stdout
-  stdOutputBackup <- dup stdOutput
-  closeFd stdOutput
-  -- Will use next available file descriptor: that is, stdout
-  _ <- openFd (BSSC.pack "/dev/null") WriteOnly Nothing defaultFileFlags
-  return stdOutputBackup
-
-restoreStdOutput :: StdOutputBackup -> IO ()
-restoreStdOutput stdOutputBackup = do
-  hFlush stdout
-  closeFd stdOutput
-  dup stdOutputBackup
-  closeFd stdOutputBackup

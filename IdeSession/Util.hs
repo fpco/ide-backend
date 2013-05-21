@@ -9,6 +9,9 @@ module IdeSession.Util (
     -- * Simple diffs
   , Diff(..)
   , applyMapDiff
+  , suppressStdOutput
+  , redirectStdOutput
+  , restoreStdOutput
   ) where
 
 import Data.Typeable (typeOf)
@@ -24,9 +27,13 @@ import Crypto.Types (BitLength)
 import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
 import System.FilePath (splitFileName, (<.>))
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
-import System.IO (Handle, hClose, openBinaryTempFile)
+import System.IO (Handle, hClose, openBinaryTempFile, hFlush, stdout)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
+import System.Posix (Fd)
+import System.Posix.IO.ByteString
+import qualified System.Posix.Files as Files
+import qualified Data.ByteString.Char8 as BSSC (pack)
 
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map as StrictMap
@@ -146,3 +153,32 @@ applyMapDiff diff = foldr (.) id (map aux $ StrictMap.toList diff)
     aux (_, Keep)     = id
     aux (k, Remove)   = StrictMap.delete k
     aux (k, Insert x) = StrictMap.insert k x
+
+type StdOutputBackup = Fd
+
+suppressStdOutput :: IO StdOutputBackup
+suppressStdOutput = do
+  hFlush stdout
+  stdOutputBackup <- dup stdOutput
+  closeFd stdOutput
+  -- Will use next available file descriptor: that is, stdout.
+  _ <- openFd (BSSC.pack "/dev/null") WriteOnly Nothing defaultFileFlags
+  return stdOutputBackup
+
+-- | Redirects stdout to a file, Creates the file, if needed.
+redirectStdOutput :: FilePath -> IO StdOutputBackup
+redirectStdOutput file = do
+  hFlush stdout
+  stdOutputBackup <- dup stdOutput
+  closeFd stdOutput
+  let mode = Files.unionFileModes Files.ownerReadMode Files.ownerWriteMode
+  -- Will use next available file descriptor: that is, stdout.
+  _ <- openFd (BSSC.pack file) WriteOnly (Just mode) defaultFileFlags
+  return stdOutputBackup
+
+restoreStdOutput :: StdOutputBackup -> IO ()
+restoreStdOutput stdOutputBackup = do
+  hFlush stdout
+  closeFd stdOutput
+  dup stdOutputBackup
+  closeFd stdOutputBackup
