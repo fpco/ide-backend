@@ -2,6 +2,7 @@ module IdeSession.Cabal (
     buildExecutable, buildHaddock
   ) where
 
+import qualified Control.Exception as Ex
 import Control.Monad
 import Control.Monad.IO.Class (liftIO)
 import Data.List (delete)
@@ -36,6 +37,7 @@ import IdeSession.Types.Public
 import IdeSession.Types.Translation
 import qualified IdeSession.Strict.List as StrictList
 import qualified IdeSession.Strict.Map  as StrictMap
+import IdeSession.Util
 
 -- TODO: factor out common parts of exe building and haddock generation
 -- after Cabal and the code that calls it are improved not to require
@@ -203,17 +205,28 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
                      { Setup.buildDistPref = Setup.Flag ideDistDir
-                     , Setup.buildVerbosity = Setup.Flag minBound
+                     , Setup.buildVerbosity = Setup.Flag $ toEnum 1
                      }
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
-  lbi <- configure (gpDesc, hookedBuildInfo) confFlags
-  markProgress
-  Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
-  markProgress
+      stdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
+      stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
+  Ex.bracket
+    (do stdOutputBackup <- redirectStdOutput stdoutLog
+        stdErrorBackup  <- redirectStdError  stderrLog
+        return (stdOutputBackup, stdErrorBackup))
+    (\(stdOutputBackup, stdErrorBackup) -> do
+        restoreStdOutput stdOutputBackup
+        restoreStdError  stdErrorBackup)
+    (\_ -> do
+        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+        markProgress
+        Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
+        markProgress)
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
-  -- as they are emitted, similarly as log_action in GHC API
+  -- as they are emitted, similarly as log_action in GHC API,
+  -- or filter stdout and display progress on each good line.
 
 configureAndHaddock :: FilePath -> FilePath -> [String] -> Bool
                     -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
@@ -258,12 +271,23 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         , Setup.haddockVerbosity = Setup.Flag minBound
         }
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
-  lbi <- configure (gpDesc, hookedBuildInfo) confFlags
-  markProgress
-  Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
-  markProgress
+      stdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
+      stderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
+  Ex.bracket
+    (do stdOutputBackup <- redirectStdOutput stdoutLog
+        stdErrorBackup  <- redirectStdError  stderrLog
+        return (stdOutputBackup, stdErrorBackup))
+    (\(stdOutputBackup, stdErrorBackup) -> do
+        restoreStdOutput stdOutputBackup
+        restoreStdError  stdErrorBackup)
+    (\_ -> do
+        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+        markProgress
+        Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
+        markProgress)
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
-  -- as they are emitted, similarly as log_action in GHC API
+  -- as they are emitted, similarly as log_action in GHC API,
+  -- or filter stdout and display progress on each good line.
 
 buildExecutable :: FilePath -> FilePath -> [String] -> Bool
                 -> Strict Maybe Computed -> (Progress -> IO ())

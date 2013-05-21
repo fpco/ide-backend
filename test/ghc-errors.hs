@@ -388,6 +388,17 @@ syntheticTests =
         indexExists <- doesFileExist $ docDir </> "html/main/index.html"
         assertBool ".lhs haddock files" indexExists
     )
+  , ( "Build haddocks and fail"
+    , withConfiguredSession defOpts $ \session -> do
+        setCurrentDirectory "test/ABerror"
+        loadModulesFrom session "."
+        setCurrentDirectory "../.."
+        assertOneError session
+        let upd = buildDoc
+        -- Note that the stderr log file here is empty, but exit code is 1:
+        updateSessionD session upd 4
+        -- TODO: catch and check the exit code
+    )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package mtl"
@@ -1507,6 +1518,21 @@ syntheticTests =
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
+    )
+  , ( "Build executable and fail"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package parallel"
+                        , "-package old-time"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        setCurrentDirectory "test/MainModule"
+        loadModulesFrom session "."
+        setCurrentDirectory "../../"
+        let m = "Main"
+            upd = buildExe [(Text.pack m, "foooooooooooooooo")]
+        updateSessionD session upd 4
+        -- TODO: catch and check the exit code
     )
   , ( "Build haddocks from ParFib"
     , let packageOpts = [ "-hide-all-packages"
