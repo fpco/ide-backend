@@ -46,6 +46,7 @@ import System.FilePath (takeDirectory, makeRelative, (</>))
 import System.Posix.Files (setFileTimes)
 import System.IO.Temp (createTempDirectory)
 import qualified Data.Text as Text
+import Control.Applicative ((<$>))
 
 import IdeSession.State
 import IdeSession.Cabal (buildExecutable)
@@ -58,6 +59,7 @@ import IdeSession.Strict.Container
 import qualified IdeSession.Strict.IntMap as IntMap
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
+import qualified IdeSession.Strict.List   as List
 import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_, withMVar)
 
 {------------------------------------------------------------------------------
@@ -215,36 +217,37 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         when (idleState' ^. ideUpdatedEnv) $
           rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
 
-        -- Determine imports and completion map from the diffs sent
-        -- from the RPC compilationi process.
-        let usePrevious :: IdeIdleState
-                        -> Strict (Map ModuleName) (Diff ( Strict [] Import
-                                                         , Strict Trie (Strict [] IdInfo)))
-                        -> ( Strict (Map ModuleName) (Strict [] Import)
-                           , Strict (Map ModuleName) (Strict Trie (Strict [] IdInfo))
-                           )
-            usePrevious idleSt importsAuto =
-              ( applyMapDiff (Map.map (fmap fst) importsAuto)
-                $ Maybe.maybe Map.empty computedImports $ idleSt ^. ideComputed
-              , applyMapDiff (Map.map (fmap snd) importsAuto)
-                $ Maybe.maybe Map.empty computedAutoMap $ idleSt ^. ideComputed
-              )
-        -- Update code
+        -- Recompile
         computed <- if (idleState' ^. ideUpdatedCode)
           then do
-            ( computedErrors
-             , computedLoaded'
-             , importsAuto
-             , computedCache'
-             ) <- rpcCompile (idleState ^. ideGhcServer)
-                             (idleState' ^. ideNewOpts)
-                             (ideSourcesDir ideStaticInfo)
-                             (idleState' ^. ideGenerateCode)
-                             callback
-            let (computedImports, computedAutoMap) = usePrevious idleState' importsAuto
-                computedCache         = mkRelative computedCache'
-                computedLoadedModules = Map.map idListToMap computedLoaded'
-            return $ Maybe.just Computed{..}
+            (  errs
+             , loaded
+             , diffImports
+             , diffAuto
+             , diffIdList
+             , cache ) <- rpcCompile (idleState' ^. ideGhcServer)
+                                     (idleState' ^. ideNewOpts)
+                                     (ideSourcesDir ideStaticInfo)
+                                     (idleState' ^. ideGenerateCode)
+                                     callback
+
+            let applyDiff :: Strict (Map ModuleName) (Diff v)
+                          -> (Computed -> Strict (Map ModuleName) v)
+                          -> Strict (Map ModuleName) v
+                applyDiff diff f = applyMapDiff diff
+                                 $ Maybe.maybe Map.empty f
+                                 $ idleState' ^. ideComputed
+
+            let diffSpan = Map.map (fmap idListToMap) diffIdList
+
+            return $ Maybe.just Computed {
+                computedErrors        = errs
+              , computedLoadedModules = loaded
+              , computedImports       = diffImports `applyDiff` computedImports
+              , computedAutoMap       = diffAuto    `applyDiff` computedAutoMap
+              , computedSpanInfo      = diffSpan    `applyDiff` computedSpanInfo
+              , computedCache         = mkRelative cache
+              }
           else return $ idleState' ^. ideComputed
 
         -- Update state
@@ -253,6 +256,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
                . (ideUpdatedEnv  ^= False)
                . (ideUpdatedCode ^= False)
                $ idleState'
+
       IdeSessionRunning _ _ ->
         Ex.throwIO (userError "Cannot update session in running mode")
       IdeSessionShutdown ->
@@ -393,7 +397,7 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
           -- ideManagedFiles is irrelevant, because only the module name
           -- inside 'module .. where' counts.
           if not configGenerateModInfo
-             || Text.pack m `Map.member` computedLoadedModules comp
+             || Text.pack m `List.elem` computedLoadedModules comp
           then do
             runActions <- rpcRun (idleState ^. ideGhcServer)
                                  m fun

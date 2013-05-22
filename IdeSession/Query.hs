@@ -164,13 +164,13 @@ getSourceErrors = computedQuery $ \Computed{..} ->
 -- | Get the list of correctly compiled modules, as reported by the compiler
 getLoadedModules :: Query [ModuleName]
 getLoadedModules = computedQuery $ \Computed{..} ->
-  StrictMap.keys $ computedLoadedModules
+  toLazyList $ computedLoadedModules
 
 -- | Get information about an identifier at a specific location
 getSpanInfo :: Query (ModuleName -> SourceSpan -> [(SourceSpan, SpanInfo)])
 getSpanInfo = computedQuery $ \Computed{..} mod span ->
   let mSpan  = introduceExplicitSharing computedCache span
-      mIdMap = StrictMap.lookup mod computedLoadedModules
+      mIdMap = StrictMap.lookup mod computedSpanInfo
   in case (mSpan, mIdMap) of
     (Just span', Just idMap) ->
       let aux (a, b) = ( removeExplicitSharing computedCache a
@@ -232,7 +232,7 @@ getAutocompletion = computedQuery $ \Computed{..} ->
 -- | Print the id info maps to the stdout (for debugging purposes only)
 dumpIdInfo :: IdeSession -> IO ()
 dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
-  forM_ (StrictMap.toList computedLoadedModules) $ \(mod, idMap) -> do
+  forM_ (StrictMap.toList computedSpanInfo) $ \(mod, idMap) -> do
     putStrLn $ "*** " ++ Text.unpack mod ++ " ***"
     forM_ (StrictIntervalMap.toList (Private.idMapToMap idMap)) $ \(i, idInfo) -> do
       let idInfo' = removeExplicitSharing computedCache idInfo

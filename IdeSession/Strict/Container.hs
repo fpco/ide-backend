@@ -30,6 +30,7 @@ class StrictContainer t where
 
 instance StrictContainer IntMap where
   newtype Strict IntMap v = StrictIntMap { toLazyIntMap :: IntMap v }
+    deriving Show
 
   force m = IntMap.foldl' (flip seq) () m `seq` StrictIntMap m
   project = toLazyIntMap
@@ -44,7 +45,7 @@ instance Binary v => Binary (Strict IntMap v) where
 
 instance StrictContainer [] where
   newtype Strict [] a = StrictList { toLazyList :: [a] }
-    deriving Eq
+    deriving (Show, Eq)
 
   force m = List.foldl' (flip seq) () m `seq` StrictList m
   project = toLazyList
@@ -60,6 +61,7 @@ instance Binary a => Binary (Strict [] a) where
 
 instance StrictContainer (Map k) where
   newtype Strict (Map k) v = StrictMap { toLazyMap :: Map k v }
+    deriving (Show)
 
   force m = Map.foldl' (flip seq) () m `seq` StrictMap m
   project = toLazyMap
@@ -74,6 +76,7 @@ instance (Ord k, Binary k, Binary v) => Binary (Strict (Map k) v) where
 
 instance StrictContainer Maybe where
   newtype Strict Maybe a = StrictMaybe { toLazyMaybe :: Maybe a }
+    deriving (Show)
 
   force Nothing  = StrictMaybe Nothing
   force (Just x) = x `seq` StrictMaybe $ Just x
@@ -94,6 +97,7 @@ instance Functor (Strict Maybe) where
 
 instance StrictContainer Trie where
   newtype Strict Trie a = StrictTrie { toLazyTrie :: Trie a }
+    deriving (Show)
 
   force m = Foldable.foldl (flip seq) () m `seq` StrictTrie m
   project = toLazyTrie

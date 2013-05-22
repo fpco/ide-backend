@@ -27,14 +27,14 @@ module IdeSession.GHC.Server
   , RunBufferMode(..)
   ) where
 
-import Control.Arrow (second)
 import Control.Concurrent (ThreadId, throwTo, forkIO, killThread, myThreadId, threadDelay)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
 import Control.Applicative ((<$>), (<*>))
 import qualified Control.Exception as Ex
-import Control.Monad (void, forM_, forever, unless, when)
+import Control.Monad (void, forM, forM_, forever, unless, when)
+import Control.Arrow (second)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
@@ -43,6 +43,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Binary (Binary)
 import qualified Data.Binary as Binary
+import Data.List ((\\))
 
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -94,11 +95,12 @@ data GhcCompileResponse =
         ghcCompileProgress :: Progress
       }
   | GhcCompileDone {
-        ghcCompileErrors :: Strict [] SourceError
-      , ghcCompileLoaded :: Strict (Map ModuleName) IdList
-      , ghcCompileInfo   :: Strict (Map ModuleName)
-                              (Diff (Strict [] Import, Strict [] IdInfo))
-      , ghcCompileCache  :: ExplicitSharingCache
+        ghcCompileErrors   :: Strict [] SourceError
+      , ghcCompileLoaded   :: Strict [] ModuleName
+      , ghcCompileImports  :: Strict (Map ModuleName) (Diff (Strict [] Import))
+      , ghcCompileAuto     :: Strict (Map ModuleName) (Diff (Strict [] IdInfo))
+      , ghcCompileSpanInfo :: Strict (Map ModuleName) (Diff IdList)
+      , ghcCompileCache    :: ExplicitSharingCache
       }
 
 data GhcRunResponse =
@@ -146,14 +148,17 @@ instance Binary GhcCompileResponse where
     Binary.putWord8 1
     Binary.put ghcCompileErrors
     Binary.put ghcCompileLoaded
-    Binary.put ghcCompileInfo
+    Binary.put ghcCompileImports
+    Binary.put ghcCompileAuto
+    Binary.put ghcCompileSpanInfo
     Binary.put ghcCompileCache
 
   get = do
     header <- Binary.getWord8
     case header of
       0 -> GhcCompileProgress <$> Binary.get
-      1 -> GhcCompileDone     <$> Binary.get <*> Binary.get <*> Binary.get <*> Binary.get
+      1 -> GhcCompileDone     <$> Binary.get <*> Binary.get <*> Binary.get
+                              <*> Binary.get <*> Binary.get <*> Binary.get
       _ -> fail "GhcCompileRespone.Binary.get: invalid header"
 
 instance Binary GhcRunResponse where
@@ -207,9 +212,8 @@ ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
   -- Set up references for the current session of Ghc monad computations.
-  pluginRef      <- newIORef StrictMap.empty
-  idMapRef       <- newIORef StrictMap.empty
-  importsAutoRef <- newIORef StrictMap.empty
+  pluginRef  <- newIORef StrictMap.empty
+  importsRef <- newIORef StrictMap.empty
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
@@ -227,7 +231,7 @@ ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
       case req of
         ReqCompile opts dir genCode ->
           ghcHandleCompile
-            conv dOpts opts pluginRef idMapRef importsAutoRef dir
+            conv dOpts opts pluginRef importsRef dir
             genCode configGenerateModInfo
         ReqRun m fun outBMode errBMode ->
           ghcHandleRun conv m fun outBMode errBMode
@@ -243,91 +247,95 @@ ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
       ]
 
 -- | Handle a compile or type check request
-ghcHandleCompile :: RpcConversation
-                 -> DynamicOpts         -- ^ startup dynamic flags
-                 -> Maybe [String]      -- ^ new, user-submitted dynamic flags
-                 -> StrictIORef (Strict (Map ModuleName) IdList) -- ^ ref for newly generated IdMaps
-                 -> StrictIORef (Strict (Map ModuleName) IdList) -- ^ ref for accumulated IdMaps
-                 -> StrictIORef (Strict (Map ModuleName) ( Strict [] Import
-                                                         , Strict [] IdInfo
-                                                         ))
-                                        -- ^ ref for previous imports and auto
-                 -> FilePath            -- ^ source directory
-                 -> Bool                -- ^ should we generate code
-                 -> Bool                -- ^ should we generate per-module info
-                 -> Ghc ()
+ghcHandleCompile
+  :: RpcConversation
+  -> DynamicOpts         -- ^ startup dynamic flags
+  -> Maybe [String]      -- ^ new, user-submitted dynamic flags
+  -> StrictIORef (Strict (Map ModuleName) IdList)
+                         -- ^ ref where the ExtractIdsT plugin stores its data
+                         -- (We clear this at the end of each call)
+  -> StrictIORef (Strict (Map ModuleName) (Strict [] Import))
+                         -- ^ we cache the import list of each module to avoid
+                         -- unnecessarily recomputing autocompletion info
+  -> FilePath            -- ^ source directory
+  -> Bool                -- ^ should we generate code
+  -> Bool                -- ^ should we generate per-module info
+  -> Ghc ()
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
-                 pluginRef idMapRef importsAutoRef configSourcesDir
+                 pluginRef importsRef configSourcesDir
                  ideGenerateCode configGenerateModInfo = do
     errsRef <- liftIO $ newIORef StrictList.nil
     counter <- liftIO $ newIORef initialProgress
-    (  errs          :: Strict [] SourceError
-     , loadedModules :: [ModuleName]
-     , importsAuto   :: Strict (Map ModuleName) ( Strict [] Import
-                                                , Strict [] IdInfo )) <-
+    (errs, loadedModules) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
-                                       configGenerateModInfo
                                        verbosity
                                        errsRef
                                        (progressCallback counter)
                                        (\_ -> return ()) -- TODO: log?
-    (filteredIdMaps, diffMap) <-
+
+    (imports, auto, spanInfo) <-
       if not configGenerateModInfo
-      then return (StrictMap.empty, StrictMap.empty)
+      then return (StrictMap.empty, StrictMap.empty, StrictMap.empty)
       else do
-        -- Keys of @pluginIdMaps@ are the modules changed in this GHC call.
-        pluginIdMaps <- liftIO $ readIORef pluginRef
-        accIdMaps <- liftIO $ readIORef idMapRef
-        let idMaps = pluginIdMaps `StrictMap.union` accIdMaps
-            loadedModulesSet = Set.fromList loadedModules
-            -- Filter out modules that got unloaded.
-            filteredIdMaps =
-              StrictMap.filterWithKey (\k _ -> k `Set.member` loadedModulesSet)
-                                      idMaps
-            filteredKeySet = StrictMap.keysSet filteredIdMaps
-        liftIO $ writeIORef pluginRef StrictMap.empty
-        liftIO $ writeIORef idMapRef filteredIdMaps
-        -- Verify the plugin and @compileInGhc@ agree on which modules are loaded.
-        when (loadedModulesSet /= filteredKeySet) $ do
-          error $ "ghcHandleCompile: loaded modules do not match id info maps: "
-                  ++ show (loadedModulesSet, filteredKeySet)
-        -- Compute and send only diffs of the map of imports and
-        -- autocompletion data. The data for a module does not need to be sent
-        -- if the imports of the module are unchanged (even if the module is)
-        -- and the modules it imports are not recompiled. (It's not enough
-        -- to determine that their exports are unchanged (which would be
-        -- reasonably fast using @mi_exp_hash@) because the types
-        -- could have changed and we send full idMaps, including types.)
-        previousImportsAuto <- liftIO $ readIORef importsAutoRef
-        let changedModuleSet = StrictMap.keysSet pluginIdMaps
+        -- Extract result from the plugin, and clear the pluginRef
+        pluginIdMaps <- liftIO $ do
+          idMaps <- readIORef pluginRef
+          writeIORef pluginRef StrictMap.empty
+          return idMaps
 
-            diff :: ModuleName
-                 -> (Strict [] Import, Strict [] IdInfo)
-                 -> Diff (Strict [] Import, Strict [] IdInfo)
-            diff m ia = case StrictMap.lookup m previousImportsAuto of
-                Nothing -> Insert ia
-                Just iaOld
-                  | m `Set.member` changedModuleSet && fst iaOld /= fst ia
-                        -> Insert ia
-                  | StrictList.any (`Set.member` changedModuleSet) (StrictList.map moduleName imports)
-                        -> Insert ia
-                  | otherwise
-                        -> Keep
-              where
-                imports = StrictList.map importModule $ fst ia
+        -- The plugin only gets called on modules that are recompiled
+        let recompiledModules = StrictMap.keys pluginIdMaps
 
-            removedModules = previousImportsAuto StrictMap.\\ importsAuto
-            diffMap = StrictMap.mapWithKey diff importsAuto
-                      `StrictMap.union` StrictMap.map (const Remove) removedModules
-        liftIO $ writeIORef importsAutoRef
-               $ applyMapDiff diffMap previousImportsAuto
-        return (filteredIdMaps, diffMap)
+        -- For those modules that got recompiled, recompute import lists
+        newImportLists <- forM recompiledModules $ \m -> do
+          imports <- importList m
+          return (m, imports)
+
+        -- Find out which modules had their import list changed
+        oldImportLists <- liftIO $ readIORef importsRef
+        let changedImports = flip filter recompiledModules $ \m ->
+              let oldImportList = StrictMap.lookup m oldImportLists
+                  newImportList = lookup m newImportLists
+              in oldImportList /= newImportList
+
+        -- For modules with changed import lists, recompute autocompletion info
+        newAutos <- forM changedImports $ \m -> do
+          auto <- autocompletion m
+          return (m, auto)
+
+        -- Figure out which modules got deleted since the last compile
+        let deletedModules :: Strict (Map ModuleName) (Diff a)
+            deletedModules = StrictMap.fromList $
+              zip (StrictMap.keys oldImportLists \\ loadedModules)
+                  (repeat Remove)
+
+        -- Construct diffs
+        let diffImports = StrictMap.fromList (map (second Insert) newImportLists)
+                        `StrictMap.union`
+                          deletedModules
+            diffAuto    = StrictMap.fromList (map (second Insert) newAutos)
+                        `StrictMap.union`
+                          deletedModules
+            diffIdList  = StrictMap.map Insert pluginIdMaps
+                        `StrictMap.union`
+                          deletedModules
+
+        -- Update the cached import lists
+        liftIO $ writeIORef importsRef $ applyMapDiff diffImports oldImportLists
+
+        return (diffImports, diffAuto, diffIdList)
+
     cache <- liftIO $ constructExplicitSharingCache
---    liftIO $ debug dVerbosity $ "returned from compileInGhc with " ++ (unlines $ map (showNormalized cache) errs)
-    -- Ship the results.
-    liftIO $ put $ GhcCompileDone errs filteredIdMaps diffMap cache
+    liftIO . put $ GhcCompileDone {
+        ghcCompileErrors   = errs
+      , ghcCompileLoaded   = force loadedModules
+      , ghcCompileImports  = imports
+      , ghcCompileAuto     = auto
+      , ghcCompileSpanInfo = spanInfo
+      , ghcCompileCache    = cache
+      }
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -535,11 +543,10 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO ( Strict [] SourceError
-                 , Strict (Map ModuleName) IdList
-                 , Strict (Map ModuleName)
-                          (Diff ( Strict [] Import
-                                , Strict Trie (Strict [] IdInfo)
-                                ))
+                 , Strict [] ModuleName
+                 , Strict (Map ModuleName) (Diff (Strict [] Import))
+                 , Strict (Map ModuleName) (Diff (Strict Trie (Strict [] IdInfo)))
+                 , Strict (Map ModuleName) (Diff IdList)
                  , ExplicitSharingCache
                  )
 rpcCompile server opts dir genCode callback =
@@ -550,11 +557,12 @@ rpcCompile server opts dir genCode callback =
                 case response of
                   GhcCompileProgress pcounter ->
                     callback pcounter >> go
-                  GhcCompileDone errs loaded importsAuto cache ->
+                  GhcCompileDone errs loaded imports auto spanInfo cache ->
                     return ( errs
                            , loaded
-                           , StrictMap.map (fmap $ second $ constructAuto cache)
-                                           importsAuto
+                           , imports
+                           , StrictMap.map (fmap (constructAuto cache)) auto
+                           , spanInfo
                            , cache
                            )
     go

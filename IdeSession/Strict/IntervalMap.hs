@@ -22,6 +22,9 @@ data StrictIntervalMap v a = StrictIntervalMap {
   , maxInterval       :: !(Maybe (Interval v))
   }
 
+instance (Ord v, Show v, Show a) => Show (StrictIntervalMap v a) where
+  show m = "fromList " ++ show (toList m)
+
 unionInterval :: Ord v => Interval v -> Maybe (Interval v) -> Maybe (Interval v)
 unionInterval i@(Interval low high) Nothing =
   low `seq` high `seq` Just i

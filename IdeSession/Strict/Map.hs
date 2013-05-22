@@ -50,6 +50,7 @@ empty = StrictMap Map.empty
 insert :: Ord k => k -> v -> Strict (Map k) v -> Strict (Map k) v
 insert k v = StrictMap . Map.insertWith' const k v . toLazyMap
 
+-- | Left biased union
 union :: Ord k => Strict (Map k) v -> Strict (Map k) v -> Strict (Map k) v
 union a b = StrictMap $ Map.union (toLazyMap a) (toLazyMap b)
 

@@ -122,7 +122,7 @@ instance Binary Text where
 ------------------------------------------------------------------------------}
 
 data Diff a = Keep | Remove | Insert a
-  deriving Functor
+  deriving (Show, Functor)
 
 instance Binary a => Binary (Diff a) where
   put Keep       = putWord8 0

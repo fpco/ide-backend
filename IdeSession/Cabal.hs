@@ -219,7 +219,7 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink
   case toLazyMaybe mcomputed of
     Nothing -> fail "This session state does not admit buidling executables."
     Just Computed{..} -> do
-      let loadedMs = StrictMap.keys $ computedLoadedModules
+      let loadedMs = StrictMap.keys $ computedSpanInfo
           imp m = do
             let mimports =
                   fmap (toLazyList . StrictList.map (removeExplicitSharing

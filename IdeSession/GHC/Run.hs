@@ -28,6 +28,8 @@ module IdeSession.GHC.Run
   , getSessionDynFlags
   , setSessionDynFlags
   , hsExtensions
+  , importList
+  , autocompletion
     -- * Executing snippets
   , runInGhc
   , RunResult(..)
@@ -35,6 +37,8 @@ module IdeSession.GHC.Run
   ) where
 
 #define DEBUG 1
+
+import Prelude hiding (mod)
 
 import Bag (bagToList)
 import qualified Config as GHC
@@ -81,6 +85,7 @@ import System.FilePath.Find (find, always, extension)
 import System.Process
 import Control.Concurrent (MVar, ThreadId)
 import Data.Aeson.TH (deriveJSON)
+import qualified Data.List as List (find)
 
 import IdeSession.GHC.HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
 import IdeSession.Types.Private
@@ -218,19 +223,13 @@ invalidateModSummaryCache =
 compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this call
              -> Bool                -- ^ should we generate code
-             -> Bool                -- ^ should we generate per-module info
              -> Int                 -- ^ verbosity level
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
-             -> Ghc ( Strict [] SourceError
-                    , [ModuleName]
-                    , Strict (Map ModuleName) ( Strict [] Import
-                                              , Strict [] IdInfo
-                                              )
-                    )
+             -> Ghc (Strict [] SourceError, [ModuleName])
 compileInGhc configSourcesDir (DynamicOpts dynOpts)
-             generateCode generateModInfo verbosity
+             generateCode verbosity
              errsRef handlerOutput handlerRemaining = do
     -- Reset errors storage.
     liftIO $ writeIORef errsRef StrictList.nil
@@ -281,17 +280,10 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
         void $ load LoadAllTargets
 
     -- Collect info
-    session <- getSession
-    graph   <- getModuleGraph
     errs   <- liftIO $ readIORef errsRef
-    loaded <- filterM isLoaded (map ms_mod_name graph)
-    importsAuto <-
-      if generateModInfo
-      then liftIO $ extractImportsAuto flags session graph
-      else return StrictMap.empty
+    loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
     return ( StrictList.reverse errs
            , map (Text.pack . moduleNameString) loaded
-           , importsAuto
            )
   where
     sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ()
@@ -317,36 +309,31 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     handleErrors flags = ghandle (ghcExceptionHandler flags)
                        . handleSourceError (sourceErrorHandler flags)
 
-extractImportsAuto :: DynFlags -> HscEnv -> ModuleGraph
-                   -> IO (Strict (Map ModuleName) ( Strict [] Import
-                                                  , Strict [] IdInfo))
-extractImportsAuto dflags session graph = do
-  assocs <- mapM goMod graph
---  cache <- wipeIdPropCache
-  return (StrictMap.fromList assocs)
+modSummary :: ModuleName -> Ghc ModSummary
+modSummary mod = do
+  graph <- getModuleGraph
+  let is_mod s = Text.pack (moduleNameString (ms_mod_name s)) == mod
+  case List.find is_mod graph of
+    Just s -> return s
+    Nothing -> liftIO $ Ex.throw (userError $ "Invalid module " ++ show mod)
+
+importList :: ModuleName -> Ghc (Strict [] Import)
+importList mod = do
+    dflags  <- getSessionDynFlags
+    summary <- modSummary mod
+    let goImp :: Located (ImportDecl RdrName) -> Import
+        goImp (L _ decl) = Import {
+            importModule    = moduleNameToId dflags (unLoc (ideclName decl))
+          , importPackage   = force $ ((Text.pack . unpackFS) <$> ideclPkgQual decl)
+          , importQualified = ideclQualified decl
+          , importImplicit  = ideclImplicit decl
+          , importAs        = force $ ((Text.pack . moduleNameString) <$> ideclAs decl)
+          , importEntities  = mkImportEntities (ideclHiding decl)
+          }
+
+    return . force $ map goImp (ms_srcimps summary)
+                  ++ map goImp (ms_textual_imps summary)
   where
-    goMod :: ModSummary -> IO (ModuleName, ( Strict [] Import
-                                           , Strict [] IdInfo))
-    goMod summary = do
-      envs <- autoEnvs summary
-      idIs <- mapM eltsToAutocompleteMap envs
-      return ( Text.pack $ moduleNameString (ms_mod_name summary)
-             , ( force $ map goImp (ms_srcimps summary)
-                      ++ map goImp (ms_textual_imps summary)
-               , force idIs
-               )
-             )
-
-    goImp :: Located (ImportDecl RdrName) -> Import
-    goImp (L _ decl) = Import {
-        importModule    = moduleNameToId dflags (unLoc (ideclName decl))
-      , importPackage   = force $ ((Text.pack . unpackFS) <$> ideclPkgQual decl)
-      , importQualified = ideclQualified decl
-      , importImplicit  = ideclImplicit decl
-      , importAs        = force $ ((Text.pack . moduleNameString) <$> ideclAs decl)
-      , importEntities  = mkImportEntities (ideclHiding decl)
-      }
-
     mkImportEntities :: Maybe (Bool, [LIE RdrName]) -> ImportEntities
     mkImportEntities Nothing               = ImportAll
     mkImportEntities (Just (True, names))  = ImportHiding (force $ map unLIE names)
@@ -356,35 +343,45 @@ extractImportsAuto dflags session graph = do
     unLIE :: LIE RdrName -> Text
     unLIE (L _ name) = Text.pack $ GHC.showSDoc (GHC.ppr name)
 
-    eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
-    eltsToAutocompleteMap elt = do
-      let name = gre_name elt
-      (idProp, Just idScope) <- idInfoForName dflags name False (Just elt)
-      return IdInfo{..}
+autocompletion :: ModuleName -> Ghc (Strict [] IdInfo)
+autocompletion mod = do
+  dflags  <- getSessionDynFlags
+  session <- getSession
 
-    autoEnvs :: ModSummary -> IO [GlobalRdrElt]
-    autoEnvs ModSummary{ ms_mod
-                               , ms_hsc_src
-                               , ms_srcimps
-                               , ms_textual_imps
-                               } = do
-      let go :: RnM (a, GlobalRdrEnv, b, c) -> IO [GlobalRdrElt]
-          go op = do
-            ((_warns, errs), res) <- initTc session ms_hsc_src False ms_mod op
-            case res of
-              Nothing -> do
-                -- TODO: deal with import errors
+  let eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
+      eltsToAutocompleteMap elt = do
+        let name = gre_name elt
+        (idProp, Just idScope) <- idInfoForName dflags name False (Just elt)
+        return IdInfo{..}
+
+      autoEnvs :: ModSummary -> IO [GlobalRdrElt]
+      autoEnvs ModSummary{ ms_mod
+                                 , ms_hsc_src
+                                 , ms_srcimps
+                                 , ms_textual_imps
+                                 } = do
+        let go :: RnM (a, GlobalRdrEnv, b, c) -> IO [GlobalRdrElt]
+            go op = do
+              ((_warns, errs), res) <- initTc session ms_hsc_src False ms_mod op
+              case res of
+                Nothing -> do
+                  -- TODO: deal with import errors
 #if DEBUG
-                appendFile "/tmp/ghc.importerrors" $ show
-                                                   . map GHC.showSDoc
-                                                   $ ErrUtils.pprErrMsgBag errs
+                  appendFile "/tmp/ghc.importerrors" $ show
+                                                     . map GHC.showSDoc
+                                                     $ ErrUtils.pprErrMsgBag errs
 #endif
-                return []
-              Just (_, elts, _, _) ->
-                return . concat $ occEnvElts elts
-      env1 <- go $ rnImports ms_srcimps
-      env2 <- go $ rnImports ms_textual_imps
-      return $ env1 ++ env2
+                  return []
+                Just (_, elts, _, _) ->
+                  return . concat $ occEnvElts elts
+        env1 <- go $ rnImports ms_srcimps
+        env2 <- go $ rnImports ms_textual_imps
+        return $ env1 ++ env2
+
+  summary <- modSummary mod
+  envs    <- liftIO $ autoEnvs summary
+  idIs    <- liftIO $ mapM eltsToAutocompleteMap envs
+  return $ force idIs
 
 -- | Run a snippet.
 runInGhc :: (String, String)  -- ^ module and function to execute

@@ -2078,6 +2078,19 @@ syntheticTests =
           (\(ExternalException stderr _) -> stderr == show (userError "Intentional crash"))
           (updateSession session (updateEnv "Foo" Nothing) (\_ -> return ()))
     )
+  , ( "getLoadedModules while configGenerateModInfo off"
+    , withConfiguredSessionModInfo False defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "hello :: IO ()"
+                    , "hello = putStrLn \"Hello World\""
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        mods <- getLoadedModules session
+        assertEqual "" [Text.pack "M"] mods
+    )
   ]
 
 assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion

@@ -19,7 +19,6 @@ module IdeSession.Types.Private (
   , IdList
   , IdMap(..)
   , SpanInfo(..)
-  , LoadedModules
   , ImportEntities(..)
   , Import(..)
     -- * Cache
@@ -42,20 +41,23 @@ import IdeSession.Strict.IntervalMap (StrictIntervalMap, Interval(..))
 import qualified IdeSession.Strict.IntervalMap as IntervalMap
 
 newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 newtype IdPropPtr = IdPropPtr { idPropPtr :: Int }
+  deriving Show
 
 data IdInfo = IdInfo {
     idProp  :: {-# UNPACK #-} !IdPropPtr
   , idScope :: !IdScope
   }
+  deriving Show
 
 data IdProp = IdProp {
     idName  :: !Text
   , idSpace :: !Public.IdNameSpace
   , idType  :: !(Strict Maybe Text)
   }
+  deriving Show
 
 data IdScope =
     -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
@@ -80,6 +82,7 @@ data IdScope =
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
+  deriving Show
 
 data SourceSpan = SourceSpan
   { spanFilePath   :: {-# UNPACK #-} !FilePathPtr
@@ -88,29 +91,31 @@ data SourceSpan = SourceSpan
   , spanToLine     :: {-# UNPACK #-} !Int
   , spanToColumn   :: {-# UNPACK #-} !Int
   }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 data EitherSpan =
     ProperSpan {-# UNPACK #-} !SourceSpan
   | TextSpan !Text
+  deriving Show
 
 data SourceError = SourceError
   { errorKind :: !Public.SourceErrorKind
   , errorSpan :: !EitherSpan
   , errorMsg  :: !Text
   }
+  deriving (Show)
 
 data ModuleId = ModuleId
   { moduleName    :: !Public.ModuleName
   , modulePackage :: {-# UNPACK #-} !PackageId
   }
-  deriving Eq
+  deriving (Show, Eq)
 
 data PackageId = PackageId
   { packageName    :: !Text
   , packageVersion :: !(Strict Maybe Text)
   }
-  deriving Eq
+  deriving (Show, Eq)
 
 -- | Used before we convert it to an IdMap
 type IdList = [(SourceSpan, SpanInfo)]
@@ -118,16 +123,16 @@ type IdList = [(SourceSpan, SpanInfo)]
 data SpanInfo =
    SpanId IdInfo
  | SpanQQ IdInfo
+ deriving Show
 
 newtype IdMap = IdMap { idMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) SpanInfo }
-
-type LoadedModules = Strict (Map Public.ModuleName) IdMap
+  deriving Show
 
 data ImportEntities =
     ImportOnly   !(Strict [] Text)
   | ImportHiding !(Strict [] Text)
   | ImportAll
-  deriving Eq
+  deriving (Show, Eq)
 
 data Import = Import {
     importModule    :: !ModuleId
@@ -138,7 +143,7 @@ data Import = Import {
   , importAs        :: !(Strict Maybe Public.ModuleName)
   , importEntities  :: !ImportEntities
   }
-  deriving Eq
+  deriving (Show, Eq)
 
 {------------------------------------------------------------------------------
   Cache
@@ -152,6 +157,7 @@ data ExplicitSharingCache = ExplicitSharingCache {
     filePathCache :: !(Strict IntMap ByteString)
   , idPropCache   :: !(Strict IntMap IdProp)
   }
+  deriving Show
 
 {------------------------------------------------------------------------------
   Binary instances

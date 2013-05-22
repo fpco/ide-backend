@@ -42,9 +42,11 @@ import IdeSession.Strict.MVar (StrictMVar)
 data Computed = Computed {
     -- | Last compilation and run errors
     computedErrors :: !(Strict [] SourceError)
-    -- | Modules that got loaded okay together with their mappings
-    -- from source locations to information about identifiers there
-  , computedLoadedModules :: !LoadedModules
+    -- | Modules that got loaded okay
+  , computedLoadedModules :: !(Strict [] ModuleName)
+    -- | Information about identifiers/quasi-quotes/subexpressions
+    -- (TODO: subexpressions not yet supported)
+  , computedSpanInfo :: !(Strict (Map ModuleName) IdMap)
     -- | Import information. This is (usually) available even for modules
     -- with parsing or type errors
   , computedImports :: !(Strict (Map ModuleName) (Strict [] Import))
@@ -58,6 +60,7 @@ data Computed = Computed {
     -- | We access IdProps indirectly through this cache
   , computedCache :: !ExplicitSharingCache
   }
+  deriving Show
 
 -- | This type is a handle to a session state. Values of this type
 -- point to the non-persistent parts of the session state in memory
