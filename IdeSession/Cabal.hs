@@ -303,7 +303,7 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink
   case toLazyMaybe mcomputed of
     Nothing -> fail "This session state does not admit executable building."
     Just Computed{..} -> do
-      let loadedMs = StrictMap.keys $ computedSpanInfo
+      let loadedMs = toLazyList computedLoadedModules
           imp m = do
             let mimports =
                   fmap (toLazyList . StrictList.map (removeExplicitSharing
@@ -327,7 +327,7 @@ buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink
   case toLazyMaybe mcomputed of
     Nothing -> fail "This session state does not admit haddock generation."
     Just Computed{..} -> do
-      let loadedMs = StrictMap.keys $ computedSpanInfo
+      let loadedMs = toLazyList computedLoadedModules
           imp m = do
             let mimports =
                   fmap (toLazyList . StrictList.map (removeExplicitSharing

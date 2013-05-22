@@ -399,8 +399,7 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
        (Just comp, True) ->
           -- ideManagedFiles is irrelevant, because only the module name
           -- inside 'module .. where' counts.
-          if not configGenerateModInfo
-             || Text.pack m `List.elem` computedLoadedModules comp
+          if Text.pack m `List.elem` computedLoadedModules comp
           then do
             runActions <- rpcRun (idleState ^. ideGhcServer)
                                  m fun
@@ -430,7 +429,6 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
         return $ IdeSessionIdle idleState
       IdeSessionShutdown ->
         return state
-    SessionConfig{configGenerateModInfo} = ideConfig ideStaticInfo
 
 -- | Build an exe from sources added previously via the ide-backend updateModule* mechanism. The modules that contains the @main@ code are indicated by the arguments to @buildExe@. The function can be called multiple times with different arguments.
 --
