@@ -88,6 +88,8 @@ initSession ideConfig@SessionConfig{..} = do
                         , _ideNewOpts          = Nothing
                         , _ideGenerateCode     = False
                         , _ideManagedFiles     = ManagedFilesInternal [] []
+                        , _ideBuildExeStatus   = Nothing
+                        , _ideBuildDocStatus   = Nothing
                         , _ideEnv              = []
                         , _ideUpdatedEnv       = False
                           -- Make sure 'ideComputed' is set on first call
@@ -442,8 +444,10 @@ buildExe ms = IdeSessionUpdate
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
     let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
-    lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts
-                           (configDynLink ideConfig) mcomputed callback ms
+    exitCode <-
+      lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts
+                             (configDynLink ideConfig) mcomputed callback ms
+    set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
 -- the ide-backend updateModule* mechanism. Similarly to 'buildExe',
@@ -451,13 +455,15 @@ buildExe ms = IdeSessionUpdate
 -- and the generated docs can be found in a subdirectory of @getDocDir@.
 buildDoc :: IdeSessionUpdate
 buildDoc = IdeSessionUpdate
-             $ \callback
-                IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
+           $ \callback
+              IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
     let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
-    lift $ buildHaddock ideSourcesDir ideDistDir ghcOpts
-                        (configDynLink ideConfig) mcomputed callback
+    exitCode <-
+      lift $ buildHaddock ideSourcesDir ideDistDir ghcOpts
+                          (configDynLink ideConfig) mcomputed callback
+    set ideBuildDocStatus (Just exitCode)
 
 {------------------------------------------------------------------------------
   Debugging

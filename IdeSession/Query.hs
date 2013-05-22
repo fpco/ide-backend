@@ -21,6 +21,8 @@ module IdeSession.Query (
   , getEnv
   , getGhcServer
   , getManagedFiles
+  , getBuildExeStatus
+  , getBuildDocStatus
     -- * Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
@@ -37,6 +39,7 @@ import Data.Accessor ((^.), getVal)
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
+import System.Exit (ExitCode)
 import System.FilePath ((</>))
 import Control.Monad (forM_)
 import qualified Data.Text as Text (unpack)
@@ -145,6 +148,14 @@ getManagedFiles = simpleQuery $ translate . getVal ideManagedFiles
         sourceFiles = map fst $ _managedSource files
       , dataFiles   = _managedData files
       }
+
+-- Get exit status of the last invocation of 'buildExe', if any.
+getBuildExeStatus :: Query (Maybe ExitCode)
+getBuildExeStatus = simpleQuery $ getVal ideBuildExeStatus
+
+-- Get exit status of the last invocation of 'buildDoc', if any.
+getBuildDocStatus :: Query (Maybe ExitCode)
+getBuildDocStatus = simpleQuery $ getVal ideBuildDocStatus
 
 {------------------------------------------------------------------------------
   Queries that rely on computed state

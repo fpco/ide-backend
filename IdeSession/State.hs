@@ -18,6 +18,8 @@ module IdeSession.State
   , ideNewOpts
   , ideGenerateCode
   , ideManagedFiles
+  , ideBuildExeStatus
+  , ideBuildDocStatus
   , ideEnv
   , ideGhcServer
   , ideStdoutBufferMode
@@ -30,9 +32,9 @@ module IdeSession.State
 
 import Data.Digest.Pure.MD5 (MD5Digest)
 import Data.Accessor (Accessor, accessor)
+import System.Exit (ExitCode)
 import System.FilePath ((</>))
 import System.Posix.Types (EpochTime)
-
 import IdeSession.Types.Private
 import IdeSession.Config
 import IdeSession.GHC.Server (RunActions, GhcServer, RunBufferMode)
@@ -98,7 +100,8 @@ data IdeIdleState = IdeIdleState {
     -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7473.
     -- Logical timestamps (used to force ghc to recompile files)
     _ideLogicalTimestamp :: !LogicalTimestamp
-    -- The result computed by the last 'updateSession' invocation.
+    -- The result computed by the GHC API typing/compilation invocation
+    -- in the last call to 'updateSession' invocation.
   , _ideComputed         :: !(Strict Maybe Computed)
     -- Compiler dynamic options. If they are not set, the options from
     -- SessionConfig are used.
@@ -107,6 +110,10 @@ data IdeIdleState = IdeIdleState {
   , _ideGenerateCode     :: !Bool
     -- Files submitted by the user and not deleted yet.
   , _ideManagedFiles     :: !ManagedFilesInternal
+    -- Exit status of the last invocation of 'buildExe', if any.
+  , _ideBuildExeStatus   :: !(Maybe ExitCode)
+    -- Exit status of the last invocation of 'buildDoc', if any.
+  , _ideBuildDocStatus   :: !(Maybe ExitCode)
     -- Environment overrides
   , _ideEnv              :: ![(String, Maybe String)]
     -- The GHC server (this is replaced in 'restartSession')
@@ -145,6 +152,8 @@ ideComputed         :: Accessor IdeIdleState (Strict Maybe Computed)
 ideNewOpts          :: Accessor IdeIdleState (Maybe [String])
 ideGenerateCode     :: Accessor IdeIdleState Bool
 ideManagedFiles     :: Accessor IdeIdleState ManagedFilesInternal
+ideBuildExeStatus   :: Accessor IdeIdleState (Maybe ExitCode)
+ideBuildDocStatus   :: Accessor IdeIdleState (Maybe ExitCode)
 ideEnv              :: Accessor IdeIdleState [(String, Maybe String)]
 ideGhcServer        :: Accessor IdeIdleState GhcServer
 ideStdoutBufferMode :: Accessor IdeIdleState RunBufferMode
@@ -157,6 +166,8 @@ ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed  
 ideNewOpts          = accessor _ideNewOpts          $ \x s -> s { _ideNewOpts          = x }
 ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCode     = x }
 ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }
+ideBuildExeStatus   = accessor _ideBuildExeStatus   $ \x s -> s { _ideBuildExeStatus   = x }
+ideBuildDocStatus   = accessor _ideBuildDocStatus   $ \x s -> s { _ideBuildDocStatus   = x }
 ideEnv              = accessor _ideEnv              $ \x s -> s { _ideEnv              = x }
 ideGhcServer        = accessor _ideGhcServer        $ \x s -> s { _ideGhcServer        = x }
 ideStdoutBufferMode = accessor _ideStdoutBufferMode $ \x s -> s { _ideStdoutBufferMode = x }

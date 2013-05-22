@@ -158,6 +158,8 @@ module IdeSession (
     -- ** Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
+  , getBuildExeStatus
+  , getBuildDocStatus
   , getSpanInfo
   , getImports
   , getAutocompletion

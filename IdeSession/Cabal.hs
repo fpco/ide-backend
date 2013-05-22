@@ -1,15 +1,16 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module IdeSession.Cabal (
     buildExecutable, buildHaddock
   ) where
 
 import qualified Control.Exception as Ex
 import Control.Monad
-import Control.Monad.IO.Class (liftIO)
 import Data.List (delete)
 import Data.Maybe (catMaybes)
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
+import System.Exit (ExitCode (ExitSuccess))
 import System.FilePath ((</>))
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
@@ -157,7 +158,7 @@ externalDeps pkgs =
 configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
                   -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
                   -> [(ModuleName, FilePath)]
-                  -> IO ()
+                  -> IO ExitCode
 configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
                   pkgs loadedMs callback ms = do
   counter <- newIORef initialProgress
@@ -213,25 +214,26 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
   createDirectoryIfMissing False $ ideDistDir </> "build"
   let stdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
       stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
-  Ex.bracket
+  exitCode :: Either ExitCode () <- Ex.bracket
     (do stdOutputBackup <- redirectStdOutput stdoutLog
         stdErrorBackup  <- redirectStdError  stderrLog
         return (stdOutputBackup, stdErrorBackup))
     (\(stdOutputBackup, stdErrorBackup) -> do
         restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
-    (\_ -> do
+    (\_ -> Ex.try $ do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
         markProgress
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
         markProgress)
+  return $! either id (const ExitSuccess) exitCode
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API,
   -- or filter stdout and display progress on each good line.
 
 configureAndHaddock :: FilePath -> FilePath -> [String] -> Bool
                     -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
-                    -> IO ()
+                    -> IO ExitCode
 configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
                     pkgs loadedMs callback = do
   counter <- newIORef initialProgress
@@ -275,18 +277,19 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
   createDirectoryIfMissing False $ ideDistDir </> "doc"
   let stdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
       stderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
-  Ex.bracket
+  exitCode :: Either ExitCode () <- Ex.bracket
     (do stdOutputBackup <- redirectStdOutput stdoutLog
         stdErrorBackup  <- redirectStdError  stderrLog
         return (stdOutputBackup, stdErrorBackup))
     (\(stdOutputBackup, stdErrorBackup) -> do
         restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
-    (\_ -> do
+    (\_ -> Ex.try $ do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
         markProgress
         Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
         markProgress)
+  return $! either id (const ExitSuccess) exitCode
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API,
   -- or filter stdout and display progress on each good line.
@@ -294,7 +297,7 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
 buildExecutable :: FilePath -> FilePath -> [String] -> Bool
                 -> Strict Maybe Computed -> (Progress -> IO ())
                 -> [(ModuleName, FilePath)]
-                -> IO ()
+                -> IO ExitCode
 buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink
                 mcomputed callback ms = do
   case toLazyMaybe mcomputed of
@@ -312,13 +315,13 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink
                 return $ map (modulePackage . importModule) imports
       imps <- mapM imp loadedMs
       let pkgs = concat imps
-      liftIO $ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
-                                 pkgs loadedMs callback ms
+      configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
+                        pkgs loadedMs callback ms
       -- TODO: keep a list of built (and up-to-date?) executables?
 
 buildHaddock :: FilePath -> FilePath -> [String] -> Bool
              -> Strict Maybe Computed -> (Progress -> IO ())
-             -> IO ()
+             -> IO ExitCode
 buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink
              mcomputed callback = do
   case toLazyMaybe mcomputed of
@@ -336,5 +339,5 @@ buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink
                 return $ map (modulePackage . importModule) imports
       imps <- mapM imp loadedMs
       let pkgs = concat imps
-      liftIO $ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
-                                   pkgs loadedMs callback
+      configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
+                          pkgs loadedMs callback

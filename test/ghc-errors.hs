@@ -351,9 +351,13 @@ syntheticTests =
         loadModulesFrom session "."
         setCurrentDirectory "../../../"
         assertNoErrors session
+        status0 <- getBuildExeStatus session
+        assertEqual "before exe build" Nothing status0
         let m = "Maybes"
             upd = buildExe [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd 4
+        status1 <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status1
         let m2 = "Exception"
             upd2 = buildExe [(Text.pack m2, m2 <.> "hs")]
         updateSessionD session upd2 4
@@ -375,15 +379,21 @@ syntheticTests =
         assertEqual "Main exe output"
                     ""
                     out3
+        status4 <- getBuildExeStatus session
+        assertEqual "after all exe builds" (Just ExitSuccess) status4
     )
   , ( "Build haddocks from some .lhs files"
     , withConfiguredSession defOpts $ \session -> do
+        status0 <- getBuildDocStatus session
+        assertEqual "before module loading" Nothing status0
         setCurrentDirectory "test/compiler/utils"
         loadModulesFrom session "."
         setCurrentDirectory "../../../"
         assertNoErrors session
         let upd = buildDoc
         updateSessionD session upd 4
+        status1 <- getBuildDocStatus session
+        assertEqual "after doc build" (Just ExitSuccess) status1
         docDir <- getDocDir session
         indexExists <- doesFileExist $ docDir </> "html/main/index.html"
         assertBool ".lhs haddock files" indexExists
@@ -397,7 +407,8 @@ syntheticTests =
         let upd = buildDoc
         -- Note that the stderr log file here is empty, but exit code is 1:
         updateSessionD session upd 4
-        -- TODO: catch and check the exit code
+        status1 <- getBuildDocStatus session
+        assertEqual "failure after doc build" (Just $ ExitFailure 1) status1
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = [ "-hide-all-packages"
@@ -1531,8 +1542,11 @@ syntheticTests =
         setCurrentDirectory "../../"
         let m = "Main"
             upd = buildExe [(Text.pack m, "foooooooooooooooo")]
+        status0 <- getBuildExeStatus session
+        assertEqual "before exe build" Nothing status0
         updateSessionD session upd 4
-        -- TODO: catch and check the exit code
+        status1 <- getBuildExeStatus session
+        assertEqual "failure after exe build" (Just $ ExitFailure 1) status1
     )
   , ( "Build haddocks from ParFib"
     , let packageOpts = [ "-hide-all-packages"
