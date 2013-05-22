@@ -12,7 +12,7 @@ import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.FilePath ((</>))
 import Data.IORef (newIORef, readIORef, modifyIORef)
-import System.Directory (doesFileExist)
+import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.IO.Temp (createTempDirectory)
 
 import Distribution.License (License (..))
@@ -210,7 +210,8 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
-      stdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
+  createDirectoryIfMissing False $ ideDistDir </> "build"
+  let stdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
       stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
   Ex.bracket
     (do stdOutputBackup <- redirectStdOutput stdoutLog
@@ -271,7 +272,8 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         , Setup.haddockVerbosity = Setup.Flag minBound
         }
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
-      stdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
+  createDirectoryIfMissing False $ ideDistDir </> "doc"
+  let stdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
       stderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
   Ex.bracket
     (do stdOutputBackup <- redirectStdOutput stdoutLog
