@@ -18,6 +18,9 @@ module IdeSession.GHC.Run
   , GhcException
   , ghandle
   , ghandleJust
+  , getModuleGraph
+  , moduleNameString
+  , ms_mod_name, ms_hs_date
     -- * Processing source files (including compilation)
   , compileInGhc
   , DynamicOpts
@@ -85,7 +88,6 @@ import System.FilePath.Find (find, always, extension)
 import System.Process
 import Control.Concurrent (MVar, ThreadId)
 import Data.Aeson.TH (deriveJSON)
-import qualified Data.List as List (find)
 
 import IdeSession.GHC.HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
 import IdeSession.Types.Private
@@ -94,7 +96,6 @@ import IdeSession.Util
 import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
 import qualified IdeSession.Strict.List as StrictList
-import qualified IdeSession.Strict.Map as StrictMap
 
 -- | These source files are type-checked.
 hsExtensions :: [FilePath]
@@ -309,18 +310,9 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
     handleErrors flags = ghandle (ghcExceptionHandler flags)
                        . handleSourceError (sourceErrorHandler flags)
 
-modSummary :: ModuleName -> Ghc ModSummary
-modSummary mod = do
-  graph <- getModuleGraph
-  let is_mod s = Text.pack (moduleNameString (ms_mod_name s)) == mod
-  case List.find is_mod graph of
-    Just s -> return s
-    Nothing -> liftIO $ Ex.throw (userError $ "Invalid module " ++ show mod)
-
-importList :: ModuleName -> Ghc (Strict [] Import)
-importList mod = do
+importList :: ModSummary -> Ghc (Strict [] Import)
+importList summary = do
     dflags  <- getSessionDynFlags
-    summary <- modSummary mod
     let goImp :: Located (ImportDecl RdrName) -> Import
         goImp (L _ decl) = Import {
             importModule    = moduleNameToId dflags (unLoc (ideclName decl))
@@ -343,8 +335,8 @@ importList mod = do
     unLIE :: LIE RdrName -> Text
     unLIE (L _ name) = Text.pack $ GHC.showSDoc (GHC.ppr name)
 
-autocompletion :: ModuleName -> Ghc (Strict [] IdInfo)
-autocompletion mod = do
+autocompletion :: ModSummary -> Ghc (Strict [] IdInfo)
+autocompletion summary = do
   dflags  <- getSessionDynFlags
   session <- getSession
 
@@ -378,7 +370,6 @@ autocompletion mod = do
         env2 <- go $ rnImports ms_textual_imps
         return $ env1 ++ env2
 
-  summary <- modSummary mod
   envs    <- liftIO $ autoEnvs summary
   idIs    <- liftIO $ mapM eltsToAutocompleteMap envs
   return $ force idIs

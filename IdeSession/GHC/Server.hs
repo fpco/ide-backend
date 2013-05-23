@@ -33,17 +33,20 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
 import Control.Applicative ((<$>), (<*>))
 import qualified Control.Exception as Ex
-import Control.Monad (void, forM, forM_, forever, unless, when)
-import Control.Arrow (second)
+import Control.Monad (void, forM_, forever, unless, when)
+import Control.Monad.State (StateT, runStateT)
+import Control.Monad.Trans.Class (lift)
 import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
 import System.Exit (ExitCode)
-import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Binary (Binary)
 import qualified Data.Binary as Binary
-import Data.List ((\\))
+import Data.List (sortBy)
+import Data.Function (on)
+import Data.Accessor (accessor, (.>))
+import Data.Accessor.Monad.MTL.State (set)
 
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -52,6 +55,7 @@ import System.IO (Handle, hFlush)
 import System.Posix (Fd)
 import System.Posix.Env (setEnv, unsetEnv)
 import System.Posix.IO.ByteString
+import System.Time (ClockTime)
 
 import IdeSession.GHC.HsWalk
 import IdeSession.GHC.Run
@@ -67,6 +71,8 @@ import qualified IdeSession.Strict.Map    as StrictMap
 import qualified IdeSession.Strict.IntMap as StrictIntMap
 import qualified IdeSession.Strict.List   as StrictList
 import qualified IdeSession.Strict.Trie   as StrictTrie
+
+import qualified GHC
 
 import Paths_ide_backend
 
@@ -246,6 +252,20 @@ ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
       , "-i/Users/dev/wt/projects/fpco/ide-backend/test/Cabal"
       ]
 
+-- | We cache our own "module summaries" in between compile requests
+data ModSummary = ModSummary {
+    -- | We cache the import lists so that we can check if the import
+    -- list for this module has changed, and hence whether we need to recompute
+    -- autocompletion info
+    modImports   :: !(Strict [] Import)
+    -- | We cache the file stamp to see if the file has changed at all, and
+    -- hence whether we need to recompute the import list
+  , modTimestamp :: !ClockTime
+    -- | We cache whether this module was reported as "loaded" before so that
+    -- we can see which modules got unloaded
+  , modIsLoaded :: !Bool
+  }
+
 -- | Handle a compile or type check request
 ghcHandleCompile
   :: RpcConversation
@@ -254,15 +274,14 @@ ghcHandleCompile
   -> StrictIORef (Strict (Map ModuleName) IdList)
                          -- ^ ref where the ExtractIdsT plugin stores its data
                          -- (We clear this at the end of each call)
-  -> StrictIORef (Strict (Map ModuleName) (Strict [] Import))
-                         -- ^ we cache the import list of each module to avoid
-                         -- unnecessarily recomputing autocompletion info
+  -> StrictIORef (Strict (Map ModuleName) ModSummary)
+                         -- ^ see doc for 'ModSummary'
   -> FilePath            -- ^ source directory
   -> Bool                -- ^ should we generate code
   -> Bool                -- ^ should we generate per-module info
   -> Ghc ()
 ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
-                 pluginRef importsRef configSourcesDir
+                 pluginRef modsRef configSourcesDir
                  ideGenerateCode configGenerateModInfo = do
     errsRef <- liftIO $ newIORef StrictList.nil
     counter <- liftIO $ newIORef initialProgress
@@ -275,67 +294,108 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                                        (progressCallback counter)
                                        (\_ -> return ()) -- TODO: log?
 
-    (imports, auto, spanInfo) <-
-      if not configGenerateModInfo
-      then return (StrictMap.empty, StrictMap.empty, StrictMap.empty)
+
+    let initialResponse = GhcCompileDone {
+            ghcCompileErrors   = errs
+          , ghcCompileLoaded   = force $ loadedModules
+          , ghcCompileCache    = error "ghcCompileCache set last"
+          -- We construct the diffs incrementally
+          , ghcCompileImports  = StrictMap.empty
+          , ghcCompileAuto     = StrictMap.empty
+          , ghcCompileSpanInfo = StrictMap.empty
+          }
+
+    response <- if not configGenerateModInfo
+      then return initialResponse
       else do
-        -- Extract result from the plugin, and clear the pluginRef
-        pluginIdMaps <- liftIO $ do
-          idMaps <- readIORef pluginRef
-          writeIORef pluginRef StrictMap.empty
-          return idMaps
+        let removeOldModule :: ModuleName -> StateT GhcCompileResponse Ghc ()
+            removeOldModule m = do
+              set (importsFor m)  Remove
+              set (autoFor m)     Remove
+              set (spanInfoFor m) Remove
 
-        -- The plugin only gets called on modules that are recompiled
-        let recompiledModules = StrictMap.keys pluginIdMaps
+            addNewModule :: (ModuleName, GHC.ModSummary)
+                         -> StateT GhcCompileResponse Ghc (ModuleName, ModSummary)
+            addNewModule (m, ghcSummary) = do
+              imports <- lift $ importList     ghcSummary
+              auto    <- lift $ autocompletion ghcSummary
+              set (importsFor m) (Insert imports)
+              set (autoFor m)    (Insert auto)
+              -- spaninfo is set separately
 
-        -- For those modules that got recompiled, recompute import lists
-        newImportLists <- forM recompiledModules $ \m -> do
-          imports <- importList m
-          return (m, imports)
+              let newSummary = ModSummary {
+                                   modTimestamp = ms_hs_date ghcSummary
+                                 , modImports   = imports
+                                 , modIsLoaded  = m `elem` loadedModules
+                                 }
 
-        -- Find out which modules had their import list changed
-        oldImportLists <- liftIO $ readIORef importsRef
-        let changedImports = flip filter recompiledModules $ \m ->
-              let oldImportList = StrictMap.lookup m oldImportLists
-                  newImportList = lookup m newImportLists
-              in oldImportList /= newImportList
+              return (m, newSummary)
 
-        -- For modules with changed import lists, recompute autocompletion info
-        newAutos <- forM changedImports $ \m -> do
-          auto <- autocompletion m
-          return (m, auto)
+            updateModule :: ModuleName -> ModSummary -> GHC.ModSummary
+                         -> StateT GhcCompileResponse Ghc (ModuleName, ModSummary)
+            updateModule m oldSummary ghcSummary
+              | modTimestamp oldSummary == ms_hs_date ghcSummary =
+                  return (m, oldSummary)
+              | otherwise = do
+                  imports <- lift $ importList ghcSummary
+                  set (importsFor m) (Insert imports)
 
-        -- Figure out which modules got deleted since the last compile
-        let deletedModules :: Strict (Map ModuleName) (Diff a)
-            deletedModules = StrictMap.fromList $
-              zip (StrictMap.keys oldImportLists \\ loadedModules)
-                  (repeat Remove)
+                  when (imports /= modImports oldSummary) $ do
+                    auto <- lift $ autocompletion ghcSummary
+                    set (autoFor m) (Insert auto)
 
-        -- Construct diffs
-        let diffImports = StrictMap.fromList (map (second Insert) newImportLists)
-                        `StrictMap.union`
-                          deletedModules
-            diffAuto    = StrictMap.fromList (map (second Insert) newAutos)
-                        `StrictMap.union`
-                          deletedModules
-            diffIdList  = StrictMap.map Insert pluginIdMaps
-                        `StrictMap.union`
-                          deletedModules
+                  let newSummary = ModSummary {
+                                       modTimestamp = ms_hs_date ghcSummary
+                                     , modImports   = imports
+                                     , modIsLoaded  = m `elem` loadedModules
+                                     }
 
-        -- Update the cached import lists
-        liftIO $ writeIORef importsRef $ applyMapDiff diffImports oldImportLists
+                  when (not (modIsLoaded newSummary)) $
+                    set (spanInfoFor m) Remove
 
-        return (diffImports, diffAuto, diffIdList)
+                  return (m, newSummary)
+
+        let go :: [(ModuleName, ModSummary)]
+               -> [(ModuleName, GHC.ModSummary)]
+               -> StateT GhcCompileResponse Ghc [(ModuleName, ModSummary)]
+            go ((m, oldSummary) : old) ((m', ghcSummary) : new) = do
+              case compare m m' of
+                LT -> do removeOldModule m
+                         go old ((m', ghcSummary) : new)
+                GT -> do newSummary   <- addNewModule (m', ghcSummary)
+                         newSummaries <- go ((m, oldSummary) : old) new
+                         return $ newSummary : newSummaries
+                EQ -> do newSummary   <- updateModule m oldSummary ghcSummary
+                         newSummaries <- go old new
+                         return $ newSummary : newSummaries
+            go old new = do
+              mapM_ removeOldModule (map fst old)
+              mapM addNewModule new
+
+        let addSpanInfo :: [(ModuleName, IdList)]
+                        -> StateT GhcCompileResponse Ghc ()
+            addSpanInfo = mapM_ $ \(m, spanInfo) ->
+              set (spanInfoFor m) (Insert spanInfo)
+
+        (newSummaries, finalResponse) <- flip runStateT initialResponse $ do
+          pluginIdMaps <- lift . liftIO $ do
+            idMaps <- readIORef pluginRef
+            writeIORef pluginRef StrictMap.empty
+            return idMaps
+          addSpanInfo (StrictMap.toList pluginIdMaps)
+
+          graph <- lift $ getModuleGraph
+          let sortedGraph = sortBy (compare `on` ms_mod_name) graph
+              name s      = Text.pack (moduleNameString (ms_mod_name s))
+              namedGraph  = map (\s -> (name s, s)) sortedGraph
+          oldSummaries <- lift . liftIO $ readIORef modsRef
+          go (StrictMap.toList oldSummaries) namedGraph
+
+        liftIO $ writeIORef modsRef (StrictMap.fromList newSummaries)
+        return finalResponse
 
     cache <- liftIO $ constructExplicitSharingCache
-    liftIO . put $ GhcCompileDone {
-        ghcCompileErrors   = errs
-      , ghcCompileLoaded   = force loadedModules
-      , ghcCompileImports  = imports
-      , ghcCompileAuto     = auto
-      , ghcCompileSpanInfo = spanInfo
-      , ghcCompileCache    = cache
-      }
+    liftIO . put $ response { ghcCompileCache = cache }
   where
     dynOpts :: DynamicOpts
     dynOpts = maybe dOpts optsToDynFlags ideNewOpts
@@ -350,6 +410,15 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
       oldCounter <- readIORef counter
       modifyIORef counter (updateProgress ghcMsg)
       put $ GhcCompileProgress oldCounter
+
+    -- Various accessors
+    allImports  = accessor ghcCompileImports  (\is st -> st { ghcCompileImports  = is })
+    allAuto     = accessor ghcCompileAuto     (\as st -> st { ghcCompileAuto     = as })
+    allSpanInfo = accessor ghcCompileSpanInfo (\ss st -> st { ghcCompileSpanInfo = ss })
+
+    importsFor  m = allImports  .> StrictMap.accessorDefault Keep m
+    autoFor     m = allAuto     .> StrictMap.accessorDefault Keep m
+    spanInfoFor m = allSpanInfo .> StrictMap.accessorDefault Keep m
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation

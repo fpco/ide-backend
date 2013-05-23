@@ -47,7 +47,6 @@ import System.FilePath (takeDirectory, makeRelative, (</>))
 import System.Posix.Files (setFileTimes)
 import System.IO.Temp (createTempDirectory)
 import qualified Data.Text as Text
-import Control.Applicative ((<$>))
 
 import IdeSession.State
 import IdeSession.Cabal (buildExecutable, buildHaddock)

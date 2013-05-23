@@ -28,8 +28,6 @@ import Prelude hiding (span)
 import Control.Applicative ((<$>), (<*>))
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Map (Map)
-import qualified Data.Map as Map
 import Data.Binary (Binary(..), getWord8, putWord8)
 import Data.Aeson.TH (deriveJSON)
 

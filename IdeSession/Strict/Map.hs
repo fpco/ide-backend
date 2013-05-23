@@ -13,6 +13,7 @@ module IdeSession.Strict.Map (
   , union
   , filterWithKey
   , lookup
+  , findWithDefault
   , keysSet
   , (\\)
   , alter
@@ -20,11 +21,15 @@ module IdeSession.Strict.Map (
   , (!)
   , keys
   , delete
+  , accessor
+  , accessorDefault
   ) where
 
 import Prelude hiding (map, lookup)
 import Data.Set (Set)
 import qualified Data.Map as Map
+import Data.Accessor (Accessor)
+import qualified Data.Accessor as Acc
 
 import IdeSession.Strict.Container
 
@@ -63,6 +68,9 @@ keysSet = Map.keysSet . toLazyMap
 lookup :: Ord k => k -> Strict (Map k) v -> Maybe v
 lookup k = Map.lookup k . toLazyMap
 
+findWithDefault :: Ord k => v -> k -> Strict (Map k) v -> v
+findWithDefault d k = Map.findWithDefault d k . toLazyMap
+
 (\\) :: Ord k => Strict (Map k) a -> Strict (Map k) b -> Strict (Map k) a
 (\\) a b = StrictMap $ (Map.\\) (toLazyMap a) (toLazyMap b)
 
@@ -86,3 +94,11 @@ keys = Map.keys . toLazyMap
 
 delete :: Ord k => k -> Strict (Map k) a -> Strict (Map k) a
 delete k = StrictMap . Map.delete k . toLazyMap
+
+accessor :: Ord k => k -> Accessor (Strict (Map k) a) (Maybe a)
+accessor key = Acc.accessor (lookup key) (\mval mp -> case mval of
+                                            Just val -> insert key val mp
+                                            Nothing  -> delete key mp)
+
+accessorDefault :: Ord k => v -> k -> Accessor (Strict (Map k) v) v
+accessorDefault d k = Acc.accessor (findWithDefault d k) (insert k)

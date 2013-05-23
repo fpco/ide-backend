@@ -7,7 +7,6 @@ module IdeSession.Types.Translation (
   , showNormalized
   ) where
 
-import qualified Data.Map as Map
 import qualified Data.ByteString.Char8 as BSSC
 import Data.Binary (Binary)
 
@@ -15,7 +14,6 @@ import IdeSession.Strict.Container
 import qualified IdeSession.Types.Public  as Public
 import qualified IdeSession.Types.Private as Private
 import qualified IdeSession.Strict.IntMap as StrictIntMap
-import qualified IdeSession.Strict.Map    as StrictMap
 
 -- | The associated type with explicit sharing
 type family XShared a

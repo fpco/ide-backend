@@ -5,6 +5,7 @@ import Prelude hiding (span, mod)
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad (liftM, void, forM_)
+import Control.Applicative ((<$>))
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
@@ -229,8 +230,8 @@ syntheticTests =
   [ ( "Maintain list of compiled modules I"
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
-              assertEqual name (sort (map Text.pack goodMods))
-                =<< getLoadedModules session
+              assertEqual name (map Text.pack goodMods)
+                =<< (sort <$> getLoadedModules session)
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
         assEq "XXX" ["XXX"]
         updateSessionD session (loadModule "A.hs" "a = 5") 1
@@ -252,8 +253,8 @@ syntheticTests =
   , ( "Maintain list of compiled modules II"
     , withConfiguredSession defOpts $ \session -> do
         let assEq name goodMods =
-              assertEqual name (sort (map Text.pack goodMods))
-                =<< getLoadedModules session
+              assertEqual name (map Text.pack goodMods)
+                =<< (sort <$> getLoadedModules session)
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
         assEq "XXX" ["XXX"]
         updateSessionD session (loadModule "A.hs" "a = 5") 1
