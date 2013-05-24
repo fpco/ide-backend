@@ -17,8 +17,6 @@ module IdeSession.GHC.HsWalk
   , mainPackage
   ) where
 
--- TODO: make sure all the caches and state is updated strictly
-
 import Control.Arrow (first, second)
 import Control.Monad (forM_)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
@@ -70,7 +68,7 @@ import DataCon (dataConRepType)
 import Pretty (showDocWith, Mode(OneLineMode))
 import PprTyThing (pprTypeForUser)
 
-#define DEBUG 0
+#define DEBUG 1
 
 {------------------------------------------------------------------------------
   Caching
@@ -570,10 +568,30 @@ instance ExtractIds a => ExtractIds (Maybe a) where
   extractIds (Just x) = extractIds x
 
 instance Record id => ExtractIds (HsGroup id) where
-  extractIds group = ast Nothing "HsGroup" $ do
-    -- TODO: HsGroup has lots of other fields
-    extractIds (hs_valds group)
-    extractIds (hs_tyclds group)
+  extractIds HsGroup { hs_valds
+                     , hs_tyclds
+                     , hs_instds
+                     , hs_derivds
+                     , hs_fixds
+                     , hs_defds
+                     , hs_fords
+                     , hs_warnds
+                     , hs_annds
+                     , hs_ruleds
+                     , hs_vects
+                     , hs_docs} = ast Nothing "HsGroup" $ do
+    extractIds hs_valds
+    extractIds hs_tyclds
+    extractIds hs_instds
+    extractIds hs_derivds
+    extractIds hs_fixds
+    extractIds hs_defds
+    extractIds hs_fords
+    extractIds hs_warnds
+    extractIds hs_annds
+    extractIds hs_ruleds
+    extractIds hs_vects
+    extractIds hs_docs
 
 instance Record id => ExtractIds (HsValBinds id) where
   extractIds (ValBindsIn {}) =
@@ -645,12 +663,12 @@ instance Record id => ExtractIds (LHsType id) where
     -- _var is not located
     extractIds typ
   extractIds (L span (HsSpliceTy splice _freevars _postTcKind)) = ast (Just span) "HsSpliceTy" $
-    extractIds splice
+    extractIds (L span splice) -- reuse location info
   extractIds (L span (HsCoreTy _)) = ast (Just span) "HsCoreTy" $
     -- Not important: doesn't arise until later in the compiler pipeline
     return ()
   extractIds (L span (HsQuasiQuoteTy qquote))  = ast (Just span) "HsQuasiQuoteTy" $
-    extractIds qquote
+    extractIds (L span qquote) -- reuse location info
   extractIds (L span (HsExplicitListTy _postTcKind typs)) = ast (Just span) "HsExplicitListTy" $
     extractIds typs
   extractIds (L span (HsExplicitTupleTy _postTcKind typs)) = ast (Just span) "HsExplicitTupleTy" $
@@ -661,12 +679,12 @@ instance Record id => ExtractIds (LHsType id) where
   extractIds (L span (HsTyLit _))             = unsupported (Just span) "HsTyLit"
 #endif
 
-instance Record id => ExtractIds (HsSplice id) where
-  extractIds (HsSplice _id expr) = ast Nothing "HsSplice" $
+instance Record id => ExtractIds (Located (HsSplice id)) where
+  extractIds (L span (HsSplice _id expr)) = ast (Just span) "HsSplice" $
     extractIds expr
 
-instance Record id => ExtractIds (HsQuasiQuote id) where
-  extractIds (HsQuasiQuote _id _srcSpan _enclosed) = ast Nothing "HsQuasiQuote" $
+instance Record id => ExtractIds (Located (HsQuasiQuote id)) where
+  extractIds (L span (HsQuasiQuote _id _srcSpan _enclosed)) = ast (Just span) "HsQuasiQuote" $
     -- Unfortunately, no location information is stored within HsQuasiQuote at all
     return ()
 
@@ -679,19 +697,19 @@ instance Record id => ExtractIds (LHsTyVarBndrs id) where
 
 instance Record id => ExtractIds (LHsTyVarBndr id) where
 #if __GLASGOW_HASKELL__ >= 706
-  extractIds (L span (UserTyVar name)) = ast (Just span) "UserTyVar"
+  extractIds (L span (UserTyVar name)) = ast (Just span) "UserTyVar" $ do
 #else
-  extractIds (L span (UserTyVar name _postTcKind)) = ast (Just span) "UserTyVar"
+  extractIds (L span (UserTyVar name _postTcKind)) = ast (Just span) "UserTyVar" $ do
 #endif
-    (record span True name)
+    record span True name
 
 #if __GLASGOW_HASKELL__ >= 706
-  extractIds (L span (KindedTyVar name _kind)) = ast (Just span) "KindedTyVar"
+  extractIds (L span (KindedTyVar name kind)) = ast (Just span) "KindedTyVar" $ do
 #else
-  extractIds (L span (KindedTyVar name _kind _postTcKind)) = ast (Just span) "KindedTyVar"
+  extractIds (L span (KindedTyVar name kind _postTcKind)) = ast (Just span) "KindedTyVar" $ do
 #endif
-    -- TODO: deal with _kind
-    (record span True name)
+    record span True name
+    extractIds kind
 
 instance Record id => ExtractIds (LHsContext id) where
   extractIds (L span typs) = ast (Just span) "LHsContext" $
@@ -861,9 +879,9 @@ instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsCoreAnn _string expr)) = ast (Just span) "HsCoreAnn" $ do
     extractIds expr
   extractIds (L span (HsSpliceE splice)) = ast (Just span) "HsSpliceE" $ do
-    extractIds splice
+    extractIds (L span splice) -- reuse span
   extractIds (L span (HsQuasiQuoteE qquote)) = ast (Just span) "HsQuasiQuoteE" $ do
-    extractIds qquote
+    extractIds (L span qquote) -- reuse span
   extractIds (L span (ExplicitPArr _postTcType exprs)) = ast (Just span) "ExplicitPArr" $ do
     extractIds exprs
   extractIds (L span (PArrSeq _postTcType seqInfo)) = ast (Just span) "PArrSeq" $ do
@@ -887,7 +905,8 @@ instance Record id => ExtractIds (LHsExpr id) where
   -- Second argument is something to do with OverloadedLists
   extractIds (L span (ArithSeq _ _ _))      = unsupported (Just span) "ArithSeq"
 #else
-  extractIds (L span (ArithSeq _ _ ))       = unsupported (Just span) "ArithSeq"
+  extractIds (L span (ArithSeq _postTcExpr seqInfo)) = ast (Just span) "ArithSeq" $ do
+    extractIds seqInfo
 #endif
 
 #if __GLASGOW_HASKELL__ >= 706
@@ -925,9 +944,8 @@ instance Record id => ExtractIds (HsBracket id) where
   extractIds (VarBr _namespace _id) = ast Nothing "VarBr" $
     -- No location information, sadly
     return ()
-
-  -- TODO
-  extractIds (DecBrL _decls) = unsupported Nothing "DecBrL"
+  extractIds (DecBrL decls) = ast Nothing "DecBrL" $
+    extractIds decls
 
 instance Record id => ExtractIds (HsTupArg id) where
   extractIds (Present arg) =
@@ -964,10 +982,10 @@ instance Record id => ExtractIds (LStmt id) where
     extractIds binds
   extractIds (L span (LastStmt expr _return)) = ast (Just span) "LastStmt" $
     extractIds expr
+  extractIds (L span stmt@(RecStmt {})) = ast (Just span) "RecStmt" $ do
+    extractIds (recS_stmts stmt)
 
   extractIds (L span (TransStmt {}))     = unsupported (Just span) "TransStmt"
-  extractIds (L span (RecStmt {}))       = unsupported (Just span) "RecStmt"
-
 #if __GLASGOW_HASKELL__ >= 706
   extractIds (L span (ParStmt _ _ _))    = unsupported (Just span) "ParStmt"
 #else
@@ -1022,7 +1040,7 @@ instance Record id => ExtractIds (LPat id) where
     -- _typ is not located
     extractIds pat
   extractIds (L span (QuasiQuotePat qquote)) = ast (Just span) "QuasiQuotePat" $
-    extractIds qquote
+    extractIds (L span qquote) -- reuse span
 
   -- During translation only
   extractIds (L span (CoPat _ _ _)) = ast (Just span) "CoPat" $
@@ -1042,20 +1060,36 @@ instance Record id => ExtractIds (LTyClDecl id) where
     record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
     extractIds (tcdTyVars decl)
     extractIds (tcdTyPats decl)
-    -- TODO: deal with tcdKindSig
+    extractIds (tcdKindSig decl)
     extractIds (tcdCons decl)
     extractIds (tcdDerivs decl)
+  extractIds (L span decl@(ClassDecl {})) = ast (Just span) "ClassDecl" $ do
+    extractIds (tcdCtxt decl)
+    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    extractIds (tcdTyVars decl)
+    -- Sadly, we don't get location info for the functional dependencies
+    extractIds (tcdSigs decl)
+    extractIds (tcdATs decl)
+    extractIds (tcdATDefs decl)
+    extractIds (tcdDocs decl)
 
-  extractIds (L span _decl@(ForeignType {})) = unsupported (Just span) "ForeignType"
-  extractIds (L span _decl@(ClassDecl {}))   = unsupported (Just span) "ClassDecl"
 #if __GLASGOW_HASKELL__ >= 707
-  extractIds (L span _decl@(FamDecl {}))     = unsupported (Just span) "TyFamily"
   extractIds (L span _decl@(SynDecl {}))     = unsupported (Just span) "TySynonym"
+  extractIds (L span _decl@(FamDecl {}))     = unsupported (Just span) "TyFamily"
   extractIds (L span _decl@(DataDecl {}))    = unsupported (Just span) "DataDecl"
 #else
-  extractIds (L span _decl@(TyFamily {}))    = unsupported (Just span) "TyFamily"
-  extractIds (L span _decl@(TySynonym {}))   = unsupported (Just span) "TySynonym"
+  extractIds (L span decl@(TySynonym {})) = ast (Just span) "TySynonym" $ do
+    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    extractIds (tcdTyVars decl)
+    extractIds (tcdTyPats decl)
+    extractIds (tcdSynRhs decl)
+  extractIds (L span decl@(TyFamily {})) = ast (Just span) "TyFamily" $  do
+    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    extractIds (tcdTyVars decl)
+    extractIds (tcdKind decl)
 #endif
+
+  extractIds (L span _decl@(ForeignType {})) = unsupported (Just span) "ForeignType"
 
 instance Record id => ExtractIds (LConDecl id) where
   extractIds (L span decl@(ConDecl {})) = ast (Just span) "ConDecl" $ do
@@ -1063,12 +1097,101 @@ instance Record id => ExtractIds (LConDecl id) where
     extractIds (con_qvars decl)
     extractIds (con_cxt decl)
     extractIds (con_details decl)
-    -- TODO: deal with con_res
+    extractIds (con_res decl)
+
+instance Record id => ExtractIds (ResType id) where
+  extractIds ResTyH98 = ast Nothing "ResTyH98" $ do
+    return () -- Nothing to do
+  extractIds (ResTyGADT typ) = ast Nothing "ResTyGADT" $ do
+    extractIds typ
 
 instance Record id => ExtractIds (ConDeclField id) where
   extractIds (ConDeclField name typ _doc) = do
     record (getLoc name) True (unLoc name)
     extractIds typ
+
+instance Record id => ExtractIds (LInstDecl id) where
+  extractIds (L span (InstDecl typ binds sigs accTypes)) = ast (Just span) "LInstDecl" $ do
+    extractIds typ
+    extractIds binds
+    extractIds sigs
+    extractIds accTypes
+
+instance Record id => ExtractIds (LDerivDecl id) where
+  extractIds (L span (DerivDecl deriv_type)) = ast (Just span) "LDerivDecl" $ do
+    extractIds deriv_type
+
+instance Record id => ExtractIds (LFixitySig id) where
+  extractIds (L span (FixitySig name _fixity)) = ast (Just span) "LFixitySig" $ do
+    record (getLoc name) False (unLoc name)
+
+instance Record id => ExtractIds (LDefaultDecl id) where
+  extractIds (L span (DefaultDecl typs)) = ast (Just span) "LDefaultDecl" $ do
+    extractIds typs
+
+instance Record id => ExtractIds (LForeignDecl id) where
+  extractIds (L span (ForeignImport name sig _coercion _import)) = ast (Just span) "ForeignImport" $ do
+    record (getLoc name) True (unLoc name)
+    extractIds sig
+  extractIds (L span (ForeignExport name sig _coercion _export)) = ast (Just span) "ForeignExport" $ do
+    record (getLoc name) False (unLoc name)
+    extractIds sig
+
+instance Record id => ExtractIds (LWarnDecl id) where
+  extractIds (L span (Warning name _txt)) = ast (Just span) "Warning" $ do
+    -- We use the span of the entire warning because we don't get location info for name
+    record span False name
+
+instance Record id => ExtractIds (LAnnDecl id) where
+  extractIds (L span _) = unsupported (Just span) "LAnnDecl"
+
+instance Record id => ExtractIds (LRuleDecl id) where
+  extractIds (L span _) = unsupported (Just span) "LRuleDecl"
+
+instance Record id => ExtractIds (LVectDecl id) where
+  extractIds (L span _) = unsupported (Just span) "LVectDecl"
+
+instance ExtractIds LDocDecl where
+  extractIds (L span _) = ast (Just span) "LDocDec" $
+    -- Nothing to do
+    return ()
+
+instance Record id => ExtractIds (Located (SpliceDecl id)) where
+  extractIds (L span (SpliceDecl expr _explicit)) = ast (Just span) "SpliceDecl" $ do
+    extractIds expr
+
+-- LHsDecl is a wrapper around the various kinds of declarations; the wrapped
+-- declarations don't have location information of themselves, so we reuse
+-- the location info of the wrapper
+instance Record id => ExtractIds (LHsDecl id) where
+  extractIds (L span (TyClD tyClD)) = ast (Just span) "TyClD" $
+    extractIds (L span tyClD)
+  extractIds (L span (InstD instD)) = ast (Just span) "InstD" $
+    extractIds (L span instD)
+  extractIds (L span (DerivD derivD)) = ast (Just span) "DerivD" $
+    extractIds (L span derivD)
+  extractIds (L span (ValD valD)) = ast (Just span) "ValD" $
+    extractIds (L span valD)
+  extractIds (L span (SigD sigD)) = ast (Just span) "SigD" $
+    extractIds (L span sigD)
+  extractIds (L span (DefD defD)) = ast (Just span) "DefD" $
+    extractIds (L span defD)
+  extractIds (L span (ForD forD)) = ast (Just span) "ForD" $
+    extractIds (L span forD)
+  extractIds (L span (WarningD warningD)) = ast (Just span) "WarningD" $
+    extractIds (L span warningD)
+  extractIds (L span (AnnD annD)) = ast (Just span) "AnnD" $
+    extractIds (L span annD)
+  extractIds (L span (RuleD ruleD)) = ast (Just span) "RuleD" $
+    extractIds (L span ruleD)
+  extractIds (L span (VectD vectD)) = ast (Just span) "VectD" $
+    extractIds (L span vectD)
+  extractIds (L span (SpliceD spliceD)) = ast (Just span) "SpliceD" $
+    extractIds (L span spliceD)
+  extractIds (L span (DocD docD)) = ast (Just span) "DocD" $
+    extractIds (L span docD)
+  extractIds (L span (QuasiQuoteD quasiQuoteD)) = ast (Just span) "QuasiQuoteD" $
+    extractIds (L span quasiQuoteD)
 
 {------------------------------------------------------------------------------
   Auxiliary

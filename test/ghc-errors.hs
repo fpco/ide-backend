@@ -1998,6 +1998,155 @@ syntheticTests =
         idInfo <- getSpanInfo session
         assertIdInfo idInfo "A" (4,7,4,13) "append (VarName) :: BS.ByteString -> BS.ByteString -> BS.ByteString (defined in bytestring-0.9.2.1:Data.ByteString at <no location info>; imported from bytestring-0.9.2.1:Data.ByteString as 'BS.' at A.hs@3:1-3:39)"
     )
+  , ( "Type information 15: Other constructs"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ {-  1 -} "{-# LANGUAGE StandaloneDeriving, DoRec #-}"
+                    , {-  2 -} "module A where"
+
+                    , {-  3 -} "data MkT = MkT"
+
+                    , {-  4 -} "instance Eq MkT where"
+                    , {-  5 -} "  (==) = const $ const True"
+
+                    , {-  6 -} "deriving instance Show MkT"
+
+                    , {-  7 -} "(+++) = (++)"
+                    , {-  8 -} "infixr 5 +++"
+
+                    , {-  9 -} "default (Int)"
+
+                    , {- 10 -} "{-# DEPRECATED f \"This is completely obsolete\" #-}"
+                    , {- 11 -} "f :: Int"
+                    , {- 12 -} "f = 1"
+
+                    , {- 13 -} "{-# WARNING g \"You really shouldn't be using g!\" #-}"
+                    , {- 14 -} "g :: Int"
+                    , {- 15 -} "g = 2"
+
+                    , {- 16 -} "h :: Int -> Int -> Int -> ([Int], [Int], [Int], [Int])"
+                    , {- 17 -} "h x y z = ([x ..], [x, y..], [x .. z], [x, y .. z])"
+
+                    , {- 18 -} "justOnes = do rec xs <- Just (1 : xs)"
+                    , {- 19 -} "              return (map negate xs)"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        assertIdInfo idInfo "A" (4,10,4,12) "Eq (TcClsName) (defined in ghc-prim-0.2.0.0:GHC.Classes at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
+        assertIdInfo idInfo "A" (5,18,5,23) "const (VarName) :: a -> b -> a (defined in base-4.5.1.0:GHC.Base at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
+        assertIdInfo idInfo "A" (6,19,6,23) "Show (TcClsName) (defined in base-4.5.1.0:GHC.Show at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
+        assertIdInfo idInfo "A" (6,24,6,27) "MkT (TcClsName) (defined at A.hs@3:6-3:9)"
+        assertIdInfo idInfo "A" (8,10,8,13) "+++ (VarName) :: [a] -> [a] -> [a] (defined at A.hs@7:1-7:6)"
+        assertIdInfo idInfo "A" (9,10,9,13) "Int (TcClsName) (wired in to the compiler)"
+        -- TODO: for some reason the DEPRECATED/WARNING pragmas don't seem to
+        -- be translated to HsWarnDecl ?
+        assertIdInfo idInfo "A" (17,13,17,14) "x (VarName) :: Int (defined at A.hs@17:3-17:4)"
+        assertIdInfo idInfo "A" (17,21,17,22) "x (VarName) :: Int (defined at A.hs@17:3-17:4)"
+        assertIdInfo idInfo "A" (17,24,17,25) "y (VarName) :: Int (defined at A.hs@17:5-17:6)"
+        assertIdInfo idInfo "A" (17,31,17,32) "x (VarName) :: Int (defined at A.hs@17:3-17:4)"
+        assertIdInfo idInfo "A" (17,36,17,37) "z (VarName) :: Int (defined at A.hs@17:7-17:8)"
+        assertIdInfo idInfo "A" (17,41,17,42) "x (VarName) :: Int (defined at A.hs@17:3-17:4)"
+        assertIdInfo idInfo "A" (17,44,17,45) "y (VarName) :: Int (defined at A.hs@17:5-17:6)"
+        assertIdInfo idInfo "A" (17,49,17,50) "z (VarName) :: Int (defined at A.hs@17:7-17:8)"
+        assertIdInfo idInfo "A" (18,19,18,21) "xs (VarName) :: [Int] (binding occurrence)"
+        assertIdInfo idInfo "A" (18,25,18,29) "Just (DataName) (defined in base-4.5.1.0:Data.Maybe at <no location info>; imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9)"
+        assertIdInfo idInfo "A" (18,35,18,37) "xs (VarName) :: [Int] (defined at A.hs@18:19-18:21)"
+    )
+  , ( "Type information 16: FFI"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE ForeignFunctionInterface #-}"
+                    , "module A where"
+
+                    , "import Prelude hiding (sin)"
+                    , "import Foreign.C"
+
+                    , "foreign import ccall \"sin\" c_sin :: CDouble -> CDouble"
+
+                    , "sin :: Double -> Double"
+                    , "sin d = realToFrac (c_sin (realToFrac d))"
+
+                    , "andBack :: CDouble -> CDouble"
+                    , "andBack = realToFrac . sin . realToFrac"
+
+                    , "foreign export ccall andBack :: CDouble -> CDouble"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        assertIdInfo idInfo "A" (5,28,5,33) "c_sin (VarName) :: CDouble -> CDouble (binding occurrence)"
+        assertIdInfo idInfo "A" (5,37,5,44) "CDouble (TcClsName) (defined in base-4.5.1.0:Foreign.C.Types at <no location info>; imported from base-4.5.1.0:Foreign.C at A.hs@4:1-4:17)"
+        assertIdInfo idInfo "A" (7,21,7,26) "c_sin (VarName) :: CDouble -> CDouble (defined at A.hs@5:28-5:33)"
+        assertIdInfo idInfo "A" (10,22,10,29) "andBack (VarName) :: CDouble -> CDouble (defined at A.hs@9:1-9:8)"
+        assertIdInfo idInfo "A" (10,33,10,40) "CDouble (TcClsName) (defined in base-4.5.1.0:Foreign.C.Types at <no location info>; imported from base-4.5.1.0:Foreign.C at A.hs@4:1-4:17)"
+    )
+  , ( "Type information 17: GADTs"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE GADTs, KindSignatures, RankNTypes #-}"
+                    , "module A where"
+
+                    , "data Expr :: * -> * where"
+                    , "  Num  :: Int -> Expr Int"
+                    , "  Bool :: Bool -> Expr Bool"
+                    , "  Add  :: Expr Int -> Expr Int -> Expr Int"
+                    , "  Cond :: forall a. Expr Bool -> Expr a -> Expr a -> Expr a"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        -- TODO: we get very strange types for some of the constructors
+        assertIdInfo idInfo "A" (4,3,4,6) "Num (DataName) :: ghc-prim:GHC.Prim.~# * ($a) Int -> Int -> Expr ($a) (binding occurrence)"
+        -- Check that we get info for the result types
+        assertIdInfo idInfo "A" (4,23,4,26) "Int (TcClsName) (wired in to the compiler)"
+        -- But the type is ok when we don't bind the variable
+        assertIdInfo idInfo "A" (7,3,7,7) "Cond (DataName) :: Expr Bool -> Expr a -> Expr a -> Expr a (binding occurrence)"
+        assertIdInfo idInfo "A" (7,18,7,19) "a (TvName) (binding occurrence)"
+        assertIdInfo idInfo "A" (7,54,7,58) "Expr (TcClsName) (defined at A.hs@3:6-3:10)"
+        assertIdInfo idInfo "A" (7,59,7,60) "a (TvName) (defined at A.hs@7:18-7:19)"
+    )
+  , ( "Type information 18: Other types"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ {-  1 -} "{-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, TypeFamilies #-}"
+                    , {-  2 -} "module A where"
+
+                    , {-  3 -} "class C a where"
+                    , {-  4 -} "  f :: Int -> a"
+
+                    , {-  5 -} "class D a b | a -> b where"
+                    , {-  6 -} "  g :: a -> b"
+
+                    , {-  7 -} "type Foo = Int"
+
+                    , {-  8 -} "type family Bar a"
+                    , {-  9 -} "type instance Bar Int = Bool"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        -- TODO: we don't get location info for the fundeps
+        -- (this is missing from GHC's AST)
+        assertIdInfo idInfo "A" (3,7,3,8) "C (TcClsName) (binding occurrence)"
+        assertIdInfo idInfo "A" (3,9,3,10) "a (TvName) (binding occurrence)"
+        assertIdInfo idInfo "A" (4,3,4,4) "f (VarName) (defined at A.hs@4:3-4:4)"
+        assertIdInfo idInfo "A" (4,8,4,11) "Int (TcClsName) (wired in to the compiler)"
+        assertIdInfo idInfo "A" (4,15,4,16) "a (TvName) (defined at A.hs@3:9-3:10)"
+        assertIdInfo idInfo "A" (5,7,5,8) "D (TcClsName) (binding occurrence)"
+        assertIdInfo idInfo "A" (5,9,5,10) "a (TvName) (binding occurrence)"
+        assertIdInfo idInfo "A" (5,11,5,12) "b (TvName) (binding occurrence)"
+        assertIdInfo idInfo "A" (6,3,6,4) "g (VarName) (defined at A.hs@6:3-6:4)"
+        assertIdInfo idInfo "A" (6,8,6,9) "a (TvName) (defined at A.hs@5:9-5:10)"
+        assertIdInfo idInfo "A" (6,13,6,14) "b (TvName) (defined at A.hs@5:11-5:12)"
+        assertIdInfo idInfo "A" (7,6,7,9) "Foo (TcClsName) (binding occurrence)"
+        assertIdInfo idInfo "A" (7,12,7,15) "Int (TcClsName) (wired in to the compiler)"
+        assertIdInfo idInfo "A" (8,13,8,16) "Bar (TcClsName) (binding occurrence)"
+        assertIdInfo idInfo "A" (8,17,8,18) "a (TvName) (binding occurrence)"
+        assertIdInfo idInfo "A" (9,15,9,18) "Bar (TcClsName) (binding occurrence)"
+        assertIdInfo idInfo "A" (9,19,9,22) "Int (TcClsName) (wired in to the compiler)"
+        assertIdInfo idInfo "A" (9,25,9,29) "Bool (TcClsName) (wired in to the compiler)"
+    )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
