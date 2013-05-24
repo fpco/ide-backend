@@ -308,7 +308,23 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
     response <- if not configGenerateModInfo
       then return initialResponse
       else do
-        let removeOldModule :: ModuleName -> StateT GhcCompileResponse Ghc ()
+        pluginIdMaps <- liftIO $ do
+          idMaps <- readIORef pluginRef
+          writeIORef pluginRef StrictMap.empty
+          return idMaps
+
+        let recompiledModules :: [ModuleName]
+            recompiledModules = StrictMap.keys pluginIdMaps
+
+            -- Strictly speaking, this check is not entirely accurate, because
+            -- we ignore the package of the imported module. However, I don't
+            -- think this can lead to actual problems, because if modules
+            -- between packages overlap this will cause trouble elsewhere.
+            gotRecompiled :: Import -> Bool
+            gotRecompiled imp =
+              moduleName (importModule imp) `elem` recompiledModules
+
+            removeOldModule :: ModuleName -> StateT GhcCompileResponse Ghc ()
             removeOldModule m = do
               set (importsFor m)  Remove
               set (autoFor m)     Remove
@@ -333,27 +349,36 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
 
             updateModule :: ModuleName -> ModSummary -> GHC.ModSummary
                          -> StateT GhcCompileResponse Ghc (ModuleName, ModSummary)
-            updateModule m oldSummary ghcSummary
-              | modTimestamp oldSummary == ms_hs_date ghcSummary =
-                  return (m, oldSummary)
-              | otherwise = do
-                  imports <- lift $ importList ghcSummary
-                  set (importsFor m) (Insert imports)
+            updateModule m oldSummary ghcSummary = do
+              (imports, importsChanged) <-
+                if modTimestamp oldSummary == ms_hs_date ghcSummary
+                  then return (modImports oldSummary, False)
+                  else do imports <- lift $ importList ghcSummary
+                          set (importsFor m) (Insert imports)
+                          return (imports, imports /= modImports oldSummary)
 
-                  when (imports /= modImports oldSummary) $ do
-                    auto <- lift $ autocompletion ghcSummary
-                    set (autoFor m) (Insert auto)
+              -- We recompute autocompletion info if the imported modules have
+              -- been recompiled. TODO: We might be able to optimize this by
+              -- checking one of ghc's various hashes to avoid recomputing
+              -- autocompletion info even if an imported module got recompiled,
+              -- but it's interface did not change (`mi_iface_hash` perhaps?)
+              -- TODO: We might also be able to make this check more fine
+              -- grained and recompute autocompletion info for some imports,
+              -- but not for others.
+              when (importsChanged || StrictList.any gotRecompiled imports) $ do
+                auto <- lift $ autocompletion ghcSummary
+                set (autoFor m) (Insert auto)
 
-                  let newSummary = ModSummary {
-                                       modTimestamp = ms_hs_date ghcSummary
-                                     , modImports   = imports
-                                     , modIsLoaded  = m `elem` loadedModules
-                                     }
+              let newSummary = ModSummary {
+                                   modTimestamp = ms_hs_date ghcSummary
+                                 , modImports   = imports
+                                 , modIsLoaded  = m `elem` loadedModules
+                                 }
 
-                  when (not (modIsLoaded newSummary)) $
-                    set (spanInfoFor m) Remove
+              when (not (modIsLoaded newSummary)) $
+                set (spanInfoFor m) Remove
 
-                  return (m, newSummary)
+              return (m, newSummary)
 
         let go :: [(ModuleName, ModSummary)]
                -> [(ModuleName, GHC.ModSummary)]
@@ -378,10 +403,6 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
               set (spanInfoFor m) (Insert spanInfo)
 
         (newSummaries, finalResponse) <- flip runStateT initialResponse $ do
-          pluginIdMaps <- lift . liftIO $ do
-            idMaps <- readIORef pluginRef
-            writeIORef pluginRef StrictMap.empty
-            return idMaps
           addSpanInfo (StrictMap.toList pluginIdMaps)
 
           graph <- lift $ getModuleGraph

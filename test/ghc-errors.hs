@@ -2139,6 +2139,47 @@ syntheticTests =
             "A.second"
           ]
     )
+  , ( "Autocomplete 2: Recompute after recompilation"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "foobar :: Bool -> Bool"
+                    , "foobar = id"
+                    ])
+               <> (updateModule "B.hs" . BSLC.pack . unlines $
+                    [ "module B where"
+                    , "import A"
+                    ])
+
+        updateSessionD session upd 2
+        assertNoErrors session
+
+        -- First check, for sanity
+        do autocomplete <- getAutocompletion session
+           let completeFoob = autocomplete (Text.pack "B") "foob"
+           assertEqual "" "[foobar (VarName) :: Bool -> Bool (defined in main:A at A.hs@3:1-3:7; imported from main:A at B.hs@2:1-2:9)]" (show completeFoob)
+
+        -- Change A, but not B. The type reported in the autocompletion for B
+        -- should now be changed, too
+
+        let upd' = (updateModule "A.hs" . BSLC.pack . unlines $
+                     [ "module A where"
+                     , "foobar :: Int -> Int"
+                     , "foobar = id"
+                     , "foobar' :: () -> ()"
+                     , "foobar' = id"
+                     ])
+
+        -- This will trigger recompilation of B
+        updateSessionD session upd' 2
+        assertNoErrors session
+
+        do autocomplete <- getAutocompletion session
+           let completeFoob = autocomplete (Text.pack "B") "foob"
+           let expected = "[foobar (VarName) :: Int -> Int (defined in main:A at A.hs@3:1-3:7; imported from main:A at B.hs@2:1-2:9),"
+                       ++ "foobar' (VarName) :: () -> () (defined in main:A at A.hs@5:1-5:8; imported from main:A at B.hs@2:1-2:9)]"
+           assertEqual "" expected (show completeFoob)
+    )
     -- TODO: Autocomplete test that checks import errors
     -- - Explicitly importing somthing that wasn't exported
     -- - Explicitly hiding something that wasn't exported
