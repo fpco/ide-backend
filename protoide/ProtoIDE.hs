@@ -86,7 +86,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
 
   -- Whenever the buffer changes, reload the module into ghc
   -- TODO: this is overkill..
-  idMapRef <- newIORef (\_ _ -> Nothing) :: IO (IORef (ModuleName -> SourceSpan -> Maybe (SourceSpan, IdInfo)))
+  idMapRef <- newIORef (\_ _ -> []) :: IO (IORef (ModuleName -> SourceSpan -> [(SourceSpan, SpanInfo)]))
   on textBuffer bufferChanged $ do
     (start, end) <- textBufferGetBounds textBuffer
     src <- textBufferGetByteString textBuffer start end False
@@ -94,7 +94,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     let upd = updateModule "M.hs" (fromChunks [src])
     updateSession ideSession upd (const $ return ())
     errors <- getSourceErrors ideSession
-    idInfo <- getIdInfo ideSession
+    idInfo <- getSpanInfo ideSession
     textBufferSetText errorsBuff (show errors)
     dumpIdInfo ideSession
     writeIORef idMapRef idInfo
@@ -128,21 +128,25 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
           textBufferApplyTag textBuffer tag iterStart iterEnd
 
     -- And highlight if it's defined in the current module
-    void . forM mIdInfo $ \(srcSpan, idInfo) -> do
-      case idScope idInfo of
-        Imported{idImportSpan} -> do
-          tagSpan srcSpan linkTag
-          case idImportSpan of
-            ProperSpan span -> tagSpan span highlight
-            _               -> return ()
-        Local{idDefSpan} ->
-          case idDefSpan of
-            ProperSpan span -> tagSpan span highlight
-            _               -> return ()
+    void . forM mIdInfo $ \(srcSpan, spanInfo) -> do
+      case spanInfo of
+        SpanId idInfo ->
+          case idScope idInfo of
+            Imported{idImportSpan} -> do
+              tagSpan srcSpan linkTag
+              case idImportSpan of
+                ProperSpan span -> tagSpan span highlight
+                _               -> return ()
+            Local{idDefSpan} ->
+              case idDefSpan of
+                ProperSpan span -> tagSpan span highlight
+                _               -> return ()
+            _ ->
+              return ()
         _ ->
           return ()
 
-      textBufferSetText idInfoBuff (show idInfo)
+      textBufferSetText idInfoBuff (show spanInfo)
         -- ++ " " ++ haddockLink idInfo {- TODO: reenable -}
 
 {- TODO: reenable
