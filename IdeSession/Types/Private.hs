@@ -115,7 +115,7 @@ data PackageId = PackageId
   { packageName    :: !Text
   , packageVersion :: !(Strict Maybe Text)
   }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 -- | Used before we convert it to an IdMap
 type IdList = [(SourceSpan, SpanInfo)]

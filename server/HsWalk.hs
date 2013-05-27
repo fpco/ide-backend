@@ -17,7 +17,7 @@ module HsWalk
   , mainPackage
   ) where
 
-import Control.Arrow (first, second)
+import Control.Arrow (first)
 import Control.Monad (forM_)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State.Class (MonadState(..))
@@ -43,6 +43,8 @@ import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
 import IdeSession.Strict.IORef
 import IdeSession.Strict.StateT
+
+import qualified Documentation.Haddock as Hk
 
 import Bag
 import DataCon (dataConName)
@@ -235,16 +237,36 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
   our own instance.
 ------------------------------------------------------------------------------}
 
+type HaddockInterfaces = Strict (Map PackageId) (Either String Hk.InterfaceFile)
+
 newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT (DynFlags, RdrName.GlobalRdrEnv, PprStyle) (StrictStateT (TidyEnv, IdList) m) a
+      ReaderT (DynFlags, RdrName.GlobalRdrEnv, PprStyle, Hk.NameCacheAccessor IO)
+              (StrictStateT (TidyEnv, IdList, HaddockInterfaces) m)
+              a
     )
-  deriving (Functor, Monad, MonadState (TidyEnv, IdList), MonadReader (DynFlags, RdrName.GlobalRdrEnv, PprStyle))
+  deriving
+    ( Functor
+    , Monad
+    , MonadState  ( TidyEnv
+                  , IdList
+                  , HaddockInterfaces
+                  )
+    , MonadReader ( DynFlags
+                  , RdrName.GlobalRdrEnv
+                  , PprStyle
+                  , Hk.NameCacheAccessor IO
+                  )
+    )
 
 execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> IdList -> ExtractIdsT m () -> m IdList
 execExtractIdsT dynFlags rdrEnv idList (ExtractIdsT m) = do
+  -- We use the freshNameCache rather than nameCacheFromGhc because we don't
+  -- actually know precisely what monad we're in; it's "a" Ghc monad but
+  -- not necessarily "the" Ghc monad
   let qual = mkPrintUnqualified dynFlags rdrEnv
       pprStyle = mkUserStyle qual AllTheWay
-  (_, idList') <- execStateT (runReaderT m (dynFlags, rdrEnv, pprStyle)) (emptyTidyEnv, idList)
+  (_, idList', _) <- execStateT (runReaderT m (dynFlags, rdrEnv, pprStyle, Hk.freshNameCache))
+                                (emptyTidyEnv, idList, Map.empty)
   return idList'
 
 instance MonadTrans ExtractIdsT where
@@ -255,24 +277,27 @@ instance MonadIO m => MonadIO (ExtractIdsT m) where
   liftIO = lift . liftIO
 
 getDynFlags :: Monad m => ExtractIdsT m DynFlags
-getDynFlags = asks $ \(dflags, _, _) -> dflags
+getDynFlags = asks $ \(dflags, _, _, _) -> dflags
 
 getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
-getGlobalRdrEnv = asks $ \(_, env, _) -> env
+getGlobalRdrEnv = asks $ \(_, env, _, _) -> env
 
 getPprStyle :: Monad m => ExtractIdsT m PprStyle
-getPprStyle = asks $ \(_, _, pprStyle) -> pprStyle
+getPprStyle = asks $ \(_, _, pprStyle, _) -> pprStyle
+
+haddockCache :: Monad m => ExtractIdsT m (Hk.NameCacheAccessor IO)
+haddockCache = asks $ \(_, _, _, cache) -> cache
 
 extendIdMap :: MonadIO m => SourceSpan -> SpanInfo -> ExtractIdsT m ()
-extendIdMap span info = modify (second aux)
+extendIdMap span info = modify ((\f (x, y, z) -> (x, f y, z)) aux)
   where
     aux :: IdList -> IdList
     aux = (:) (span, info)
 
 tidyType :: Monad m => Type -> ExtractIdsT m Type
-tidyType typ = state $ \(tidyEnv, idMap) ->
+tidyType typ = state $ \(tidyEnv, idMap, haddocks) ->
   let (tidyEnv', typ') = tidyOpenType tidyEnv typ
-  in (typ', (tidyEnv', idMap))
+  in (typ', (tidyEnv', idMap, haddocks))
 
 lookupRdrEnv :: RdrName.GlobalRdrEnv -> Name -> Maybe RdrName.GlobalRdrElt
 lookupRdrEnv rdrEnv name =
@@ -282,6 +307,25 @@ lookupRdrEnv rdrEnv name =
                    []    -> Nothing
                    [elt] -> Just elt
                    _     -> error "ghc invariant violated"
+
+haddockInterfaceFilePath :: Monad m => PackageId -> m String
+haddockInterfaceFilePath _pkg =
+  return "/this/does/not/exist"
+
+haddockInterfaceFor :: MonadIO m
+                    => PackageId
+                    -> ExtractIdsT m (Either String Hk.InterfaceFile)
+haddockInterfaceFor pkg = do
+  (tinyEnv, idMap, haddocks) <- get
+  case Map.lookup pkg haddocks of
+    Just mIface -> return mIface
+    Nothing -> do
+      path   <- haddockInterfaceFilePath pkg
+      cache  <- haddockCache
+      mIface <- liftIO $ Hk.readInterfaceFile cache path
+      let haddocks' = Map.insert pkg mIface haddocks
+      put (tinyEnv, idMap, haddocks')
+      return mIface
 
 #if DEBUG
 -- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
@@ -329,10 +373,11 @@ ast _mspan _info cont = do
     return indent
 #endif
 
-  (tidyEnv, _) <- get
+  -- Restore the tideEnv after cont
+  (tidyEnv, _, _) <- get
   r <- cont
-  (_, idMap') <- get
-  put (tidyEnv, idMap')
+  (_, idMap', haddocks') <- get
+  put (tidyEnv, idMap', haddocks')
 
 #if DEBUG
   liftIO $ writeIORef astIndent indent
