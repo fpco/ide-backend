@@ -1,7 +1,7 @@
 From 28ae8064096488ca89bd3e308a57bb4dd1d491e1 Mon Sep 17 00:00:00 2001
 From: Edsko de Vries <edsko@well-typed.com>
 Date: Wed, 8 May 2013 12:22:22 +0100
-Subject: [PATCH] Backport patch to #7231 (commit 772e6d2)
+Subject: [PATCH 5/9] Backport patch to #7231 (commit 772e6d2)
 
 ---
  compiler/main/GhcMake.hs | 17 ++++++++++++-----
