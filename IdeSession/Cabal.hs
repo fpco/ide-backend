@@ -22,9 +22,10 @@ import Distribution.PackageDescription
 import qualified Distribution.Package as Package
 import qualified Distribution.Simple.Build as Build
 import qualified Distribution.Simple.Haddock as Haddock
-import Distribution.Simple.Compiler (CompilerFlavor (GHC))
+import Distribution.Simple.Compiler ( CompilerFlavor (GHC)
+                                    , PackageDB(..), PackageDBStack )
 import Distribution.Simple.Configure (configure)
-import Distribution.Simple.LocalBuildInfo (localPkgDescr)
+import Distribution.Simple.LocalBuildInfo (localPkgDescr, withPackageDB)
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
@@ -156,11 +157,12 @@ externalDeps pkgs =
   in liftM catMaybes $ mapM depOfName pkgs
 
 configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
-                  -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
+                  -> PackageDBStack -> [PackageId]
+                  -> [ModuleName] -> (Progress -> IO ())
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
 configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
-                  pkgs loadedMs callback ms = do
+                  withPackageDB pkgs loadedMs callback ms = do
   counter <- newIORef initialProgress
   let markProgress = do
         oldCounter <- readIORef counter
@@ -222,7 +224,8 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
-        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+        lbiRaw <- configure (gpDesc, hookedBuildInfo) confFlags
+        let lbi = lbiRaw {withPackageDB}
         markProgress
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
         markProgress)
@@ -232,10 +235,11 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
   -- or filter stdout and display progress on each good line.
 
 configureAndHaddock :: FilePath -> FilePath -> [String] -> Bool
-                    -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
+                    -> PackageDBStack -> [PackageId]
+                    -> [ModuleName] -> (Progress -> IO ())
                     -> IO ExitCode
 configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
-                    pkgs loadedMs callback = do
+                    withPackageDB pkgs loadedMs callback = do
   counter <- newIORef initialProgress
   let markProgress = do
         oldCounter <- readIORef counter
@@ -285,7 +289,8 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
-        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+        lbiRaw <- configure (gpDesc, hookedBuildInfo) confFlags
+        let lbi = lbiRaw {withPackageDB}
         markProgress
         Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
         markProgress)
@@ -294,11 +299,11 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
   -- as they are emitted, similarly as log_action in GHC API,
   -- or filter stdout and display progress on each good line.
 
-buildExecutable :: FilePath -> FilePath -> [String] -> Bool
+buildExecutable :: FilePath -> FilePath -> [String] -> Bool -> Maybe [FilePath]
                 -> Strict Maybe Computed -> (Progress -> IO ())
                 -> [(ModuleName, FilePath)]
                 -> IO ExitCode
-buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink
+buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
                 mcomputed callback ms = do
   case toLazyMaybe mcomputed of
     Nothing -> fail "This session state does not admit executable building."
@@ -314,15 +319,18 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink
               Just imports ->
                 return $ map (modulePackage . importModule) imports
       imps <- mapM imp loadedMs
-      let pkgs = concat imps
+      let defaultDB = GlobalPackageDB : UserPackageDB : []
+          toDB l = GlobalPackageDB : fmap SpecificPackageDB l
+          withPackageDB = maybe defaultDB toDB extraPackageDB
+          pkgs = concat imps
       configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
-                        pkgs loadedMs callback ms
+                        withPackageDB pkgs loadedMs callback ms
       -- TODO: keep a list of built (and up-to-date?) executables?
 
-buildHaddock :: FilePath -> FilePath -> [String] -> Bool
+buildHaddock :: FilePath -> FilePath -> [String] -> Bool -> Maybe [FilePath]
              -> Strict Maybe Computed -> (Progress -> IO ())
              -> IO ExitCode
-buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink
+buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
              mcomputed callback = do
   case toLazyMaybe mcomputed of
     Nothing -> fail "This session state does not admit haddock generation."
@@ -338,6 +346,9 @@ buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink
               Just imports ->
                 return $ map (modulePackage . importModule) imports
       imps <- mapM imp loadedMs
-      let pkgs = concat imps
+      let defaultDB = GlobalPackageDB : UserPackageDB : []
+          toDB l = GlobalPackageDB : fmap SpecificPackageDB l
+          withPackageDB = maybe defaultDB toDB extraPackageDB
+          pkgs = concat imps
       configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
-                          pkgs loadedMs callback
+                          withPackageDB pkgs loadedMs callback

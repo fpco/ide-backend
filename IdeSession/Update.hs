@@ -391,7 +391,7 @@ updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ _ ->
 -- The function resembles a query, but it's not instantaneous
 -- and the running code can be interrupted or interacted with.
 runStmt :: IdeSession -> String -> String -> IO RunActions
-runStmt IdeSession{ideStaticInfo, ideState} m fun = do
+runStmt IdeSession{ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
     IdeSessionIdle idleState ->
      case (toLazyMaybe (idleState ^. ideComputed), idleState ^. ideGenerateCode) of
@@ -440,10 +440,12 @@ buildExe ms = IdeSessionUpdate
                  IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
-    let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
+    let SessionConfig{configDynLink, configPackageDBStack} = ideConfig
+        ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
     exitCode <-
       lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts
-                             (configDynLink ideConfig) mcomputed callback ms
+                             configDynLink configPackageDBStack
+                             mcomputed callback ms
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
@@ -456,10 +458,12 @@ buildDoc = IdeSessionUpdate
               IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
-    let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
+    let SessionConfig{configDynLink, configPackageDBStack} = ideConfig
+        ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
     exitCode <-
       lift $ buildHaddock ideSourcesDir ideDistDir ghcOpts
-                          (configDynLink ideConfig) mcomputed callback
+                          configDynLink configPackageDBStack
+                          mcomputed callback
     set ideBuildDocStatus (Just exitCode)
 
 {------------------------------------------------------------------------------

@@ -21,6 +21,8 @@ data SessionConfig = SessionConfig {
   , configGenerateModInfo :: Bool
     -- Build shared libraries and dynamically link executables.
   , configDynLink :: Bool
+    -- Package dbs to consult. User package db included if the list is empty.
+  , configPackageDBStack :: Maybe [FilePath]
   }
 
 -- | Default session configuration
@@ -42,4 +44,5 @@ defaultSessionConfig = SessionConfig {
   , configInProcess       = False
   , configGenerateModInfo = True
   , configDynLink         = False
+  , configPackageDBStack  = Nothing
   }

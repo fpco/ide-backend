@@ -199,13 +199,14 @@ getSpanInfo = computedQuery $ \Computed{..} mod span ->
       -- For now, however, there are only two possibilities: the span has
       -- nothing to do with a quasi-quote and will therefore be a single
       -- SpanId, or the span is a quasi-quote, and we will have a SpanQQ
-      -- *somewhere* in the list.
+      -- \*somewhere* in the list.
       -- Once we report span info for subexpressions, however, this is no
       -- longer true, and the ordering of the spaninfo becomes significant.
       -- In that case we will need to ensure that: the order of the dominators
       -- is correct (with larger spans later in the list, and the immediate
-      -- dominator first), and that the SpanQQ immediately follows to "top-level"
-      -- node in the AST that corresponds to the expansion of the quasi-quote.
+      -- dominator first), and that the SpanQQ immediately follows
+      -- to "top-level" node in the AST that corresponds to the expansion
+      -- of the quasi-quote.
       in case filter isQQ doms of
            [qq] -> [qq]
            _    -> doms
