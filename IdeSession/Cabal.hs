@@ -325,7 +325,6 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
           pkgs = concat imps
       configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
                         withPackageDB pkgs loadedMs callback ms
-      -- TODO: keep a list of built (and up-to-date?) executables?
 
 buildHaddock :: FilePath -> FilePath -> [String] -> Bool -> Maybe [FilePath]
              -> Strict Maybe Computed -> (Progress -> IO ())

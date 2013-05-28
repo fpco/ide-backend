@@ -433,7 +433,7 @@ runStmt IdeSession{ideState} m fun = do
 --
 -- We assume any indicated module is already successfully processed by GHC API in a compilation mode that makes @computedImports@ available (but no code needs to be generated). The environment (package dependencies, ghc options, preprocessor program options, etc.) for building the exe is the same as when previously compiling the code via GHC API. The module does not have to be called @Main@, but we assume the main function is always @main@ (we don't check this and related conditions, but GHC does when eventually called to build the exe).
 --
--- The executable files are placed in the filesystem inside the @build/@ directory, in subdirectories corresponding to the given module names. The build directory does not overlap with any of the other used directories and its path can be obtained via a call to @getBuildDir@.
+-- The executable files are placed in the filesystem inside the @build@ subdirectory of @getDistDir@, in subdirectories corresponding to the given module names. The build directory does not overlap with any of the other used directories and its path.
 buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
 buildExe ms = IdeSessionUpdate
               $ \callback
@@ -451,7 +451,8 @@ buildExe ms = IdeSessionUpdate
 -- | Build haddock documentation from sources added previously via
 -- the ide-backend updateModule* mechanism. Similarly to 'buildExe',
 -- it needs the project modules to be already loaded within the session
--- and the generated docs can be found in a subdirectory of @getDocDir@.
+-- and the generated docs can be found in the @doc@ subdirectory
+-- of @getDistDir@.
 buildDoc :: IdeSessionUpdate
 buildDoc = IdeSessionUpdate
            $ \callback

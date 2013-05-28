@@ -11,8 +11,7 @@ module IdeSession.Query (
   , getSessionConfig
   , getSourcesDir
   , getDataDir
-  , getBuildDir
-  , getDocDir
+  , getDistDir
   , getSourceModule
   , getDataFile
   , getAllDataFiles
@@ -91,15 +90,11 @@ getSourcesDir = staticQuery $ return . ideSourcesDir
 getDataDir :: Query FilePath
 getDataDir = staticQuery $ return . ideDataDir
 
--- | Obtain the directory prefix for executables compiled in this session.
--- Each executable is in a subdirectory with the same name as the file, e.g.:
--- "BUILD_DIR/typecheck-dir/typecheck-dir".
-getBuildDir :: Query FilePath
-getBuildDir = staticQuery $ return . (</> "build") . ideDistDir
-
--- | Obtain the directory prefix for documentation built in this session.
-getDocDir :: Query FilePath
-getDocDir = staticQuery $ return . (</> "doc") . ideDistDir
+-- | Obtain the directory prefix for results of Cabal invocations.
+-- Executables compiled in this session end up in a subdirectory @build@,
+-- haddocks in @doc@, concatenated licences in file @licences@, etc.
+getDistDir :: Query FilePath
+getDistDir = staticQuery $ return . ideDistDir
 
 -- | Read the current value of one of the source modules.
 getSourceModule :: FilePath -> Query BSL.ByteString

@@ -370,16 +370,16 @@ syntheticTests =
         updateSessionD session upd3 4
         let upd4 = buildExe [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd4 4
-        buildDir <- getBuildDir session
-        out <- readProcess (buildDir </> m </> m) [] []
+        distDir <- getDistDir session
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "Maybes exe output"
                     "False\n"
                     out
-        out2 <- readProcess (buildDir </> m2 </> m2) [] []
+        out2 <- readProcess (distDir </> "build" </> m2 </> m2) [] []
         assertEqual "Exception exe output"
                     ""
                     out2
-        out3 <- readProcess (buildDir </> m3 </> m3) [] []
+        out3 <- readProcess (distDir </> "build" </> m3 </> m3) [] []
         assertEqual "Main exe output"
                     ""
                     out3
@@ -398,8 +398,8 @@ syntheticTests =
         updateSessionD session upd 4
         status1 <- getBuildDocStatus session
         assertEqual "after doc build" (Just ExitSuccess) status1
-        docDir <- getDocDir session
-        indexExists <- doesFileExist $ docDir </> "html/main/index.html"
+        distDir <- getDistDir session
+        indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
         assertBool ".lhs haddock files" indexExists
     )
   , ( "Build haddocks and fail"
@@ -533,8 +533,8 @@ syntheticTests =
         let m = "TH.TH"
             upd = buildExe [(Text.pack m, "TH/TH.hs")]
         updateSessionD session upd 4
-        buildDir <- getBuildDir session
-        out <- readProcess (buildDir </> m </> m) [] []
+        distDir <- getDistDir session
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "TH.TH exe output"
                     "(True,43)\n"
                     out
@@ -550,8 +550,8 @@ syntheticTests =
         assertNoErrors session
         let upd = buildDoc
         updateSessionD session upd 4
-        docDir <- getDocDir session
-        indexExists <- doesFileExist $ docDir </> "html/main/index.html"
+        distDir <- getDistDir session
+        indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
         assertBool "TH.TH haddock files" indexExists
 
     )
@@ -1506,8 +1506,8 @@ syntheticTests =
         let m = "Main"
             upd = buildExe [(Text.pack m, "ParFib.hs")]
         updateSessionD session upd 4
-        buildDir <- getBuildDir session
-        fibOut <- readProcess (buildDir </> m </> m) [] []
+        distDir <- getDistDir session
+        fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
@@ -1528,8 +1528,8 @@ syntheticTests =
         updateSessionD session upd 4
         let upd2 = buildExe [(Text.pack "Main", "ParFib.hs")]
         updateSessionD session upd2 4
-        buildDir <- getBuildDir session
-        fibOut <- readProcess (buildDir </> m </> m) [] []
+        distDir <- getDistDir session
+        fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
@@ -1564,8 +1564,8 @@ syntheticTests =
         setCurrentDirectory "../../"
         let upd = buildDoc
         updateSessionD session upd 4
-        docDir <- getDocDir session
-        indexExists <- doesFileExist $ docDir </> "html/main/index.html"
+        distDir <- getDistDir session
+        indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
         assertBool "ParFib haddock files" indexExists
     )
   , ( "Build executable with empty package db stack and fail"
@@ -1582,8 +1582,8 @@ syntheticTests =
         let m = "Main"
             upd = buildExe [(Text.pack m, "ParFib.hs")]
         updateSessionD session upd 4
-        buildDir <- getBuildDir session
-        fibOut <- readProcess (buildDir </> m </> m) [] []
+        distDir <- getDistDir session
+        fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
