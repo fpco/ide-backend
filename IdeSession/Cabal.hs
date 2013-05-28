@@ -320,7 +320,7 @@ buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
                 return $ map (modulePackage . importModule) imports
       imps <- mapM imp loadedMs
       let defaultDB = GlobalPackageDB : UserPackageDB : []
-          toDB l = GlobalPackageDB : fmap SpecificPackageDB l
+          toDB l = fmap SpecificPackageDB l
           withPackageDB = maybe defaultDB toDB extraPackageDB
           pkgs = concat imps
       configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
@@ -347,7 +347,7 @@ buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
                 return $ map (modulePackage . importModule) imports
       imps <- mapM imp loadedMs
       let defaultDB = GlobalPackageDB : UserPackageDB : []
-          toDB l = GlobalPackageDB : fmap SpecificPackageDB l
+          toDB l = fmap SpecificPackageDB l
           withPackageDB = maybe defaultDB toDB extraPackageDB
           pkgs = concat imps
       configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink

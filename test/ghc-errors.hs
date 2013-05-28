@@ -65,20 +65,23 @@ loadModulesFrom session originalSourcesDir = do
 
 -- | Run the specified action with a new IDE session, configured to use a
 -- temporary directory
-withConfiguredSessionModInfo :: Bool -> [String] -> (IdeSession -> IO a)
-                             -> IO a
-withConfiguredSessionModInfo configGenerateModInfo opts io = do
+withConfiguredSessionDetailed :: Bool -> Maybe [FilePath] -> [String]
+                              -> (IdeSession -> IO a)
+                              -> IO a
+withConfiguredSessionDetailed configGenerateModInfo configPackageDBStack
+                              opts io = do
   slashTmp <- getTemporaryDirectory
   withTempDirectory slashTmp "ide-backend-test." $ \configDir -> do
     let sessionConfig = defaultSessionConfig{
                             configDir
                           , configStaticOpts = opts
                           , configGenerateModInfo
+                          , configPackageDBStack
                           }
     withSession sessionConfig io
 
 withConfiguredSession :: [String] -> (IdeSession -> IO a) -> IO a
-withConfiguredSession = withConfiguredSessionModInfo True
+withConfiguredSession = withConfiguredSessionDetailed True Nothing
 
 -- | Run the specified action with a new IDE session
 withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
@@ -1565,6 +1568,26 @@ syntheticTests =
         indexExists <- doesFileExist $ docDir </> "html/main/index.html"
         assertBool "ParFib haddock files" indexExists
     )
+  , ( "Build executable with empty package db stack and fail"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package parallel"
+                        , "-package old-time"
+                        ]
+      in withConfiguredSessionDetailed True {-(Just [])-}Nothing packageOpts
+         $ \session -> do
+        setCurrentDirectory "test/MainModule"
+        loadModulesFrom session "."
+        setCurrentDirectory "../../"
+        let m = "Main"
+            upd = buildExe [(Text.pack m, "ParFib.hs")]
+        updateSessionD session upd 4
+        buildDir <- getBuildDir session
+        fibOut <- readProcess (buildDir </> m </> m) [] []
+        assertEqual "ParFib exe output"
+                    "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                    fibOut
+    )
   , ( "Type information 1: Local identifiers and Prelude"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
@@ -2354,7 +2377,7 @@ syntheticTests =
           (updateSession session (updateEnv "Foo" Nothing) (\_ -> return ()))
     )
   , ( "getLoadedModules while configGenerateModInfo off"
-    , withConfiguredSessionModInfo False defOpts $ \session -> do
+    , withConfiguredSessionDetailed False Nothing defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -2433,7 +2456,7 @@ tests =
         let caseName = projectName ++ " (" ++ show k ++ ")"
         testCase caseName $ do
           debug dVerbosity $ featureName ++ " / " ++ caseName ++ ":"
-          withConfiguredSessionModInfo genModInfo opts $ \session -> do
+          withConfiguredSessionDetailed genModInfo Nothing opts $ \session -> do
             (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
             check session originalUpdate lm
   in [ testGroup "Full integration tests on multiple projects"
