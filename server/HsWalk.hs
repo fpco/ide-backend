@@ -13,8 +13,6 @@ module HsWalk
   , idInfoForName
   , constructExplicitSharingCache
   , moduleNameToId
-  , fillVersion
-  , mainPackage
   ) where
 
 import Control.Arrow (first)
@@ -22,19 +20,21 @@ import Control.Monad (forM_)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State.Class (MonadState(..))
 import Control.Monad.Trans.Class (MonadTrans, lift)
-import Control.Exception (evaluate)
+import Control.Exception (evaluate, try, SomeException)
 import Control.Applicative ((<$>))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BSSC
 import Data.List (stripPrefix)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, fromJust)
 import Data.Version
 import Prelude hiding (id, mod, span)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+import qualified Data.Map as LazyMap
+import System.Directory (getHomeDirectory)
 
 import IdeSession.Types.Private
 import IdeSession.Strict.Container
@@ -56,7 +56,7 @@ import qualified Module
 import MonadUtils (MonadIO (..))
 import qualified Name
 import OccName
-import Outputable hiding (getPprStyle)
+import Outputable
 import qualified Packages
 import qualified RdrName
 import TcRnTypes
@@ -161,12 +161,16 @@ extractIdsPlugin symbolRef = HscPlugin {..}
       appendFile "/tmp/ghc.qq" $ showSDoc (ppr qq)
       idInfo <- readIORef qqRef
       ProperSpan span' <- extractSourceSpan $ tcl_loc (env_lcl env)
-      let dflags = hsc_dflags  (env_top env)
-          rdrEnv = tcg_rdr_env (env_gbl env)
+      let dflags  = hsc_dflags  (env_top env)
+          rdrEnv  = tcg_rdr_env (env_gbl env)
+          current = tcg_mod     (env_gbl env)
       (idProp, Just idScope) <- idInfoForName dflags
                                               quoter
                                               False
                                               (lookupRdrEnv rdrEnv quoter)
+                                              (Just current)
+                                              -- TODO: Home module
+                                              (\_ _ -> return Maybe.nothing)
       let quoterInfo = IdInfo{..}
       let idInfo' = (span', SpanQQ quoterInfo) : idInfo
       writeIORef qqRef idInfo'
@@ -182,7 +186,7 @@ extractIdsPlugin symbolRef = HscPlugin {..}
         writeIORef qqRef [] -- Reset for the next module
         return qqs
 
-      identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) qqs $ do
+      identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) qqs processedModule $ do
 #if DEBUG
         pretty_mod     <- pretty False processedModule
         pretty_rdr_env <- pretty False (tcg_rdr_env env)
@@ -237,37 +241,52 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
   our own instance.
 ------------------------------------------------------------------------------}
 
-type HaddockInterfaces = Strict (Map PackageId) (Either String Hk.InterfaceFile)
+data ExtractIdsEnv = ExtractIdsEnv {
+    eIdsDynFlags :: !DynFlags
+  , eIdsRdrEnv   :: !RdrName.GlobalRdrEnv
+  , eIdsPprStyle :: !PprStyle
+  , eIdsHkCache  :: !(Hk.NameCacheAccessor IO)
+  , eIdsCurrent  :: !Module.Module
+  }
+
+data ExtractIdsState = ExtractIdsState {
+    eIdsTidyEnv  :: !TidyEnv
+  , eIdsIdList   :: !IdList
+  , eIdsHkIfaces :: !(Strict (Map PackageId) (Either String Hk.LinkEnv))
+  }
 
 newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT (DynFlags, RdrName.GlobalRdrEnv, PprStyle, Hk.NameCacheAccessor IO)
-              (StrictStateT (TidyEnv, IdList, HaddockInterfaces) m)
-              a
+      ReaderT ExtractIdsEnv (StrictStateT ExtractIdsState m) a
     )
   deriving
-    ( Functor
-    , Monad
-    , MonadState  ( TidyEnv
-                  , IdList
-                  , HaddockInterfaces
-                  )
-    , MonadReader ( DynFlags
-                  , RdrName.GlobalRdrEnv
-                  , PprStyle
-                  , Hk.NameCacheAccessor IO
-                  )
-    )
+    (Functor, Monad, MonadState ExtractIdsState, MonadReader ExtractIdsEnv)
 
-execExtractIdsT :: Monad m => DynFlags -> RdrName.GlobalRdrEnv -> IdList -> ExtractIdsT m () -> m IdList
-execExtractIdsT dynFlags rdrEnv idList (ExtractIdsT m) = do
+execExtractIdsT :: Monad m
+                => DynFlags
+                -> RdrName.GlobalRdrEnv
+                -> IdList
+                -> Module.Module
+                -> ExtractIdsT m ()
+                -> m IdList
+execExtractIdsT dynFlags rdrEnv idList current (ExtractIdsT m) = do
   -- We use the freshNameCache rather than nameCacheFromGhc because we don't
   -- actually know precisely what monad we're in; it's "a" Ghc monad but
   -- not necessarily "the" Ghc monad
-  let qual = mkPrintUnqualified dynFlags rdrEnv
-      pprStyle = mkUserStyle qual AllTheWay
-  (_, idList', _) <- execStateT (runReaderT m (dynFlags, rdrEnv, pprStyle, Hk.freshNameCache))
-                                (emptyTidyEnv, idList, Map.empty)
-  return idList'
+  let qual    = mkPrintUnqualified dynFlags rdrEnv
+      eIdsEnv = ExtractIdsEnv {
+                    eIdsDynFlags = dynFlags
+                  , eIdsRdrEnv   = rdrEnv
+                  , eIdsPprStyle = mkUserStyle qual AllTheWay
+                  , eIdsHkCache  = Hk.freshNameCache
+                  , eIdsCurrent  = current
+                  }
+      eIdsSt  = ExtractIdsState {
+                    eIdsTidyEnv  = emptyTidyEnv
+                  , eIdsIdList   = idList
+                  , eIdsHkIfaces = Map.empty
+                  }
+  eIdsSt' <- execStateT (runReaderT m eIdsEnv) eIdsSt
+  return (eIdsIdList eIdsSt')
 
 instance MonadTrans ExtractIdsT where
   lift = ExtractIdsT . lift . lift
@@ -276,28 +295,17 @@ instance MonadTrans ExtractIdsT where
 instance MonadIO m => MonadIO (ExtractIdsT m) where
   liftIO = lift . liftIO
 
-getDynFlags :: Monad m => ExtractIdsT m DynFlags
-getDynFlags = asks $ \(dflags, _, _, _) -> dflags
-
-getGlobalRdrEnv :: Monad m => ExtractIdsT m RdrName.GlobalRdrEnv
-getGlobalRdrEnv = asks $ \(_, env, _, _) -> env
-
-getPprStyle :: Monad m => ExtractIdsT m PprStyle
-getPprStyle = asks $ \(_, _, pprStyle, _) -> pprStyle
-
-haddockCache :: Monad m => ExtractIdsT m (Hk.NameCacheAccessor IO)
-haddockCache = asks $ \(_, _, _, cache) -> cache
-
 extendIdMap :: MonadIO m => SourceSpan -> SpanInfo -> ExtractIdsT m ()
-extendIdMap span info = modify ((\f (x, y, z) -> (x, f y, z)) aux)
-  where
-    aux :: IdList -> IdList
-    aux = (:) (span, info)
+extendIdMap span info = modify $ \st -> st {
+    eIdsIdList = (span, info) : eIdsIdList st
+  }
 
 tidyType :: Monad m => Type -> ExtractIdsT m Type
-tidyType typ = state $ \(tidyEnv, idMap, haddocks) ->
-  let (tidyEnv', typ') = tidyOpenType tidyEnv typ
-  in (typ', (tidyEnv', idMap, haddocks))
+tidyType typ = do
+  st <- get
+  let (tidyEnv', typ') = tidyOpenType (eIdsTidyEnv st) typ
+  put $ st { eIdsTidyEnv = tidyEnv' }
+  return typ'
 
 lookupRdrEnv :: RdrName.GlobalRdrEnv -> Name -> Maybe RdrName.GlobalRdrElt
 lookupRdrEnv rdrEnv name =
@@ -308,31 +316,54 @@ lookupRdrEnv rdrEnv name =
                    [elt] -> Just elt
                    _     -> error "ghc invariant violated"
 
-haddockInterfaceFilePath :: Monad m => PackageId -> m String
-haddockInterfaceFilePath _pkg =
-  return "/this/does/not/exist"
+haddockInterfaceFilePath :: MonadIO m => PackageId -> m String
+haddockInterfaceFilePath PackageId{..} = do
+  home <- liftIO $ getHomeDirectory
+  -- TODO: This is a hack
+  return $ home ++ "/.cabal/share/doc/"
+        ++ Text.unpack packageName
+        ++ Maybe.maybe "" (\v -> "-" ++ Text.unpack v) packageVersion
+        ++ "/html/"
+        ++ Text.unpack packageName
+        ++ ".haddock"
 
 haddockInterfaceFor :: MonadIO m
                     => PackageId
-                    -> ExtractIdsT m (Either String Hk.InterfaceFile)
+                    -> ExtractIdsT m (Either String Hk.LinkEnv)
 haddockInterfaceFor pkg = do
-  (tinyEnv, idMap, haddocks) <- get
-  case Map.lookup pkg haddocks of
+  st <- get
+  let hkIfaces = eIdsHkIfaces st
+  case Map.lookup pkg hkIfaces of
     Just mIface -> return mIface
     Nothing -> do
       path   <- haddockInterfaceFilePath pkg
-      cache  <- haddockCache
-      mIface <- liftIO $ Hk.readInterfaceFile cache path
-      let haddocks' = Map.insert pkg mIface haddocks
-      put (tinyEnv, idMap, haddocks')
-      return mIface
+      cache  <- asks eIdsHkCache
+      mIface <- liftIO . try' $ Hk.readInterfaceFile cache path
+      let linkEnv   = Hk.ifLinkEnv <$> mIface
+      let hkIfaces' = Map.insert pkg linkEnv hkIfaces
+      put $ st { eIdsHkIfaces = hkIfaces' }
+      return linkEnv
+  where
+    try' :: MonadIO m => IO (Either String a) -> m (Either String a)
+    try' act = do
+      mr <- liftIO $ try act
+      case mr of
+        Left e -> do
+          liftIO . putStrLn $ "Warning: " ++ show e
+          return . Left $ show (e :: SomeException)
+        Right (Left e) -> do
+          liftIO . putStrLn $ "Warning: " ++ show e
+          return . Left $ e
+        Right (Right r) -> do
+          liftIO . putStrLn $ "Notice: Successfully opened haddock interface for " ++ show pkg
+          return . Right $ r
 
 #if DEBUG
 -- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
 -- it does
 pretty :: (Monad m, Outputable a) => Bool -> a -> ExtractIdsT m String
 pretty debugShow val = do
-  _dynFlags <- getDynFlags
+  _dynFlags <- asks eIdsDynFlags
 #if __GLASGOW_HASKELL__ >= 706
   return $ (if debugShow then showSDocDebug else showSDoc) _dynFlags (ppr val)
 #else
@@ -374,10 +405,10 @@ ast _mspan _info cont = do
 #endif
 
   -- Restore the tideEnv after cont
-  (tidyEnv, _, _) <- get
-  r <- cont
-  (_, idMap', haddocks') <- get
-  put (tidyEnv, idMap', haddocks')
+  stBefore <- get
+  r        <- cont
+  stAfter  <- get
+  put $ stAfter { eIdsTidyEnv = eIdsTidyEnv stBefore }
 
 #if DEBUG
   liftIO $ writeIORef astIndent indent
@@ -416,7 +447,7 @@ recordType :: MonadIO m => String -> Unique -> Type -> ExtractIdsT m ()
 recordType _header uniq typ = do
   typ' <- tidyType typ
   -- We don't want line breaks in the types
-  pprStyle <- getPprStyle
+  pprStyle <- asks eIdsPprStyle
   let noForalls = False
       typStr    = showDocWith OneLineMode
                    (runSDoc (pprTypeForUser noForalls typ')
@@ -429,18 +460,37 @@ recordType _header uniq typ = do
       idType = Maybe.just $ Text.pack typStr
     }
 
+moduleToModuleId :: DynFlags -> Module.Module -> ModuleId
+moduleToModuleId dflags mod = ModuleId {
+    moduleName    = Text.pack $ moduleNameString $ Module.moduleName mod
+  , modulePackage = fillVersion dflags $ Module.modulePackageId mod
+  }
+
 -- | Construct an IdInfo for a 'Name'. We assume the @GlobalRdrElt@ is
 -- uniquely determined by the @Name@ and the @DynFlags@ do not change
 -- in a bad way.
-idInfoForName :: MonadIO m
-              => DynFlags                      -- ^ The usual dynflags
-              -> Name                          -- ^ The name in question
-              -> Bool                          -- ^ Is this a binding occurrence?
-              -> Maybe RdrName.GlobalRdrElt    -- ^ GlobalRdrElt for imported names
-              -> m (IdPropPtr, Maybe IdScope)  -- ^ Nothing if imported but no GlobalRdrElt
-idInfoForName dflags name idIsBinder mElt = do
-    scope <- constructScope
-    let idPropPtr = IdPropPtr . getKey . getUnique $ name
+idInfoForName
+  :: MonadIO m
+  => DynFlags                      -- ^ The usual dynflags
+  -> Name                          -- ^ The name in question
+  -> Bool                          -- ^ Is this a binding occurrence?
+  -> Maybe RdrName.GlobalRdrElt    -- ^ GlobalRdrElt for imported names
+  -> Maybe Module.Module           -- ^ Current module for local names
+  -> (PackageId -> Name -> m (Strict Maybe ModuleId))  -- ^ Home modules
+  -> m (IdPropPtr, Maybe IdScope)  -- ^ Nothing if imported but no GlobalRdrElt
+idInfoForName dflags name idIsBinder mElt mCurrent home = do
+    scope     <- constructScope
+    idDefSpan <- extractSourceSpan (Name.nameSrcSpan name)
+
+    let mod         = if isLocal scope
+                        then fromJust mCurrent
+                        else fromMaybe missingModule $
+                          Name.nameModule_maybe name
+    let idPropPtr   = IdPropPtr . getKey . getUnique $ name
+    let idDefinedIn = moduleToModuleId dflags mod
+
+    idHomeModule <- home (modulePackage idDefinedIn) name
+
     extendIdPropCache idPropPtr IdProp{..}
     return (idPropPtr, scope)
   where
@@ -453,11 +503,7 @@ idInfoForName dflags name idIsBinder mElt = do
       constructScope
         | idIsBinder               = return $ Just Binder
         | Name.isWiredInName  name = return $ Just WiredIn
-        | Name.isInternalName name = do
-            span <- extractSourceSpan (Name.nameSrcSpan name)
-            return . Just $ Local {
-                idDefSpan = span
-              }
+        | Name.isInternalName name = return $ Just Local
         | otherwise = case mElt of
               Just gre -> do scope <- scopeFromProv (RdrName.gre_prov gre)
                              return (Just scope)
@@ -465,23 +511,11 @@ idInfoForName dflags name idIsBinder mElt = do
 
       scopeFromProv :: MonadIO m => RdrName.Provenance -> m IdScope
       scopeFromProv RdrName.LocalDef = do
-        span <- extractSourceSpan (Name.nameSrcSpan name)
-        return Local {
-            idDefSpan = span
-          }
+        return Local
       scopeFromProv (RdrName.Imported spec) = do
-        let mod = fromMaybe
-                    (error (concatMap showSDocDebug $ ppr name : map ppr spec))
-                    $ Name.nameModule_maybe name
         (impMod, impSpan, impQual) <- extractImportInfo spec
-        span <- extractSourceSpan (Name.nameSrcSpan name)
         return Imported {
-            idDefSpan      = span
-          , idDefinedIn    = ModuleId
-              { moduleName    = Text.pack $ moduleNameString $ Module.moduleName mod
-              , modulePackage = fillVersion dflags $ Module.modulePackageId mod
-              }
-          , idImportedFrom = moduleNameToId dflags impMod
+            idImportedFrom = moduleNameToId dflags impMod
           , idImportSpan   = impSpan
           , idImportQual   = Text.pack $ impQual
           }
@@ -499,6 +533,14 @@ idInfoForName dflags name idIsBinder mElt = do
               else ""
           )
       extractImportInfo _ = fail "ghc invariant violated"
+
+      isLocal :: Maybe IdScope -> Bool
+      isLocal (Just Local)  = True
+      isLocal (Just Binder) = True
+      isLocal _             = False
+
+      missingModule :: a
+      missingModule = error $ "No module for " ++ showSDocDebug (ppr name)
 
 moduleNameToId :: DynFlags -> GHC.ModuleName -> ModuleId
 moduleNameToId dflags impMod = ModuleId {
@@ -581,11 +623,30 @@ instance Record Name where
     span' <- extractSourceSpan span
     case span' of
       ProperSpan sourceSpan -> do
-        dflags <- getDynFlags
-        rdrEnv <- getGlobalRdrEnv
+        dflags  <- asks eIdsDynFlags
+        rdrEnv  <- asks eIdsRdrEnv
+        current <- asks eIdsCurrent
+
+        let home pkg name = do
+             mMod <- fmap (LazyMap.lookup name) <$> haddockInterfaceFor pkg
+             case mMod of
+               Right (Just mod) -> return . Maybe.just $
+                 moduleToModuleId dflags mod
+               Right Nothing -> do
+                 liftIO $ putStrLn $ "Warning: no home module found for " ++ showSDoc (ppr name)
+                 return Maybe.nothing
+               Left err ->  do
+                 liftIO $ putStrLn $ "Warning: no home module found for " ++ showSDoc (ppr name) ++ ": " ++ err
+                 return Maybe.nothing
+
         -- The lookup into the rdr env will only be used for imported names.
-        -- TODO: the cache is update twice here; clean up with Ints in IdMaps.
-        info <- idInfoForName dflags name idIsBinder (lookupRdrEnv rdrEnv name)
+        info <- idInfoForName dflags
+                              name
+                              idIsBinder
+                              (lookupRdrEnv rdrEnv name)
+                              (Just current)
+                              home
+
         case info of
           (idProp, Just idScope) -> do
             extendIdMap sourceSpan $ SpanId IdInfo{..}

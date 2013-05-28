@@ -62,6 +62,12 @@ data IdProp = IdProp {
     -- We don't always know this; in particular, we don't know kinds because
     -- the type checker does not give us LSigs for top-level annotations)
   , idType  :: !(Maybe Text)
+    -- | Module the identifier was defined in
+  , idDefinedIn :: {-# UNPACK #-} !ModuleId
+    -- | Where in the module was it defined (not always known)
+  , idDefSpan :: !EitherSpan
+    -- | Haddock home module
+  , idHomeModule :: !(Maybe ModuleId)
   }
   deriving (Eq)
 
@@ -74,14 +80,10 @@ data IdScope =
     -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
     Binder
     -- | Defined within this module
-  | Local {
-        idDefSpan :: !EitherSpan
-      }
+  | Local
     -- | Imported from a different module
   | Imported {
-        idDefSpan      :: !EitherSpan
-      , idDefinedIn    :: {-# UNPACK #-} !ModuleId
-      , idImportedFrom :: {-# UNPACK #-} !ModuleId
+        idImportedFrom :: {-# UNPACK #-} !ModuleId
       , idImportSpan   :: !EitherSpan
         -- | Qualifier used for the import
         --
@@ -183,16 +185,18 @@ instance Show IdProp where
        Text.unpack idName ++ " "
     ++ "(" ++ show idSpace ++ ")"
     ++ (case idType of Just typ -> " :: " ++ Text.unpack typ; Nothing -> [])
+    ++ " defined in "
+    ++ show idDefinedIn
+    ++ " at " ++ show idDefSpan
+    ++ (case idHomeModule of Just home -> " (home " ++ show home ++ ")"
+                             Nothing   -> "")
 
 instance Show IdScope where
   show Binder          = "binding occurrence"
-  show (Local {..})    = "defined at " ++ show idDefSpan
+  show Local           = "defined locally"
   show WiredIn         = "wired in to the compiler"
   show (Imported {..}) =
-          "defined in "
-        ++ show idDefinedIn
-        ++ " at " ++ show idDefSpan ++ ";"
-        ++ " imported from " ++ show idImportedFrom
+           "imported from " ++ show idImportedFrom
         ++ (if Text.null idImportQual
               then []
               else " as '" ++ Text.unpack idImportQual ++ "'")
@@ -297,16 +301,16 @@ instance Binary IdProp where
     put idName
     put idSpace
     put idType
+    put idDefinedIn
+    put idDefSpan
+    put idHomeModule
 
-  get = IdProp <$> get <*> get <*> get
+  get = IdProp <$> get <*> get <*> get <*> get <*> get <*> get
 
 instance Binary IdScope where
   put Binder       = putWord8 0
-  put Local{..}    = do putWord8 1
-                        put idDefSpan
+  put Local        = putWord8 1
   put Imported{..} = do putWord8 2
-                        put idDefSpan
-                        put idDefinedIn
                         put idImportedFrom
                         put idImportSpan
                         put idImportQual
@@ -316,8 +320,8 @@ instance Binary IdScope where
     header <- getWord8
     case header of
       0 -> return Binder
-      1 -> Local <$> get
-      2 -> Imported <$> get <*> get <*> get <*> get <*> get
+      1 -> return Local
+      2 -> Imported <$> get <*> get <*> get
       3 -> return WiredIn
       _ -> fail "IdScope.get: invalid header"
 

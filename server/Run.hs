@@ -94,7 +94,8 @@ import IdeSession.Types.Private
 import IdeSession.Util
 import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
-import qualified IdeSession.Strict.List as StrictList
+import qualified IdeSession.Strict.List  as StrictList
+import qualified IdeSession.Strict.Maybe as StrictMaybe
 
 import HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
 import Debug
@@ -269,8 +270,16 @@ autocompletion summary = do
 
   let eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
       eltsToAutocompleteMap elt = do
-        let name = gre_name elt
-        (idProp, Just idScope) <- idInfoForName dflags name False (Just elt)
+        let name          = gre_name elt
+            isBinder      = False
+            currentModule = Nothing -- Must be imported (TH stage restriction)
+        (idProp, Just idScope) <- idInfoForName dflags
+                                                name
+                                                isBinder
+                                                (Just elt)
+                                                currentModule
+                                                -- TODO: home module
+                                                (\_ _ -> return StrictMaybe.nothing)
         return IdInfo{..}
 
       autoEnvs :: ModSummary -> IO [GlobalRdrElt]

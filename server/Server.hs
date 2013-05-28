@@ -138,7 +138,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
     errsRef <- liftIO $ newIORef StrictList.nil
     counter <- liftIO $ newIORef initialProgress
     (errs, loadedModules) <-
-      suppressGhcStdout $ compileInGhc configSourcesDir
+      {- suppressGhcStdout $ -} compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
                                        verbosity
