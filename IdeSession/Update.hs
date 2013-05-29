@@ -51,7 +51,8 @@ import qualified Data.Text as Text
 import IdeSession.State
 import IdeSession.Cabal (buildExecutable, buildHaddock)
 import IdeSession.Config
-import IdeSession.GHC.Server
+import IdeSession.GHC.API
+import IdeSession.GHC.Client
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util

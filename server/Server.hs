@@ -1,31 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 -- | Implementation of the server that controls the long-running GHC instance.
--- This is the place where the GHC-specific part joins the parts
--- implementing the general RPC infrastructure and session management.
---
--- The modules importing any GHC internals, as well as the modules
--- implementing the RPC infrastructure, should be accessible to the rest
--- of the program only indirectly, through @IdeSession.GHC.Server@.
-module IdeSession.GHC.Server
-  ( -- * A handle to the server
-    GhcServer
-    -- * Server-side operations
-  , ghcServer
-    -- * Client-side operations
-  , InProcess
-  , forkGhcServer
-  , rpcCompile
-  , RunActions(..)
-  , runWaitAll
-  , rpcRun
-  , rpcSetEnv
-  , rpcCrash
-  , shutdownGhcServer
-  , forceShutdownGhcServer
-  , getGhcExitCode
-  , RunResult(..)
-  , RunBufferMode(..)
-  ) where
+-- This interacts with the ide-backend library through serialized data only.
+module Server (ghcServer) where
 
 import Control.Concurrent (ThreadId, throwTo, forkIO, killThread, myThreadId, threadDelay)
 import Control.Concurrent.Async (async, cancel, withAsync)
@@ -53,16 +29,13 @@ import System.FilePath ((</>))
 
 import System.IO (Handle, hFlush)
 import System.Posix (Fd)
-import System.Posix.Env (setEnv, unsetEnv)
 import System.Posix.IO.ByteString
 import System.Time (ClockTime)
 
-import IdeSession.GHC.HsWalk
-import IdeSession.GHC.Run
+import IdeSession.GHC.API
 import IdeSession.RPC.Server
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
-import IdeSession.Debug
 import IdeSession.Util
 import IdeSession.BlockingOps (modifyMVar, modifyMVar_, readChan, withMVar, wait)
 import IdeSession.Strict.IORef
@@ -73,130 +46,11 @@ import qualified IdeSession.Strict.List   as StrictList
 import qualified IdeSession.Strict.Trie   as StrictTrie
 
 import qualified GHC
+import Run
+import HsWalk
+import Debug
 
 import Paths_ide_backend
-
-data GhcRequest
-  = ReqCompile {
-        reqCompileOptions   :: Maybe [String]
-      , reqCompileSourceDir :: FilePath
-      , reqCompileGenCode   :: Bool
-      }
-  | ReqRun {
-        reqRunModule   :: String
-      , reqRunFun      :: String
-      , reqRunOutBMode :: RunBufferMode
-      , reqRunErrBMode :: RunBufferMode
-      }
-  | ReqSetEnv {
-         reqSetEnv :: [(String, Maybe String)]
-       }
-    -- | For debugging only! :)
-  | ReqCrash {
-         reqCrashDelay :: Maybe Int
-       }
-
-data GhcCompileResponse =
-    GhcCompileProgress {
-        ghcCompileProgress :: Progress
-      }
-  | GhcCompileDone {
-        ghcCompileErrors   :: Strict [] SourceError
-      , ghcCompileLoaded   :: Strict [] ModuleName
-      , ghcCompileImports  :: Strict (Map ModuleName) (Diff (Strict [] Import))
-      , ghcCompileAuto     :: Strict (Map ModuleName) (Diff (Strict [] IdInfo))
-      , ghcCompileSpanInfo :: Strict (Map ModuleName) (Diff IdList)
-      , ghcCompileCache    :: ExplicitSharingCache
-      }
-
-data GhcRunResponse =
-    GhcRunOutp BSS.ByteString
-  | GhcRunDone RunResult
-
-data GhcRunRequest =
-    GhcRunInput BSS.ByteString
-  | GhcRunInterrupt
-  | GhcRunAckDone
-
-instance Binary GhcRequest where
-  put ReqCompile{..} = do
-    Binary.putWord8 0
-    Binary.put reqCompileOptions
-    Binary.put reqCompileSourceDir
-    Binary.put reqCompileGenCode
-  put ReqRun{..} = do
-    Binary.putWord8 1
-    Binary.put reqRunModule
-    Binary.put reqRunFun
-    Binary.put reqRunOutBMode
-    Binary.put reqRunErrBMode
-  put ReqSetEnv{..} = do
-    Binary.putWord8 2
-    Binary.put reqSetEnv
-  put ReqCrash{..} = do
-    Binary.putWord8 3
-    Binary.put reqCrashDelay
-
-  get = do
-    header <- Binary.getWord8
-    case header of
-      0 -> ReqCompile <$> Binary.get <*> Binary.get <*> Binary.get
-      1 -> ReqRun     <$> Binary.get <*> Binary.get <*> Binary.get <*> Binary.get
-      2 -> ReqSetEnv  <$> Binary.get
-      3 -> ReqCrash   <$> Binary.get
-      _ -> fail "GhcRequest.Binary.get: invalid header"
-
-instance Binary GhcCompileResponse where
-  put GhcCompileProgress {..} = do
-    Binary.putWord8 0
-    Binary.put ghcCompileProgress
-  put GhcCompileDone {..} = do
-    Binary.putWord8 1
-    Binary.put ghcCompileErrors
-    Binary.put ghcCompileLoaded
-    Binary.put ghcCompileImports
-    Binary.put ghcCompileAuto
-    Binary.put ghcCompileSpanInfo
-    Binary.put ghcCompileCache
-
-  get = do
-    header <- Binary.getWord8
-    case header of
-      0 -> GhcCompileProgress <$> Binary.get
-      1 -> GhcCompileDone     <$> Binary.get <*> Binary.get <*> Binary.get
-                              <*> Binary.get <*> Binary.get <*> Binary.get
-      _ -> fail "GhcCompileRespone.Binary.get: invalid header"
-
-instance Binary GhcRunResponse where
-  put (GhcRunOutp bs) = Binary.putWord8 0 >> Binary.put bs
-  put (GhcRunDone r)  = Binary.putWord8 1 >> Binary.put r
-
-  get = do
-    header <- Binary.getWord8
-    case header of
-      0 -> GhcRunOutp <$> Binary.get
-      1 -> GhcRunDone <$> Binary.get
-      _ -> fail "GhcRunResponse.get: invalid header"
-
-instance Binary GhcRunRequest where
-  put (GhcRunInput bs) = Binary.putWord8 0 >> Binary.put bs
-  put GhcRunInterrupt  = Binary.putWord8 1
-  put GhcRunAckDone    = Binary.putWord8 2
-
-  get = do
-    header <- Binary.getWord8
-    case header of
-      0 -> GhcRunInput <$> Binary.get
-      1 -> return GhcRunInterrupt
-      2 -> return GhcRunAckDone
-      _ -> fail "GhcRunRequest.get: invalid header"
-
-data GhcServer = OutProcess RpcServer
-               | InProcess RpcConversation ThreadId
-
-conversation :: GhcServer -> (RpcConversation -> IO a) -> IO a
-conversation (OutProcess server) = rpcConversation server
-conversation (InProcess conv _)  = ($ conv)
 
 --------------------------------------------------------------------------------
 -- Server-side operations                                                     --
@@ -575,11 +429,6 @@ ghcHandleSetEnv RpcConversation{put} env = liftIO $ do
   setupEnv env
   put ()
 
-setupEnv :: [(String, Maybe String)] -> IO ()
-setupEnv env = forM_ env $ \(var, mVal) ->
-  case mVal of Just val -> setEnv var val True
-               Nothing  -> unsetEnv var
-
 -- | Handle a crash request (debugging)
 ghcHandleCrash :: Maybe Int -> Ghc ()
 ghcHandleCrash delay = liftIO $ do
@@ -589,218 +438,6 @@ ghcHandleCrash delay = liftIO $ do
                     void . forkIO $ threadDelay i >> throwTo tid crash
   where
     crash = userError "Intentional crash"
-
---------------------------------------------------------------------------------
--- Client-side operations                                                     --
---------------------------------------------------------------------------------
-
-type InProcess = Bool
-
-forkGhcServer :: Bool -> [String] -> Maybe String -> InProcess -> IO GhcServer
-forkGhcServer configGenerateModInfo opts workingDir False = do
-  bindir <- getBinDir
-  let prog = bindir </> "ide-backend-server"
-
-  exists <- doesFileExist prog
-  unless exists $
-    fail $ "The 'ide-backend-server' program was expected to "
-        ++ "be at location " ++ prog ++ " but it is not."
-
-  server <- forkRpcServer prog
-                          (opts ++ [ "--ghc-opts-end"
-                                   , show configGenerateModInfo ])
-                          workingDir
-  return (OutProcess server)
-{- TODO: Reenable in-process
-forkGhcServer configGenerateModInfo opts workingDir True = do
-  let conv a b = RpcConversation {
-                   get = do bs <- $readChan a
-                            case decode' bs of
-                              Just x  -> return x
-                              Nothing -> fail "JSON failure"
-                 , put = writeChan b . encode
-                 }
-  a   <- newChan
-  b   <- newChan
-  tid <- forkIO $ ghcServerEngine configGenerateModInfo opts (conv a b)
-  return $ InProcess (conv b a) tid
--}
-
--- | Compile or typecheck
-rpcCompile :: GhcServer           -- ^ GHC server
-           -> Maybe [String]      -- ^ Options
-           -> FilePath            -- ^ Source directory
-           -> Bool                -- ^ Should we generate code?
-           -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ( Strict [] SourceError
-                 , Strict [] ModuleName
-                 , Strict (Map ModuleName) (Diff (Strict [] Import))
-                 , Strict (Map ModuleName) (Diff (Strict Trie (Strict [] IdInfo)))
-                 , Strict (Map ModuleName) (Diff IdList)
-                 , ExplicitSharingCache
-                 )
-rpcCompile server opts dir genCode callback =
-  conversation server $ \RpcConversation{..} -> do
-    put (ReqCompile opts dir genCode)
-
-    let go = do response <- get
-                case response of
-                  GhcCompileProgress pcounter ->
-                    callback pcounter >> go
-                  GhcCompileDone errs loaded imports auto spanInfo cache ->
-                    return ( errs
-                           , loaded
-                           , imports
-                           , StrictMap.map (fmap (constructAuto cache)) auto
-                           , spanInfo
-                           , cache
-                           )
-    go
-
-constructAuto :: ExplicitSharingCache -> Strict [] IdInfo
-              -> Strict Trie (Strict [] IdInfo)
-constructAuto cache lk =
-  StrictTrie.fromListWith (StrictList.++) $ map aux (toLazyList lk)
-  where
-    aux :: IdInfo -> (BSS.ByteString, Strict [] IdInfo)
-    aux idInfo@IdInfo{idProp = k} =
-      let idProp = idPropCache cache StrictIntMap.! idPropPtr k
-      in ( BSSC.pack . Text.unpack . idName $ idProp
-         , StrictList.singleton idInfo )
-
--- | Handles to the running code, through which one can interact with the code.
-data RunActions = RunActions {
-    -- | Wait for the code to output something or terminate
-    runWait                     :: IO (Either BSS.ByteString RunResult)
-    -- | Send a UserInterrupt exception to the code
-    --
-    -- A call to 'interrupt' after the snippet has terminated has no effect.
-  , interrupt                   :: IO ()
-    -- | Make data available on the code's stdin
-    --
-    -- A call to 'supplyStdin' after the snippet has terminated has no effect.
-  , supplyStdin                 :: BSS.ByteString -> IO ()
-    -- | Register a callback to be invoked when the program terminates
-    -- The callback will only be invoked once.
-    --
-    -- A call to 'registerTerminationCallback' after the snippet has terminated
-    -- has no effect. The termination handler is NOT called when the the
-    -- 'RunActions' is 'forceCancel'ed.
-  , registerTerminationCallback :: (RunResult -> IO ()) -> IO ()
-    -- | Force terminate the runaction
-    -- (The server will be useless after this -- for internal use only).
-    --
-    -- Guranteed not to block.
-  , forceCancel                 :: IO ()
-  }
-
--- | Repeatedly call 'runWait' until we receive a 'Right' result, while
--- collecting all 'Left' results
-runWaitAll :: RunActions -> IO (BSL.ByteString, RunResult)
-runWaitAll RunActions{runWait} = go []
-  where
-    go :: [BSS.ByteString] -> IO (BSL.ByteString, RunResult)
-    go acc = do
-      resp <- runWait
-      case resp of
-        Left  bs        -> go (bs : acc)
-        Right runResult -> return (BSL.fromChunks (reverse acc), runResult)
-
--- | Run code
-rpcRun :: GhcServer       -- ^ GHC server
-       -> String          -- ^ Module
-       -> String          -- ^ Function
-       -> RunBufferMode   -- ^ Buffer mode for stdout
-       -> RunBufferMode   -- ^ Buffer mode for stderr
-       -> IO RunActions
-rpcRun server m fun outBMode errBMode = do
-  runWaitChan <- newChan :: IO (Chan (Either BSS.ByteString RunResult))
-  reqChan     <- newChan :: IO (Chan GhcRunRequest)
-
-  conv <- async . Ex.handle (handleExternalException runWaitChan) $
-    conversation server $ \RpcConversation{..} -> do
-      put (ReqRun m fun outBMode errBMode)
-      withAsync (sendRequests put reqChan) $ \sentAck -> do
-        let go = do resp <- get
-                    case resp of
-                      GhcRunDone result -> writeChan runWaitChan (Right result)
-                      GhcRunOutp bs     -> writeChan runWaitChan (Left bs) >> go
-        go
-        $wait sentAck
-
-  -- The runActionState initially is the termination callback to be called
-  -- when the snippet terminates. After termination it becomes (Right outcome).
-  -- This means that we will only execute the termination callback once, and
-  -- the user can safely call runWait after termination and get the same
-  -- result.
-  let onTermination :: RunResult -> IO ()
-      onTermination _ = do writeChan reqChan GhcRunAckDone
-                           $wait conv
-  runActionsState <- newMVar (Left onTermination)
-
-  return RunActions {
-      runWait = $modifyMVar runActionsState $ \st -> case st of
-        Right outcome ->
-          return (Right outcome, Right outcome)
-        Left terminationCallback -> do
-          outcome <- $readChan runWaitChan
-          case outcome of
-            Left bs ->
-              return (Left terminationCallback, Left bs)
-            Right res@RunForceCancelled ->
-              return (Right res, Right res)
-            Right res -> do
-              terminationCallback res
-              return (Right res, Right res)
-    , interrupt   = writeChan reqChan GhcRunInterrupt
-    , supplyStdin = writeChan reqChan . GhcRunInput
-    , registerTerminationCallback = \callback' ->
-        $modifyMVar_ runActionsState $ \st -> case st of
-          Right outcome ->
-            return (Right outcome)
-          Left callback ->
-            return (Left (\res -> callback res >> callback' res))
-    , forceCancel = do
-        writeChan runWaitChan (Right RunForceCancelled)
-        cancel conv
-    }
-  where
-    sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> IO ()
-    sendRequests put reqChan =
-      let go = do req <- $readChan reqChan
-                  put req
-                  case req of
-                    GhcRunAckDone -> return ()
-                    _             -> go
-      in go
-
-    -- TODO: should we restart the session when ghc crashes?
-    -- Maybe recommend that the session is started on GhcExceptions?
-    handleExternalException :: Chan (Either BSS.ByteString RunResult)
-                            -> ExternalException
-                            -> IO ()
-    handleExternalException ch = writeChan ch . Right . RunGhcException . show
-
--- | Set the environment
-rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()
-rpcSetEnv (OutProcess server) env = rpc server (ReqSetEnv env)
-rpcSetEnv (InProcess _ _)     env = setupEnv env
-
--- | Crash the GHC server (for debugging purposes)
-rpcCrash :: GhcServer -> Maybe Int -> IO ()
-rpcCrash server delay = conversation server $ \RpcConversation{..} ->
-  put (ReqCrash delay)
-
-shutdownGhcServer :: GhcServer -> IO ()
-shutdownGhcServer (OutProcess server) = shutdown server
-shutdownGhcServer (InProcess _ tid)   = killThread tid
-
-forceShutdownGhcServer :: GhcServer -> IO ()
-forceShutdownGhcServer (OutProcess server) = forceShutdown server
-forceShutdownGhcServer (InProcess _ tid)   = killThread tid
-
-getGhcExitCode :: GhcServer -> IO (Maybe ExitCode)
-getGhcExitCode (OutProcess server) = getRpcExitCode server
 
 --------------------------------------------------------------------------------
 -- Auxiliary                                                                  --

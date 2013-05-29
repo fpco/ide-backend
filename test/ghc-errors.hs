@@ -15,7 +15,6 @@ import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
 import Data.IORef (IORef, newIORef, writeIORef, readIORef)
 import System.Directory
-import System.Environment (getArgs)
 import System.Exit (ExitCode (..))
 import System.FilePath
 import System.FilePath.Find (always, extension, find)
@@ -31,9 +30,7 @@ import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure, (@?=))
 
 import IdeSession
 import TestTools
-import IdeSession.Debug
-import IdeSession.GHC.Run (hsExtensions)
--- import IdeSession.Query (dumpIdInfo)
+import Debug
 
 -- Tests using various functions of the IdeSession API
 -- and a variety of small test Haskell projects.
@@ -2466,12 +2463,7 @@ tests =
      ]
 
 main :: IO ()
-main = do
-  args <- getArgs
-  case args of
-    "--server" : opts -> ghcServer opts  -- @opts@ are GHC static flags
-    _ -> defaultMain tests
-
+main = defaultMain tests
 
 -- Extra debug facilities. Normally turned off.
 

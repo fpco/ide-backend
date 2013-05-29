@@ -3,7 +3,7 @@ module IdeSession.Config (
   , defaultSessionConfig
   ) where
 
-import IdeSession.GHC.Server (InProcess) -- Should this be someplace else?
+import IdeSession.GHC.Client (InProcess)
 
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.

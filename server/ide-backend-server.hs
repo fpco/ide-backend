@@ -1,8 +1,7 @@
 module Main where
 
-import IdeSession (ghcServer)
 import System.Environment (getArgs)
+import Server (ghcServer)
 
-main = do
-  args <- getArgs
-  ghcServer args
+main :: IO ()
+main = getArgs >>= ghcServer

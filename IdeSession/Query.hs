@@ -48,7 +48,7 @@ import IdeSession.State
 import IdeSession.Types.Translation
 import IdeSession.Types.Public
 import qualified IdeSession.Types.Private as Private
-import IdeSession.GHC.Server (GhcServer)
+import IdeSession.GHC.Client (GhcServer)
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map  as StrictMap
 import qualified IdeSession.Strict.List as StrictList

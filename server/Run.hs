@@ -10,7 +10,7 @@
 -- Only @IdeSession.GHC.Run@ and @IdeSession.GHC.HsWalk@ should import
 -- any modules from the ghc package and the modules should not be reexported
 -- anywhere else, with the exception of @IdeSession.GHC.Server@.
-module IdeSession.GHC.Run
+module Run
   ( -- * Re-expored GHC API
     Ghc
   , runFromGhc
@@ -89,90 +89,17 @@ import System.Process
 import Control.Concurrent (MVar, ThreadId)
 import Data.Aeson.TH (deriveJSON)
 
-import IdeSession.GHC.HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
+import IdeSession.GHC.API
 import IdeSession.Types.Private
-import IdeSession.Debug
 import IdeSession.Util
 import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
 import qualified IdeSession.Strict.List as StrictList
 
--- | These source files are type-checked.
-hsExtensions :: [FilePath]
-hsExtensions = [".hs", ".lhs"]
--- Boot files are not so simple. They should probably be copied to the src dir,
--- but not made proper targets. This is probably similar to .h files.
--- hsExtentions = [".hs", ".lhs", ".hs-boot", ".lhs-boot", ".hi-boot"]
+import HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
+import Debug
 
 newtype DynamicOpts = DynamicOpts [Located String]
-
--- | The outcome of running code
-data RunResult =
-    -- | The code terminated okay
-    RunOk String
-    -- | The code threw an exception
-  | RunProgException String
-    -- | GHC itself threw an exception when we tried to run the code
-  | RunGhcException String
-    -- | The session was restarted
-  | RunForceCancelled
-  deriving (Show, Eq)
-
--- | Buffer modes for running code
---
--- Note that 'NoBuffering' means that something like 'putStrLn' will do a
--- syscall per character, and each of these characters will be read and sent
--- back to the client. This results in a large overhead.
---
--- When using 'LineBuffering' or 'BlockBuffering', 'runWait' will not report
--- any output from the snippet until it outputs a linebreak/fills the buffer,
--- respectively (or does an explicit flush). However, you can specify a timeout
--- in addition to the buffering mode; if you set this to @Just n@, the buffer
--- will be flushed every @n@ microseconds.
---
--- NOTE: This is duplicated in the IdeBackendRTS (defined in IdeSession)
-data RunBufferMode =
-    RunNoBuffering
-  | RunLineBuffering  { runBufferTimeout :: Maybe Int }
-  | RunBlockBuffering { runBufferBlockSize :: Maybe Int
-                      , runBufferTimeout   :: Maybe Int
-                      }
-  deriving Show
-
-instance Binary RunResult where
-  put (RunOk str)            = putWord8 0 >> put str
-  put (RunProgException str) = putWord8 1 >> put str
-  put (RunGhcException str)  = putWord8 2 >> put str
-  put RunForceCancelled      = putWord8 3
-
-  get = do
-    header <- getWord8
-    case header of
-      0 -> RunOk <$> get
-      1 -> RunProgException <$> get
-      2 -> RunGhcException <$> get
-      3 -> return RunForceCancelled
-      _ -> fail "RunResult.get: invalid header"
-
-instance Binary RunBufferMode where
-  put RunNoBuffering        = putWord8 0
-  put RunLineBuffering{..}  = do putWord8 1
-                                 put runBufferTimeout
-  put RunBlockBuffering{..} = do putWord8 2
-                                 put runBufferBlockSize
-                                 put runBufferTimeout
-
-  get = do
-    header <- getWord8
-    case header of
-      0 -> return RunNoBuffering
-      1 -> RunLineBuffering <$> get
-      2 -> RunBlockBuffering <$> get <*> get
-      _ -> fail "RunBufferMode.get: invalid header"
-
--- | JSON instances for the convenience of client code
-$(deriveJSON id ''RunResult)
-$(deriveJSON id ''RunBufferMode)
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts

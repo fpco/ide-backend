@@ -7,7 +7,7 @@
 -- Only @IdeSession.GHC.Run@ and @IdeSession.GHC.HsWalk@ should import
 -- any modules from the ghc package and the modules should not be reexported
 -- anywhere else, with the exception of @IdeSession.GHC.Server@.
-module IdeSession.GHC.HsWalk
+module HsWalk
   ( extractIdsPlugin
   , extractSourceSpan
   , idInfoForName

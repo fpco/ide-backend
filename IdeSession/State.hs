@@ -37,7 +37,8 @@ import System.FilePath ((</>))
 import System.Posix.Types (EpochTime)
 import IdeSession.Types.Private
 import IdeSession.Config
-import IdeSession.GHC.Server (RunActions, GhcServer, RunBufferMode)
+import IdeSession.GHC.API (RunBufferMode)
+import IdeSession.GHC.Client (RunActions, GhcServer)
 import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
 
