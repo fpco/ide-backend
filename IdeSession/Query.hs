@@ -22,6 +22,7 @@ module IdeSession.Query (
   , getManagedFiles
   , getBuildExeStatus
   , getBuildDocStatus
+  , getBuildLicensesStatus
     -- * Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
@@ -92,7 +93,7 @@ getDataDir = staticQuery $ return . ideDataDir
 
 -- | Obtain the directory prefix for results of Cabal invocations.
 -- Executables compiled in this session end up in a subdirectory @build@,
--- haddocks in @doc@, concatenated licences in file @licences@, etc.
+-- haddocks in @doc@, concatenated licenses in file @licenses@, etc.
 getDistDir :: Query FilePath
 getDistDir = staticQuery $ return . ideDistDir
 
@@ -151,6 +152,10 @@ getBuildExeStatus = simpleQuery $ getVal ideBuildExeStatus
 -- Get exit status of the last invocation of 'buildDoc', if any.
 getBuildDocStatus :: Query (Maybe ExitCode)
 getBuildDocStatus = simpleQuery $ getVal ideBuildDocStatus
+
+-- Get exit status of the last invocation of 'buildLicenses', if any.
+getBuildLicensesStatus :: Query (Maybe ExitCode)
+getBuildLicensesStatus = simpleQuery $ getVal ideBuildLicensesStatus
 
 {------------------------------------------------------------------------------
   Queries that rely on computed state

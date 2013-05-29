@@ -1585,6 +1585,22 @@ syntheticTests =
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
     )
+  , ( "Build licenses from ParFib"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package parallel"
+                        , "-package old-time"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        setCurrentDirectory "test/MainModule"
+        loadModulesFrom session "."
+        setCurrentDirectory "../../"
+        let upd = buildLicenses "test/MainModule/cabals"
+        updateSessionD session upd 3
+        distDir <- getDistDir session
+        licensesExists <- doesFileExist $ distDir </> "licenses.txt"
+        assertBool "ParFib licenses file" licensesExists
+    )
   , ( "Type information 1: Local identifiers and Prelude"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $

@@ -23,6 +23,7 @@ module IdeSession.Update (
   , updateStderrBufferMode
   , buildExe
   , buildDoc
+  , buildLicenses
     -- * Running code
   , runStmt
     -- * Debugging
@@ -49,7 +50,7 @@ import System.IO.Temp (createTempDirectory)
 import qualified Data.Text as Text
 
 import IdeSession.State
-import IdeSession.Cabal (buildExecutable, buildHaddock)
+import IdeSession.Cabal (buildExecutable, buildHaddock, buildLicenseCatenation)
 import IdeSession.Config
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
@@ -90,6 +91,7 @@ initSession ideConfig@SessionConfig{..} = do
                         , _ideManagedFiles     = ManagedFilesInternal [] []
                         , _ideBuildExeStatus   = Nothing
                         , _ideBuildDocStatus   = Nothing
+                        , _ideBuildLicensesStatus = Nothing
                         , _ideEnv              = []
                         , _ideUpdatedEnv       = False
                           -- Make sure 'ideComputed' is set on first call
@@ -441,8 +443,10 @@ buildExe ms = IdeSessionUpdate
                  IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
-    let SessionConfig{configDynLink, configPackageDBStack} = ideConfig
-        ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
+    let SessionConfig{ configDynLink
+                     , configPackageDBStack
+                     , configStaticOpts } = ideConfig
+        ghcOpts = fromMaybe configStaticOpts ghcNewOpts
     exitCode <-
       lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts
                              configDynLink configPackageDBStack
@@ -460,13 +464,28 @@ buildDoc = IdeSessionUpdate
               IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
-    let SessionConfig{configDynLink, configPackageDBStack} = ideConfig
-        ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
+    let SessionConfig{ configDynLink
+                     , configPackageDBStack
+                     , configStaticOpts } = ideConfig
+        ghcOpts = fromMaybe configStaticOpts ghcNewOpts
     exitCode <-
       lift $ buildHaddock ideSourcesDir ideDistDir ghcOpts
                           configDynLink configPackageDBStack
                           mcomputed callback
     set ideBuildDocStatus (Just exitCode)
+
+-- | Build a file containing licenses of all used packages.
+-- Similarly to 'buildExe', it needs the project modules to be already
+-- loaded within the session and the concatenated licences can be found
+-- in the @licenses.txt@ file of @getDistDir@.
+buildLicenses :: FilePath -> IdeSessionUpdate
+buildLicenses cabalsDir = IdeSessionUpdate
+                          $ \callback
+                             IdeStaticInfo{ideDistDir} -> do
+    mcomputed <- get ideComputed
+    exitCode <-
+      lift $ buildLicenseCatenation cabalsDir ideDistDir mcomputed callback
+    set ideBuildLicensesStatus (Just exitCode)
 
 {------------------------------------------------------------------------------
   Debugging

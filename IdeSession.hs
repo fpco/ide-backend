@@ -126,6 +126,7 @@ module IdeSession (
   , updateStderrBufferMode
   , buildExe
   , buildDoc
+  , buildLicenses
     -- ** Progress
   , Progress(..)
   , initialProgress
@@ -159,6 +160,7 @@ module IdeSession (
   , getLoadedModules
   , getBuildExeStatus
   , getBuildDocStatus
+  , getBuildLicensesStatus
   , getSpanInfo
   , getImports
   , getAutocompletion

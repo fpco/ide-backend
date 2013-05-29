@@ -20,6 +20,7 @@ module IdeSession.State
   , ideManagedFiles
   , ideBuildExeStatus
   , ideBuildDocStatus
+  , ideBuildLicensesStatus
   , ideEnv
   , ideGhcServer
   , ideStdoutBufferMode
@@ -115,6 +116,8 @@ data IdeIdleState = IdeIdleState {
   , _ideBuildExeStatus   :: !(Maybe ExitCode)
     -- Exit status of the last invocation of 'buildDoc', if any.
   , _ideBuildDocStatus   :: !(Maybe ExitCode)
+    -- Exit status of the last invocation of 'buildDoc', if any.
+  , _ideBuildLicensesStatus :: !(Maybe ExitCode)
     -- Environment overrides
   , _ideEnv              :: ![(String, Maybe String)]
     -- The GHC server (this is replaced in 'restartSession')
@@ -155,6 +158,7 @@ ideGenerateCode     :: Accessor IdeIdleState Bool
 ideManagedFiles     :: Accessor IdeIdleState ManagedFilesInternal
 ideBuildExeStatus   :: Accessor IdeIdleState (Maybe ExitCode)
 ideBuildDocStatus   :: Accessor IdeIdleState (Maybe ExitCode)
+ideBuildLicensesStatus :: Accessor IdeIdleState (Maybe ExitCode)
 ideEnv              :: Accessor IdeIdleState [(String, Maybe String)]
 ideGhcServer        :: Accessor IdeIdleState GhcServer
 ideStdoutBufferMode :: Accessor IdeIdleState RunBufferMode
@@ -169,6 +173,8 @@ ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCo
 ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }
 ideBuildExeStatus   = accessor _ideBuildExeStatus   $ \x s -> s { _ideBuildExeStatus   = x }
 ideBuildDocStatus   = accessor _ideBuildDocStatus   $ \x s -> s { _ideBuildDocStatus   = x }
+ideBuildLicensesStatus =
+  accessor _ideBuildLicensesStatus $ \x s -> s { _ideBuildLicensesStatus = x }
 ideEnv              = accessor _ideEnv              $ \x s -> s { _ideEnv              = x }
 ideGhcServer        = accessor _ideGhcServer        $ \x s -> s { _ideGhcServer        = x }
 ideStdoutBufferMode = accessor _ideStdoutBufferMode $ \x s -> s { _ideStdoutBufferMode = x }

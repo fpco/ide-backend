@@ -1,25 +1,30 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module IdeSession.Cabal (
-    buildExecutable, buildHaddock
+    buildExecutable, buildHaddock, buildLicenseCatenation
   ) where
 
 import qualified Control.Exception as Ex
 import Control.Monad
-import Data.List (delete)
-import Data.Maybe (catMaybes)
+import qualified Data.ByteString.Lazy as BSL
+import Data.List (delete, sort, nub)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.Exit (ExitCode (ExitSuccess))
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeFileName)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.IO.Temp (createTempDirectory)
+import System.IO (IOMode(WriteMode), hClose, openFile, hPutStr)
 
 import Distribution.License (License (..))
 import qualified Distribution.ModuleName
 import Distribution.PackageDescription
 import qualified Distribution.Package as Package
+import Distribution.ParseUtils ( parseFields, simpleField, ParseResult(..)
+                               , FieldDescr, parseLicenseQ, parseFilePathQ
+                               , showFilePath )
 import qualified Distribution.Simple.Build as Build
 import qualified Distribution.Simple.Haddock as Haddock
 import Distribution.Simple.Compiler ( CompilerFlavor (GHC)
@@ -29,6 +34,7 @@ import Distribution.Simple.LocalBuildInfo (localPkgDescr, withPackageDB)
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
+import qualified Distribution.Text
 import Distribution.Version (anyVersion, thisVersion)
 import Language.Haskell.Extension (Language (Haskell2010))
 
@@ -305,34 +311,77 @@ buildExecutable :: FilePath -> FilePath -> [String] -> Bool -> Maybe [FilePath]
                 -> IO ExitCode
 buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
                 mcomputed callback ms = do
-  case toLazyMaybe mcomputed of
-    Nothing -> fail "This session state does not admit executable building."
-    Just Computed{..} -> do
-      let loadedMs = toLazyList computedLoadedModules
-          imp m = do
-            let mimports =
-                  fmap (toLazyList . StrictList.map (removeExplicitSharing
-                                                       computedCache)) $
-                    StrictMap.lookup m computedImports
-            case mimports of
-              Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
-              Just imports ->
-                return $ map (modulePackage . importModule) imports
-      imps <- mapM imp loadedMs
-      let defaultDB = GlobalPackageDB : UserPackageDB : []
-          toDB l = fmap SpecificPackageDB l
-          withPackageDB = maybe defaultDB toDB extraPackageDB
-          pkgs = concat imps
-      configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
-                        withPackageDB pkgs loadedMs callback ms
+  (loadedMs, pkgs) <- buildDeps mcomputed
+  let defaultDB = GlobalPackageDB : UserPackageDB : []
+      toDB l = fmap SpecificPackageDB l
+      withPackageDB = maybe defaultDB toDB extraPackageDB
+  configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
+                    withPackageDB pkgs loadedMs callback ms
 
 buildHaddock :: FilePath -> FilePath -> [String] -> Bool -> Maybe [FilePath]
              -> Strict Maybe Computed -> (Progress -> IO ())
              -> IO ExitCode
 buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
              mcomputed callback = do
+  (loadedMs, pkgs) <- buildDeps mcomputed
+  let defaultDB = GlobalPackageDB : UserPackageDB : []
+      toDB l = fmap SpecificPackageDB l
+      withPackageDB = maybe defaultDB toDB extraPackageDB
+  configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
+                      withPackageDB pkgs loadedMs callback
+
+licenseFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath)]
+licenseFieldDescrs =
+ [ simpleField "license"
+           Distribution.Text.disp              parseLicenseQ
+           (fromMaybe AllRightsReserved . fst) (\l t -> (Just l, snd t))
+ , simpleField "license-file"
+           showFilePath                        parseFilePathQ
+           (fromMaybe "" . snd)                (\lf t -> (fst t, Just lf))
+ ]
+
+buildLicenseCatenation :: FilePath -> FilePath
+                       -> Strict Maybe Computed -> (Progress -> IO ())
+                       -> IO ExitCode
+buildLicenseCatenation cabalsDir ideDistDir mcomputed callback = do
+  counter <- newIORef initialProgress
+  let markProgress = do
+        oldCounter <- readIORef counter
+        modifyIORef counter (updateProgress "")
+        callback oldCounter
+  licensesFile <- openFile (ideDistDir </> "licenses.txt") WriteMode
+  let mainPackageName = Text.pack "main"
+      f :: PackageId -> IO ()
+      f PackageId{packageName} | packageName == mainPackageName = return ()
+      f PackageId{..} = do
+        let packageFile = cabalsDir </> Text.unpack packageName ++ ".cabal"
+        b <- doesFileExist packageFile
+        if b then do
+          s <- readFile packageFile
+          case parseFields licenseFieldDescrs (Nothing, Nothing) s of
+            ParseFailed _ -> return ()  -- TODO
+            -- Ignore warnings, assume harmless:
+            ParseOk _ (Just _l, Just lf) -> do
+              -- TODO: guess from haddockInterfaces of http://hackage.haskell.org/packages/archive/Cabal/latest/doc/html/Distribution-InstalledPackageInfo.html#t:InstalledPackageInfo_
+              -- The directory of the licence file is ignored in installed pkg.
+              bs <- BSL.readFile lf
+              hPutStr licensesFile $
+                "\nLicense for " ++ Text.unpack packageName ++ ":\n"
+              BSL.hPut licensesFile bs
+            ParseOk _ _ -> return ()  -- TODO
+        else return ()  -- TODO
+        markProgress
+  (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
+  mapM_ f pkgs
+  hClose licensesFile
+  return ExitSuccess
+
+-- Gives a list of all modules and a list of all package dependencies
+-- of the currently loaded project.
+buildDeps :: Strict Maybe Computed -> IO ([ModuleName], [PackageId])
+buildDeps mcomputed = do
   case toLazyMaybe mcomputed of
-    Nothing -> fail "This session state does not admit haddock generation."
+    Nothing -> fail "This session state does not admit artifact generation."
     Just Computed{..} -> do
       let loadedMs = toLazyList computedLoadedModules
           imp m = do
@@ -343,11 +392,6 @@ buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
             case mimports of
               Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
               Just imports ->
-                return $ map (modulePackage . importModule) imports
+                return $! map (modulePackage . importModule) imports
       imps <- mapM imp loadedMs
-      let defaultDB = GlobalPackageDB : UserPackageDB : []
-          toDB l = fmap SpecificPackageDB l
-          withPackageDB = maybe defaultDB toDB extraPackageDB
-          pkgs = concat imps
-      configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
-                          withPackageDB pkgs loadedMs callback
+      return $ (loadedMs, nub $ sort $ concat imps)
