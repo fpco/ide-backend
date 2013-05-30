@@ -18,6 +18,7 @@ module HsWalk
 import Control.Arrow (first)
 import Control.Monad (forM_)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
+import Control.Monad.Error (runErrorT, ErrorT(..))
 import Control.Monad.State.Class (MonadState(..))
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Control.Exception (evaluate, try, SomeException)
@@ -252,7 +253,7 @@ data ExtractIdsEnv = ExtractIdsEnv {
 data ExtractIdsState = ExtractIdsState {
     eIdsTidyEnv  :: !TidyEnv
   , eIdsIdList   :: !IdList
-  , eIdsHkIfaces :: !(Strict (Map PackageId) (Either String Hk.LinkEnv))
+  , eIdsHkIfaces :: !(Strict (Map Module.PackageId) (Either String Hk.LinkEnv))
   }
 
 newtype ExtractIdsT m a = ExtractIdsT (
@@ -316,19 +317,27 @@ lookupRdrEnv rdrEnv name =
                    [elt] -> Just elt
                    _     -> error "ghc invariant violated"
 
-haddockInterfaceFilePath :: MonadIO m => PackageId -> m String
-haddockInterfaceFilePath PackageId{..} = do
-  home <- liftIO $ getHomeDirectory
-  -- TODO: This is a hack
-  return $ home ++ "/.cabal/share/doc/"
-        ++ Text.unpack packageName
-        ++ Maybe.maybe "" (\v -> "-" ++ Text.unpack v) packageVersion
-        ++ "/html/"
-        ++ Text.unpack packageName
-        ++ ".haddock"
+haddockInterfaceFilePath :: MonadIO m
+                         => Module.PackageId
+                         -> ExtractIdsT m (Either String FilePath)
+haddockInterfaceFilePath pkg = do
+  pkgIdMap <- (Packages.pkgIdMap . pkgState) <$> asks eIdsDynFlags
+  case Packages.lookupPackage pkgIdMap pkg of
+    Nothing ->
+      return . Left $ "Package configuration for "
+                   ++ showSDoc (ppr pkg)
+                   ++ " not found"
+    Just cfg | null (Packages.haddockInterfaces cfg) -> do
+      return . Left $ "No haddock interfaces found for package "
+                   ++ showSDoc (ppr pkg)
+    Just cfg | length (Packages.haddockInterfaces cfg) > 1 -> do
+      return . Left $ "Too many haddock interfaces found for package "
+                   ++ showSDoc (ppr pkg)
+    Just cfg ->
+      return . Right . head . Packages.haddockInterfaces $ cfg
 
 haddockInterfaceFor :: MonadIO m
-                    => PackageId
+                    => Module.PackageId
                     -> ExtractIdsT m (Either String Hk.LinkEnv)
 haddockInterfaceFor pkg = do
   st <- get
@@ -336,10 +345,11 @@ haddockInterfaceFor pkg = do
   case Map.lookup pkg hkIfaces of
     Just mIface -> return mIface
     Nothing -> do
-      path   <- haddockInterfaceFilePath pkg
-      cache  <- asks eIdsHkCache
-      mIface <- liftIO . try' $ Hk.readInterfaceFile cache path
-      let linkEnv   = Hk.ifLinkEnv <$> mIface
+      linkEnv <- runErrorT $ do
+        path   <- ErrorT $ haddockInterfaceFilePath pkg
+        cache  <- asks eIdsHkCache
+        mIface <- ErrorT . liftIO . try' $ Hk.readInterfaceFile cache path
+        return $ Hk.ifLinkEnv mIface
       let hkIfaces' = Map.insert pkg linkEnv hkIfaces
       put $ st { eIdsHkIfaces = hkIfaces' }
       return linkEnv
@@ -355,7 +365,7 @@ haddockInterfaceFor pkg = do
           liftIO . putStrLn $ "Warning: " ++ show e
           return . Left $ e
         Right (Right r) -> do
-          liftIO . putStrLn $ "Notice: Successfully opened haddock interface for " ++ show pkg
+          liftIO . putStrLn $ "Notice: Successfully opened haddock interface for " ++ showSDoc (ppr pkg)
           return . Right $ r
 
 #if DEBUG
@@ -476,7 +486,7 @@ idInfoForName
   -> Bool                          -- ^ Is this a binding occurrence?
   -> Maybe RdrName.GlobalRdrElt    -- ^ GlobalRdrElt for imported names
   -> Maybe Module.Module           -- ^ Current module for local names
-  -> (PackageId -> Name -> m (Strict Maybe ModuleId))  -- ^ Home modules
+  -> (Module.PackageId -> Name -> m (Strict Maybe ModuleId))  -- ^ Home modules
   -> m (IdPropPtr, Maybe IdScope)  -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt mCurrent home = do
     scope     <- constructScope
@@ -489,7 +499,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
     let idPropPtr   = IdPropPtr . getKey . getUnique $ name
     let idDefinedIn = moduleToModuleId dflags mod
 
-    idHomeModule <- home (modulePackage idDefinedIn) name
+    idHomeModule <- home (Module.modulePackageId mod) name
 
     extendIdPropCache idPropPtr IdProp{..}
     return (idPropPtr, scope)

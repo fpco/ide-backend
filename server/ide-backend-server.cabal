@@ -36,6 +36,7 @@ executable ide-backend-server
                       mtl                  >= 2.1     && < 2.2,
                       unordered-containers >= 0.2.3   && < 0.3,
                       filemanip            >= 0.3.6.2 && < 0.4,
+                      haddock              >= 2.11    && < 2.12,
                       binary               == 0.5.1.0,
                       template-haskell
 
