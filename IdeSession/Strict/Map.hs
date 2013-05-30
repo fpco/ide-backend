@@ -17,6 +17,7 @@ module IdeSession.Strict.Map (
   , keysSet
   , (\\)
   , alter
+  , adjust
   , member
   , (!)
   , keys
@@ -82,6 +83,14 @@ alter f k = StrictMap . Map.alter aux k . toLazyMap
     aux ma = case f ma of
                Nothing -> Nothing
                Just a  -> a `seq` Just a
+
+-- We use alter because it gives us something to anchor a seq to
+adjust :: forall k v. Ord k => (v -> v) -> k -> Strict (Map k) v -> Strict (Map k) v
+adjust f i = StrictMap . Map.alter aux i . toLazyMap
+  where
+    aux :: Maybe v -> Maybe v
+    aux Nothing  = Nothing
+    aux (Just v) = let v' = f v in v' `seq` Just v'
 
 member :: Ord k => k -> Strict (Map k) v -> Bool
 member k = Map.member k . toLazyMap
