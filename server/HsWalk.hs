@@ -16,9 +16,8 @@ module HsWalk
   ) where
 
 import Control.Arrow (first)
-import Control.Monad (forM_)
+import Control.Monad (forM_, join)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
-import Control.Monad.Error (runErrorT, ErrorT(..))
 import Control.Monad.State.Class (MonadState(..))
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Control.Exception (evaluate, try, SomeException)
@@ -29,6 +28,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BSSC
 import Data.List (stripPrefix)
 import Data.Maybe (fromMaybe, fromJust)
+import Data.Either (rights)
 import Data.Version
 import Prelude hiding (id, mod, span)
 import System.IO.Unsafe (unsafePerformIO)
@@ -171,7 +171,7 @@ extractIdsPlugin symbolRef = HscPlugin {..}
                                               (lookupRdrEnv rdrEnv quoter)
                                               (Just current)
                                               -- TODO: Home module
-                                              (\_ _ -> return Maybe.nothing)
+                                              (\_ -> return Maybe.nothing)
       let quoterInfo = IdInfo{..}
       let idInfo' = (span', SpanQQ quoterInfo) : idInfo
       writeIORef qqRef idInfo'
@@ -187,7 +187,7 @@ extractIdsPlugin symbolRef = HscPlugin {..}
         writeIORef qqRef [] -- Reset for the next module
         return qqs
 
-      identMap <- execExtractIdsT dynFlags (tcg_rdr_env env) qqs processedModule $ do
+      identMap <- execExtractIdsT dynFlags env qqs processedModule $ do
 #if DEBUG
         pretty_mod     <- pretty False processedModule
         pretty_rdr_env <- pretty False (tcg_rdr_env env)
@@ -256,56 +256,59 @@ mkLinkEnv m = foldr (.) (\x -> x) (map aux (LazyMap.toList m)) Map.empty
       Just mod -> Map.insert (mod, Name.nameOccName n) home
       Nothing  -> \x -> x
 
-haddockInterfaceFilePath :: MonadIO m
-                         => Module.PackageId
-                         -> ExtractIdsT m (Either String FilePath)
-haddockInterfaceFilePath pkg = do
-  pkgIdMap <- (Packages.pkgIdMap . pkgState) <$> asks eIdsDynFlags
+homeModuleFor :: Monad m => Name -> ExtractIdsT m (Strict Maybe ModuleId)
+homeModuleFor name =
+  case Name.nameModule_maybe name of
+    Nothing -> do
+      return Maybe.nothing
+    Just mod -> do
+      linkEnv <- asks eIdsLinkEnv
+      case Map.lookup (mod, Name.nameOccName name) linkEnv of
+        Nothing -> do
+          return Maybe.nothing
+        Just m  -> do
+          dflags <- asks eIdsDynFlags
+          return (Maybe.just (moduleToModuleId dflags m))
+
+haddockInterfaceFilePath :: DynFlags
+                         -> Module.PackageId
+                         -> Either String FilePath
+haddockInterfaceFilePath dflags pkg = do
+  let pkgIdMap = Packages.pkgIdMap (pkgState dflags)
   case Packages.lookupPackage pkgIdMap pkg of
     Nothing ->
-      return . Left $ "Package configuration for "
-                   ++ showSDoc (ppr pkg)
-                   ++ " not found"
+      Left $ "Package configuration for "
+          ++ showSDoc (ppr pkg)
+          ++ " not found"
     Just cfg | null (Packages.haddockInterfaces cfg) -> do
-      return . Left $ "No haddock interfaces found for package "
-                   ++ showSDoc (ppr pkg)
+      Left $ "No haddock interfaces found for package "
+          ++ showSDoc (ppr pkg)
     Just cfg | length (Packages.haddockInterfaces cfg) > 1 -> do
-      return . Left $ "Too many haddock interfaces found for package "
-                   ++ showSDoc (ppr pkg)
+      Left $ "Too many haddock interfaces found for package "
+          ++ showSDoc (ppr pkg)
     Just cfg ->
-      return . Right . head . Packages.haddockInterfaces $ cfg
+      Right . head . Packages.haddockInterfaces $ cfg
 
-haddockInterfaceFor :: MonadIO m
-                    => Module.PackageId
-                    -> ExtractIdsT m (Either String LinkEnv)
-haddockInterfaceFor pkg = do
-  st <- get
-  let hkIfaces = eIdsHkIfaces st
-  case Map.lookup pkg hkIfaces of
-    Just mIface -> return mIface
-    Nothing -> do
-      linkEnv <- runErrorT $ do
-        path   <- ErrorT $ haddockInterfaceFilePath pkg
-        cache  <- asks eIdsHkCache
-        mIface <- ErrorT . liftIO . try' $ Hk.readInterfaceFile cache path
-        -- lift . liftIO $ putStrLn $ "Original linkenv for " ++ showSDoc (ppr pkg) ++ " is " ++ showSDocDebug (ppr (Hk.ifLinkEnv mIface))
-        return . mkLinkEnv $ Hk.ifLinkEnv mIface
-      let hkIfaces' = Map.insert pkg linkEnv hkIfaces
-      put $ st { eIdsHkIfaces = hkIfaces' }
-      return linkEnv
+haddockInterfaceFor :: DynFlags
+                    -> Hk.NameCacheAccessor IO
+                    -> Module.PackageId
+                    -> IO (Either String LinkEnv)
+haddockInterfaceFor dflags cache pkg = do
+    case haddockInterfaceFilePath dflags pkg of
+      Left err   -> return (Left err)
+      Right path -> do
+        iface <- try' $ Hk.readInterfaceFile cache path
+        return (mkLinkEnv . Hk.ifLinkEnv <$> iface)
   where
     try' :: MonadIO m => IO (Either String a) -> m (Either String a)
     try' act = do
       mr <- liftIO $ try act
       case mr of
         Left e -> do
-          liftIO . putStrLn $ "Warning: " ++ show e
           return . Left $ show (e :: SomeException)
         Right (Left e) -> do
-          liftIO . putStrLn $ "Warning: " ++ show e
           return . Left $ e
         Right (Right r) -> do
-          liftIO . putStrLn $ "Notice: Successfully opened haddock interface for " ++ showSDoc (ppr pkg)
           return . Right $ r
 
 {------------------------------------------------------------------------------
@@ -320,14 +323,13 @@ data ExtractIdsEnv = ExtractIdsEnv {
     eIdsDynFlags :: !DynFlags
   , eIdsRdrEnv   :: !RdrName.GlobalRdrEnv
   , eIdsPprStyle :: !PprStyle
-  , eIdsHkCache  :: !(Hk.NameCacheAccessor IO)
   , eIdsCurrent  :: !Module.Module
+  , eIdsLinkEnv  :: !LinkEnv
   }
 
 data ExtractIdsState = ExtractIdsState {
     eIdsTidyEnv  :: !TidyEnv
   , eIdsIdList   :: !IdList
-  , eIdsHkIfaces :: !(Strict (Map Module.PackageId) (Either String LinkEnv))
   }
 
 newtype ExtractIdsT m a = ExtractIdsT (
@@ -336,29 +338,40 @@ newtype ExtractIdsT m a = ExtractIdsT (
   deriving
     (Functor, Monad, MonadState ExtractIdsState, MonadReader ExtractIdsEnv)
 
-execExtractIdsT :: Monad m
+execExtractIdsT :: MonadIO m
                 => DynFlags
-                -> RdrName.GlobalRdrEnv
+                -> TcGblEnv
                 -> IdList
                 -> Module.Module
                 -> ExtractIdsT m ()
                 -> m IdList
-execExtractIdsT dynFlags rdrEnv idList current (ExtractIdsT m) = do
+execExtractIdsT dynFlags env idList current (ExtractIdsT m) = do
+  -- Construct LinkEnv for finding home modules
+  --
   -- We use the freshNameCache rather than nameCacheFromGhc because we don't
   -- actually know precisely what monad we're in; it's "a" Ghc monad but
   -- not necessarily "the" Ghc monad
-  let qual    = mkPrintUnqualified dynFlags rdrEnv
+  linkEnvs <- liftIO $ mapM (haddockInterfaceFor dynFlags Hk.freshNameCache)
+                            (imp_dep_pkgs (tcg_imports env))
+
+  -- The order in which we take these unions is important!
+  -- For instance, there is an entry for 'True' in both ghc-prim and base, but
+  -- we want the entry in base so that we report Data.Bool as the home module
+  -- rather than GHC.Types
+  let linkEnv = Map.unions (rights linkEnvs)
+
+  let rdrEnv  = tcg_rdr_env env
+      qual    = mkPrintUnqualified dynFlags rdrEnv
       eIdsEnv = ExtractIdsEnv {
                     eIdsDynFlags = dynFlags
                   , eIdsRdrEnv   = rdrEnv
                   , eIdsPprStyle = mkUserStyle qual AllTheWay
-                  , eIdsHkCache  = Hk.freshNameCache
                   , eIdsCurrent  = current
+                  , eIdsLinkEnv  = linkEnv
                   }
       eIdsSt  = ExtractIdsState {
                     eIdsTidyEnv  = emptyTidyEnv
                   , eIdsIdList   = idList
-                  , eIdsHkIfaces = Map.empty
                   }
   eIdsSt' <- execStateT (runReaderT m eIdsEnv) eIdsSt
   return (eIdsIdList eIdsSt')
@@ -509,7 +522,7 @@ idInfoForName
   -> Bool                          -- ^ Is this a binding occurrence?
   -> Maybe RdrName.GlobalRdrElt    -- ^ GlobalRdrElt for imported names
   -> Maybe Module.Module           -- ^ Current module for local names
-  -> (Module.PackageId -> Name -> m (Strict Maybe ModuleId))  -- ^ Home modules
+  -> (Name -> m (Strict Maybe ModuleId))  -- ^ Home modules
   -> m (IdPropPtr, Maybe IdScope)  -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt mCurrent home = do
     scope     <- constructScope
@@ -522,7 +535,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
     let idPropPtr   = IdPropPtr . getKey . getUnique $ name
     let idDefinedIn = moduleToModuleId dflags mod
 
-    idHomeModule <- home (Module.modulePackageId mod) name
+    idHomeModule <- home name
 
     extendIdPropCache idPropPtr IdProp{..}
     return (idPropPtr, scope)
@@ -676,35 +689,13 @@ instance Record Name where
         rdrEnv  <- asks eIdsRdrEnv
         current <- asks eIdsCurrent
 
-        let -- home :: Module.PackageId -> Name -> m (Strict Maybe ModuleId)
-            home pkg name = do
-              case Name.nameModule_maybe name of
-                Nothing -> do
-                  -- liftIO . putStrLn $ "Warning: No module for " ++ showSDoc (ppr name)
-                  return Maybe.nothing
-                Just mod -> do
-                  mLinkEnv <- haddockInterfaceFor pkg
-                  case mLinkEnv of
-                    Left err -> do
-                      -- liftIO . putStrLn $ "Warning: No link environment for " ++ showSDoc (ppr name)
-                      return Maybe.nothing
-                    Right linkEnv -> do
-                      case Map.lookup (mod, Name.nameOccName name) linkEnv of
-                        Nothing -> do
-                          -- liftIO . putStrLn $ "Warning! No entry in link environment for " ++ showSDoc (ppr name) -- ++ " " ++ showLinkEnv linkEnv
-                          return Maybe.nothing
-                        Just m  -> do
-                          -- liftIO $ putStrLn $ "Notice: Link environment is " ++ showLinkEnv linkEnv
-                          -- fail "Giving up"
-                          return (Maybe.just (moduleToModuleId dflags m))
-
         -- The lookup into the rdr env will only be used for imported names.
         info <- idInfoForName dflags
                               name
                               idIsBinder
                               (lookupRdrEnv rdrEnv name)
                               (Just current)
-                              home
+                              homeModuleFor
 
         case info of
           (idProp, Just idScope) -> do

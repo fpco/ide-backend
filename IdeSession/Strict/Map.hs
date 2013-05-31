@@ -11,6 +11,7 @@ module IdeSession.Strict.Map (
   , empty
   , insert
   , union
+  , unions
   , filterWithKey
   , lookup
   , findWithDefault
@@ -31,6 +32,7 @@ import Data.Set (Set)
 import qualified Data.Map as Map
 import Data.Accessor (Accessor)
 import qualified Data.Accessor as Acc
+import qualified Data.List as List
 
 import IdeSession.Strict.Container
 
@@ -59,6 +61,9 @@ insert k v = StrictMap . Map.insertWith' const k v . toLazyMap
 -- | Left biased union
 union :: Ord k => Strict (Map k) v -> Strict (Map k) v -> Strict (Map k) v
 union a b = StrictMap $ Map.union (toLazyMap a) (toLazyMap b)
+
+unions :: Ord k => [Strict (Map k) v] -> Strict (Map k) v
+unions = StrictMap . Map.unions . List.map toLazyMap
 
 filterWithKey :: Ord k => (k -> v -> Bool) -> Strict (Map k) v -> Strict (Map k) v
 filterWithKey p = StrictMap . Map.filterWithKey p . toLazyMap
