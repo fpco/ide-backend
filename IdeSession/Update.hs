@@ -481,10 +481,12 @@ buildDoc = IdeSessionUpdate
 buildLicenses :: FilePath -> IdeSessionUpdate
 buildLicenses cabalsDir = IdeSessionUpdate
                           $ \callback
-                             IdeStaticInfo{ideDistDir} -> do
+                             IdeStaticInfo{ideDistDir, ideConfig} -> do
     mcomputed <- get ideComputed
+    let SessionConfig{configPackageDBStack} = ideConfig
     exitCode <-
-      lift $ buildLicenseCatenation cabalsDir ideDistDir mcomputed callback
+      lift $ buildLicenseCatenation cabalsDir ideDistDir configPackageDBStack
+                                    mcomputed callback
     set ideBuildLicensesStatus (Just exitCode)
 
 {------------------------------------------------------------------------------

@@ -12,12 +12,14 @@ import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.Exit (ExitCode (ExitSuccess))
-import System.FilePath ((</>), takeFileName)
+import System.FilePath ((</>), takeFileName, splitPath, joinPath)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.IO.Temp (createTempDirectory)
 import System.IO (IOMode(WriteMode), hClose, openFile, hPutStr)
 
+import Distribution.InstalledPackageInfo
+  (InstalledPackageInfo_ (InstalledPackageInfo, haddockInterfaces))
 import Distribution.License (License (..))
 import qualified Distribution.ModuleName
 import Distribution.PackageDescription
@@ -30,10 +32,13 @@ import qualified Distribution.Simple.Haddock as Haddock
 import Distribution.Simple.Compiler ( CompilerFlavor (GHC)
                                     , PackageDB(..), PackageDBStack )
 import Distribution.Simple.Configure (configure)
+import Distribution.Simple.GHC (getInstalledPackages)
 import Distribution.Simple.LocalBuildInfo (localPkgDescr, withPackageDB)
+import Distribution.Simple.PackageIndex (lookupSourcePackageId)
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
+import Distribution.Simple.Program.Db (configureAllKnownPrograms)
 import qualified Distribution.Text
 import Distribution.Version (anyVersion, thisVersion)
 import Language.Haskell.Extension (Language (Haskell2010))
@@ -340,10 +345,14 @@ licenseFieldDescrs =
            (fromMaybe "" . snd)                (\lf t -> (fst t, Just lf))
  ]
 
-buildLicenseCatenation :: FilePath -> FilePath
+buildLicenseCatenation :: FilePath -> FilePath -> Maybe [FilePath]
                        -> Strict Maybe Computed -> (Progress -> IO ())
                        -> IO ExitCode
-buildLicenseCatenation cabalsDir ideDistDir mcomputed callback = do
+buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
+                       callback = do
+  let defaultDB = GlobalPackageDB : UserPackageDB : []
+      toDB l = fmap SpecificPackageDB l
+      withPackageDB = maybe defaultDB toDB extraPackageDB
   counter <- newIORef initialProgress
   let markProgress = do
         oldCounter <- readIORef counter
@@ -354,7 +363,8 @@ buildLicenseCatenation cabalsDir ideDistDir mcomputed callback = do
       f :: PackageId -> IO ()
       f PackageId{packageName} | packageName == mainPackageName = return ()
       f PackageId{..} = do
-        let packageFile = cabalsDir </> Text.unpack packageName ++ ".cabal"
+        let nameString = Text.unpack packageName
+            packageFile = cabalsDir </> nameString ++ ".cabal"
         b <- doesFileExist packageFile
         if b then do
           s <- readFile packageFile
@@ -362,12 +372,26 @@ buildLicenseCatenation cabalsDir ideDistDir mcomputed callback = do
             ParseFailed _ -> return ()  -- TODO
             -- Ignore warnings, assume harmless:
             ParseOk _ (Just _l, Just lf) -> do
-              -- TODO: guess from haddockInterfaces of http://hackage.haskell.org/packages/archive/Cabal/latest/doc/html/Distribution-InstalledPackageInfo.html#t:InstalledPackageInfo_
-              -- The directory of the licence file is ignored in installed pkg.
-              bs <- BSL.readFile lf
-              hPutStr licensesFile $
-                "\nLicense for " ++ Text.unpack packageName ++ ":\n"
-              BSL.hPut licensesFile bs
+              programDB <- configureAllKnownPrograms
+                             minBound defaultProgramConfiguration
+              pkgIndex <- getInstalledPackages minBound withPackageDB programDB
+              let versionString = maybe "" Text.unpack packageVersion
+              version <- parseVersionString versionString
+              let pkgId = Package.PackageIdentifier
+                            { pkgName = Package.PackageName nameString
+                            , pkgVersion = version }
+                  pkgInfos = lookupSourcePackageId pkgIndex pkgId
+              case pkgInfos of
+                InstalledPackageInfo{haddockInterfaces = hIn : _} : _ -> do
+                  let prefix = joinPath $ init $ init $ splitPath hIn
+                  -- The directory of the licence file is ignored
+                  -- in installed packages, hence @takeFileName@.
+                  bs <- BSL.readFile $ prefix </> takeFileName lf
+                  hPutStr licensesFile $
+                    "\nLicense for " ++ nameString ++ ":\n"
+                  BSL.hPut licensesFile bs
+                _ -> error $ "buildLicenseCatenation: Package "
+                             ++ nameString ++ " not properly installed."
             ParseOk _ _ -> return ()  -- TODO
         else return ()  -- TODO
         markProgress
