@@ -7,7 +7,7 @@ import qualified Control.Exception as Ex
 import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
 import Data.List (delete, sort, nub)
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
 import Data.Version (Version (..), parseVersion)
@@ -18,7 +18,7 @@ import System.FilePath ((</>), takeFileName, splitPath, joinPath)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.IO.Temp (createTempDirectory)
-import System.IO (IOMode(WriteMode), hClose, openFile, hPutStr)
+import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr)
 
 import Distribution.InstalledPackageInfo
   (InstalledPackageInfo_ (InstalledPackageInfo, haddockInterfaces))
@@ -29,7 +29,7 @@ import qualified Distribution.Package as Package
 import Distribution.ParseUtils ( parseFields, simpleField, ParseResult(..)
                                , FieldDescr, parseLicenseQ, parseFilePathQ
                                , parseFreeText, showFilePath, showFreeText
-                               , locatedErrorMsg )
+                               , locatedErrorMsg, showPWarning, PWarning )
 import qualified Distribution.Simple.Build as Build
 import qualified Distribution.Simple.Haddock as Haddock
 import Distribution.Simple.Compiler ( CompilerFlavor (GHC)
@@ -340,8 +340,8 @@ buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
   configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
                       withPackageDB pkgs loadedMs callback
 
-licenseFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
-licenseFieldDescrs =
+lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
+lFieldDescrs =
  [ simpleField "license"
      Distribution.Text.disp              parseLicenseQ
      (\(t1, _, _) -> fromMaybe BSD3 t1)  (\l (_, t2, t3) -> (Just l, t2, t3))
@@ -367,7 +367,10 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
         modifyIORef counter (updateProgress "")
         callback oldCounter
   (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
-  licensesFile <- openFile (ideDistDir </> "licenses.txt") WriteMode
+  let stdoutLog  = ideDistDir </> "licenses.stdout"
+      stderrLog  = ideDistDir </> "licenses.stderr"
+      licensesFN = ideDistDir </> "licenses.txt"
+  licensesFile <- openBinaryFile licensesFN WriteMode
   let mainPackageName = Text.pack "main"
       f :: PackageId -> IO ()
       f PackageId{packageName} | packageName == mainPackageName = return ()
@@ -376,14 +379,20 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
             packageFile = cabalsDir </> nameString ++ ".cabal"
             versionString = maybe "" Text.unpack packageVersion
         version <- parseVersionString versionString
+        let outputWarns :: [PWarning] -> IO ()
+            outputWarns [] = return ()
+            outputWarns warns = do
+              let warnMsg = "Parse warnings for " ++ packageFile ++ ":\n"
+                            ++ unlines (map (showPWarning packageFile) warns)
+              appendFile stdoutLog warnMsg
         b <- doesFileExist packageFile
         if b then do
+          hPutStr licensesFile $ "\nLicense for " ++ nameString ++ ":\n\n"
           pkgS <- readFile packageFile
-          mbs <- case parseFields
-                        licenseFieldDescrs (Nothing, Nothing, Nothing) pkgS of
+          case parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS of
             ParseFailed err -> fail $ snd $ locatedErrorMsg err
-            -- Ignore warnings, assume harmless:
-            ParseOk _ (_, Just lf, _) -> do
+            ParseOk warns (_, Just lf, _) -> do
+              outputWarns warns
               programDB <- configureAllKnownPrograms  -- won't die
                              minBound defaultProgramConfiguration
               pkgIndex <- getInstalledPackages minBound withPackageDB programDB
@@ -393,43 +402,55 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
                   pkgInfos = lookupSourcePackageId pkgIndex pkgId
               case pkgInfos of
                 InstalledPackageInfo{haddockInterfaces = hIn : _} : _ -> do
-                  let prefix = joinPath $ init $ init $ splitPath hIn
+                  let ps = splitPath hIn
+                      prefix = joinPath $ take (length ps - 2) ps
                       -- The directory of the licence file is ignored
                       -- in installed packages, hence @takeFileName@.
                       stdLocation = prefix </> takeFileName lf
                   bstd <- doesFileExist stdLocation
                   if bstd then do
                     bs <- BSL.readFile stdLocation
-                    return $ Left bs
+                    BSL.hPut licensesFile bs
                   else do
                     -- Assume the package is not installed, but in a GHC tree.
-                    let treePrefix =
-                          joinPath $ init $ init $ init $ splitPath prefix
+                    let treePs = splitPath prefix
+                        treePrefix = joinPath $ take (length treePs - 3) treePs
                         treeLocation = treePrefix </> takeFileName lf
                     bs <- BSL.readFile treeLocation
-                    return $ Left bs
+                    BSL.hPut licensesFile bs
                 _ -> fail $ "buildLicenseCatenation: Package "
                             ++ nameString
                             ++ " not properly installed."
-            ParseOk _ (l, Nothing, mauthor) -> do
+            ParseOk warns (l, Nothing, mauthor) -> do
+              outputWarns warns
+              when (isNothing l) $ do
+                let warnMsg =
+                      "WARNING: Package " ++ packageFile
+                      ++ " has no license nor license file specified."
+                appendFile stdoutLog warnMsg
               let license = fromMaybe BSD3 l
                   author = fromMaybe "???" mauthor
               ms <- licenseText license author
-              return $ Right ms
-          hPutStr licensesFile $ "\nLicense for " ++ nameString ++ ":\n\n"
-          case mbs of
-            Left bs -> BSL.hPut licensesFile bs
-            Right Nothing -> fail $ "No license text can be found for package "
-                             ++ nameString ++ "."
-            Right (Just s) -> hPutStr licensesFile s
+              case ms of
+                Nothing -> fail $ "No license text can be found for package "
+                                   ++ nameString ++ "."
+                Just s -> do
+                  hPutStr licensesFile s
+                  let assumed = if isNothing l
+                                then "and the assumed"
+                                else "but"
+                      warnMsg =
+                        "WARNING: No license file specified, "
+                        ++ assumed
+                        ++ " license is "
+                        ++ show license
+                        ++ ". Reproducing standard license text."
+                  appendFile stdoutLog warnMsg
         else return ()  -- TODO: verify the pkg is in the core set
         markProgress
   res <- Ex.try $ mapM_ f pkgs
   hClose licensesFile
-  -- TODO: perhaps output warnings about license or license-file missing
-  -- and any parsing warnings to "licenses.stdout".
-  let stderrLog = ideDistDir </> "licenses.stderr"
-      handler :: Ex.IOException -> IO ExitCode
+  let handler :: Ex.IOException -> IO ExitCode
       handler e = do
         let msg = "Licenses concatenation failed. The exception is:\n"
                   ++ show e
