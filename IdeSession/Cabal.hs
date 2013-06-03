@@ -11,7 +11,7 @@ import Data.Maybe (catMaybes, fromMaybe)
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
-import System.Exit (ExitCode (ExitSuccess))
+import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.FilePath ((</>), takeFileName, splitPath, joinPath)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
@@ -26,7 +26,7 @@ import Distribution.PackageDescription
 import qualified Distribution.Package as Package
 import Distribution.ParseUtils ( parseFields, simpleField, ParseResult(..)
                                , FieldDescr, parseLicenseQ, parseFilePathQ
-                               , showFilePath )
+                               , showFilePath, locatedErrorMsg )
 import qualified Distribution.Simple.Build as Build
 import qualified Distribution.Simple.Haddock as Haddock
 import Distribution.Simple.Compiler ( CompilerFlavor (GHC)
@@ -358,6 +358,7 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
         oldCounter <- readIORef counter
         modifyIORef counter (updateProgress "")
         callback oldCounter
+  (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
   licensesFile <- openFile (ideDistDir </> "licenses.txt") WriteMode
   let mainPackageName = Text.pack "main"
       f :: PackageId -> IO ()
@@ -365,18 +366,18 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
       f PackageId{..} = do
         let nameString = Text.unpack packageName
             packageFile = cabalsDir </> nameString ++ ".cabal"
+            versionString = maybe "" Text.unpack packageVersion
+        version <- parseVersionString versionString
         b <- doesFileExist packageFile
         if b then do
           s <- readFile packageFile
           case parseFields licenseFieldDescrs (Nothing, Nothing) s of
-            ParseFailed _ -> return ()  -- TODO
+            ParseFailed err -> fail $ snd $ locatedErrorMsg err
             -- Ignore warnings, assume harmless:
-            ParseOk _ (Just _l, Just lf) -> do
-              programDB <- configureAllKnownPrograms
+            ParseOk _ (_, Just lf) -> do
+              programDB <- configureAllKnownPrograms  -- won't die
                              minBound defaultProgramConfiguration
               pkgIndex <- getInstalledPackages minBound withPackageDB programDB
-              let versionString = maybe "" Text.unpack packageVersion
-              version <- parseVersionString versionString
               let pkgId = Package.PackageIdentifier
                             { pkgName = Package.PackageName nameString
                             , pkgVersion = version }
@@ -388,17 +389,26 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
                   -- in installed packages, hence @takeFileName@.
                   bs <- BSL.readFile $ prefix </> takeFileName lf
                   hPutStr licensesFile $
-                    "\nLicense for " ++ nameString ++ ":\n"
+                    "\nLicense for " ++ nameString ++ ":\n\n"
                   BSL.hPut licensesFile bs
-                _ -> error $ "buildLicenseCatenation: Package "
-                             ++ nameString ++ " not properly installed."
-            ParseOk _ _ -> return ()  -- TODO
-        else return ()  -- TODO
+                _ -> fail $ "buildLicenseCatenation: Package "
+                            ++ nameString
+                            ++ " not properly installed."
+            ParseOk _ (_l, Nothing) -> return ()  -- TODO: print license l
+        else return ()  -- TODO: verify the pkg is in the core set
         markProgress
-  (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
-  mapM_ f pkgs
+  res <- Ex.try $ mapM_ f pkgs
   hClose licensesFile
-  return ExitSuccess
+  -- TODO: perhaps output warnings about license or license-file missing
+  -- and any parsing warnings to "licenses.stdout".
+  let stderrLog = ideDistDir </> "licenses.stderr"
+      handler :: Ex.IOException -> IO ExitCode
+      handler e = do
+        let msg = "Licenses concatenation failed. The exception is:\n"
+                  ++ show e
+        writeFile stderrLog msg
+        return $ ExitFailure 1
+  either handler (const $ return ExitSuccess) res
 
 -- Gives a list of all modules and a list of all package dependencies
 -- of the currently loaded project.

@@ -1,0 +1,33 @@
+name:		parallel
+version:        3.2.0.3
+license:	BSD3
+license-file:	LICENSE
+maintainer:	libraries@haskell.org
+synopsis:	Parallel programming library
+description:
+    This package provides a library for parallel programming.
+category:       Control
+build-type:     Simple
+cabal-version:  >=1.6
+
+source-repository head
+    type:     git
+    location: http://darcs.haskell.org/packages/parallel.git/
+
+library {
+  exposed-modules:
+        Control.Seq
+        Control.Parallel
+        Control.Parallel.Strategies
+  extensions:	CPP BangPatterns
+  build-depends: base    >= 3 && < 5,
+                 deepseq >= 1.1 && < 1.4,
+                 containers >= 0.1 && < 0.6,
+                 array      >= 0.1 && < 0.5
+  ghc-options: -Wall
+
+  if impl(ghc >= 6.11) {
+    -- To improve parallel performance:
+    ghc-options: -feager-blackholing
+  }
+}
