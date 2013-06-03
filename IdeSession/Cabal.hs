@@ -379,20 +379,29 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
             packageFile = cabalsDir </> nameString ++ ".cabal"
             versionString = maybe "" Text.unpack packageVersion
         version <- parseVersionString versionString
-        let outputWarns :: [PWarning] -> IO ()
-            outputWarns [] = return ()
-            outputWarns warns = do
+        let _outputWarns :: [PWarning] -> IO ()
+            _outputWarns [] = return ()
+            _outputWarns warns = do
               let warnMsg = "Parse warnings for " ++ packageFile ++ ":\n"
                             ++ unlines (map (showPWarning packageFile) warns)
+                            ++ "\n"
               appendFile stdoutLog warnMsg
         b <- doesFileExist packageFile
         if b then do
           hPutStr licensesFile $ "\nLicense for " ++ nameString ++ ":\n\n"
           pkgS <- readFile packageFile
+          -- We can't use @parsePackageDescription@, because it defaults to
+          -- AllRightsReserved and we default to BSD3. It's very hard
+          -- to use the machinery from the inside of @parsePackageDescription@,
+          -- so instead we use the much simpler @ParseUtils.parseFields@.
+          -- The downside is that we are much less past- and future-proof
+          -- against .cabal format changes. The upside is @parseFields@
+          -- is faster and does not care about most parsing errors
+          -- the .cabal file may (appear to) have.
           case parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS of
             ParseFailed err -> fail $ snd $ locatedErrorMsg err
-            ParseOk warns (_, Just lf, _) -> do
-              outputWarns warns
+            ParseOk _warns (_, Just lf, _) -> do
+              -- outputWarns warns  -- false positives
               programDB <- configureAllKnownPrograms  -- won't die
                              minBound defaultProgramConfiguration
               pkgIndex <- getInstalledPackages minBound withPackageDB programDB
@@ -421,12 +430,12 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
                 _ -> fail $ "buildLicenseCatenation: Package "
                             ++ nameString
                             ++ " not properly installed."
-            ParseOk warns (l, Nothing, mauthor) -> do
-              outputWarns warns
+            ParseOk _warns (l, Nothing, mauthor) -> do
+              -- outputWarns warns  -- false positives
               when (isNothing l) $ do
                 let warnMsg =
                       "WARNING: Package " ++ packageFile
-                      ++ " has no license nor license file specified."
+                      ++ " has no license nor license file specified.\n"
                 appendFile stdoutLog warnMsg
               let license = fromMaybe BSD3 l
                   author = fromMaybe "???" mauthor
@@ -437,14 +446,15 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
                 Just s -> do
                   hPutStr licensesFile s
                   let assumed = if isNothing l
-                                then "and the assumed"
-                                else "but"
+                                then " and the assumed"
+                                else ", but"
                       warnMsg =
-                        "WARNING: No license file specified, "
+                        "WARNING: No license file specified for package "
+                        ++ packageFile
                         ++ assumed
                         ++ " license is "
                         ++ show license
-                        ++ ". Reproducing standard license text."
+                        ++ ". Reproducing standard license text.\n"
                   appendFile stdoutLog warnMsg
         else return ()  -- TODO: verify the pkg is in the core set
         markProgress

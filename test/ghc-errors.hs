@@ -460,9 +460,9 @@ syntheticTests =
         assertEqual "after license build" (Just ExitSuccess) status
         distDir <- getDistDir session
         licensesWarns <- readFile $ distDir </> "licenses.stdout"
-        assertEqual "licensesWarns length" 344 (length licensesWarns)
+        assertEqual "licensesWarns length" 367 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
-        assertEqual "licenses length" 10921 (length licenses)
+        assertEqual "licenses length" 8447 (length licenses)
     )
   , ( "Build licenses with wrong cabal files and fail"
     , let packageOpts = [ "-hide-all-packages"

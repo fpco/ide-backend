@@ -12,6 +12,8 @@ Description:
     Test coverage data for this library is available at:
         <http://code.haskell.org/~dons/tests/bytestring/hpc_index.html>
 
+License:             BSD3
+License-file:        LICENSE
 Category:            Data
 Copyright:           Copyright (c) Don Stewart   2005-2009,
                                (c) Duncan Coutts 2006-2009,
