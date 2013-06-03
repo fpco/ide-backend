@@ -20,6 +20,7 @@ library
   other-modules:      IdeSession.State,
                       IdeSession.Config,
                       IdeSession.Cabal,
+                      IdeSession.Licenses,
                       IdeSession.Query,
                       IdeSession.Update,
                       IdeSession.RPC.Server,
@@ -69,12 +70,11 @@ library
                       tagged               >= 0.4     && < 0.5,
                       fingertree           >= 0.0.1   && < 0.1,
                       transformers         >= 0.3     && < 0.4,
+                      time                 >= 1.4     && < 1.5,
                       Cabal                == 1.14.0,
                       ide-backend-rts      >= 0.1.1,
                       template-haskell
-  if impl(ghc >= 7.6.2)
-     build-depends:   time      ==1.4.*
-  else
+  if impl(ghc < 7.6.1)
      build-depends:   old-time  ==1.*
 
   default-language:   Haskell2010
@@ -92,11 +92,9 @@ test-suite typecheck-dir
   type:               exitcode-stdio-1.0
   main-is:            typecheck-dir.hs
   hs-source-dirs:     test
-  build-depends:      base, ide-backend, temporary, filemanip, directory
+  build-depends:      base, ide-backend, temporary, filemanip, directory, time
 
-  if impl(ghc >= 7.6.1)
-     build-depends:   time      ==1.4.*
-  else
+  if impl(ghc < 7.6.1)
      build-depends:   old-time  ==1.*
 
   default-language:   Haskell2010
@@ -114,14 +112,12 @@ test-suite ghc-errors
   hs-source-dirs:     test server
   build-depends:      base, ide-backend, text, random, utf8-string, bytestring,
                       unix, process, filemanip, temporary, filepath, directory,
-                      HUnit, test-framework, test-framework-hunit,
+                      HUnit, test-framework, test-framework-hunit, time,
 -- parallel is only needed for the code of the tests; please do not remove;
 -- note that under cabal-dev it's still not enough and you need to install
 -- parallel by hand into a regular package DB
                       parallel
-  if impl(ghc >= 7.6.1)
-     build-depends:   time      ==1.4.*
-  else
+  if impl(ghc < 7.6.1)
      build-depends:   old-time  ==1.*
 
   default-language:   Haskell2010

@@ -8,6 +8,8 @@ import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
 import Data.List (delete, sort, nub)
 import Data.Maybe (catMaybes, fromMaybe)
+import Data.Time
+  ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
@@ -26,7 +28,8 @@ import Distribution.PackageDescription
 import qualified Distribution.Package as Package
 import Distribution.ParseUtils ( parseFields, simpleField, ParseResult(..)
                                , FieldDescr, parseLicenseQ, parseFilePathQ
-                               , showFilePath, locatedErrorMsg )
+                               , parseFreeText, showFilePath, showFreeText
+                               , locatedErrorMsg )
 import qualified Distribution.Simple.Build as Build
 import qualified Distribution.Simple.Haddock as Haddock
 import Distribution.Simple.Compiler ( CompilerFlavor (GHC)
@@ -43,6 +46,8 @@ import qualified Distribution.Text
 import Distribution.Version (anyVersion, thisVersion)
 import Language.Haskell.Extension (Language (Haskell2010))
 
+import IdeSession.Licenses
+  ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
 import IdeSession.State
 import IdeSession.Strict.Container
 import IdeSession.Types.Progress
@@ -335,14 +340,17 @@ buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
   configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
                       withPackageDB pkgs loadedMs callback
 
-licenseFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath)]
+licenseFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
 licenseFieldDescrs =
  [ simpleField "license"
-           Distribution.Text.disp              parseLicenseQ
-           (fromMaybe AllRightsReserved . fst) (\l t -> (Just l, snd t))
+     Distribution.Text.disp              parseLicenseQ
+     (\(t1, _, _) -> fromMaybe BSD3 t1)  (\l (_, t2, t3) -> (Just l, t2, t3))
  , simpleField "license-file"
-           showFilePath                        parseFilePathQ
-           (fromMaybe "" . snd)                (\lf t -> (fst t, Just lf))
+     showFilePath                        parseFilePathQ
+     (\(_, t2, _) -> fromMaybe "" t2)    (\lf (t1, _, t3) -> (t1, Just lf, t3))
+ , simpleField "author"
+     showFreeText                        parseFreeText
+     (\(_, _, t3) -> fromMaybe "???" t3) (\a (t1, t2, _) -> (t1, t2, Just a))
  ]
 
 buildLicenseCatenation :: FilePath -> FilePath -> Maybe [FilePath]
@@ -370,11 +378,12 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
         version <- parseVersionString versionString
         b <- doesFileExist packageFile
         if b then do
-          s <- readFile packageFile
-          case parseFields licenseFieldDescrs (Nothing, Nothing) s of
+          pkgS <- readFile packageFile
+          mbs <- case parseFields
+                        licenseFieldDescrs (Nothing, Nothing, Nothing) pkgS of
             ParseFailed err -> fail $ snd $ locatedErrorMsg err
             -- Ignore warnings, assume harmless:
-            ParseOk _ (_, Just lf) -> do
+            ParseOk _ (_, Just lf, _) -> do
               programDB <- configureAllKnownPrograms  -- won't die
                              minBound defaultProgramConfiguration
               pkgIndex <- getInstalledPackages minBound withPackageDB programDB
@@ -388,13 +397,21 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
                   -- The directory of the licence file is ignored
                   -- in installed packages, hence @takeFileName@.
                   bs <- BSL.readFile $ prefix </> takeFileName lf
-                  hPutStr licensesFile $
-                    "\nLicense for " ++ nameString ++ ":\n\n"
-                  BSL.hPut licensesFile bs
+                  return $ Left bs
                 _ -> fail $ "buildLicenseCatenation: Package "
                             ++ nameString
                             ++ " not properly installed."
-            ParseOk _ (_l, Nothing) -> return ()  -- TODO: print license l
+            ParseOk _ (l, Nothing, mauthor) -> do
+              let license = fromMaybe BSD3 l
+                  author = fromMaybe "???" mauthor
+              ms <- licenseText license author
+              return $ Right ms
+          hPutStr licensesFile $ "\nLicense for " ++ nameString ++ ":\n\n"
+          case mbs of
+            Left bs -> BSL.hPut licensesFile bs
+            Right Nothing -> fail $ "No license text can be found for package "
+                             ++ nameString ++ "."
+            Right (Just s) -> hPutStr licensesFile s
         else return ()  -- TODO: verify the pkg is in the core set
         markProgress
   res <- Ex.try $ mapM_ f pkgs
@@ -429,3 +446,35 @@ buildDeps mcomputed = do
                 return $! map (modulePackage . importModule) imports
       imps <- mapM imp loadedMs
       return $ (loadedMs, nub $ sort $ concat imps)
+
+licenseText :: License -> String -> IO (Maybe String)
+licenseText license author = do
+  year <- getYear
+  return $! case license of
+    BSD3 -> Just $ bsd3 author (show year)
+
+    (GPL (Just (Version {versionBranch = [2]})))
+      -> Just gplv2
+
+    (GPL (Just (Version {versionBranch = [3]})))
+      -> Just gplv3
+
+    (LGPL (Just (Version {versionBranch = [2]})))
+      -> Just lgpl2
+
+    (LGPL (Just (Version {versionBranch = [3]})))
+      -> Just lgpl3
+
+-- TODO: needs to wait for a newer version of Cabal
+--    (Apache (Just (Version {versionBranch = [2, 0]})))
+--      -> Just apache20
+
+    _ -> Nothing
+
+getYear :: IO Integer
+getYear = do
+  u <- getCurrentTime
+  z <- getCurrentTimeZone
+  let l = utcToLocalTime z u
+      (y, _, _) = toGregorian $ localDay l
+  return y
