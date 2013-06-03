@@ -1597,6 +1597,8 @@ syntheticTests =
         setCurrentDirectory "../../"
         let upd = buildLicenses "test/MainModule/cabals"
         updateSessionD session upd 3
+        status <- getBuildLicensesStatus session
+        assertEqual "after license build" (Just ExitSuccess) status
         distDir <- getDistDir session
         licensesExists <- doesFileExist $ distDir </> "licenses.txt"
         assertBool "ParFib licenses file" licensesExists

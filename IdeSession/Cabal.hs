@@ -394,10 +394,20 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
               case pkgInfos of
                 InstalledPackageInfo{haddockInterfaces = hIn : _} : _ -> do
                   let prefix = joinPath $ init $ init $ splitPath hIn
-                  -- The directory of the licence file is ignored
-                  -- in installed packages, hence @takeFileName@.
-                  bs <- BSL.readFile $ prefix </> takeFileName lf
-                  return $ Left bs
+                      -- The directory of the licence file is ignored
+                      -- in installed packages, hence @takeFileName@.
+                      stdLocation = prefix </> takeFileName lf
+                  bstd <- doesFileExist stdLocation
+                  if bstd then do
+                    bs <- BSL.readFile stdLocation
+                    return $ Left bs
+                  else do
+                    -- Assume the package is not installed, but in a GHC tree.
+                    let treePrefix =
+                          joinPath $ init $ init $ init $ splitPath prefix
+                        treeLocation = treePrefix </> takeFileName lf
+                    bs <- BSL.readFile treeLocation
+                    return $ Left bs
                 _ -> fail $ "buildLicenseCatenation: Package "
                             ++ nameString
                             ++ " not properly installed."
