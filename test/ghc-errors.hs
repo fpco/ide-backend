@@ -441,6 +441,56 @@ syntheticTests =
 -- we need a proper support for .h
 --      assertNoErrors msgs2
     )
+  , ( "Build licenses from NamedFieldPuns"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package mtl"
+                        , "-package base"
+                        , "-package array"
+                        , "-package bytestring"
+                        , "-package containers"
+                        , "-package binary"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        loadModulesFrom session "test/Puns"
+        let upd = buildLicenses "test/Puns/cabals"
+        updateSessionD session upd 99
+        msgs <- getSourceErrors session
+        assertSomeErrors msgs
+        status <- getBuildLicensesStatus session
+        assertEqual "after license build" (Just ExitSuccess) status
+        distDir <- getDistDir session
+        licensesWarns <- readFile $ distDir </> "licenses.stdout"
+        assertEqual "licensesWarns length" 344 (length licensesWarns)
+        licenses <- readFile $ distDir </> "licenses.txt"
+        assertEqual "licenses length" 10921 (length licenses)
+    )
+  , ( "Build licenses with wrong cabal files and fail"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package mtl"
+                        , "-package base"
+                        , "-package array"
+                        , "-package bytestring"
+                        , "-package containers"
+                        , "-package binary"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        loadModulesFrom session "test/Puns"
+        let upd = buildLicenses "test/Puns/cabals/parse_error"
+        updateSessionD session upd 99
+        status <- getBuildLicensesStatus session
+        assertEqual "after license parse_error" (Just $ ExitFailure 1) status
+        distDir <- getDistDir session
+        licensesErr <- readFile $ distDir </> "licenses.stderr"
+        assertEqual "licenses parse_error msgs" licensesErr
+          "Licenses concatenation failed. The exception is:\nuser error (Parse of field 'license' failed.)"
+        let upd2 = buildLicenses "test/Puns/cabals/no_text_error"
+        updateSessionD session upd2 99
+        status2 <- getBuildLicensesStatus session
+        assertEqual "after license no_text_error" (Just $ ExitFailure 1) status2
+        licensesErr2 <- readFile $ distDir </> "licenses.stderr"
+        assertEqual "licenses no_text_error msgs" licensesErr2
+          "Licenses concatenation failed. The exception is:\nuser error (No license text can be found for package mtl.)"
+    )
   , ( "Test CWD by reading a data file"
     , withConfiguredSession defOpts $ \session -> do
         let update = updateDataFile "datafile.dat"
@@ -1600,9 +1650,39 @@ syntheticTests =
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
         distDir <- getDistDir session
-        licensesExists <- doesFileExist $ distDir </> "licenses.txt"
-        assertBool "ParFib licenses file" licensesExists
+        licensesWarnExists <- doesFileExist $ distDir </> "licenses.stdout"
+        assertBool "licenses no warnings" $ not licensesWarnExists
+        licenses <- readFile $ distDir </> "licenses.txt"
+        assertEqual "licenses length" 4933 (length licenses)
     )
+  -- , ( "Build licenses from Cabal"
+  --   , let packageOpts = [ "-hide-all-packages"
+  --                       , "-package base"
+  --                       , "-package deepseq"
+  --                       , "-package filepath"
+  --                       , "-package directory"
+  --                       , "-package process"
+  --                       , "-package old-time"
+  --                       , "-package containers"
+  --                       , "-package array"
+  --                       , "-package pretty"
+  --                       , "-package bytestring"
+  --                       , "-package unix"
+  --                       ]
+  --     in withConfiguredSession packageOpts $ \session -> do
+  --       setCurrentDirectory "test/Cabal"
+  --       loadModulesFrom session "."
+  --       setCurrentDirectory "../../"
+  --       let upd = buildLicenses "test/MainModule/cabals"
+  --       updateSessionD session upd 99
+  --       status <- getBuildLicensesStatus session
+  --       assertEqual "after license build" (Just ExitSuccess) status
+  --       distDir <- getDistDir session
+  --       licensesWarnExists <- doesFileExist $ distDir </> "licenses.stdout"
+  --       assertBool "licenses no warnings" $ not licensesWarnExists
+  --       licenses <- readFile $ distDir </> "licenses.txt"
+  --       assertEqual "licenses length" 4933 (length licenses)
+  --   )
   , ( "Type information 1: Local identifiers and Prelude"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $

@@ -433,7 +433,7 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
               ms <- licenseText license author
               case ms of
                 Nothing -> fail $ "No license text can be found for package "
-                                   ++ nameString ++ "."
+                                  ++ nameString ++ "."
                 Just s -> do
                   hPutStr licensesFile s
                   let assumed = if isNothing l
