@@ -7,6 +7,7 @@ license-file:         LICENSE
 author:               Duncan Coutts, Mikolaj Konarski, Edsko de Vries
 maintainer:           Duncan Coutts <duncan@well-typed.com>
 copyright:            (c) 2012 Well-Typed LLP
+data-files:           CoreLicenses.txt
 category:             Development
 build-type:           Simple
 cabal-version:        >=1.10

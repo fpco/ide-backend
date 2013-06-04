@@ -462,7 +462,7 @@ syntheticTests =
         licensesWarns <- readFile $ distDir </> "licenses.stdout"
         assertEqual "licensesWarns length" 367 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
-        assertEqual "licenses length" 12349 (length licenses)
+        assertEqual "licenses length" 16182 (length licenses)
     )
   , ( "Build licenses with wrong cabal files and fail"
     , let packageOpts = [ "-hide-all-packages"
@@ -1653,7 +1653,7 @@ syntheticTests =
         licensesWarnExists <- doesFileExist $ distDir </> "licenses.stdout"
         assertBool "licenses no warnings" $ not licensesWarnExists
         licenses <- readFile $ distDir </> "licenses.txt"
-        assertEqual "licenses length" 8834 (length licenses)
+        assertEqual "licenses length" 12667 (length licenses)
     )
   -- , ( "Build licenses from Cabal"
   --   , let packageOpts = [ "-hide-all-packages"

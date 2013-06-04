@@ -57,6 +57,8 @@ import qualified IdeSession.Strict.List as StrictList
 import qualified IdeSession.Strict.Map  as StrictMap
 import IdeSession.Util
 
+import qualified Paths_ide_backend as Self
+
 -- TODO: factor out common parts of exe building and haddock generation
 -- after Cabal and the code that calls it are improved not to require
 -- the configure step, etc.
@@ -371,6 +373,13 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB configLicenseExc
       stderrLog  = ideDistDir </> "licenses.stderr"
       licensesFN = ideDistDir </> "licenses.txt"
   licensesFile <- openBinaryFile licensesFN WriteMode
+  -- The file containing concatenated licenses for core components.
+  -- If not present in @cabalsDir@, taken from the default location.
+  let cabalCoreFN = cabalsDir </> "CoreLicenses.txt"
+  defaultCoreFN <- Self.getDataFileName "CoreLicenses.txt"
+  bCore <- doesFileExist cabalCoreFN
+  bsCore <- BSL.readFile $ if bCore then cabalCoreFN else defaultCoreFN
+  BSL.hPut licensesFile bsCore
   let mainPackageName = Text.pack "main"
       f :: PackageId -> IO ()
       f PackageId{packageName} | packageName == mainPackageName = return ()
