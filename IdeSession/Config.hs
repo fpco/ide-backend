@@ -23,6 +23,9 @@ data SessionConfig = SessionConfig {
   , configDynLink :: Bool
     -- Package dbs to consult. Assumes global and user dbs, if @Nothing@.
   , configPackageDBStack :: Maybe [FilePath]
+    -- Packages that don't need the .cabal files provided for license
+    -- concatenation (e.g., because they are covered by the core license set).
+  , configLicenseExc :: [String]
   }
 
 -- | Default session configuration
@@ -45,4 +48,7 @@ defaultSessionConfig = SessionConfig {
   , configGenerateModInfo = True
   , configDynLink         = False
   , configPackageDBStack  = Nothing
+    -- ghc-prim, integer-gmp, etc., all have their own licenses specified
+    -- in their .cabal files.
+  , configLicenseExc      = ["rts"]
   }

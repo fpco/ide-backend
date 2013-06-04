@@ -353,11 +353,11 @@ lFieldDescrs =
      (\(_, _, t3) -> fromMaybe "???" t3) (\a (t1, t2, _) -> (t1, t2, Just a))
  ]
 
-buildLicenseCatenation :: FilePath -> FilePath -> Maybe [FilePath]
+buildLicenseCatenation :: FilePath -> FilePath -> Maybe [FilePath] -> [String]
                        -> Strict Maybe Computed -> (Progress -> IO ())
                        -> IO ExitCode
-buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
-                       callback = do
+buildLicenseCatenation cabalsDir ideDistDir extraPackageDB configLicenseExc
+                       mcomputed callback = do
   let defaultDB = GlobalPackageDB : UserPackageDB : []
       toDB l = fmap SpecificPackageDB l
       withPackageDB = maybe defaultDB toDB extraPackageDB
@@ -456,7 +456,10 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB mcomputed
                         ++ show license
                         ++ ". Reproducing standard license text.\n"
                   appendFile stdoutLog warnMsg
-        else return ()  -- TODO: verify the pkg is in the core set
+        else
+          unless (nameString `elem` configLicenseExc) $
+            fail $ "No .cabal file provided for package "
+                   ++ nameString ++ " so no license can be found."
         markProgress
   res <- Ex.try $ mapM_ f pkgs
   hClose licensesFile
