@@ -123,7 +123,7 @@ ghcHandleCompile
   :: RpcConversation
   -> DynamicOpts         -- ^ startup dynamic flags
   -> Maybe [String]      -- ^ new, user-submitted dynamic flags
-  -> StrictIORef (Strict (Map ModuleName) IdList)
+  -> StrictIORef (Strict (Map ModuleName) PluginResult)
                          -- ^ ref where the ExtractIdsT plugin stores its data
                          -- (We clear this at the end of each call)
   -> StrictIORef (Strict (Map ModuleName) ModSummary)
@@ -154,6 +154,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
           -- We construct the diffs incrementally
           , ghcCompileImports  = StrictMap.empty
           , ghcCompileAuto     = StrictMap.empty
+          , ghcCompilePkgDeps  = StrictMap.empty
           , ghcCompileSpanInfo = StrictMap.empty
           }
 
@@ -203,6 +204,9 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                          -> StateT GhcCompileResponse Ghc (ModuleName, ModSummary)
             updateModule m oldSummary ghcSummary = do
               (imports, importsChanged) <-
+                -- We recompute imports when the file changed, rather than when
+                -- it got (successfully) recompiled because we provide the
+                -- imports even for modules with type errors
                 if modTimestamp oldSummary == ms_hs_date ghcSummary
                   then return (modImports oldSummary, False)
                   else do imports <- lift $ importList ghcSummary
@@ -249,13 +253,14 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
               mapM_ removeOldModule (map fst old)
               mapM addNewModule new
 
-        let addSpanInfo :: [(ModuleName, IdList)]
-                        -> StateT GhcCompileResponse Ghc ()
-            addSpanInfo = mapM_ $ \(m, spanInfo) ->
-              set (spanInfoFor m) (Insert spanInfo)
+        let sendPluginResult :: [(ModuleName, PluginResult)]
+                             -> StateT GhcCompileResponse Ghc ()
+            sendPluginResult = mapM_ $ \(m, result) -> do
+              set (spanInfoFor m) (Insert (pluginIdList result))
+              set (pkgDepsFor m)  (Insert (pluginPkgDeps result))
 
         (newSummaries, finalResponse) <- flip runStateT initialResponse $ do
-          addSpanInfo (StrictMap.toList pluginIdMaps)
+          sendPluginResult (StrictMap.toList pluginIdMaps)
 
           graph <- lift $ getModuleGraph
           let sortedGraph = sortBy (compare `on` ms_mod_name) graph
@@ -288,10 +293,12 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
     allImports  = accessor ghcCompileImports  (\is st -> st { ghcCompileImports  = is })
     allAuto     = accessor ghcCompileAuto     (\as st -> st { ghcCompileAuto     = as })
     allSpanInfo = accessor ghcCompileSpanInfo (\ss st -> st { ghcCompileSpanInfo = ss })
+    allPkgDeps  = accessor ghcCompilePkgDeps  (\ds st -> st { ghcCompilePkgDeps  = ds })
 
     importsFor  m = allImports  .> StrictMap.accessorDefault Keep m
     autoFor     m = allAuto     .> StrictMap.accessorDefault Keep m
     spanInfoFor m = allSpanInfo .> StrictMap.accessorDefault Keep m
+    pkgDepsFor  m = allPkgDeps  .> StrictMap.accessorDefault Keep m
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation

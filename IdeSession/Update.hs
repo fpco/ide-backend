@@ -230,6 +230,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
              , diffImports
              , diffAuto
              , diffIdList
+             , diffPkgDeps
              , cache ) <- rpcCompile (idleState' ^. ideGhcServer)
                                      (idleState' ^. ideNewOpts)
                                      (ideSourcesDir ideStaticInfo)
@@ -251,6 +252,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
               , computedImports       = diffImports `applyDiff` computedImports
               , computedAutoMap       = diffAuto    `applyDiff` computedAutoMap
               , computedSpanInfo      = diffSpan    `applyDiff` computedSpanInfo
+              , computedPkgDeps       = diffPkgDeps `applyDiff` computedPkgDeps
               , computedCache         = mkRelative cache
               }
           else return $ idleState' ^. ideComputed

@@ -164,6 +164,7 @@ module IdeSession (
   , getSpanInfo
   , getImports
   , getAutocompletion
+  , getPkgDeps
     -- * Types for identifier info, errors, etc.
     -- ** Types
   , IdNameSpace(..)

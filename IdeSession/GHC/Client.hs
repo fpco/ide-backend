@@ -159,6 +159,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
                  , Strict (Map ModuleName) (Diff (Strict [] Import))
                  , Strict (Map ModuleName) (Diff (Strict Trie (Strict [] IdInfo)))
                  , Strict (Map ModuleName) (Diff IdList)
+                 , Strict (Map ModuleName) (Diff (Strict [] PackageId))
                  , ExplicitSharingCache
                  )
 rpcCompile server opts dir genCode callback =
@@ -169,12 +170,13 @@ rpcCompile server opts dir genCode callback =
                 case response of
                   GhcCompileProgress pcounter ->
                     callback pcounter >> go
-                  GhcCompileDone errs loaded imports auto spanInfo cache ->
+                  GhcCompileDone errs loaded imports auto spanInfo deps cache ->
                     return ( errs
                            , loaded
                            , imports
                            , StrictMap.map (fmap (constructAuto cache)) auto
                            , spanInfo
+                           , deps
                            , cache
                            )
     go

@@ -2478,6 +2478,28 @@ syntheticTests =
         mods <- getLoadedModules session
         assertEqual "" [Text.pack "M"] mods
     )
+  , ( "Package dependencies"
+    , withConfiguredSession ("-package mtl" : "-package parallel" : defOpts) $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    ])
+               <> (updateModule "B.hs" . BSLC.pack . unlines $
+                    [ "module B where"
+                    , "import Control.Parallel"
+                    ])
+               <> (updateModule "C.hs" . BSLC.pack . unlines $
+                    [ "module C where"
+                    , "import Control.Monad.Cont" -- from mtl
+                    ])
+
+        updateSessionD session upd 3
+        assertNoErrors session
+
+        deps <- getPkgDeps session
+        print (deps (Text.pack "A"))
+        print (deps (Text.pack "B"))
+        print (deps (Text.pack "C"))
+     )
   ]
 
 assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion

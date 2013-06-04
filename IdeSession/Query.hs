@@ -29,6 +29,7 @@ module IdeSession.Query (
   , getSpanInfo
   , getImports
   , getAutocompletion
+  , getPkgDeps
     -- * Debugging (internal use only)
   , dumpIdInfo
   ) where
@@ -241,6 +242,14 @@ getAutocompletion = computedQuery $ \Computed{..} ->
              . StrictTrie.elems
              . StrictTrie.submap n
              $ mapOfTries StrictMap.! modName
+
+-- | (Transitive) package dependencies
+--
+-- These are only available for modules that got compiled successfully.
+getPkgDeps :: Query (ModuleName -> Maybe [PackageId])
+getPkgDeps = computedQuery $ \Computed{..} mod ->
+  fmap (toLazyList . StrictList.map (removeExplicitSharing computedCache)) $
+    StrictMap.lookup mod computedPkgDeps
 
 {------------------------------------------------------------------------------
   Debugging

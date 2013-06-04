@@ -89,6 +89,7 @@ data GhcCompileResponse =
       , ghcCompileImports  :: Strict (Map ModuleName) (Diff (Strict [] Import))
       , ghcCompileAuto     :: Strict (Map ModuleName) (Diff (Strict [] IdInfo))
       , ghcCompileSpanInfo :: Strict (Map ModuleName) (Diff IdList)
+      , ghcCompilePkgDeps  :: Strict (Map ModuleName) (Diff (Strict [] PackageId))
       , ghcCompileCache    :: ExplicitSharingCache
       }
 
@@ -151,6 +152,7 @@ instance Binary GhcCompileResponse where
     put ghcCompileImports
     put ghcCompileAuto
     put ghcCompileSpanInfo
+    put ghcCompilePkgDeps
     put ghcCompileCache
 
   get = do
@@ -159,6 +161,7 @@ instance Binary GhcCompileResponse where
       0 -> GhcCompileProgress <$> get
       1 -> GhcCompileDone     <$> get <*> get <*> get
                               <*> get <*> get <*> get
+                              <*> get
       _ -> fail "GhcCompileRespone.get: invalid header"
 
 instance Binary GhcRunResponse where

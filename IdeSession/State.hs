@@ -61,6 +61,8 @@ data Computed = Computed {
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
   , computedAutoMap :: !(Strict (Map ModuleName) (Strict Trie (Strict [] IdInfo)))
+    -- | (Transitive) package dependencies
+  , computedPkgDeps :: !(Strict (Map ModuleName) (Strict [] PackageId))
     -- | We access IdProps indirectly through this cache
   , computedCache :: !ExplicitSharingCache
   }

@@ -13,6 +13,7 @@ module HsWalk
   , idInfoForName
   , constructExplicitSharingCache
   , moduleNameToId
+  , PluginResult(..)
   ) where
 
 import Control.Arrow (first)
@@ -148,11 +149,17 @@ fromGhcNameSpace ns
   Extract an IdMap from information returned by the ghc type checker
 ------------------------------------------------------------------------------}
 
+-- | We collect quasi quotes as the type checker expands them
 qqRef :: StrictIORef IdList
 {-# NOINLINE qqRef #-}
 qqRef = unsafePerformIO $ newIORef []
 
-extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) IdList) -> HscPlugin
+data PluginResult = PluginResult {
+    pluginIdList  :: !IdList
+  , pluginPkgDeps :: !(Strict [] PackageId)
+  }
+
+extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult) -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin {..}
   where
     runHscQQ :: forall m. MonadIO m => Env TcGblEnv TcLclEnv
@@ -187,7 +194,7 @@ extractIdsPlugin symbolRef = HscPlugin {..}
         writeIORef qqRef [] -- Reset for the next module
         return qqs
 
-      identMap <- execExtractIdsT dynFlags env qqs processedModule $ do
+      pluginResult <- execExtractIdsT dynFlags env qqs processedModule $ do
 #if DEBUG
         pretty_mod     <- pretty False processedModule
         pretty_rdr_env <- pretty False (tcg_rdr_env env)
@@ -222,7 +229,7 @@ extractIdsPlugin symbolRef = HscPlugin {..}
     --    cache <- readIORef idPropCacheRef
     --    appendFile "/tmp/ghc.log" $ "Cache == " ++ show cache
 #endif
-      liftIO $ modifyIORef symbolRef (Map.insert processedName identMap)
+      liftIO $ modifyIORef symbolRef (Map.insert processedName pluginResult)
       return env
 
 extractTypesFromTypeEnv :: forall m. MonadIO m => TypeEnv -> ExtractIdsT m ()
@@ -344,15 +351,18 @@ execExtractIdsT :: MonadIO m
                 -> IdList
                 -> Module.Module
                 -> ExtractIdsT m ()
-                -> m IdList
+                -> m PluginResult
 execExtractIdsT dynFlags env idList current (ExtractIdsT m) = do
   -- Construct LinkEnv for finding home modules
   --
   -- We use the freshNameCache rather than nameCacheFromGhc because we don't
   -- actually know precisely what monad we're in; it's "a" Ghc monad but
   -- not necessarily "the" Ghc monad
+  let pkgDeps :: [Module.PackageId]
+      pkgDeps = (imp_dep_pkgs (tcg_imports env))
+
   linkEnvs <- liftIO $ mapM (haddockInterfaceFor dynFlags Hk.freshNameCache)
-                            (imp_dep_pkgs (tcg_imports env))
+                            pkgDeps
 
   -- The order in which we take these unions is important!
   -- For instance, there is an entry for 'True' in both ghc-prim and base, but
@@ -374,7 +384,10 @@ execExtractIdsT dynFlags env idList current (ExtractIdsT m) = do
                   , eIdsIdList   = idList
                   }
   eIdsSt' <- execStateT (runReaderT m eIdsEnv) eIdsSt
-  return (eIdsIdList eIdsSt')
+  return PluginResult {
+      pluginIdList  = eIdsIdList eIdsSt'
+    , pluginPkgDeps = force $ map (fillVersion dynFlags) pkgDeps
+    }
 
 instance MonadTrans ExtractIdsT where
   lift = ExtractIdsT . lift . lift
