@@ -462,7 +462,7 @@ syntheticTests =
         licensesWarns <- readFile $ distDir </> "licenses.stdout"
         assertEqual "licensesWarns length" 367 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
-        assertEqual "licenses length" 16182 (length licenses)
+        assertEqual "licenses length" 27142 (length licenses)
     )
   , ( "Build licenses with wrong cabal files and fail"
     , let packageOpts = [ "-hide-all-packages"
@@ -1646,14 +1646,14 @@ syntheticTests =
         loadModulesFrom session "."
         setCurrentDirectory "../../"
         let upd = buildLicenses "test/MainModule/cabals"
-        updateSessionD session upd 3
+        updateSessionD session upd 6
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
         distDir <- getDistDir session
         licensesWarnExists <- doesFileExist $ distDir </> "licenses.stdout"
         assertBool "licenses no warnings" $ not licensesWarnExists
         licenses <- readFile $ distDir </> "licenses.txt"
-        assertEqual "licenses length" 12667 (length licenses)
+        assertEqual "licenses length" 21409 (length licenses)
     )
   -- , ( "Build licenses from Cabal"
   --   , let packageOpts = [ "-hide-all-packages"

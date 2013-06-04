@@ -480,8 +480,8 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB configLicenseExc
         return $ ExitFailure 1
   either handler (const $ return ExitSuccess) res
 
--- Gives a list of all modules and a list of all package dependencies
--- of the currently loaded project.
+-- Gives a list of all modules and a list of all transitive package
+-- dependencies of the currently loaded project.
 buildDeps :: Strict Maybe Computed -> IO ([ModuleName], [PackageId])
 buildDeps mcomputed = do
   case toLazyMaybe mcomputed of
@@ -489,14 +489,12 @@ buildDeps mcomputed = do
     Just Computed{..} -> do
       let loadedMs = toLazyList computedLoadedModules
           imp m = do
-            let mimports =
+            let mdeps =
                   fmap (toLazyList . StrictList.map (removeExplicitSharing
                                                        computedCache)) $
-                    StrictMap.lookup m computedImports
-            case mimports of
-              Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
-              Just imports ->
-                return $! map (modulePackage . importModule) imports
+                    StrictMap.lookup m computedPkgDeps
+                missing = fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
+            return $ fromMaybe missing mdeps
       imps <- mapM imp loadedMs
       return $ (loadedMs, nub $ sort $ concat imps)
 
