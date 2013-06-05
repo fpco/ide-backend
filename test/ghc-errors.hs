@@ -456,9 +456,13 @@ syntheticTests =
         updateSessionD session upd 99
         msgs <- getSourceErrors session
         assertSomeErrors msgs
+        distDir <- getDistDir session
+        errExists <- doesFileExist $ distDir </> "licenses.stderr"
+        when errExists $ do
+          licensesErr <- readFile $ distDir </> "licenses.stderr"
+          assertEqual "license errors" licensesErr ""
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
-        distDir <- getDistDir session
         licensesWarns <- readFile $ distDir </> "licenses.stdout"
         assertEqual "licensesWarns length" 367 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
@@ -1653,9 +1657,13 @@ syntheticTests =
         setCurrentDirectory "../../"
         let upd = buildLicenses "test/MainModule/cabals"
         updateSessionD session upd 6
+        distDir <- getDistDir session
+        errExists <- doesFileExist $ distDir </> "licenses.stderr"
+        when errExists $ do
+          licensesErr <- readFile $ distDir </> "licenses.stderr"
+          assertEqual "license errors" licensesErr ""
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
-        distDir <- getDistDir session
         licensesWarnExists <- doesFileExist $ distDir </> "licenses.stdout"
         assertBool "licenses no warnings" $ not licensesWarnExists
         licenses <- readFile $ distDir </> "licenses.txt"
