@@ -1549,6 +1549,7 @@ syntheticTests =
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
+        assertNoErrors session
         setCurrentDirectory "../../"
         let m = "Main"
             upd = buildExe [(Text.pack m, "ParFib.hs")]
@@ -1568,6 +1569,7 @@ syntheticTests =
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
+        assertNoErrors session
         setCurrentDirectory "../../"
         let m = "ParFib.Main"
             upd = buildExe [ (Text.pack m, "ParFib.Main.hs")
@@ -1590,6 +1592,7 @@ syntheticTests =
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
+        assertNoErrors session
         setCurrentDirectory "../../"
         let m = "Main"
             upd = buildExe [(Text.pack m, "foooooooooooooooo")]
@@ -1608,6 +1611,7 @@ syntheticTests =
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
+        assertNoErrors session
         setCurrentDirectory "../../"
         let upd = buildDoc
         updateSessionD session upd 4
@@ -1625,6 +1629,7 @@ syntheticTests =
          $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
+        assertNoErrors session
         setCurrentDirectory "../../"
         let m = "Main"
             upd = buildExe [(Text.pack m, "ParFib.hs")]
@@ -1644,6 +1649,7 @@ syntheticTests =
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
+        assertNoErrors session
         setCurrentDirectory "../../"
         let upd = buildLicenses "test/MainModule/cabals"
         updateSessionD session upd 6

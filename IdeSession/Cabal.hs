@@ -369,16 +369,20 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB configLicenseExc
         modifyIORef counter (updateProgress "")
         callback oldCounter
   (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
-  let stdoutLog  = ideDistDir </> "licenses.stdout"
-      stderrLog  = ideDistDir </> "licenses.stderr"
-      licensesFN = ideDistDir </> "licenses.txt"
+  let stdoutLog  = ideDistDir </> "licenses.stdout"  -- warnings
+      stderrLog  = ideDistDir </> "licenses.stderr"  -- errors
+      licensesFN = ideDistDir </> "licenses.txt"     -- result
   licensesFile <- openBinaryFile licensesFN WriteMode
   -- The file containing concatenated licenses for core components.
   -- If not present in @cabalsDir@, taken from the default location.
   let cabalCoreFN = cabalsDir </> "CoreLicenses.txt"
   defaultCoreFN <- Self.getDataFileName "CoreLicenses.txt"
-  bCore <- doesFileExist cabalCoreFN
-  bsCore <- BSL.readFile $ if bCore then cabalCoreFN else defaultCoreFN
+  cabalCoreExists <- doesFileExist cabalCoreFN
+  defaultCoreExists <- doesFileExist defaultCoreFN
+  let coreFN | cabalCoreExists = cabalCoreFN
+             | defaultCoreExists = defaultCoreFN
+             | otherwise = "CoreLicenses.txt"  -- in-place, for testing mostly
+  bsCore <- BSL.readFile coreFN
   BSL.hPut licensesFile bsCore
   let mainPackageName = Text.pack "main"
       f :: PackageId -> IO ()
