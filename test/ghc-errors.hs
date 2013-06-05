@@ -2496,9 +2496,9 @@ syntheticTests =
         assertNoErrors session
 
         deps <- getPkgDeps session
-        print (deps (Text.pack "A"))
-        print (deps (Text.pack "B"))
-        print (deps (Text.pack "C"))
+        assertEqual "" "Just [base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]" (show (deps (Text.pack "A")))
+        assertEqual "" "Just [parallel-3.2.0.3,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]" (show (deps (Text.pack "B")))
+        assertEqual "" "Just [mtl-2.1.2,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0,transformers-0.3.0.0]" (show (deps (Text.pack "C")))
      )
   ]
 
