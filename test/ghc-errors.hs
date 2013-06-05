@@ -460,7 +460,7 @@ syntheticTests =
         errExists <- doesFileExist $ distDir </> "licenses.stderr"
         when errExists $ do
           licensesErr <- readFile $ distDir </> "licenses.stderr"
-          assertEqual "license errors" licensesErr ""
+          assertEqual "license errors" "" licensesErr
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
         licensesWarns <- readFile $ distDir </> "licenses.stdout"
@@ -1661,7 +1661,7 @@ syntheticTests =
         errExists <- doesFileExist $ distDir </> "licenses.stderr"
         when errExists $ do
           licensesErr <- readFile $ distDir </> "licenses.stderr"
-          assertEqual "license errors" licensesErr ""
+          assertEqual "license errors" "" licensesErr
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
         licensesWarnExists <- doesFileExist $ distDir </> "licenses.stdout"

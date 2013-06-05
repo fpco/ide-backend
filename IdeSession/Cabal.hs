@@ -442,9 +442,20 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB configLicenseExc
                     if btree then do
                       bs <- BSL.readFile treeLocation
                       BSL.hPut licensesFile bs
-                    else fail $ "Package " ++ nameString
-                                ++ " has no license file in path "
-                                ++ stdLocation ++ " nor " ++ treeLocation
+                    else do
+                      -- Assume the package is not installed, but in a GHC tree
+                      -- with an alternative layout (OSX?).
+                      let osxPrefix = joinPath $ take (length ps - 1) ps
+                          osxLocation = osxPrefix </> takeFileName lf
+                      bosx <- doesFileExist osxLocation
+                      if bosx then do
+                        bs <- BSL.readFile osxLocation
+                        BSL.hPut licensesFile bs
+                      else fail $ "Package " ++ nameString
+                                  ++ " has no license file in path "
+                                  ++ stdLocation
+                                  ++ " nor " ++ treeLocation
+                                  ++ " nor " ++ osxLocation
                 _ -> fail $ "Package " ++ nameString
                              ++ " not properly installed."
             ParseOk _warns (l, Nothing, mauthor) -> do
