@@ -438,11 +438,15 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB configLicenseExc
                     let treePs = splitPath prefix
                         treePrefix = joinPath $ take (length treePs - 3) treePs
                         treeLocation = treePrefix </> takeFileName lf
-                    bs <- BSL.readFile treeLocation
-                    BSL.hPut licensesFile bs
-                _ -> fail $ "buildLicenseCatenation: Package "
-                            ++ nameString
-                            ++ " not properly installed."
+                    btree <- doesFileExist treeLocation
+                    if btree then do
+                      bs <- BSL.readFile treeLocation
+                      BSL.hPut licensesFile bs
+                    else fail $ "Package " ++ nameString
+                                ++ " has no license file in path "
+                                ++ stdLocation ++ " nor " ++ treeLocation
+                _ -> fail $ "Package " ++ nameString
+                             ++ " not properly installed."
             ParseOk _warns (l, Nothing, mauthor) -> do
               -- outputWarns warns  -- false positives
               when (isNothing l) $ do
