@@ -3,31 +3,19 @@
 -- This interacts with the ide-backend library through serialized data only.
 module Server (ghcServer) where
 
-import Control.Concurrent (ThreadId, throwTo, forkIO, killThread, myThreadId, threadDelay)
-import Control.Concurrent.Async (async, cancel, withAsync)
-import Control.Concurrent.Chan (Chan, newChan, writeChan)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
-import Control.Applicative ((<$>), (<*>))
+import Control.Concurrent (ThreadId, throwTo, forkIO, myThreadId, threadDelay)
+import Control.Concurrent.Async (async)
+import Control.Concurrent.MVar (MVar, newEmptyMVar)
 import qualified Control.Exception as Ex
-import Control.Monad (void, forM_, forever, unless, when)
+import Control.Monad (void, forever, unless, when)
 import Control.Monad.State (StateT, runStateT)
 import Control.Monad.Trans.Class (lift)
-import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
-import qualified Data.ByteString.Char8 as BSSC (pack)
-import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
-import System.Exit (ExitCode)
+import qualified Data.ByteString as BSS (hGetSome, hPut, null)
 import qualified Data.Text as Text
-import Data.Binary (Binary)
-import qualified Data.Binary as Binary
 import Data.List (sortBy)
 import Data.Function (on)
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
-import System.IO.Unsafe (unsafePerformIO)
-import Data.Maybe (catMaybes)
-
-import System.Directory (doesFileExist)
-import System.FilePath ((</>))
 
 import System.IO (Handle, hFlush)
 import System.Posix (Fd)
@@ -39,13 +27,11 @@ import IdeSession.RPC.Server
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util
-import IdeSession.BlockingOps (modifyMVar, modifyMVar_, readChan, withMVar, wait)
+import IdeSession.BlockingOps (withMVar, wait)
 import IdeSession.Strict.IORef
 import IdeSession.Strict.Container
-import qualified IdeSession.Strict.Map    as StrictMap
-import qualified IdeSession.Strict.IntMap as StrictIntMap
-import qualified IdeSession.Strict.List   as StrictList
-import qualified IdeSession.Strict.Trie   as StrictTrie
+import qualified IdeSession.Strict.Map  as StrictMap
+import qualified IdeSession.Strict.List as StrictList
 
 import qualified GHC
 import Run
@@ -215,7 +201,8 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                   else do dynFlags <- lift $ getSessionDynFlags
                           imports <- lift $ importList ghcSummary
                           set (importsFor m) (Insert imports)
-                          lift . liftIO $ updatePkgDepsFor dynFlags m ghcSummary
+                          let pkgDeps = pkgDepsFromModSummary dynFlags ghcSummary
+                          lift . liftIO $ updatePkgDepsFor m pkgDeps
                           return (imports, imports /= modImports oldSummary)
 
               -- We recompute autocompletion info if the imported modules have
@@ -278,6 +265,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
         return finalResponse
 
     cache <- liftIO $ constructExplicitSharingCache
+    -- Should we call clearLinkEnvCache here?
     liftIO . put $ response { ghcCompileCache = cache }
   where
     dynOpts :: DynamicOpts
@@ -410,8 +398,8 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
       -- Backup stdout, then replace stdout and stderr with the pipe's write end
       stdOutputBackup <- liftIO $ dup stdOutput
       stdErrorBackup  <- liftIO $ dup stdError
-      dupTo stdOutputWr stdOutput
-      dupTo stdOutputWr stdError
+      _ <- dupTo stdOutputWr stdOutput
+      _ <- dupTo stdOutputWr stdError
       closeFd stdOutputWr
 
       -- Convert to the read end to a handle and return
@@ -426,7 +414,7 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
 
       -- Swizzle stdin
       stdInputBackup <- liftIO $ dup stdInput
-      dupTo stdInputRd stdInput
+      _ <- dupTo stdInputRd stdInput
       closeFd stdInputRd
 
       -- Convert the write end to a handle and return

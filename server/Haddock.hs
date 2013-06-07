@@ -2,19 +2,25 @@ module Haddock (
     -- Package dependencies cache
     pkgDepsFor
   , updatePkgDepsFor
+  , pkgDepsFromModSummary
     -- Interfacing with Haddock
   , haddockInterfaceFor
     -- Link environment
   , LinkEnv
   , homeModuleFor
+    -- Link environment cache
+  , linkEnvFor
+  , clearLinkEnvCache
   ) where
 
 -- Platform imports
+import Prelude hiding (mod)
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Exception (SomeException)
+import Control.Applicative ((<$>))
 import qualified Control.Exception as Ex
 import Data.Maybe (catMaybes)
-import Control.Applicative ((<$>))
+import Data.Either (rights)
 import qualified Data.Map as LazyMap
 
 -- GHC imports; unqualified where no confusion can arise
@@ -29,7 +35,6 @@ import Outputable (ppr, showSDoc)
 import qualified GHC
 import qualified Packages as GHC
 import qualified Name     as GHC
-import qualified OccName  as GHC
 import MonadUtils (MonadIO(..)) -- ghc's MonadIO
 
 -- Haddock imports
@@ -53,10 +58,16 @@ pkgDepCache :: StrictIORef (Strict (Map ModuleName) [GHC.PackageId])
 {-# NOINLINE pkgDepCache #-}
 pkgDepCache = unsafePerformIO $ newIORef StrictMap.empty
 
-updatePkgDepsFor :: DynFlags -> ModuleName -> GHC.ModSummary -> IO ()
-updatePkgDepsFor dflags m s = do
-    cache <- readIORef pkgDepCache
-    writeIORef pkgDepCache (StrictMap.insert m deps cache)
+updatePkgDepsFor :: ModuleName -> [GHC.PackageId] -> IO ()
+updatePkgDepsFor m deps = do
+  cache <- readIORef pkgDepCache
+  writeIORef pkgDepCache (StrictMap.insert m deps cache)
+
+pkgDepsFromModSummary :: DynFlags
+                      -> GHC.ModSummary
+                      -> [GHC.PackageId]
+pkgDepsFromModSummary dflags s =
+    catMaybes (map (moduleToPackageId dflags) impMods)
   where
     aux :: Located (ImportDecl RdrName)
         -> GHC.ModuleName
@@ -65,9 +76,6 @@ updatePkgDepsFor dflags m s = do
     impMods :: [GHC.ModuleName]
     impMods = map aux (GHC.ms_srcimps      s)
            ++ map aux (GHC.ms_textual_imps s)
-
-    deps :: [GHC.PackageId]
-    deps = catMaybes (map (moduleToPackageId dflags) impMods)
 
 pkgDepsFor :: ModuleName -> IO [GHC.PackageId]
 pkgDepsFor m = do
@@ -129,8 +137,8 @@ haddockInterfaceFor dflags cache pkg = do
 
 type LinkEnv = Strict (Map (GHC.Module, GHC.OccName)) GHC.Module
 
-showLinkEnv :: LinkEnv -> String
-showLinkEnv = unlines . map (showSDoc . ppr) . StrictMap.toList
+_showLinkEnv :: LinkEnv -> String
+_showLinkEnv = unlines . map (showSDoc . ppr) . StrictMap.toList
 
 mkLinkEnv :: Map GHC.Name GHC.Module -> LinkEnv
 mkLinkEnv m = foldr (.) (\x -> x) (map aux (LazyMap.toList m)) StrictMap.empty
@@ -156,13 +164,29 @@ homeModuleFor dflags linkEnv name =
   Link environment cache
 ------------------------------------------------------------------------------}
 
-linkEnvCache :: StrictIORef (Strict (Map ModuleName) LinkEnv)
+linkEnvCache :: StrictIORef (Strict (Map [GHC.PackageId]) LinkEnv)
 {-# NOINLINE linkEnvCache #-}
 linkEnvCache = unsafePerformIO $ newIORef StrictMap.empty
 
-linkEnvFor :: ModuleName -> IO LinkEnv
-linkEnvFor m = do
-  cache <- readIORef linkEnvCache
-  case StrictMap.lookup m cache of
-    Just linkEnv -> return linkEnv
+clearLinkEnvCache :: IO ()
+clearLinkEnvCache = writeIORef linkEnvCache StrictMap.empty
 
+-- | Find the cached link environment, or construct a new one, for the
+-- given set of dependencies.
+--
+-- Note that the order of the dependencies is important!  For instance, there
+-- is an entry for 'True' in both ghc-prim and base, but we want the entry in
+-- base so that we report Data.Bool as the home module rather than GHC.Types.
+linkEnvFor :: DynFlags -> [GHC.PackageId] -> IO LinkEnv
+linkEnvFor dynFlags deps = do
+  cache <- readIORef linkEnvCache
+  case StrictMap.lookup deps cache of
+    Just linkEnv -> return linkEnv
+    Nothing -> do
+      linkEnvs <- liftIO $ mapM (haddockInterfaceFor dynFlags Hk.freshNameCache)
+                                deps
+
+      let linkEnv = StrictMap.unions (rights linkEnvs)
+
+      writeIORef linkEnvCache (StrictMap.insert deps linkEnv cache)
+      return linkEnv

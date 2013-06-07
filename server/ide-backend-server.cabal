@@ -49,6 +49,7 @@ executable ide-backend-server
   default-extensions: MonoLocalBinds,
                       BangPatterns, RecordWildCards, NamedFieldPuns
 
-  ghc-options:        -threaded
+  ghc-options:        -Wall
+                      -threaded
                       -- use the compacting GC:
                       -with-rtsopts=-c

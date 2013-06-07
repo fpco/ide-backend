@@ -17,27 +17,20 @@ module HsWalk
   , moduleToPackageId
   ) where
 
-import Control.Arrow (first)
-import Control.Monad (forM_, join)
+import Control.Monad (forM_)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State.Class (MonadState(..))
 import Control.Monad.Trans.Class (MonadTrans, lift)
-import Control.Exception (evaluate, try, SomeException)
-import Control.Applicative ((<$>))
+import Control.Exception (evaluate)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BSSC
-import Data.List (stripPrefix)
 import Data.Maybe (fromMaybe, fromJust)
-import Data.Either (rights)
-import Data.Version
 import Prelude hiding (id, mod, span)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
-import qualified Data.Map as LazyMap
-import System.Directory (getHomeDirectory)
 
 import IdeSession.Types.Private
 import IdeSession.Strict.Container
@@ -46,8 +39,6 @@ import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
 import IdeSession.Strict.IORef
 import IdeSession.Strict.StateT
-
-import qualified Documentation.Haddock as Hk
 
 import Bag
 import DataCon (dataConName)
@@ -60,7 +51,6 @@ import MonadUtils (MonadIO (..))
 import qualified Name
 import OccName
 import Outputable
-import qualified Packages
 import qualified RdrName
 import TcRnTypes
 import TcType (tidyOpenType)
@@ -281,21 +271,11 @@ execExtractIdsT :: MonadIO m
                 -> m PluginResult
 execExtractIdsT dynFlags env idList current (ExtractIdsT m) = do
   -- Construct LinkEnv for finding home modules
-  --
-  -- We use the freshNameCache rather than nameCacheFromGhc because we don't
-  -- actually know precisely what monad we're in; it's "a" Ghc monad but
-  -- not necessarily "the" Ghc monad
-  let pkgDeps :: [Module.PackageId]
-      pkgDeps = (imp_dep_pkgs (tcg_imports env))
-
-  linkEnvs <- liftIO $ mapM (haddockInterfaceFor dynFlags Hk.freshNameCache)
-                            pkgDeps
-
-  -- The order in which we take these unions is important!
-  -- For instance, there is an entry for 'True' in both ghc-prim and base, but
-  -- we want the entry in base so that we report Data.Bool as the home module
-  -- rather than GHC.Types
-  let linkEnv = Map.unions (rights linkEnvs)
+  -- The order of the package dependencies is important! (See comment for
+  -- linkEnvFor.) We assume that ghc gives us the package dependencies in the
+  -- right order.
+  let pkgDeps = (imp_dep_pkgs (tcg_imports env))
+  linkEnv <- liftIO $ linkEnvFor dynFlags pkgDeps
 
   let rdrEnv  = tcg_rdr_env env
       qual    = mkPrintUnqualified dynFlags rdrEnv
@@ -531,8 +511,8 @@ extractSourceSpan (RealSrcSpan srcspan) = liftIO $ do
 extractSourceSpan (UnhelpfulSpan s) =
   return . TextSpan $ fsToText s
 
-showName :: Name -> String
-showName n = "Name { n_sort = " ++ showNameSort ++ "\n"
+_showName :: Name -> String
+_showName n = "Name { n_sort = " ++ showNameSort ++ "\n"
           ++ "     , n_occ  = " ++ s (Name.nameOccName n) ++ "\n"
           ++ "     , n_uniq = " ++ s (Name.nameUnique n) ++ "\n"
           ++ "     , n_loc  = " ++ s (Name.nameSrcSpan n) ++ "\n"
