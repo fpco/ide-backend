@@ -279,7 +279,7 @@ autocompletion summary = do
                                                 (Just elt)
                                                 currentModule
                                                 -- TODO: home module
-                                                (\_ -> return StrictMaybe.nothing)
+                                                (\_ -> StrictMaybe.nothing)
         return IdInfo{..}
 
       autoEnvs :: ModSummary -> IO [GlobalRdrElt]

@@ -23,6 +23,8 @@ import Data.List (sortBy)
 import Data.Function (on)
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
+import System.IO.Unsafe (unsafePerformIO)
+import Data.Maybe (catMaybes)
 
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -48,6 +50,7 @@ import qualified IdeSession.Strict.Trie   as StrictTrie
 import qualified GHC
 import Run
 import HsWalk
+import Haddock
 import Debug
 
 --------------------------------------------------------------------------------
@@ -209,8 +212,10 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                 -- imports even for modules with type errors
                 if modTimestamp oldSummary == ms_hs_date ghcSummary
                   then return (modImports oldSummary, False)
-                  else do imports <- lift $ importList ghcSummary
+                  else do dynFlags <- lift $ getSessionDynFlags
+                          imports <- lift $ importList ghcSummary
                           set (importsFor m) (Insert imports)
+                          lift . liftIO $ updatePkgDepsFor dynFlags m ghcSummary
                           return (imports, imports /= modImports oldSummary)
 
               -- We recompute autocompletion info if the imported modules have

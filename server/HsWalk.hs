@@ -14,6 +14,7 @@ module HsWalk
   , constructExplicitSharingCache
   , moduleNameToId
   , PluginResult(..)
+  , moduleToPackageId
   ) where
 
 import Control.Arrow (first)
@@ -71,6 +72,9 @@ import NameEnv (nameEnvUniqueElts)
 import DataCon (dataConRepType)
 import Pretty (showDocWith, Mode(OneLineMode))
 import PprTyThing (pprTypeForUser)
+
+import Conv
+import Haddock
 
 #define DEBUG 1
 
@@ -178,7 +182,7 @@ extractIdsPlugin symbolRef = HscPlugin {..}
                                               (lookupRdrEnv rdrEnv quoter)
                                               (Just current)
                                               -- TODO: Home module
-                                              (\_ -> return Maybe.nothing)
+                                              (\_ -> Maybe.nothing)
       let quoterInfo = IdInfo{..}
       let idInfo' = (span', SpanQQ quoterInfo) : idInfo
       writeIORef qqRef idInfo'
@@ -240,83 +244,6 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
       recordType ("ADataCon: " ++ showSDoc (ppr dataCon)) uniq (dataConRepType dataCon)
     go _ =
       return ()
-
-{------------------------------------------------------------------------------
-  Haddock's LinkEnv maps Names to Modules, but unfortunately those Names
-  have different Uniques than the Uniques that ghc uses and hence we cannot
-  use them for lookup. We create our own environment instead.
-------------------------------------------------------------------------------}
-
-type LinkEnv = Strict (Map (Module.Module, OccName)) Module
-
-showLinkEnv :: LinkEnv -> String
-showLinkEnv = unlines . map aux . Map.toList
-  where
-    aux :: ((Module.Module, OccName), Module) -> String
-    aux = showSDoc . ppr
-
-mkLinkEnv :: Map Name Module.Module -> LinkEnv
-mkLinkEnv m = foldr (.) (\x -> x) (map aux (LazyMap.toList m)) Map.empty
-  where
-    aux :: (Name, Module.Module) -> LinkEnv -> LinkEnv
-    aux (n, home) = case Name.nameModule_maybe n of
-      Just mod -> Map.insert (mod, Name.nameOccName n) home
-      Nothing  -> \x -> x
-
-homeModuleFor :: Monad m => Name -> ExtractIdsT m (Strict Maybe ModuleId)
-homeModuleFor name =
-  case Name.nameModule_maybe name of
-    Nothing -> do
-      return Maybe.nothing
-    Just mod -> do
-      linkEnv <- asks eIdsLinkEnv
-      case Map.lookup (mod, Name.nameOccName name) linkEnv of
-        Nothing -> do
-          return Maybe.nothing
-        Just m  -> do
-          dflags <- asks eIdsDynFlags
-          return (Maybe.just (moduleToModuleId dflags m))
-
-haddockInterfaceFilePath :: DynFlags
-                         -> Module.PackageId
-                         -> Either String FilePath
-haddockInterfaceFilePath dflags pkg = do
-  let pkgIdMap = Packages.pkgIdMap (pkgState dflags)
-  case Packages.lookupPackage pkgIdMap pkg of
-    Nothing ->
-      Left $ "Package configuration for "
-          ++ showSDoc (ppr pkg)
-          ++ " not found"
-    Just cfg | null (Packages.haddockInterfaces cfg) -> do
-      Left $ "No haddock interfaces found for package "
-          ++ showSDoc (ppr pkg)
-    Just cfg | length (Packages.haddockInterfaces cfg) > 1 -> do
-      Left $ "Too many haddock interfaces found for package "
-          ++ showSDoc (ppr pkg)
-    Just cfg ->
-      Right . head . Packages.haddockInterfaces $ cfg
-
-haddockInterfaceFor :: DynFlags
-                    -> Hk.NameCacheAccessor IO
-                    -> Module.PackageId
-                    -> IO (Either String LinkEnv)
-haddockInterfaceFor dflags cache pkg = do
-    case haddockInterfaceFilePath dflags pkg of
-      Left err   -> return (Left err)
-      Right path -> do
-        iface <- try' $ Hk.readInterfaceFile cache path
-        return (mkLinkEnv . Hk.ifLinkEnv <$> iface)
-  where
-    try' :: MonadIO m => IO (Either String a) -> m (Either String a)
-    try' act = do
-      mr <- liftIO $ try act
-      case mr of
-        Left e -> do
-          return . Left $ show (e :: SomeException)
-        Right (Left e) -> do
-          return . Left $ e
-        Right (Right r) -> do
-          return . Right $ r
 
 {------------------------------------------------------------------------------
   ExtractIdsT adds state and en environment to whatever monad that GHC
@@ -519,36 +446,29 @@ recordType _header uniq typ = do
       idType = Maybe.just $ Text.pack typStr
     }
 
-moduleToModuleId :: DynFlags -> Module.Module -> ModuleId
-moduleToModuleId dflags mod = ModuleId {
-    moduleName    = Text.pack $ moduleNameString $ Module.moduleName mod
-  , modulePackage = fillVersion dflags $ Module.modulePackageId mod
-  }
-
 -- | Construct an IdInfo for a 'Name'. We assume the @GlobalRdrElt@ is
 -- uniquely determined by the @Name@ and the @DynFlags@ do not change
 -- in a bad way.
 idInfoForName
   :: MonadIO m
-  => DynFlags                      -- ^ The usual dynflags
-  -> Name                          -- ^ The name in question
-  -> Bool                          -- ^ Is this a binding occurrence?
-  -> Maybe RdrName.GlobalRdrElt    -- ^ GlobalRdrElt for imported names
-  -> Maybe Module.Module           -- ^ Current module for local names
-  -> (Name -> m (Strict Maybe ModuleId))  -- ^ Home modules
-  -> m (IdPropPtr, Maybe IdScope)  -- ^ Nothing if imported but no GlobalRdrElt
+  => DynFlags                         -- ^ The usual dynflags
+  -> Name                             -- ^ The name in question
+  -> Bool                             -- ^ Is this a binding occurrence?
+  -> Maybe RdrName.GlobalRdrElt       -- ^ GlobalRdrElt for imported names
+  -> Maybe Module.Module              -- ^ Current module for local names
+  -> (Name -> Strict Maybe ModuleId)  -- ^ Home modules
+  -> m (IdPropPtr, Maybe IdScope)     -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt mCurrent home = do
     scope     <- constructScope
     idDefSpan <- extractSourceSpan (Name.nameSrcSpan name)
 
-    let mod         = if isLocal scope
-                        then fromJust mCurrent
-                        else fromMaybe missingModule $
-                          Name.nameModule_maybe name
-    let idPropPtr   = IdPropPtr . getKey . getUnique $ name
-    let idDefinedIn = moduleToModuleId dflags mod
-
-    idHomeModule <- home name
+    let mod          = if isLocal scope
+                         then fromJust mCurrent
+                         else fromMaybe missingModule $
+                           Name.nameModule_maybe name
+        idPropPtr    = IdPropPtr . getKey . getUnique $ name
+        idDefinedIn  = moduleToModuleId dflags mod
+        idHomeModule = home name
 
     extendIdPropCache idPropPtr IdProp{..}
     return (idPropPtr, scope)
@@ -601,72 +521,6 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       missingModule :: a
       missingModule = error $ "No module for " ++ showSDocDebug (ppr name)
 
-moduleNameToId :: DynFlags -> GHC.ModuleName -> ModuleId
-moduleNameToId dflags impMod = ModuleId {
-      moduleName    = Text.pack $ moduleNameString $ impMod
-    , modulePackage = packageId
-    }
-  where
-    -- | Translate a module name to a PackageId (i.e., add package information)
-    packageId :: PackageId
-    packageId = case pkgExposed of
-      []  -> mainPackage  -- we assume otherwise GHC would signal an error
-      [p] -> fillVersion dflags $ Packages.packageConfigId $ fst p
-      _   -> let pkgIds = map (first (Module.packageIdString
-                                       . Packages.packageConfigId)) pkgExposed
-             in error $ "modToPkg: " ++ moduleNameString impMod
-                     ++ ": " ++ show pkgIds
-
-    pkgAll     = Packages.lookupModuleInAllPackages dflags impMod
-    pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
-
--- | Attempt to find out the version of a package
-fillVersion :: DynFlags -> Module.PackageId -> PackageId
-fillVersion dflags p =
-  case Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) p of
-    Nothing -> if p == Module.mainPackageId
-               then mainPackage
-               else error $ "fillVersion:" ++ Module.packageIdString p
-    Just pkgCfg ->
-      let sourcePkgId = Packages.sourcePackageId pkgCfg
-          pkgName = Packages.pkgName sourcePkgId
-          prefixPN = "PackageName "
-          showPN = show pkgName
-          -- A hack to avoid importing Distribution.Package.
-          errPN = fromMaybe (error $ "stripPrefixPN "
-                                     ++ prefixPN ++ " "
-                                     ++ showPN)
-                  $ stripPrefix prefixPN showPN
-          packageName = init $ tail errPN
-          pkgVersion  = Packages.pkgVersion sourcePkgId
-          packageVersion = Maybe.just $ case showVersion pkgVersion of
-            -- See http://www.haskell.org/ghc/docs/7.4.2//html/libraries/ghc/Module.html#g:3.
-            -- The version of wired-in packages is completely wiped out,
-            -- but we use a leak in the form of a Cabal package id
-            -- for the same package, which still contains a version.
-            "" -> let installedPkgId = Packages.installedPackageId pkgCfg
-                      prefixPV = "InstalledPackageId "
-                                 ++ "\"" ++ packageName ++ "-"
-                      showPV = show installedPkgId
-                      -- A hack to avoid cabal dependency, in particular.
-                      errPV = fromMaybe (error $ "stripPrefixPV "
-                                                 ++ prefixPV ++ " "
-                                                 ++ showPV)
-                              $ stripPrefix prefixPV showPV
-                  in reverse $ tail $ snd $ break (=='-') $ reverse errPV
-            s  -> s
-      in PackageId {
-             packageName    = Text.pack packageName
-           , packageVersion = Text.pack <$> packageVersion
-           }
-
--- | PackageId of the main package
-mainPackage :: PackageId
-mainPackage = PackageId {
-    packageName    = Text.pack $ Module.packageIdString Module.mainPackageId
-  , packageVersion = Maybe.nothing -- the only case of no version
-  }
-
 extractSourceSpan :: MonadIO m => SrcSpan -> m EitherSpan
 extractSourceSpan (RealSrcSpan srcspan) = liftIO $ do
   key <- mkFilePathPtr $ unpackFS (srcSpanFile srcspan)
@@ -701,6 +555,7 @@ instance Record Name where
         dflags  <- asks eIdsDynFlags
         rdrEnv  <- asks eIdsRdrEnv
         current <- asks eIdsCurrent
+        linkEnv <- asks eIdsLinkEnv
 
         -- The lookup into the rdr env will only be used for imported names.
         info <- idInfoForName dflags
@@ -708,7 +563,7 @@ instance Record Name where
                               idIsBinder
                               (lookupRdrEnv rdrEnv name)
                               (Just current)
-                              homeModuleFor
+                              (homeModuleFor dflags linkEnv)
 
         case info of
           (idProp, Just idScope) -> do
