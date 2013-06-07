@@ -2455,6 +2455,19 @@ syntheticTests =
            let expected = "[foobar (VarName) :: Int -> Int defined in main:A at A.hs@3:1-3:7 (imported from main:A at B.hs@2:1-2:9),foobar' (VarName) :: () -> () defined in main:A at A.hs@5:1-5:8 (imported from main:A at B.hs@2:1-2:9)]"
            assertEqual "" expected (show completeFoob)
     )
+  , ( "Autocomplete 3: Autocompletion entries should have home module info"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    ])
+
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        autocomplete <- getAutocompletion session
+        let completeTru = autocomplete (Text.pack "A") "Tru"
+        assertEqual "" "[True (DataName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)]" (show completeTru)
+    )
     -- TODO: Autocomplete test that checks import errors
     -- - Explicitly importing somthing that wasn't exported
     -- - Explicitly hiding something that wasn't exported

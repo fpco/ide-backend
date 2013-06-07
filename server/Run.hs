@@ -79,15 +79,13 @@ import RdrName (GlobalRdrEnv, GlobalRdrElt, gre_name)
 
 import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM, void)
-import Control.Applicative ((<$>), (<*>))
+import Control.Applicative ((<$>))
 import Data.List ((\\))
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.Binary (Binary(..), getWord8, putWord8)
 import System.FilePath.Find (find, always, extension)
 import System.Process
 import Control.Concurrent (MVar, ThreadId)
-import Data.Aeson.TH (deriveJSON)
 
 import IdeSession.GHC.API
 import IdeSession.Types.Private
@@ -95,9 +93,9 @@ import IdeSession.Util
 import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
 import qualified IdeSession.Strict.List  as StrictList
-import qualified IdeSession.Strict.Maybe as StrictMaybe
 
 import HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
+import Haddock
 import Debug
 
 newtype DynamicOpts = DynamicOpts [Located String]
@@ -188,7 +186,7 @@ compileInGhc configSourcesDir (DynamicOpts dynOpts)
 #if __GLASGOW_HASKELL__ < 706 || defined(GHC_761)
         invalidateModSummaryCache
 #endif
-        setSessionDynFlags flags
+        _ <- setSessionDynFlags flags
         -- Set up targets.
         oldTargets <- getTargets
         let targetIdFromFile file = TargetFile file Nothing
@@ -268,6 +266,9 @@ autocompletion summary = do
   dflags  <- getSessionDynFlags
   session <- getSession
 
+  let pkgDeps = pkgDepsFromModSummary dflags summary
+  linkEnv <- liftIO $ linkEnvFor dflags pkgDeps
+
   let eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
       eltsToAutocompleteMap elt = do
         let name          = gre_name elt
@@ -278,8 +279,7 @@ autocompletion summary = do
                                                 isBinder
                                                 (Just elt)
                                                 currentModule
-                                                -- TODO: home module
-                                                (\_ -> StrictMaybe.nothing)
+                                                (homeModuleFor dflags linkEnv)
         return IdInfo{..}
 
       autoEnvs :: ModSummary -> IO [GlobalRdrElt]
@@ -320,7 +320,7 @@ runInGhc (m, fun) outBMode errBMode tidMVar = do
   flags <- getSessionDynFlags
   -- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
   -- Set GHC verbosity to avoid stray GHC messages, e.g., from the linker.
-  setSessionDynFlags (flags { verbosity = 0 })
+  _ <- setSessionDynFlags (flags { verbosity = 0 })
   -- TODO: not sure if this cleanup handler is needed:
   defaultCleanupHandler flags . handleErrors $ do
 -- TODO: these debug statements break tests currently:

@@ -54,6 +54,7 @@ import Conv
   Package dependencies
 ------------------------------------------------------------------------------}
 
+-- TODO: Not sure we actually use this anywhere
 pkgDepCache :: StrictIORef (Strict (Map ModuleName) [GHC.PackageId])
 {-# NOINLINE pkgDepCache #-}
 pkgDepCache = unsafePerformIO $ newIORef StrictMap.empty
