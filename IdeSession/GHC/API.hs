@@ -13,6 +13,7 @@ module IdeSession.GHC.API (
   , RunResult(..)
     -- * Configuration
   , hsExtensions
+  , cppHeaderName
   ) where
 
 import Data.Binary
@@ -237,3 +238,5 @@ hsExtensions = [".hs", ".lhs"]
 -- but not made proper targets. This is probably similar to .h files.
 -- hsExtentions = [".hs", ".lhs", ".hs-boot", ".lhs-boot", ".hi-boot"]
 
+cppHeaderName :: FilePath
+cppHeaderName = "cabal_macros.h"

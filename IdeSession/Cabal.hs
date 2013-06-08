@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module IdeSession.Cabal (
-    buildExecutable, buildHaddock, buildLicenseCatenation
+    buildExecutable, buildHaddock, buildLicenseCatenation, generateMacros
   ) where
 
 import qualified Control.Exception as Ex
@@ -21,23 +21,30 @@ import System.IO.Temp (createTempDirectory)
 import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr)
 
 import Distribution.InstalledPackageInfo
-  (InstalledPackageInfo_ (InstalledPackageInfo, haddockInterfaces))
+  (InstalledPackageInfo_ ( InstalledPackageInfo
+                         , installedPackageId
+                         , sourcePackageId
+                         , haddockInterfaces ))
 import Distribution.License (License (..))
 import qualified Distribution.ModuleName
 import Distribution.PackageDescription
 import qualified Distribution.Package as Package
-import Distribution.ParseUtils ( parseFields, simpleField, ParseResult(..)
+import Distribution.ParseUtils ( parseFields, simpleField, ParseResult (..)
                                , FieldDescr, parseLicenseQ, parseFilePathQ
                                , parseFreeText, showFilePath, showFreeText
                                , locatedErrorMsg, showPWarning, PWarning )
 import qualified Distribution.Simple.Build as Build
+import Distribution.Simple.Build.Macros
 import qualified Distribution.Simple.Haddock as Haddock
 import Distribution.Simple.Compiler ( CompilerFlavor (GHC)
                                     , PackageDB(..), PackageDBStack )
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.GHC (getInstalledPackages)
-import Distribution.Simple.LocalBuildInfo (localPkgDescr, withPackageDB)
-import Distribution.Simple.PackageIndex (lookupSourcePackageId)
+import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo (..)
+                                          , ComponentLocalBuildInfo (..)
+                                          , localPkgDescr, withPackageDB)
+import Distribution.Simple.PackageIndex ( allPackages
+                                        , lookupSourcePackageId )
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
@@ -548,3 +555,44 @@ getYear = do
   let l = utcToLocalTime z u
       (y, _, _) = toGregorian $ localDay l
   return y
+
+generateMacros :: Maybe [FilePath] -> IO String
+generateMacros extraPackageDB = do
+  let defaultDB = GlobalPackageDB : UserPackageDB : []
+      toDB l = fmap SpecificPackageDB l
+      withPackageDB = maybe defaultDB toDB extraPackageDB
+  programDB <- configureAllKnownPrograms minBound defaultProgramConfiguration
+  pkgIndex <- getInstalledPackages minBound withPackageDB programDB
+  let cpd ipInfo = (installedPackageId ipInfo, sourcePackageId ipInfo)
+      componentPackageDeps = map cpd $ allPackages pkgIndex
+      libraryConfig = Just ComponentLocalBuildInfo {componentPackageDeps}
+      -- @generate@ needs only a few fields.
+      lbi = LocalBuildInfo { libraryConfig
+                           , executableConfigs   = []
+                           , testSuiteConfigs    = []
+                           , benchmarkConfigs    = []
+                           , localPkgDescr       = pkgDesc
+                           , configFlags         = undefined
+                           , extraConfigArgs     = undefined
+                           , installDirTemplates = undefined
+                           , compiler            = undefined
+                           , buildDir            = undefined
+                           , scratchDir          = undefined
+                           , compBuildOrder      = undefined
+                           , installedPkgs       = undefined
+                           , pkgDescrFile        = undefined
+                           , withPrograms        = undefined
+                           , withVanillaLib      = undefined
+                           , withProfLib         = undefined
+                           , withSharedLib       = undefined
+                           , withDynExe          = undefined
+                           , withProfExe         = undefined
+                           , withOptimization    = undefined
+                           , withGHCiLib         = undefined
+                           , splitObjs           = undefined
+                           , stripExes           = undefined
+                           , withPackageDB       = undefined
+                           , progPrefix          = undefined
+                           , progSuffix          = undefined
+                           }
+  return $ generate undefined lbi
