@@ -55,11 +55,7 @@ import Data.Version (Version(..))
 import Distribution.Simple (PackageDBStack, PackageDB(..))
 
 import IdeSession.State
-import IdeSession.Cabal ( buildExecutable
-                        , buildHaddock
-                        , buildLicenseCatenation
-                        , packageDbArgs
-                        )
+import IdeSession.Cabal
 import IdeSession.Config
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
@@ -123,6 +119,10 @@ initSession ideConfig@SessionConfig{..} = do
   let ideStaticInfo = IdeStaticInfo{..}
   let session = IdeSession{..}
 
+  -- TODO: for now, this location is safe, but when the user
+  -- is allowed to overwrite .h files, we need to create an extra dir.
+  writeMacros ideConfig ideSourcesDir
+
   return session
 
 -- | Verify configuration, and throw an exception if configuration is invalid
@@ -157,6 +157,12 @@ checkPackageDbEnvVar = do
 
     catchIO :: IO a -> (IOError -> IO a) -> IO a
     catchIO = Ex.catch
+
+-- | Write per-package CPP macros.
+writeMacros :: SessionConfig -> FilePath -> IO ()
+writeMacros SessionConfig{configPackageDBStack} path = do
+  macros <- generateMacros configPackageDBStack
+  writeFile (path </> cppHeaderName) macros
 
 -- | Close a session down, releasing the resources.
 --

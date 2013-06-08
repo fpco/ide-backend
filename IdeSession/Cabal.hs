@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module IdeSession.Cabal (
-    buildExecutable, buildHaddock, buildLicenseCatenation, packageDbArgs
+    buildExecutable, buildHaddock, buildLicenseCatenation
+  , packageDbArgs, generateMacros
   ) where
 
 import qualified Control.Exception as Ex
@@ -21,23 +22,30 @@ import System.IO.Temp (createTempDirectory)
 import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr)
 
 import Distribution.InstalledPackageInfo
-  (InstalledPackageInfo_ (InstalledPackageInfo, haddockInterfaces))
+  (InstalledPackageInfo_ ( InstalledPackageInfo
+                         , installedPackageId
+                         , sourcePackageId
+                         , haddockInterfaces ))
 import Distribution.License (License (..))
 import qualified Distribution.ModuleName
 import Distribution.PackageDescription
 import qualified Distribution.Package as Package
-import Distribution.ParseUtils ( parseFields, simpleField, ParseResult(..)
+import Distribution.ParseUtils ( parseFields, simpleField, ParseResult (..)
                                , FieldDescr, parseLicenseQ, parseFilePathQ
                                , parseFreeText, showFilePath, showFreeText
                                , locatedErrorMsg, showPWarning, PWarning )
 import qualified Distribution.Simple.Build as Build
+import Distribution.Simple.Build.Macros
 import qualified Distribution.Simple.Haddock as Haddock
 import Distribution.Simple (PackageDB(..), PackageDBStack)
 import Distribution.Simple.Compiler (CompilerFlavor (GHC))
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.GHC (getInstalledPackages)
-import Distribution.Simple.LocalBuildInfo (localPkgDescr)
-import Distribution.Simple.PackageIndex (lookupSourcePackageId)
+import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo (..)
+                                          , ComponentLocalBuildInfo (..)
+                                          , localPkgDescr, withPackageDB)
+import Distribution.Simple.PackageIndex ( allPackages
+                                        , lookupSourcePackageId )
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
@@ -174,8 +182,8 @@ externalDeps pkgs =
         return $ Just $ Package.Dependency packageN (thisVersion version)
   in liftM catMaybes $ mapM depOfName pkgs
 
-configFlags :: FilePath -> Bool -> PackageDBStack -> Setup.ConfigFlags
-configFlags ideDistDir dynlink packageDbStack =
+mkConfFlags :: FilePath -> Bool -> PackageDBStack -> Setup.ConfigFlags
+mkConfFlags ideDistDir dynlink packageDbStack =
   let userInstall = UserPackageDB `elem` packageDbStack
       isSpecific SpecificPackageDB{} = True
       isSpecific _ = False
@@ -231,7 +239,7 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = configFlags ideDistDir dynlink packageDbStack
+      confFlags = mkConfFlags ideDistDir dynlink packageDbStack
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
                      { Setup.buildDistPref = Setup.Flag ideDistDir
@@ -253,7 +261,7 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
     (\_ -> Ex.try $ do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
         -- Setting @withPackageDB@ here is too late, @configure@ would fail
-        -- already. Hence we set it in @configFlags@ (can be reverted,
+        -- already. Hence we set it in @mkConfFlags@ (can be reverted,
         -- when/if we construct @lbi@ without @configure@).
         markProgress
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
@@ -293,7 +301,7 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = configFlags ideDistDir dynlink packageDbStack
+      confFlags = mkConfFlags ideDistDir dynlink packageDbStack
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       haddockFlags = Setup.defaultHaddockFlags
@@ -565,3 +573,40 @@ packageDbArgs (Version ver _) dbstack = case dbstack of
       | otherwise
       = "package-db"
 
+generateMacros :: PackageDBStack -> IO String
+generateMacros packageDbStack = do
+  programDB <- configureAllKnownPrograms minBound defaultProgramConfiguration
+  pkgIndex <- getInstalledPackages minBound packageDbStack programDB
+  let cpd ipInfo = (installedPackageId ipInfo, sourcePackageId ipInfo)
+      componentPackageDeps = map cpd $ allPackages pkgIndex
+      libraryConfig = Just ComponentLocalBuildInfo {componentPackageDeps}
+      -- @generate@ needs only a few fields.
+      lbi = LocalBuildInfo { libraryConfig
+                           , executableConfigs   = []
+                           , testSuiteConfigs    = []
+                           , benchmarkConfigs    = []
+                           , localPkgDescr       = pkgDesc
+                           , configFlags         = undefined
+                           , extraConfigArgs     = undefined
+                           , installDirTemplates = undefined
+                           , compiler            = undefined
+                           , buildDir            = undefined
+                           , scratchDir          = undefined
+                           , compBuildOrder      = undefined
+                           , installedPkgs       = undefined
+                           , pkgDescrFile        = undefined
+                           , withPrograms        = undefined
+                           , withVanillaLib      = undefined
+                           , withProfLib         = undefined
+                           , withSharedLib       = undefined
+                           , withDynExe          = undefined
+                           , withProfExe         = undefined
+                           , withOptimization    = undefined
+                           , withGHCiLib         = undefined
+                           , splitObjs           = undefined
+                           , stripExes           = undefined
+                           , withPackageDB       = undefined
+                           , progPrefix          = undefined
+                           , progSuffix          = undefined
+                           }
+  return $ generate undefined lbi
