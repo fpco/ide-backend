@@ -6,7 +6,7 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad (forM_, liftM, void, when)
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
-import qualified Data.ByteString.Lazy.Char8 as BSLC (pack, unpack)
+import qualified Data.ByteString.Lazy.Char8 as BSLC (pack, unpack, null)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isPrefixOf, isSuffixOf, isInfixOf, sort)
@@ -415,6 +415,58 @@ syntheticTests =
         updateSessionD session upd 4
         status1 <- getBuildDocStatus session
         assertEqual "failure after doc build" (Just $ ExitFailure 1) status1
+    )
+  , ( "Use cabal macro for a package we really depend on"
+    , let packageOpts = defOpts ++ ["-XCPP"]
+      in withConfiguredSession packageOpts $ \session -> do
+        macros <- getSourceModule "cabal_macros.h" session
+        assertBool "Main with cabal macro exe output" (not $ BSLC.null macros)
+        -- assertEqual "Main with cabal macro exe output" (BSLC.pack "") macros
+        let update = updateModule "Main.hs" $ BSLC.pack $ unlines
+              [ "#if !MIN_VERSION_base(999,0,0)"
+              , "main = print 5"
+              , "#else"
+              , "terrible error"
+              , "#endif"
+              ]
+        updateSessionD session update 1
+        assertNoErrors session
+        let update2 = updateCodeGeneration True
+        updateSessionD session update2 1
+        runActions <- runStmt session "Main" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
+        let m = "Main"
+            upd = buildExe [(Text.pack m, "Main.hs")]
+        updateSessionD session upd 4
+        distDir <- getDistDir session
+        mOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "Main with cabal macro exe output" "5\n" mOut
+    )
+  , ( "Use cabal macro for a package we don't really depend on"
+    , let packageOpts = defOpts ++ ["-XCPP"]
+      in withConfiguredSession packageOpts $ \session -> do
+        let update = updateModule "Main.hs" $ BSLC.pack $ unlines
+              [ "#if !MIN_VERSION_containers(999,0,0)"
+              , "main = print 5"
+              , "#else"
+              , "terrible error"
+              , "#endif"
+              ]
+        updateSessionD session update 1
+        assertNoErrors session
+        let update2 = updateCodeGeneration True
+        updateSessionD session update2 1
+        runActions <- runStmt session "Main" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
+        -- TODO:
+        -- let m = "Main"
+        --     upd = buildExe [(Text.pack m, "Main.hs")]
+        -- updateSessionD session upd 4
+        -- distDir <- getDistDir session
+        -- mOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        -- assertEqual "Main with cabal macro exe output" "5\n" mOut
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = [ "-hide-all-packages"
