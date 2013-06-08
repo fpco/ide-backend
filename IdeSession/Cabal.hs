@@ -7,7 +7,8 @@ module IdeSession.Cabal (
 import qualified Control.Exception as Ex
 import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
-import Data.List (delete, sort, nub, find)
+import Data.Function
+import Data.List (delete, sort, nub, nubBy, find)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
@@ -71,16 +72,16 @@ import qualified Paths_ide_backend as Self
 -- after Cabal and the code that calls it are improved not to require
 -- the configure step, etc.
 
-pkgName :: Package.PackageName
-pkgName = Package.PackageName "main"  -- matches the import default
+pkgNameMain :: Package.PackageName
+pkgNameMain = Package.PackageName "main"  -- matches the import default
 
-pkgVersion :: Version
-pkgVersion = Version [1, 0] []
+pkgVersionMain :: Version
+pkgVersionMain = Version [1, 0] []
 
 pkgIdent :: Package.PackageIdentifier
 pkgIdent = Package.PackageIdentifier
-  { pkgName    = pkgName
-  , pkgVersion = pkgVersion
+  { pkgName    = pkgNameMain
+  , pkgVersion = pkgVersionMain
   }
 
 pkgDesc :: PackageDescription
@@ -173,7 +174,7 @@ externalDeps pkgs =
   let depOfName :: Monad m => PackageId -> m (Maybe Package.Dependency)
       depOfName PackageId{packageName, packageVersion = Nothing} = do
         let packageN = Package.PackageName $ Text.unpack $ packageName
-        if packageN == pkgName then return Nothing
+        if packageN == pkgNameMain then return Nothing
         else return $ Just $ Package.Dependency packageN anyVersion
       depOfName PackageId{packageName, packageVersion = Just versionText} = do
         let packageN = Package.PackageName $ Text.unpack $ packageName
@@ -211,7 +212,7 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         callback oldCounter
   markProgress
   libDeps <- externalDeps pkgs
-  let mainDep = Package.Dependency pkgName (thisVersion pkgVersion)
+  let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
   executables <- mapM (exeDesc ideSourcesDir ideDistDir ghcOpts) ms
   markProgress
@@ -578,7 +579,9 @@ generateMacros packageDbStack = do
   programDB <- configureAllKnownPrograms minBound defaultProgramConfiguration
   pkgIndex <- getInstalledPackages minBound packageDbStack programDB
   let cpd ipInfo = (installedPackageId ipInfo, sourcePackageId ipInfo)
-      componentPackageDeps = map cpd $ allPackages pkgIndex
+      samePkg = (==) `on` Package.pkgName . sourcePackageId
+      newestDeps = nubBy samePkg $ reverse $ allPackages pkgIndex
+      componentPackageDeps = map cpd newestDeps
       libraryConfig = Just ComponentLocalBuildInfo {componentPackageDeps}
       -- @generate@ needs only a few fields.
       lbi = LocalBuildInfo { libraryConfig
