@@ -196,6 +196,7 @@ module IdeSession (
   , dumpIdInfo
   , crashGhcServer
   , hsExtensions
+  , ideBackendApiVersion
 ) where
 
 import IdeSession.Config

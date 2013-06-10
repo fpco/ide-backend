@@ -48,16 +48,28 @@ import Debug
 -- | Start the RPC server. Used from within the server executable.
 ghcServer :: [String] -> IO ()
 ghcServer fdsAndOpts = do
-  let (opts, "--ghc-opts-end" : configGenerateModInfo : fds) =
+  let (opts, "--ghc-opts-end" : configGenerateModInfo : clientApiVersion : fds) =
         span (/= "--ghc-opts-end") fdsAndOpts
-  rpcServer fds (ghcServerEngine (read configGenerateModInfo) opts)
+  rpcServer fds $ ghcServerEngine (read configGenerateModInfo)
+                                  (read clientApiVersion)
+                                  opts
 
 -- | The GHC server engine proper.
 --
 -- This function runs in end endless loop inside the @Ghc@ monad, making
 -- incremental compilation possible.
-ghcServerEngine :: Bool -> [String] -> RpcConversation -> IO ()
-ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
+ghcServerEngine :: Bool -> Int -> [String] -> RpcConversation -> IO ()
+ghcServerEngine configGenerateModInfo
+                clientApiVersion
+                staticOpts
+                conv@RpcConversation{..} = do
+  -- Check API versions
+  unless (clientApiVersion == ideBackendApiVersion) $
+    Ex.throwIO . userError $ "API version mismatch between ide-backend "
+                          ++ "(" ++ show clientApiVersion ++ ") "
+                          ++ "and ide-backend-server "
+                          ++ "(" ++ show ideBackendApiVersion ++ ")"
+
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
   -- Set up references for the current session of Ghc monad computations.

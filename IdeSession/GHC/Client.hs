@@ -68,7 +68,9 @@ forkGhcServer configGenerateModInfo opts workingDir False = do
 
   server <- forkRpcServer prog
                           (opts ++ [ "--ghc-opts-end"
-                                   , show configGenerateModInfo ])
+                                   , show configGenerateModInfo
+                                   , show ideBackendApiVersion
+                                   ])
                           workingDir
   return (OutProcess server)
 forkGhcServer _ _ _ True =

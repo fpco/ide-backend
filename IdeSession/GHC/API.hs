@@ -12,6 +12,7 @@ module IdeSession.GHC.API (
   , GhcRunResponse(..)
   , RunResult(..)
     -- * Configuration
+  , ideBackendApiVersion
   , hsExtensions
   ) where
 
@@ -24,6 +25,13 @@ import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Strict.Container
 import IdeSession.Util (Diff)
+
+-- | For detecting runtime version mismatch between the server and the library
+--
+-- We use a Unix timestamp for this so that these API versions have some
+-- semantics (http://www.epochconverter.com/, GMT).
+ideBackendApiVersion :: Int
+ideBackendApiVersion = 1370868956
 
 {------------------------------------------------------------------------------
   Requests
