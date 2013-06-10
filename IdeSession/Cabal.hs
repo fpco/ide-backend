@@ -6,11 +6,12 @@ module IdeSession.Cabal (
 import qualified Control.Exception as Ex
 import Control.Monad
 import Data.List (delete)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.Exit (ExitCode (ExitSuccess))
+import System.Environment (getEnvironment)
 import System.FilePath ((</>))
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
@@ -22,7 +23,7 @@ import Distribution.PackageDescription
 import qualified Distribution.Package as Package
 import qualified Distribution.Simple.Build as Build
 import qualified Distribution.Simple.Haddock as Haddock
-import Distribution.Simple.Compiler (CompilerFlavor (GHC))
+import Distribution.Simple.Compiler (CompilerFlavor (GHC), PackageDB (SpecificPackageDB))
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.LocalBuildInfo (localPkgDescr)
 import Distribution.Simple.PreProcess (PPSuffixHandler)
@@ -196,12 +197,21 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = (Setup.defaultConfigFlags defaultProgramConfiguration)
+
+  -- MSS 2013-06-10: Temporary hack to set the package database based on the
+  -- GHC_PACKAGE_PATH environment variable.
+  env <- getEnvironment
+  let packageDB = fromMaybe Setup.NoFlag $ do
+        path <- lookup "GHC_PACKAGE_PATH" env
+        return $ Setup.Flag $ SpecificPackageDB $ takeWhile (/= ':') path
+
+  let confFlags = (Setup.defaultConfigFlags defaultProgramConfiguration)
                      { Setup.configDistPref = Setup.Flag ideDistDir
                      , Setup.configUserInstall = Setup.Flag True
                      , Setup.configVerbosity = Setup.Flag minBound
                      , Setup.configSharedLib = Setup.Flag dynlink
                      , Setup.configDynExe = Setup.Flag dynlink
+                     , Setup.configPackageDB = packageDB
                      }
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
