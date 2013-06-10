@@ -16,11 +16,11 @@ import Data.List (sortBy)
 import Data.Function (on)
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
-
 import System.IO (Handle, hFlush)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import System.Time (ClockTime)
+import System.Environment (withArgs)
 
 import IdeSession.GHC.API
 import IdeSession.RPC.Server
@@ -34,6 +34,8 @@ import qualified IdeSession.Strict.Map  as StrictMap
 import qualified IdeSession.Strict.List as StrictList
 
 import qualified GHC
+import GhcMonad(Ghc(..))
+
 import Run
 import HsWalk
 import Haddock
@@ -81,7 +83,8 @@ ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
             conv dOpts opts pluginRef importsRef dir
             genCode configGenerateModInfo
         ReqRun m fun outBMode errBMode ->
-          ghcHandleRun conv m fun outBMode errBMode
+          ghcWithArgs [] $
+            ghcHandleRun conv m fun outBMode errBMode
         ReqSetEnv env ->
           ghcHandleSetEnv conv env
         ReqCrash delay ->
@@ -293,6 +296,9 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
     spanInfoFor m = allSpanInfo .> StrictMap.accessorDefault Keep m
     pkgDepsFor  m = allPkgDeps  .> StrictMap.accessorDefault Keep m
 
+
+
+
 -- | Handle a run request
 ghcHandleRun :: RpcConversation
              -> String            -- ^ Module
@@ -441,7 +447,7 @@ ghcHandleCrash delay = liftIO $ do
 -- Auxiliary                                                                  --
 --------------------------------------------------------------------------------
 
--- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
+-- | Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
 -- We suppress stdout during compilation to avoid stray messages, e.g. from
 -- the linker.
 -- TODO: send all suppressed messages to a debug log file.
@@ -451,3 +457,13 @@ suppressGhcStdout p = do
   x <- p
   liftIO $ restoreStdOutput stdOutputBackup
   return x
+
+-- | Lift operations on `IO` to the `Ghc` monad. This is unsafe as it makes
+-- operations possible in the `Ghc` monad that weren't possible before
+-- (for instance, @unsafeLiftIO forkIO@ is probably a bad idea!).
+unsafeLiftIO :: (IO a -> IO b) -> Ghc a -> Ghc b
+unsafeLiftIO f (Ghc ghc) = Ghc $ \session -> f (ghc session)
+
+-- | Lift `withArgs` to the `Ghc` monad. Relies on `unsafeLiftIO`.
+ghcWithArgs :: [String] -> Ghc a -> Ghc a
+ghcWithArgs = unsafeLiftIO . withArgs

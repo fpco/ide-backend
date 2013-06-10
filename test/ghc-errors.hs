@@ -2527,6 +2527,24 @@ syntheticTests =
         assertEqual "" "Just [parallel-3.2.0.3,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]" (show (deps (Text.pack "B")))
         assertEqual "" "Just [mtl-2.1.2,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0,transformers-0.3.0.0]" (show (deps (Text.pack "C")))
      )
+  , ( "Set command line arguments 1: Default to no args"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.Environment (getArgs)"
+                    , "printArgs :: IO ()"
+                    , "printArgs = getArgs >>= print"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        runActions <- runStmt session "M" "printArgs"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk _ -> assertEqual "" (BSLC.pack "[]\n") output
+          _       -> assertFailure $ "Unexpected run result: " ++ show result
+    )
   ]
 
 assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
