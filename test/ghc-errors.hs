@@ -1990,7 +1990,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,9,2,10) infoPrint
         assertIdInfo idInfo "A" (2,9,2,13) infoPrint
     )
-  , ( "Type information 9: Quasi-quotation"
+  , ( "Type information 9a: Quasi-quotation (QQ in own package)"
     , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateModule "A.hs" . BSLC.pack . unlines $
@@ -2037,6 +2037,35 @@ syntheticTests =
         assertIdInfo idInfo "B" (5,7,5,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter defined in main:A at A.hs@4:1-4:3 (imported from main:A at B.hs@3:1-3:9)"
         assertIdInfo idInfo "B" (6,7,6,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter defined in main:A at A.hs@4:1-4:3 (imported from main:A at B.hs@3:1-3:9)"
         assertIdInfo idInfo "B" (7,7,7,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter defined in main:A at A.hs@4:1-4:3 (imported from main:A at B.hs@3:1-3:9)"
+    )
+  , ( "Type information 9b: Quasi-quotation (QQ in separate package, check home module info)"
+    , withConfiguredSession ("-package template-haskell" : "-package yesod" : defOpts) $ \session -> do
+        let upd = updateCodeGeneration True
+               <> (updateModule "Main.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TypeFamilies, QuasiQuotes, MultiParamTypeClasses,"
+                    , "             TemplateHaskell, OverloadedStrings #-}"
+                    , "import Yesod"
+
+                    , "data Piggies = Piggies"
+
+                    , "instance Yesod Piggies"
+
+                    , "mkYesod \"Piggies\" [parseRoutes|"
+                    , "  / HomeR GET"
+                    , "|]"
+
+                    , "getHomeR = defaultLayout [whamlet|"
+                    , "  Welcome to the Pigsty!"
+                    , "  |]"
+
+                    , "main = warpEnv Piggies"
+                    ])
+        updateSessionD session upd 2
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+
+        assertIdInfo idInfo "Main" (6,19,8,3) "quasi-quote with quoter parseRoutes (VarName) defined in yesod-routes-1.2.0.1:Yesod.Routes.Parse at <no location info> (home yesod-core-1.2.2:Yesod.Core.Dispatch) (imported from yesod-1.2.1:Yesod at Main.hs@3:1-3:13)"
+        assertIdInfo idInfo "Main" (9,26,11,5) "quasi-quote with quoter whamlet (VarName) defined in yesod-core-1.2.2:Yesod.Core.Widget at <no location info> (home yesod-core-1.2.2:Yesod.Core.Widget) (imported from yesod-1.2.1:Yesod at Main.hs@3:1-3:13)"
     )
   , ( "Type information 10: Template Haskell"
     , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
@@ -2733,11 +2762,8 @@ assertIdInfo :: (Text -> SourceSpan -> [(SourceSpan, SpanInfo)])
              -> (Int, Int, Int, Int)
              -> String
              -> Assertion
-assertIdInfo idInfo mod loc@(frLine, frCol, toLine, toCol) typ =
-    when (typ /= (show . snd . head $ idInfo (Text.pack mod) span)) $
-      putStrLn $ "Warning: Expected: " ++ typ ++ "\n"
-              ++ "              got: assertIdInfo idInfo " ++ show mod ++ " " ++ show loc ++ " " ++ show (show . snd . head $ idInfo (Text.pack mod) span)
-    -- assertEqual "" typ (show . snd . head $ idInfo (Text.pack mod) span)
+assertIdInfo idInfo mod (frLine, frCol, toLine, toCol) typ =
+    assertEqual "" typ (show . snd . head $ idInfo (Text.pack mod) span)
   where
     span = SourceSpan { spanFilePath   = mod ++ ".hs"
                       , spanFromLine   = frLine

@@ -66,7 +66,7 @@ import PprTyThing (pprTypeForUser)
 import Conv
 import Haddock
 
-#define DEBUG 1
+#define DEBUG 0
 
 {------------------------------------------------------------------------------
   Caching
@@ -160,19 +160,26 @@ extractIdsPlugin symbolRef = HscPlugin {..}
                                     -> HsQuasiQuote Name
                                     -> m (HsQuasiQuote Name)
     runHscQQ env qq@(HsQuasiQuote quoter _span _str) = liftIO $ do
+#ifdef DEBUG
       appendFile "/tmp/ghc.qq" $ showSDoc (ppr qq)
-      idInfo <- readIORef qqRef
+#endif
+
+      let dflags  =               hsc_dflags  (env_top env)
+          rdrEnv  =               tcg_rdr_env (env_gbl env)
+          current =               tcg_mod     (env_gbl env)
+          pkgDeps = imp_dep_pkgs (tcg_imports (env_gbl env))
+
+      idInfo           <- readIORef qqRef
       ProperSpan span' <- extractSourceSpan $ tcl_loc (env_lcl env)
-      let dflags  = hsc_dflags  (env_top env)
-          rdrEnv  = tcg_rdr_env (env_gbl env)
-          current = tcg_mod     (env_gbl env)
+      linkEnv          <- liftIO $ linkEnvFor dflags pkgDeps
+
       (idProp, Just idScope) <- idInfoForName dflags
                                               quoter
                                               False
                                               (lookupRdrEnv rdrEnv quoter)
                                               (Just current)
-                                              -- TODO: Home module
-                                              (\_ -> Maybe.nothing)
+                                              (homeModuleFor dflags linkEnv)
+
       let quoterInfo = IdInfo{..}
       let idInfo' = (span', SpanQQ quoterInfo) : idInfo
       writeIORef qqRef idInfo'
