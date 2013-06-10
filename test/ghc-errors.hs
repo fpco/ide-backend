@@ -2061,11 +2061,16 @@ syntheticTests =
                     , "main = warpEnv Piggies"
                     ])
         updateSessionD session upd 2
-        assertNoErrors session
-        idInfo <- getSpanInfo session
 
-        assertIdInfo idInfo "Main" (6,19,8,3) "quasi-quote with quoter parseRoutes (VarName) defined in yesod-routes-1.2.0.1:Yesod.Routes.Parse at <no location info> (home yesod-core-1.2.2:Yesod.Core.Dispatch) (imported from yesod-1.2.1:Yesod at Main.hs@3:1-3:13)"
-        assertIdInfo idInfo "Main" (9,26,11,5) "quasi-quote with quoter whamlet (VarName) defined in yesod-core-1.2.2:Yesod.Core.Widget at <no location info> (home yesod-core-1.2.2:Yesod.Core.Widget) (imported from yesod-1.2.1:Yesod at Main.hs@3:1-3:13)"
+        errs <- getSourceErrors session
+        case errs of
+          [] -> do
+            idInfo <- getSpanInfo session
+
+            assertIdInfo idInfo "Main" (6,19,8,3) "quasi-quote with quoter parseRoutes (VarName) defined in yesod-routes-1.2.0.1:Yesod.Routes.Parse at <no location info> (home yesod-core-1.2.2:Yesod.Core.Dispatch) (imported from yesod-1.2.1:Yesod at Main.hs@3:1-3:13)"
+            assertIdInfo idInfo "Main" (9,26,11,5) "quasi-quote with quoter whamlet (VarName) defined in yesod-core-1.2.2:Yesod.Core.Widget at <no location info> (home yesod-core-1.2.2:Yesod.Core.Widget) (imported from yesod-1.2.1:Yesod at Main.hs@3:1-3:13)"
+          _ ->
+            putStrLn "WARNING: Skipping due to errors (probably yesod package not installed)"
     )
   , ( "Type information 10: Template Haskell"
     , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
