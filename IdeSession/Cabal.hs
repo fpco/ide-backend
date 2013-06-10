@@ -152,7 +152,7 @@ externalDeps pkgs =
         let packageN = Package.PackageName $ Text.unpack $ packageName
             versionString = Text.unpack versionText
         version <- parseVersionString versionString
-        return $ Just $ Package.Dependency packageN (thisVersion version)
+        return $ Just $ Package.Dependency packageN anyVersion
   in liftM catMaybes $ mapM depOfName pkgs
 
 configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
