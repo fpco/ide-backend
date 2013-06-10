@@ -1,0 +1,20 @@
+NOTE: THESE ARE JUST QUICK AND DIRTY NOTES-TO-SELF FOR INSTALLING
+ISOLATION-RUNNER. They work for me, but YMMV.
+
+git clone git@github.com:fpco/fpco
+
+cd fpco
+git submodule update --init
+
+cd gitlib
+<<modify .gitmodules: git@github.com:fpco/rest-client.git instead of the HTTP url>>
+git submodule update --init
+
+cd ..
+git submodule update --init --recursive
+
+cd dev-scripts/fpbuild
+cabal install
+cd ../..
+
+FPCO_NO_HSENV=1 FPCO_USE_CABAL_META=0 dev-scripts/build-all.sh
