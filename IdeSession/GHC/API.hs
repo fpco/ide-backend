@@ -44,6 +44,9 @@ data GhcRequest
   | ReqSetEnv {
          reqSetEnv :: [(String, Maybe String)]
        }
+  | ReqSetArgs {
+         reqSetArgs :: [String]
+       }
     -- | For debugging only! :)
   | ReqCrash {
          reqCrashDelay :: Maybe Int
@@ -128,8 +131,11 @@ instance Binary GhcRequest where
   put ReqSetEnv{..} = do
     putWord8 2
     put reqSetEnv
-  put ReqCrash{..} = do
+  put ReqSetArgs{..} = do
     putWord8 3
+    put reqSetArgs
+  put ReqCrash{..} = do
+    putWord8 4
     put reqCrashDelay
 
   get = do
@@ -138,7 +144,8 @@ instance Binary GhcRequest where
       0 -> ReqCompile <$> get <*> get <*> get
       1 -> ReqRun     <$> get <*> get <*> get <*> get
       2 -> ReqSetEnv  <$> get
-      3 -> ReqCrash   <$> get
+      3 -> ReqSetArgs <$> get
+      4 -> ReqCrash   <$> get
       _ -> fail "GhcRequest.get: invalid header"
 
 instance Binary GhcCompileResponse where

@@ -7,7 +7,7 @@ import Control.Concurrent (ThreadId, throwTo, forkIO, myThreadId, threadDelay)
 import Control.Concurrent.Async (async)
 import Control.Concurrent.MVar (MVar, newEmptyMVar)
 import qualified Control.Exception as Ex
-import Control.Monad (void, forever, unless, when)
+import Control.Monad (void, unless, when)
 import Control.Monad.State (StateT, runStateT)
 import Control.Monad.Trans.Class (lift)
 import qualified Data.ByteString as BSS (hGetSome, hPut, null)
@@ -75,20 +75,29 @@ ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
       void $ setSessionDynFlags dynFlags'
 
     -- Start handling RPC calls
-    forever $ do
-      req <- liftIO get
-      case req of
-        ReqCompile opts dir genCode ->
-          ghcHandleCompile
-            conv dOpts opts pluginRef importsRef dir
-            genCode configGenerateModInfo
-        ReqRun m fun outBMode errBMode ->
-          ghcWithArgs [] $
-            ghcHandleRun conv m fun outBMode errBMode
-        ReqSetEnv env ->
-          ghcHandleSetEnv conv env
-        ReqCrash delay ->
-          ghcHandleCrash delay
+    let go args = do
+          req <- liftIO get
+          args' <- case req of
+            ReqCompile opts dir genCode -> do
+              ghcHandleCompile
+                conv dOpts opts pluginRef importsRef dir
+                genCode configGenerateModInfo
+              return args
+            ReqRun m fun outBMode errBMode -> do
+              ghcWithArgs args $ ghcHandleRun conv m fun outBMode errBMode
+              return args
+            ReqSetEnv env -> do
+              ghcHandleSetEnv conv env
+              return args
+            ReqSetArgs args' -> do
+              liftIO $ put ()
+              return args'
+            ReqCrash delay -> do
+              ghcHandleCrash delay
+              return args
+          go args'
+
+    go []
   where
     ideBackendRTSOpts = [
         -- Just in case the user specified -hide-all-packages

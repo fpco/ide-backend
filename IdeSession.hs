@@ -122,6 +122,7 @@ module IdeSession (
   , updateDataFileFromFile
   , updateDataFileDelete
   , updateEnv
+  , updateArgs
   , updateStdoutBufferMode
   , updateStderrBufferMode
   , buildExe

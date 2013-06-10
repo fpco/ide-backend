@@ -17,6 +17,7 @@ module IdeSession.GHC.Client (
   , rpcRun
   , rpcCrash
   , rpcSetEnv
+  , rpcSetArgs
   ) where
 
 import Control.Concurrent (ThreadId, killThread)
@@ -147,6 +148,13 @@ runWaitAll RunActions{runWait} = go []
 rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()
 rpcSetEnv (OutProcess server) env = rpc server (ReqSetEnv env)
 rpcSetEnv (InProcess _ _)     env = setupEnv env
+
+-- | Set command line arguments
+rpcSetArgs :: GhcServer -> [String] -> IO ()
+rpcSetArgs (OutProcess server) args =
+  rpc server (ReqSetArgs args)
+rpcSetArgs (InProcess _ _) _ =
+  error "rpcSetArgs not supposed for in-process server"
 
 -- | Compile or typecheck
 rpcCompile :: GhcServer           -- ^ GHC server

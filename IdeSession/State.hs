@@ -22,11 +22,13 @@ module IdeSession.State
   , ideBuildDocStatus
   , ideBuildLicensesStatus
   , ideEnv
+  , ideArgs
   , ideGhcServer
   , ideStdoutBufferMode
   , ideStderrBufferMode
   , ideUpdatedEnv
   , ideUpdatedCode
+  , ideUpdatedArgs
   , managedSource
   , managedData
   ) where
@@ -101,39 +103,43 @@ data IdeSessionState =
 type LogicalTimestamp = EpochTime
 
 data IdeIdleState = IdeIdleState {
-    -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7473.
+    -- | A workaround for http://hackage.haskell.org/trac/ghc/ticket/7473.
     -- Logical timestamps (used to force ghc to recompile files)
     _ideLogicalTimestamp :: !LogicalTimestamp
-    -- The result computed by the GHC API typing/compilation invocation
+    -- | The result computed by the GHC API typing/compilation invocation
     -- in the last call to 'updateSession' invocation.
   , _ideComputed         :: !(Strict Maybe Computed)
-    -- Compiler dynamic options. If they are not set, the options from
+    -- | Compiler dynamic options. If they are not set, the options from
     -- SessionConfig are used.
   , _ideNewOpts          :: !(Maybe [String])
-    -- Whether to generate code in addition to type-checking.
+    -- | Whether to generate code in addition to type-checking.
   , _ideGenerateCode     :: !Bool
-    -- Files submitted by the user and not deleted yet.
+    -- | Files submitted by the user and not deleted yet.
   , _ideManagedFiles     :: !ManagedFilesInternal
-    -- Exit status of the last invocation of 'buildExe', if any.
+    -- | Exit status of the last invocation of 'buildExe', if any.
   , _ideBuildExeStatus   :: !(Maybe ExitCode)
-    -- Exit status of the last invocation of 'buildDoc', if any.
+    -- | Exit status of the last invocation of 'buildDoc', if any.
   , _ideBuildDocStatus   :: !(Maybe ExitCode)
-    -- Exit status of the last invocation of 'buildDoc', if any.
+    -- | Exit status of the last invocation of 'buildDoc', if any.
   , _ideBuildLicensesStatus :: !(Maybe ExitCode)
-    -- Environment overrides
+    -- | Environment overrides
   , _ideEnv              :: ![(String, Maybe String)]
-    -- The GHC server (this is replaced in 'restartSession')
+    -- | Command line arguments for snippets (expected value of `getArgs`)
+  , _ideArgs             :: ![String]
+    -- | The GHC server (this is replaced in 'restartSession')
   , _ideGhcServer        :: !GhcServer
-    -- Buffer mode for standard output for 'runStmt'
+    -- | Buffer mode for standard output for 'runStmt'
   , _ideStdoutBufferMode :: !RunBufferMode
-    -- Buffer mode for standard error for 'runStmt'
+    -- | Buffer mode for standard error for 'runStmt'
   , _ideStderrBufferMode :: !RunBufferMode
-    -- Has the environment (as recorded in this state) diverged from the
+    -- | Has the environment (as recorded in this state) diverged from the
     -- environment on the server?
   , _ideUpdatedEnv       :: !Bool
-    -- Has the code diverged from what has been loaded into GHC on the last
+    -- | Has the code diverged from what has been loaded into GHC on the last
     -- call to 'updateSession'?
   , _ideUpdatedCode      :: !Bool
+    -- | Has the value of ideArgs diverged from what's recorded on the server?
+  , _ideUpdatedArgs      :: !Bool
   }
 
 -- | The collection of source and data files submitted by the user.
@@ -162,11 +168,13 @@ ideBuildExeStatus   :: Accessor IdeIdleState (Maybe ExitCode)
 ideBuildDocStatus   :: Accessor IdeIdleState (Maybe ExitCode)
 ideBuildLicensesStatus :: Accessor IdeIdleState (Maybe ExitCode)
 ideEnv              :: Accessor IdeIdleState [(String, Maybe String)]
+ideArgs             :: Accessor IdeIdleState [String]
 ideGhcServer        :: Accessor IdeIdleState GhcServer
 ideStdoutBufferMode :: Accessor IdeIdleState RunBufferMode
 ideStderrBufferMode :: Accessor IdeIdleState RunBufferMode
 ideUpdatedEnv       :: Accessor IdeIdleState Bool
 ideUpdatedCode      :: Accessor IdeIdleState Bool
+ideUpdatedArgs      :: Accessor IdeIdleState Bool
 
 ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
@@ -178,11 +186,13 @@ ideBuildDocStatus   = accessor _ideBuildDocStatus   $ \x s -> s { _ideBuildDocSt
 ideBuildLicensesStatus =
   accessor _ideBuildLicensesStatus $ \x s -> s { _ideBuildLicensesStatus = x }
 ideEnv              = accessor _ideEnv              $ \x s -> s { _ideEnv              = x }
+ideArgs             = accessor _ideArgs             $ \x s -> s { _ideArgs             = x }
 ideGhcServer        = accessor _ideGhcServer        $ \x s -> s { _ideGhcServer        = x }
 ideStdoutBufferMode = accessor _ideStdoutBufferMode $ \x s -> s { _ideStdoutBufferMode = x }
 ideStderrBufferMode = accessor _ideStderrBufferMode $ \x s -> s { _ideStderrBufferMode = x }
 ideUpdatedEnv       = accessor _ideUpdatedEnv       $ \x s -> s { _ideUpdatedEnv       = x }
 ideUpdatedCode      = accessor _ideUpdatedCode      $ \x s -> s { _ideUpdatedCode      = x }
+ideUpdatedArgs      = accessor _ideUpdatedArgs      $ \x s -> s { _ideUpdatedArgs      = x }
 
 managedSource :: Accessor ManagedFilesInternal [(FilePath, (MD5Digest, LogicalTimestamp))]
 managedData   :: Accessor ManagedFilesInternal [FilePath]

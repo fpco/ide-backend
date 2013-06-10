@@ -2527,7 +2527,7 @@ syntheticTests =
         assertEqual "" "Just [parallel-3.2.0.3,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]" (show (deps (Text.pack "B")))
         assertEqual "" "Just [mtl-2.1.2,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0,transformers-0.3.0.0]" (show (deps (Text.pack "C")))
      )
-  , ( "Set command line arguments 1: Default to no args"
+  , ( "Set command line arguments"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
@@ -2539,11 +2539,68 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
 
-        runActions <- runStmt session "M" "printArgs"
-        (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSLC.pack "[]\n") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        -- Check that default is []
+        do runActions <- runStmt session "M" "printArgs"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "[]\n") output
+             _       -> assertFailure $ "Unexpected run result: " ++ show result
+
+        -- Check that we can set command line arguments
+        updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
+        do runActions <- runStmt session "M" "printArgs"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
+             _       -> assertFailure $ "Unexpected run result: " ++ show result
+
+        -- Check that we can change command line arguments
+        updateSession session (updateArgs ["D", "E"]) (\_ -> return ())
+        do runActions <- runStmt session "M" "printArgs"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "[\"D\",\"E\"]\n") output
+             _       -> assertFailure $ "Unexpected run result: " ++ show result
+
+        -- Check that we can clear command line arguments
+        updateSession session (updateArgs []) (\_ -> return ())
+        do runActions <- runStmt session "M" "printArgs"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "[]\n") output
+             _       -> assertFailure $ "Unexpected run result: " ++ show result
+    )
+  , ( "Check that command line arguments survive restartSession"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.Environment (getArgs)"
+                    , "printArgs :: IO ()"
+                    , "printArgs = getArgs >>= print"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        -- Sanity check: check before restart session
+        updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
+        do runActions <- runStmt session "M" "printArgs"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
+             _       -> assertFailure $ "Unexpected run result: " ++ show result
+
+        -- Restart and update the session
+        restartSession session
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        -- Check that arguments are still here
+        do runActions <- runStmt session "M" "printArgs"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
+             _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   ]
 

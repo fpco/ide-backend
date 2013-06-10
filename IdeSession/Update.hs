@@ -19,6 +19,7 @@ module IdeSession.Update (
   , updateDataFileFromFile
   , updateDataFileDelete
   , updateEnv
+  , updateArgs
   , updateStdoutBufferMode
   , updateStderrBufferMode
   , buildExe
@@ -93,7 +94,9 @@ initSession ideConfig@SessionConfig{..} = do
                         , _ideBuildDocStatus   = Nothing
                         , _ideBuildLicensesStatus = Nothing
                         , _ideEnv              = []
+                        , _ideArgs             = []
                         , _ideUpdatedEnv       = False
+                        , _ideUpdatedArgs      = False -- Server default is []
                           -- Make sure 'ideComputed' is set on first call
                           -- to updateSession
                         , _ideUpdatedCode      = True
@@ -173,6 +176,7 @@ restartSession IdeSession{ideStaticInfo, ideState} = do
       return . IdeSessionIdle
              . (ideComputed    ^= Maybe.nothing)
              . (ideUpdatedEnv  ^= True)
+             . (ideUpdatedArgs ^= True)
              . (ideUpdatedCode ^= True)
              . (ideGhcServer   ^= server)
              $ idleState
@@ -222,6 +226,9 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         when (idleState' ^. ideUpdatedEnv) $
           rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
 
+        when (idleState' ^. ideUpdatedArgs) $
+          rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
+
         -- Recompile
         computed <- if (idleState' ^. ideUpdatedCode)
           then do
@@ -262,6 +269,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
                . (ideComputed    ^= computed)
                . (ideUpdatedEnv  ^= False)
                . (ideUpdatedCode ^= False)
+               . (ideUpdatedArgs ^= False)
                $ idleState'
 
       IdeSessionRunning _ _ ->
@@ -380,6 +388,13 @@ updateEnv :: String -> Maybe String -> IdeSessionUpdate
 updateEnv var val = IdeSessionUpdate $ \_ _ -> do
   set (ideEnv .> lookup' var) (Just val)
   set ideUpdatedEnv True
+
+-- | Set command line arguments for snippets
+-- (i.e., the expected value of `getArgs`)
+updateArgs :: [String] -> IdeSessionUpdate
+updateArgs args = IdeSessionUpdate $ \_ _ -> do
+  set ideArgs args
+  set ideUpdatedArgs True
 
 -- | Set buffering mode for snippets' stdout
 updateStdoutBufferMode :: RunBufferMode -> IdeSessionUpdate
