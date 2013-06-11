@@ -134,7 +134,8 @@ test-suite typecheck-dir
                       tagged,
                       syb,
                       Cabal                == 1.14.0,
-                      ide-backend-rts      >= 0.1.1
+                      ide-backend-rts      >= 0.1.1,
+                      split
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else
@@ -189,7 +190,8 @@ test-suite ghc-errors
 -- parallel is only needed for the code of the tests; please do not remove;
 -- note that under cabal-dev it's still not enough and you need to install
 -- parallel by hand into a regular package DB
-                      parallel
+                      parallel,
+                      split
   if impl(ghc >= 7.6.1)
      build-depends:   time      ==1.4.*
   else
