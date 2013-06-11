@@ -1,36 +1,37 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Main (main) where
 
-import Prelude hiding (span, mod)
+import Control.Applicative ((<$>))
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
-import Control.Monad (liftM, void, forM_, when)
-import Control.Applicative ((<$>))
+import Control.Monad (forM_, liftM, void, when)
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
-import Data.List (sort, isPrefixOf, isSuffixOf)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.List (isPrefixOf, isSuffixOf, sort)
 import qualified Data.List as List
 import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
-import Data.IORef (IORef, newIORef, writeIORef, readIORef)
+import Data.Text (Text)
+import qualified Data.Text as Text
+import Prelude hiding (mod, span)
 import System.Directory
 import System.Exit (ExitCode (..))
 import System.FilePath
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
 import System.Process (readProcess)
+import qualified System.Process as Process
 import System.Random (randomRIO)
-import Data.Text (Text)
-import qualified Data.Text as Text
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure, (@?=))
 
+import Debug
 import IdeSession
 import TestTools
-import Debug
 
 -- Tests using various functions of the IdeSession API
 -- and a variety of small test Haskell projects.
@@ -2636,7 +2637,53 @@ syntheticTests =
              RunOk _ -> assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
              _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Register a package, restart session, see the package"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package simple-lib17"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        deletePackage "test/simple-lib17"
+        restartSession session
+        let upd = updateModule "Main.hs" . BSLC.pack . unlines $
+                    [ "module Main where"
+                    , "import SimpleLib (simpleLib)"
+                    , "main = print simpleLib"
+                    ]
+        updateSessionD session upd 1
+        assertOneError session
+        installPackage "test/simple-lib17"
+        updateSessionD session upd 1
+        assertOneError session  -- no restartSession yet!
+        restartSession session
+        updateSessionD session upd 1
+        assertNoErrors session
+        let m = "Main"
+            upd2 = buildExe [(Text.pack m, "Main.hs")]
+        updateSessionD session upd2 4
+        distDir <- getDistDir session
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "DB exe output"
+                    "42\n"
+                    out
+        deletePackage "test/simple-lib17"
+    )
   ]
+
+deletePackage :: FilePath -> IO ()
+deletePackage pkgDir = do
+  forM_ [["-v0", "unregister", takeFileName pkgDir]] $ \cmd -> do
+    (_,_,_,r2) <- Process.createProcess (Process.proc "ghc-pkg" cmd)
+                    { Process.cwd = Just pkgDir
+                    , Process.std_err = Process.CreatePipe }
+    void $ Process.waitForProcess r2
+
+installPackage :: FilePath -> IO ()
+installPackage pkgDir = do
+  forM_ ["clean", "configure", "build", "copy", "register"] $ \cmd -> do
+    (_,_,_,r2) <- Process.createProcess (Process.proc "cabal" ["-v0", cmd])
+                    { Process.cwd = Just pkgDir }
+    void $ Process.waitForProcess r2
 
 assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
 assertSameSet header xs ys = assertSameList header (sort xs) (sort ys)
