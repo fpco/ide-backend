@@ -234,7 +234,8 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
     (\_ -> Ex.try $ do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
         markProgress
-        Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
+        Build.build (localPkgDescr lbi) lbi buildFlags preprocessors `Ex.catch` \(e :: Ex.SomeException) -> do
+            error $ show (e, lookup "GHC_PACKAGE_PATH" env, packageDB)
         markProgress)
   return $! either id (const ExitSuccess) exitCode
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
