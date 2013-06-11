@@ -74,7 +74,8 @@ library
                       tagged,
                       syb,
                       Cabal                == 1.14.0,
-                      ide-backend-rts      >= 0.1.1
+                      ide-backend-rts      >= 0.1.1,
+                      split
   if impl(ghc >= 7.6.2)
      build-depends:   time      ==1.4.*
   else

@@ -16,6 +16,7 @@ import System.FilePath ((</>))
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.IO.Temp (createTempDirectory)
+import Data.List.Split (splitOn)
 
 import Distribution.License (License (..))
 import qualified Distribution.ModuleName
@@ -203,7 +204,11 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
   env <- getEnvironment
   let packageDB = fromMaybe Setup.NoFlag $ do
         path <- lookup "GHC_PACKAGE_PATH" env
-        return $ Setup.Flag $ SpecificPackageDB $ takeWhile (/= ':') path
+        -- isolation-manager sets two additional databases: the first contains
+        -- ide-backend-rts, and the second everything else. For building, we
+        -- only need the second.
+        path':_ <- Just $ filter (not . null) $ reverse $ splitOn "." path
+        return $ Setup.Flag $ SpecificPackageDB path'
 
   let confFlags = (Setup.defaultConfigFlags defaultProgramConfiguration)
                      { Setup.configDistPref = Setup.Flag ideDistDir
