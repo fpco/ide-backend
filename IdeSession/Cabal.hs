@@ -207,7 +207,7 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         -- isolation-manager sets two additional databases: the first contains
         -- ide-backend-rts, and the second everything else. For building, we
         -- only need the second.
-        path':_ <- Just $ filter (not . null) $ reverse $ splitOn "." path
+        path':_ <- Just $ filter (not . null) $ reverse $ splitOn ":" path
         return $ Setup.Flag $ SpecificPackageDB path'
 
   let confFlags = (Setup.defaultConfigFlags defaultProgramConfiguration)
