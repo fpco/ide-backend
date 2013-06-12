@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module IdeSession.Cabal (
-    buildExecutable, buildHaddock, buildLicenseCatenation
+    buildExecutable, buildHaddock, buildLicenseCatenation, packageDbArgs
   ) where
 
 import qualified Control.Exception as Ex
@@ -543,3 +543,25 @@ getYear = do
   let l = utcToLocalTime z u
       (y, _, _) = toGregorian $ localDay l
   return y
+
+-- | Translate a DB stack to an argument to arguments for GHC
+--
+-- Copied directly from Cabal 1.16.0.3
+packageDbArgs :: Version -> PackageDBStack -> [String]
+packageDbArgs (Version ver _) dbstack = case dbstack of
+  (GlobalPackageDB:UserPackageDB:dbs) -> concatMap specific dbs
+  (GlobalPackageDB:dbs)               -> ("-no-user-" ++ packageDbFlag)
+                                       : concatMap specific dbs
+  _ -> ierror
+  where
+    specific (SpecificPackageDB db) = [ '-':packageDbFlag , db ]
+    specific _ = ierror
+    ierror     = error $ "internal error: unexpected package db stack: "
+                      ++ show dbstack
+
+    packageDbFlag
+      | ver < [7,5]
+      = "package-conf"
+      | otherwise
+      = "package-db"
+

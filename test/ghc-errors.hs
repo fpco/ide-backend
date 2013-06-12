@@ -9,7 +9,7 @@ import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack, unpack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.List (isPrefixOf, isSuffixOf, sort)
+import Data.List (isPrefixOf, isSuffixOf, isInfixOf, sort)
 import qualified Data.List as List
 import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
@@ -2680,6 +2680,20 @@ syntheticTests =
                     "42\n"
                     out
         deletePackage "test/simple-lib17"
+    )
+  , ( "Make sure package DB is passed to ghc"
+    , withConfiguredSessionDetailed False [GlobalPackageDB] defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    ])
+        updateSessionD session upd 1
+        -- We expect an error because 'ide-backend-rts' is not (usually?) installed
+        -- in the global package DB
+        errs <- getSourceErrors session
+        case errs of
+          [err] | "cannot satisfy -package ide-backend-rts" `isInfixOf` Text.unpack (errorMsg err) ->
+            return ()
+          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors errs
     )
   ]
 

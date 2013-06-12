@@ -50,11 +50,16 @@ import System.Posix.Files (setFileTimes)
 import System.IO.Temp (createTempDirectory)
 import qualified Data.Text as Text
 import System.Environment (getEnv)
+import Data.Version (Version(..))
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
 
 import IdeSession.State
-import IdeSession.Cabal (buildExecutable, buildHaddock, buildLicenseCatenation)
+import IdeSession.Cabal ( buildExecutable
+                        , buildHaddock
+                        , buildLicenseCatenation
+                        , packageDbArgs
+                        )
 import IdeSession.Config
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
@@ -80,11 +85,15 @@ initSession :: SessionConfig -> IO IdeSession
 initSession ideConfig@SessionConfig{..} = do
   verifyConfig ideConfig
 
+  -- TODO: Don't hardcode ghc version
+  let ghcOpts = configStaticOpts
+             ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
+
   configDirCanon <- Dir.canonicalizePath configDir
   ideSourcesDir  <- createTempDirectory configDirCanon "src."
   ideDataDir     <- createTempDirectory configDirCanon "data."
   ideDistDir     <- createTempDirectory configDirCanon "dist."
-  _ideGhcServer  <- forkGhcServer configGenerateModInfo configStaticOpts (Just ideDataDir) configInProcess
+  _ideGhcServer  <- forkGhcServer configGenerateModInfo ghcOpts (Just ideDataDir) configInProcess
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
   -- a workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
