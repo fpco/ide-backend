@@ -6,7 +6,7 @@ module IdeSession.Cabal (
 import qualified Control.Exception as Ex
 import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
-import Data.List (delete, sort, nub)
+import Data.List (delete, sort, nub, find)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
@@ -32,10 +32,11 @@ import Distribution.ParseUtils ( parseFields, simpleField, ParseResult(..)
                                , locatedErrorMsg, showPWarning, PWarning )
 import qualified Distribution.Simple.Build as Build
 import qualified Distribution.Simple.Haddock as Haddock
-import Distribution.Simple.Compiler (CompilerFlavor (GHC), PackageDBStack )
+import Distribution.Simple (PackageDB(..), PackageDBStack)
+import Distribution.Simple.Compiler (CompilerFlavor (GHC))
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.GHC (getInstalledPackages)
-import Distribution.Simple.LocalBuildInfo (localPkgDescr, withPackageDB)
+import Distribution.Simple.LocalBuildInfo (localPkgDescr)
 import Distribution.Simple.PackageIndex (lookupSourcePackageId)
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
@@ -173,6 +174,21 @@ externalDeps pkgs =
         return $ Just $ Package.Dependency packageN (thisVersion version)
   in liftM catMaybes $ mapM depOfName pkgs
 
+configFlags :: FilePath -> Bool -> PackageDBStack -> Setup.ConfigFlags
+configFlags ideDistDir dynlink packageDbStack =
+  let userInstall = UserPackageDB `elem` packageDbStack
+      isSpecific SpecificPackageDB{} = True
+      isSpecific _ = False
+      packageDB = maybe Setup.NoFlag Setup.Flag $ find isSpecific packageDbStack
+  in (Setup.defaultConfigFlags defaultProgramConfiguration)
+       { Setup.configDistPref = Setup.Flag ideDistDir
+       , Setup.configUserInstall = Setup.Flag userInstall
+       , Setup.configVerbosity = Setup.Flag minBound
+       , Setup.configSharedLib = Setup.Flag dynlink
+       , Setup.configDynExe = Setup.Flag dynlink
+       , Setup.configPackageDB = packageDB
+       }
+
 configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
                   -> PackageDBStack -> [PackageId]
                   -> [ModuleName] -> (Progress -> IO ())
@@ -215,13 +231,7 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = (Setup.defaultConfigFlags defaultProgramConfiguration)
-                     { Setup.configDistPref = Setup.Flag ideDistDir
-                     , Setup.configUserInstall = Setup.Flag True
-                     , Setup.configVerbosity = Setup.Flag minBound
-                     , Setup.configSharedLib = Setup.Flag dynlink
-                     , Setup.configDynExe = Setup.Flag dynlink
-                     }
+      confFlags = configFlags ideDistDir dynlink packageDbStack
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
                      { Setup.buildDistPref = Setup.Flag ideDistDir
@@ -241,8 +251,10 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
-        lbiRaw <- configure (gpDesc, hookedBuildInfo) confFlags
-        let lbi = lbiRaw {withPackageDB = packageDbStack}
+        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+        -- Setting @withPackageDB@ here is too late, @configure@ would fail
+        -- already. Hence we set it in @configFlags@ (can be reverted,
+        -- when/if we construct @lbi@ without @configure@).
         markProgress
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
         markProgress)
@@ -281,13 +293,7 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = (Setup.defaultConfigFlags defaultProgramConfiguration)
-                     { Setup.configDistPref = Setup.Flag ideDistDir
-                     , Setup.configUserInstall = Setup.Flag True
-                     , Setup.configVerbosity = Setup.Flag minBound
-                     , Setup.configSharedLib = Setup.Flag dynlink
---                     , Setup.configDynExe = Setup.Flag dynlink
-                     }
+      confFlags = configFlags ideDistDir dynlink packageDbStack
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       haddockFlags = Setup.defaultHaddockFlags
@@ -306,8 +312,7 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
-        lbiRaw <- configure (gpDesc, hookedBuildInfo) confFlags
-        let lbi = lbiRaw {withPackageDB = packageDbStack}
+        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
         markProgress
         Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
         markProgress)
