@@ -1627,26 +1627,10 @@ syntheticTests =
         indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
         assertBool "ParFib haddock files" indexExists
     )
-  , ( "Build executable with empty package db stack and fail"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package base"
-                        , "-package parallel"
-                        , "-package old-time"
-                        ]
-      in withConfiguredSessionDetailed True [] packageOpts
-         $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
-        let m = "Main"
-            upd = buildExe [(Text.pack m, "ParFib.hs")]
-        updateSessionD session upd 4
-        distDir <- getDistDir session
-        fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
-        assertEqual "ParFib exe output"
-                    "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
-                    fibOut
+  , ( "Fail on empty package DB"
+    , assertRaises ""
+        (\e -> e == userError "Invalid package DB stack: []")
+        (withConfiguredSessionDetailed True [] defOpts $ \_ -> return ())
     )
   , ( "Build licenses from ParFib"
     , let packageOpts = [ "-hide-all-packages"
