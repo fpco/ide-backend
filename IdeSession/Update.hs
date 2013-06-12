@@ -33,7 +33,7 @@ module IdeSession.Update (
   )
   where
 
-import Control.Monad (when, void, forM)
+import Control.Monad (when, void, forM, unless)
 import Control.Monad.State (MonadState, StateT, execStateT, lift)
 import Control.Monad.IO.Class (liftIO)
 import qualified Control.Exception as Ex
@@ -49,6 +49,9 @@ import System.FilePath (takeDirectory, makeRelative, (</>))
 import System.Posix.Files (setFileTimes)
 import System.IO.Temp (createTempDirectory)
 import qualified Data.Text as Text
+import System.Environment (getEnv)
+
+import Distribution.Simple (PackageDBStack, PackageDB(..))
 
 import IdeSession.State
 import IdeSession.Cabal (buildExecutable, buildHaddock, buildLicenseCatenation)
@@ -71,8 +74,12 @@ import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_, withMVar)
 
 -- | Create a fresh session, using some initial configuration.
 --
+-- Throws an exception if the configuration is invalid, or if GHC_PACKAGE_PATH
+-- is set.
 initSession :: SessionConfig -> IO IdeSession
 initSession ideConfig@SessionConfig{..} = do
+  verifyConfig ideConfig
+
   configDirCanon <- Dir.canonicalizePath configDir
   ideSourcesDir  <- createTempDirectory configDirCanon "src."
   ideDataDir     <- createTempDirectory configDirCanon "data."
@@ -108,6 +115,39 @@ initSession ideConfig@SessionConfig{..} = do
   let session = IdeSession{..}
 
   return session
+
+-- | Verify configuration, and throw an exception if configuration is invalid
+verifyConfig :: SessionConfig -> IO ()
+verifyConfig SessionConfig{..} = do
+    unless (isValidPackageDB configPackageDBStack) $
+      Ex.throw . userError $ "Invalid package DB stack: "
+                          ++ show configPackageDBStack
+
+    checkPackageDbEnvVar
+  where
+    isValidPackageDB :: PackageDBStack -> Bool
+    isValidPackageDB [GlobalPackageDB] = True
+    isValidPackageDB [GlobalPackageDB, UserPackageDB] = True
+    isValidPackageDB [GlobalPackageDB, SpecificPackageDB _] = True
+    isValidPackageDB [GlobalPackageDB, UserPackageDB, SpecificPackageDB _] = True
+    isValidPackageDB _ = False
+
+-- Copied directly from Cabal
+checkPackageDbEnvVar :: IO ()
+checkPackageDbEnvVar = do
+    hasGPP <- (getEnv "GHC_PACKAGE_PATH" >> return True)
+              `catchIO` (\_ -> return False)
+    when hasGPP $
+      die $ "Use of GHC's environment variable GHC_PACKAGE_PATH is "
+         ++ "incompatible with Cabal. Use the flag --package-db to specify a "
+         ++ "package database (it can be used multiple times)."
+  where
+    -- Definitions so that the copied code from Cabal works
+
+    die = Ex.throwIO . userError
+
+    catchIO :: IO a -> (IOError -> IO a) -> IO a
+    catchIO = Ex.catch
 
 -- | Close a session down, releasing the resources.
 --
@@ -449,11 +489,24 @@ runStmt IdeSession{ideState} m fun = do
       IdeSessionShutdown ->
         return state
 
--- | Build an exe from sources added previously via the ide-backend updateModule* mechanism. The modules that contains the @main@ code are indicated by the arguments to @buildExe@. The function can be called multiple times with different arguments.
+-- | Build an exe from sources added previously via the ide-backend
+-- updateModule* mechanism. The modules that contains the @main@ code are
+-- indicated by the arguments to @buildExe@. The function can be called
+-- multiple times with different arguments.
 --
--- We assume any indicated module is already successfully processed by GHC API in a compilation mode that makes @computedImports@ available (but no code needs to be generated). The environment (package dependencies, ghc options, preprocessor program options, etc.) for building the exe is the same as when previously compiling the code via GHC API. The module does not have to be called @Main@, but we assume the main function is always @main@ (we don't check this and related conditions, but GHC does when eventually called to build the exe).
+-- We assume any indicated module is already successfully processed by GHC API
+-- in a compilation mode that makes @computedImports@ available (but no code
+-- needs to be generated). The environment (package dependencies, ghc options,
+-- preprocessor program options, etc.) for building the exe is the same as when
+-- previously compiling the code via GHC API. The module does not have to be
+-- called @Main@, but we assume the main function is always @main@ (we don't
+-- check this and related conditions, but GHC does when eventually called to
+-- build the exe).
 --
--- The executable files are placed in the filesystem inside the @build@ subdirectory of @getDistDir@, in subdirectories corresponding to the given module names. The build directory does not overlap with any of the other used directories and its path.
+-- The executable files are placed in the filesystem inside the @build@
+-- subdirectory of @getDistDir@, in subdirectories corresponding to the given
+-- module names. The build directory does not overlap with any of the other
+-- used directories and its path.
 buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
 buildExe ms = IdeSessionUpdate
               $ \callback

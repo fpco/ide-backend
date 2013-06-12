@@ -32,8 +32,7 @@ import Distribution.ParseUtils ( parseFields, simpleField, ParseResult(..)
                                , locatedErrorMsg, showPWarning, PWarning )
 import qualified Distribution.Simple.Build as Build
 import qualified Distribution.Simple.Haddock as Haddock
-import Distribution.Simple.Compiler ( CompilerFlavor (GHC)
-                                    , PackageDB(..), PackageDBStack )
+import Distribution.Simple.Compiler (CompilerFlavor (GHC), PackageDBStack )
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.GHC (getInstalledPackages)
 import Distribution.Simple.LocalBuildInfo (localPkgDescr, withPackageDB)
@@ -47,7 +46,7 @@ import Distribution.Version (anyVersion, thisVersion)
 import Language.Haskell.Extension (Language (Haskell2010))
 
 import IdeSession.Licenses
-  ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
+  ( bsd3, gplv2, gplv3, lgpl2, lgpl3 ) -- , apache20 )
 import IdeSession.State
 import IdeSession.Strict.Container
 import IdeSession.Types.Progress
@@ -180,7 +179,7 @@ configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
 configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
-                  withPackageDB pkgs loadedMs callback ms = do
+                  packageDbStack pkgs loadedMs callback ms = do
   counter <- newIORef initialProgress
   let markProgress = do
         oldCounter <- readIORef counter
@@ -243,7 +242,7 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
         lbiRaw <- configure (gpDesc, hookedBuildInfo) confFlags
-        let lbi = lbiRaw {withPackageDB}
+        let lbi = lbiRaw {withPackageDB = packageDbStack}
         markProgress
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
         markProgress)
@@ -257,7 +256,7 @@ configureAndHaddock :: FilePath -> FilePath -> [String] -> Bool
                     -> [ModuleName] -> (Progress -> IO ())
                     -> IO ExitCode
 configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
-                    withPackageDB pkgs loadedMs callback = do
+                    packageDbStack pkgs loadedMs callback = do
   counter <- newIORef initialProgress
   let markProgress = do
         oldCounter <- readIORef counter
@@ -308,7 +307,7 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
         lbiRaw <- configure (gpDesc, hookedBuildInfo) confFlags
-        let lbi = lbiRaw {withPackageDB}
+        let lbi = lbiRaw {withPackageDB = packageDbStack}
         markProgress
         Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
         markProgress)
@@ -317,30 +316,24 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
   -- as they are emitted, similarly as log_action in GHC API,
   -- or filter stdout and display progress on each good line.
 
-buildExecutable :: FilePath -> FilePath -> [String] -> Bool -> Maybe [FilePath]
+buildExecutable :: FilePath -> FilePath -> [String] -> Bool -> PackageDBStack
                 -> Strict Maybe Computed -> (Progress -> IO ())
                 -> [(ModuleName, FilePath)]
                 -> IO ExitCode
-buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
+buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink packageDbStack
                 mcomputed callback ms = do
   (loadedMs, pkgs) <- buildDeps mcomputed
-  let defaultDB = GlobalPackageDB : UserPackageDB : []
-      toDB l = fmap SpecificPackageDB l
-      withPackageDB = maybe defaultDB toDB extraPackageDB
   configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
-                    withPackageDB pkgs loadedMs callback ms
+                    packageDbStack pkgs loadedMs callback ms
 
-buildHaddock :: FilePath -> FilePath -> [String] -> Bool -> Maybe [FilePath]
+buildHaddock :: FilePath -> FilePath -> [String] -> Bool -> PackageDBStack
              -> Strict Maybe Computed -> (Progress -> IO ())
              -> IO ExitCode
-buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
+buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink packageDbStack
              mcomputed callback = do
   (loadedMs, pkgs) <- buildDeps mcomputed
-  let defaultDB = GlobalPackageDB : UserPackageDB : []
-      toDB l = fmap SpecificPackageDB l
-      withPackageDB = maybe defaultDB toDB extraPackageDB
   configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
-                      withPackageDB pkgs loadedMs callback
+                      packageDbStack pkgs loadedMs callback
 
 lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
 lFieldDescrs =
@@ -355,14 +348,11 @@ lFieldDescrs =
      (\(_, _, t3) -> fromMaybe "???" t3) (\a (t1, t2, _) -> (t1, t2, Just a))
  ]
 
-buildLicenseCatenation :: FilePath -> FilePath -> Maybe [FilePath] -> [String]
+buildLicenseCatenation :: FilePath -> FilePath -> PackageDBStack -> [String]
                        -> Strict Maybe Computed -> (Progress -> IO ())
                        -> IO ExitCode
-buildLicenseCatenation cabalsDir ideDistDir extraPackageDB configLicenseExc
+buildLicenseCatenation cabalsDir ideDistDir packageDbStack configLicenseExc
                        mcomputed callback = do
-  let defaultDB = GlobalPackageDB : UserPackageDB : []
-      toDB l = fmap SpecificPackageDB l
-      withPackageDB = maybe defaultDB toDB extraPackageDB
   counter <- newIORef initialProgress
   let markProgress = do
         oldCounter <- readIORef counter
@@ -417,7 +407,7 @@ buildLicenseCatenation cabalsDir ideDistDir extraPackageDB configLicenseExc
               -- outputWarns warns  -- false positives
               programDB <- configureAllKnownPrograms  -- won't die
                              minBound defaultProgramConfiguration
-              pkgIndex <- getInstalledPackages minBound withPackageDB programDB
+              pkgIndex <- getInstalledPackages minBound packageDbStack programDB
               let pkgId = Package.PackageIdentifier
                             { pkgName = Package.PackageName nameString
                             , pkgVersion = version }

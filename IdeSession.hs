@@ -190,6 +190,9 @@ module IdeSession (
   , haddockLink
   -- * Exception types
   , ExternalException(..)
+  -- * Re-exports from Cabal
+  , PackageDBStack
+  , PackageDB(..)
   -- * For internal/debugging use only
   , getGhcExitCode
   , forceRecompile
@@ -208,3 +211,5 @@ import IdeSession.Types.Progress
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
 import IdeSession.RPC.Server (ExternalException (..))
+
+import Distribution.Simple (PackageDBStack, PackageDB(..))

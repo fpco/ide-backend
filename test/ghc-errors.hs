@@ -63,7 +63,7 @@ loadModulesFrom session originalSourcesDir = do
 
 -- | Run the specified action with a new IDE session, configured to use a
 -- temporary directory
-withConfiguredSessionDetailed :: Bool -> Maybe [FilePath] -> [String]
+withConfiguredSessionDetailed :: Bool -> PackageDBStack -> [String]
                               -> (IdeSession -> IO a)
                               -> IO a
 withConfiguredSessionDetailed configGenerateModInfo configPackageDBStack
@@ -79,7 +79,10 @@ withConfiguredSessionDetailed configGenerateModInfo configPackageDBStack
     withSession sessionConfig io
 
 withConfiguredSession :: [String] -> (IdeSession -> IO a) -> IO a
-withConfiguredSession = withConfiguredSessionDetailed True Nothing
+withConfiguredSession = withConfiguredSessionDetailed True defaultDbStack
+
+defaultDbStack :: PackageDBStack
+defaultDbStack = [GlobalPackageDB, UserPackageDB]
 
 -- | Run the specified action with a new IDE session
 withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
@@ -1630,7 +1633,7 @@ syntheticTests =
                         , "-package parallel"
                         , "-package old-time"
                         ]
-      in withConfiguredSessionDetailed True {-(Just [])-}Nothing packageOpts
+      in withConfiguredSessionDetailed True [] packageOpts
          $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
@@ -2528,7 +2531,7 @@ syntheticTests =
           (updateSession session (updateEnv "Foo" Nothing) (\_ -> return ()))
     )
   , ( "getLoadedModules while configGenerateModInfo off"
-    , withConfiguredSessionDetailed False Nothing defOpts $ \session -> do
+    , withConfiguredSessionDetailed False defaultDbStack defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -2750,7 +2753,7 @@ tests =
         let caseName = projectName ++ " (" ++ show k ++ ")"
         testCase caseName $ do
           debug dVerbosity $ featureName ++ " / " ++ caseName ++ ":"
-          withConfiguredSessionDetailed genModInfo Nothing opts $ \session -> do
+          withConfiguredSessionDetailed genModInfo defaultDbStack opts $ \session -> do
             (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
             check session originalUpdate lm
   in [ testGroup "Full integration tests on multiple projects"
