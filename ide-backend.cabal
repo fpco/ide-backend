@@ -114,6 +114,7 @@ test-suite ghc-errors
   build-depends:      base, ide-backend, text, random, utf8-string, bytestring,
                       unix, process, filemanip, temporary, filepath, directory,
                       HUnit, test-framework, test-framework-hunit, time,
+                      regex-compat,
 -- parallel is only needed for the code of the tests; please do not remove;
 -- note that under cabal-dev it's still not enough and you need to install
 -- parallel by hand into a regular package DB

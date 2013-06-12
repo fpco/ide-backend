@@ -24,6 +24,7 @@ import System.IO.Temp (withTempDirectory)
 import System.Process (readProcess)
 import qualified System.Process as Process
 import System.Random (randomRIO)
+import Text.Regex (mkRegex, subRegex)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -2826,9 +2827,17 @@ assertIdInfo :: (Text -> SourceSpan -> [(SourceSpan, SpanInfo)])
              -> (Int, Int, Int, Int)
              -> String
              -> Assertion
-assertIdInfo idInfo mod (frLine, frCol, toLine, toCol) typ =
-    assertEqual "" typ (show . snd . head $ idInfo (Text.pack mod) span)
+assertIdInfo idInfo mod (frLine, frCol, toLine, toCol) expected =
+    assertEqual "" (ignoreVersions expected) (ignoreVersions actual)
   where
+    ignoreVersions :: String -> String
+    ignoreVersions s = subRegex (mkRegex versionRegexp) s "X.Y.Z"
+
+    versionRegexp :: String
+    versionRegexp = "[0-9]+(\\.[0-9]+)+"
+
+    actual = show . snd . head $ idInfo (Text.pack mod) span
+
     span = SourceSpan { spanFilePath   = mod ++ ".hs"
                       , spanFromLine   = frLine
                       , spanFromColumn = frCol
