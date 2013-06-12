@@ -508,19 +508,20 @@ runStmt IdeSession{ideState} m fun = do
 -- module names. The build directory does not overlap with any of the other
 -- used directories and its path.
 buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
-buildExe ms = IdeSessionUpdate
-              $ \callback
-                 IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
+buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
     let SessionConfig{ configDynLink
                      , configPackageDBStack
                      , configStaticOpts } = ideConfig
         ghcOpts = fromMaybe configStaticOpts ghcNewOpts
-    exitCode <-
-      lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts
-                             configDynLink configPackageDBStack
-                             mcomputed callback ms
+    exitCode <- lift $ Ex.bracket
+      Dir.getCurrentDirectory
+      Dir.setCurrentDirectory
+      (const $ do Dir.setCurrentDirectory ideDataDir
+                  buildExecutable ideSourcesDir ideDistDir ghcOpts
+                                  configDynLink configPackageDBStack
+                                  mcomputed callback ms)
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
@@ -529,19 +530,20 @@ buildExe ms = IdeSessionUpdate
 -- and the generated docs can be found in the @doc@ subdirectory
 -- of @getDistDir@.
 buildDoc :: IdeSessionUpdate
-buildDoc = IdeSessionUpdate
-           $ \callback
-              IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
+buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
     let SessionConfig{ configDynLink
                      , configPackageDBStack
                      , configStaticOpts } = ideConfig
         ghcOpts = fromMaybe configStaticOpts ghcNewOpts
-    exitCode <-
-      lift $ buildHaddock ideSourcesDir ideDistDir ghcOpts
-                          configDynLink configPackageDBStack
-                          mcomputed callback
+    exitCode <- lift $ Ex.bracket
+      Dir.getCurrentDirectory
+      Dir.setCurrentDirectory
+      (const $ do Dir.setCurrentDirectory ideDataDir
+                  buildHaddock ideSourcesDir ideDistDir ghcOpts
+                               configDynLink configPackageDBStack
+                               mcomputed callback)
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
@@ -549,9 +551,7 @@ buildDoc = IdeSessionUpdate
 -- loaded within the session and the concatenated licences can be found
 -- in the @licenses.txt@ file of @getDistDir@.
 buildLicenses :: FilePath -> IdeSessionUpdate
-buildLicenses cabalsDir = IdeSessionUpdate
-                          $ \callback
-                             IdeStaticInfo{ideDistDir, ideConfig} -> do
+buildLicenses cabalsDir = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     mcomputed <- get ideComputed
     let SessionConfig{configPackageDBStack, configLicenseExc} = ideConfig
     exitCode <-

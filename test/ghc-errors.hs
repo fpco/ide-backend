@@ -6,7 +6,7 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad (forM_, liftM, void, when)
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
-import qualified Data.ByteString.Lazy.Char8 as BSLC (pack)
+import qualified Data.ByteString.Lazy.Char8 as BSLC (pack, unpack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isPrefixOf, isSuffixOf, sort)
@@ -522,6 +522,31 @@ syntheticTests =
         (output2, _) <- runWaitAll runActions2
         assertEqual "compare new content"
           (BSLC.pack "new content\n") output2
+    )
+  , ( "Test CWD in executable building"
+    , let packageOpts = defOpts ++ ["-package template-haskell"]
+      in withConfiguredSession packageOpts $ \session -> do
+        let update = updateCodeGeneration True
+                     <> updateDataFile "test.txt" (BSLC.pack "test data")
+        let update2 = updateModule "Main.hs" $ BSLC.pack $ unlines
+              [ "{-# LANGUAGE TemplateHaskell #-}"
+              , "module Main where"
+              , "import Language.Haskell.TH.Syntax"
+              , "main = do"
+              , "  putStrLn $(qRunIO (readFile \"test.txt\") >>= lift)"
+              ]
+        updateSessionD session (update <> update2) 1
+        assertNoErrors session
+        runActions <- runStmt session "Main" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "compare test data"
+          "test data\n" (BSLC.unpack output)
+        let m = "Main"
+            upd = buildExe [(Text.pack m, "Main.hs")]
+        updateSessionD session upd 4
+        distDir <- getDistDir session
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "CWD exe output" (BSLC.unpack output) out
     )
 {- Now that we always load the RTS, we're never in this situation
   , ("Reject getSourceErrors without updateSession"
