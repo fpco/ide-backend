@@ -11,11 +11,13 @@ import Control.Monad (void, unless, when)
 import Control.Monad.State (StateT, runStateT)
 import Control.Monad.Trans.Class (lift)
 import qualified Data.ByteString as BSS (hGetSome, hPut, null)
+import Data.Monoid ((<>))
 import qualified Data.Text as Text
 import Data.List (sortBy)
 import Data.Function (on)
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
+import System.FilePath ((</>))
 import System.IO (Handle, hFlush)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
@@ -71,7 +73,7 @@ ghcServerEngine configGenerateModInfo
                           ++ "(" ++ show ideBackendApiVersion ++ ")"
 
   -- Submit static opts and get back leftover dynamic opts.
-  dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
+  dOpts <- submitStaticOpts staticOpts
   -- Set up references for the current session of Ghc monad computations.
   pluginRef  <- newIORef StrictMap.empty
   importsRef <- newIORef StrictMap.empty
@@ -110,12 +112,6 @@ ghcServerEngine configGenerateModInfo
           go args'
 
     go []
-  where
-    ideBackendRTSOpts = [
-        -- Just in case the user specified -hide-all-packages
-        "-package ide-backend-rts"
-      , "-i/Users/dev/wt/projects/fpco/ide-backend/test/Cabal"
-      ]
 
 -- | We cache our own "module summaries" in between compile requests
 data ModSummary = ModSummary {
@@ -293,7 +289,14 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
     liftIO . put $ response { ghcCompileCache = cache }
   where
     dynOpts :: DynamicOpts
-    dynOpts = maybe dOpts optsToDynFlags ideNewOpts
+    dynOpts =
+      let userOpts = maybe dOpts optsToDynFlags ideNewOpts
+          -- Just in case the user specified -hide-all-packages.
+          rtsOpts = ["-package ide-backend-rts"]
+          -- Include cabal_macros.h.
+          cppOpts = [ "-optP-include"
+                    , "-optP" ++ configSourcesDir </> cppHeaderName ]
+      in userOpts <> optsToDynFlags (rtsOpts ++ cppOpts)
 
     -- Let GHC API print "compiling M ... done." for each module.
     verbosity :: Int

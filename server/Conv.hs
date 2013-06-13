@@ -37,14 +37,14 @@ moduleToPackageId dflags impMod = case pkgExposed of
 
 moduleNameToId :: DynFlags -> GHC.ModuleName -> ModuleId
 moduleNameToId dflags impMod = ModuleId {
-    moduleName    = Text.pack $ Module.moduleNameString $ impMod
+    moduleName    = Text.pack $ Module.moduleNameString impMod
   , modulePackage = case moduleToPackageId dflags impMod of
                       Just pkg -> fillVersion dflags pkg
                       Nothing  -> mainPackage
   }
 
 -- | Attempt to find out the version of a package
-fillVersion :: DynFlags -> Module.PackageId -> PackageId
+fillVersion :: DynFlags -> GHC.PackageId -> PackageId
 fillVersion dflags p =
   case Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) p of
     Nothing -> if p == Module.mainPackageId
@@ -95,4 +95,3 @@ moduleToModuleId dflags mod = ModuleId {
     moduleName    = Text.pack $ Module.moduleNameString $ Module.moduleName mod
   , modulePackage = fillVersion dflags $ Module.modulePackageId mod
   }
-
