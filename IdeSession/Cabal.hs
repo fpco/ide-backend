@@ -8,7 +8,7 @@ import qualified Control.Exception as Ex
 import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
 import Data.Function
-import Data.List (delete, sort, nub, nubBy, find)
+import Data.List (delete, sort, nub, nubBy)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
@@ -55,8 +55,7 @@ import qualified Distribution.Text
 import Distribution.Version (anyVersion, thisVersion)
 import Language.Haskell.Extension (Language (Haskell2010))
 
-import IdeSession.Licenses
-  ( bsd3, gplv2, gplv3, lgpl2, lgpl3 ) -- , apache20 )
+import IdeSession.Licenses ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
 import IdeSession.State
 import IdeSession.Strict.Container
 import IdeSession.Types.Progress
@@ -185,18 +184,15 @@ externalDeps pkgs =
 
 mkConfFlags :: FilePath -> Bool -> PackageDBStack -> Setup.ConfigFlags
 mkConfFlags ideDistDir dynlink packageDbStack =
-  let userInstall = UserPackageDB `elem` packageDbStack
-      isSpecific SpecificPackageDB{} = True
-      isSpecific _ = False
-      packageDB = maybe Setup.NoFlag Setup.Flag $ find isSpecific packageDbStack
-  in (Setup.defaultConfigFlags defaultProgramConfiguration)
-       { Setup.configDistPref = Setup.Flag ideDistDir
-       , Setup.configUserInstall = Setup.Flag userInstall
-       , Setup.configVerbosity = Setup.Flag minBound
-       , Setup.configSharedLib = Setup.Flag dynlink
-       , Setup.configDynExe = Setup.Flag dynlink
--- TODO!!!!!!!!!       , Setup.configPackageDB = packageDB
-       }
+  (Setup.defaultConfigFlags defaultProgramConfiguration)
+    { Setup.configDistPref = Setup.Flag ideDistDir
+    , Setup.configUserInstall = Setup.Flag False
+    , Setup.configVerbosity = Setup.Flag minBound
+    , Setup.configSharedLib = Setup.Flag dynlink
+    , Setup.configDynExe = Setup.Flag dynlink
+      -- @Nothing@ wipes out default, initial DBs.
+    , Setup.configPackageDBs = Nothing : map Just packageDbStack
+    }
 
 configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
                   -> PackageDBStack -> [PackageId]
@@ -539,9 +535,8 @@ licenseText license author = do
     (LGPL (Just (Version {versionBranch = [3]})))
       -> Just lgpl3
 
--- TODO: needs to wait for a newer version of Cabal
---    (Apache (Just (Version {versionBranch = [2, 0]})))
---      -> Just apache20
+    (Apache (Just (Version {versionBranch = [2, 0]})))
+      -> Just apache20
 
     _ -> Nothing
 
