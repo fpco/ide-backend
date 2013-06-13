@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TemplateHaskell #-}
+{-# LANGUAGE CPP, TemplateHaskell, GeneralizedNewtypeDeriving #-}
 -- Copyright   : (c) JP Moresmau 2011,
 --                   Well-Typed 2012
 -- (JP Moresmau's buildwrapper package used as template for GHC API use)
@@ -81,6 +81,7 @@ import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM, void)
 import Control.Applicative ((<$>), (<*>))
 import Data.List ((\\))
+import Data.Monoid (Monoid)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Binary (Binary(..), getWord8, putWord8)
@@ -101,6 +102,7 @@ import HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
 import Debug
 
 newtype DynamicOpts = DynamicOpts [Located String]
+  deriving Monoid
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
