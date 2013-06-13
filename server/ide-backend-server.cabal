@@ -45,6 +45,10 @@ executable ide-backend-server
   else
      build-depends:   old-time  ==1.*
 
+  -- The standard macros don't give us 7.6.x granularity
+  if impl(ghc == 7.6.1)
+    cpp-options:     -DGHC_761
+
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,
                       BangPatterns, RecordWildCards, NamedFieldPuns

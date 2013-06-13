@@ -195,7 +195,7 @@ mkConfFlags ideDistDir dynlink packageDbStack =
        , Setup.configVerbosity = Setup.Flag minBound
        , Setup.configSharedLib = Setup.Flag dynlink
        , Setup.configDynExe = Setup.Flag dynlink
-       , Setup.configPackageDB = packageDB
+-- TODO!!!!!!!!!       , Setup.configPackageDB = packageDB
        }
 
 configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
