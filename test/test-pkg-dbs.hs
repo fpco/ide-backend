@@ -88,11 +88,8 @@ testGhc cfg = do
   shutdownSession session
 
 configs :: [Configuration]
-configs = concatMap aux packages
+configs = concatMap aux [["A", "B", "C", "D"]]
   where
-    packages :: [[String]]
-    packages = subsequences ["A", "B", "C", "D"]
-
     aux :: [String] -> [Configuration]
     aux [] = return []
     aux (pkg : pkgs) = do
