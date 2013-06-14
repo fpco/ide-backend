@@ -135,11 +135,14 @@ verifyConfig SessionConfig{..} = do
     checkPackageDbEnvVar
   where
     isValidPackageDB :: PackageDBStack -> Bool
+    isValidPackageDB _ = True
+   {-
     isValidPackageDB [GlobalPackageDB] = True
     isValidPackageDB [GlobalPackageDB, UserPackageDB] = True
     isValidPackageDB [GlobalPackageDB, SpecificPackageDB _] = True
     isValidPackageDB [GlobalPackageDB, UserPackageDB, SpecificPackageDB _] = True
     isValidPackageDB _ = False
+   -}
 
 -- Copied directly from Cabal
 checkPackageDbEnvVar :: IO ()

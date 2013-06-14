@@ -121,6 +121,22 @@ test-suite ghc-errors
 --  ghc-options:        -threaded
 --  ghc-options:        -with-rtsopts=-N
 
+test-suite test-pkg-dbs 
+  type:               exitcode-stdio-1.0
+  main-is:            test-pkg-dbs.hs
+-- server for Debug:
+  hs-source-dirs:     test server
+  build-depends:      base, ide-backend,
+                      bytestring,
+                      HUnit, test-framework, test-framework-hunit
+
+  default-language:   Haskell2010
+  default-extensions: MonoLocalBinds,
+                      BangPatterns, RecordWildCards, NamedFieldPuns
+  other-extensions:   CPP, TemplateHaskell, ScopedTypeVariables,
+                      DeriveDataTypeable
+  ghc-options:        -Wall -fno-warn-unused-do-bind
+
 test-suite rpc-server
   type:               exitcode-stdio-1.0
   main-is:            rpc-server.hs

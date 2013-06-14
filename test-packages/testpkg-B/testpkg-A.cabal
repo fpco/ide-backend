@@ -1,0 +1,17 @@
+name:                testpkg-B
+version:             0.1.0.0
+-- synopsis:            
+-- description:         
+license:             BSD3
+license-file:        LICENSE
+author:              Edsko de Vries
+maintainer:          edsko@well-typed.com
+-- copyright:           
+category:            Testing
+build-type:          Simple
+cabal-version:       >=1.8
+
+library
+  exposed-modules:     Testing.TestPkgB
+  -- other-modules:       
+  build-depends:       base ==4.5.*
