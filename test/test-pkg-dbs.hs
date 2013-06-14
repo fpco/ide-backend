@@ -32,6 +32,7 @@ import qualified Data.ByteString.Lazy.Char8 as BSLC (pack, unpack, null)
 import Data.Maybe (catMaybes)
 import Data.List (subsequences)
 import Control.Concurrent (threadDelay)
+import qualified Control.Exception as Ex
 
 import IdeSession
 
@@ -61,31 +62,32 @@ configToPackageDBStack = catMaybes . map aux
 verifyErrors :: Configuration -> [SourceError] -> Assertion
 verifyErrors _ errs = assertBool ("Unexpected errors: " ++ show errs) (null errs)
 
+-- TODO: would it be useful to move this to IdeSession?
+withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
+withSession config = Ex.bracket (initSession config) shutdownSession
+
 testGhc :: Configuration -> Assertion
-testGhc cfg = do
-  session <- initSession defaultSessionConfig {
-                             configPackageDBStack = configToPackageDBStack cfg
-                           }
+testGhc cfg = withSession config $ \session -> do
+    let upd = (updateCodeGeneration True)
+           <> (updateModule "Main.hs" . BSLC.pack . unlines $
+                 configToImports cfg ++ [
+                   "main = putStrLn \"hi\""
+                 ])
 
+    updateSession session upd (\_ -> return ())
 
-  let upd = (updateCodeGeneration True)
-         <> (updateModule "Main.hs" . BSLC.pack . unlines $
-               configToImports cfg ++ [
-                 "main = putStrLn \"hi\""
-               ])
+    errs <- getSourceErrors session
+    verifyErrors cfg errs
 
-  updateSession session upd (\_ -> return ())
-
-  errs <- getSourceErrors session
-  verifyErrors cfg errs
-
-  runActions <- runStmt session "Main" "main"
-  (output, result) <- runWaitAll runActions
-  case result of
-    RunOk _ -> assertEqual "" (BSLC.pack "hi\n") output
-    _       -> assertFailure $ "Unexpected run result: " ++ show result
-
-  shutdownSession session
+    runActions <- runStmt session "Main" "main"
+    (output, result) <- runWaitAll runActions
+    case result of
+      RunOk _ -> assertEqual "" (BSLC.pack "hi\n") output
+      _       -> assertFailure $ "Unexpected run result: " ++ show result
+  where
+    config = defaultSessionConfig {
+        configPackageDBStack = configToPackageDBStack cfg
+      }
 
 configs :: [Configuration]
 configs = concatMap aux [["A", "B", "C", "D"]]
@@ -97,9 +99,13 @@ configs = concatMap aux [["A", "B", "C", "D"]]
       config <- aux pkgs
       return $ (pkg, usage) : config
 
+testCaseGhc :: Configuration -> Test
+testCaseGhc cfg =
+  testCase (show cfg) (testGhc cfg `Ex.finally` threadDelay 1000000)
+
 tests :: [Test]
 tests = [
-    testGroup "GHC" $ map (\config -> testCase (show config) (testGhc config)) configs
+    testGroup "GHC" $ map testCaseGhc configs
   , testGroup "Cabal" [
       ]
   ]
