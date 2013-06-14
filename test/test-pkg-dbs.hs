@@ -11,17 +11,17 @@
 
     for testpkg-C
 
-      ghc-pkg init test-packages/db1
+      ghc-pkg init /Users/dev/.cabal/db1
 
       cabal install --prefix=/Users/dev/.cabal \
-        --package-db=/Users/dev/wt/projects/fpco/ide-backend/test-packages/db1
+        --package-db=/Users/dev/.cabal/db1
 
     for testpkg-D
 
-      ghc-pkg init test-packages/db2
+      ghc-pkg init /Users/dev/.cabal/db2
 
       cabal install --prefix=/Users/dev/.cabal \
-        --package-db=/Users/dev/wt/projects/fpco/ide-backend/test-packages/db2
+        --package-db=/Users/dev/.cabal/db2
 -}
 
 import Test.Framework (Test, defaultMain, testGroup)
@@ -33,6 +33,8 @@ import Data.Maybe (catMaybes)
 import Data.List (subsequences)
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
+import System.Directory(getHomeDirectory)
+import System.FilePath ((</>))
 
 import IdeSession
 
@@ -50,13 +52,13 @@ configToImports = catMaybes . map aux
     aux (pkg, DontUse) = Nothing
     aux (pkg, _)       = Just $ "import Testing.TestPkg" ++ pkg
 
-configToPackageDBStack :: Configuration -> PackageDBStack
-configToPackageDBStack = catMaybes . map aux
+configToPackageDBStack :: FilePath -> Configuration -> PackageDBStack
+configToPackageDBStack homeDir = catMaybes . map aux
   where
     aux ("A", UseAndLoadDB) = Just GlobalPackageDB
     aux ("B", UseAndLoadDB) = Just UserPackageDB
-    aux ("C", UseAndLoadDB) = Just $ SpecificPackageDB "test-packages/db1"
-    aux ("D", UseAndLoadDB) = Just $ SpecificPackageDB "test-packages/db2"
+    aux ("C", UseAndLoadDB) = Just $ SpecificPackageDB $ homeDir </> ".cabal/db1"
+    aux ("D", UseAndLoadDB) = Just $ SpecificPackageDB $ homeDir </> ".cabal/db2"
     aux _                   = Nothing
 
 verifyErrors :: Configuration -> [SourceError] -> Assertion
@@ -67,7 +69,9 @@ withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
 withSession config = Ex.bracket (initSession config) shutdownSession
 
 testGhc :: Configuration -> Assertion
-testGhc cfg = withSession config $ \session -> do
+testGhc cfg = do
+  homeDirectory <- getHomeDirectory
+  withSession (config homeDirectory) $ \session -> do
     let upd = (updateCodeGeneration True)
            <> (updateModule "Main.hs" . BSLC.pack . unlines $
                  configToImports cfg ++ [
@@ -85,8 +89,8 @@ testGhc cfg = withSession config $ \session -> do
       RunOk _ -> assertEqual "" (BSLC.pack "hi\n") output
       _       -> assertFailure $ "Unexpected run result: " ++ show result
   where
-    config = defaultSessionConfig {
-        configPackageDBStack = configToPackageDBStack cfg
+    config homeDir = defaultSessionConfig {
+        configPackageDBStack = configToPackageDBStack homeDir cfg
       }
 
 configs :: [Configuration]
