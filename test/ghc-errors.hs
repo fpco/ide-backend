@@ -2733,7 +2733,7 @@ syntheticTests =
                     out
         deletePackage "test/simple-lib17"
     )
-  , ( "Make sure package DB is passed to ghc"
+  , ( "Make sure package DB is passed to ghc (configGenerateModInfo False)"
     , withConfiguredSessionDetailed False [GlobalPackageDB] defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
@@ -2742,10 +2742,26 @@ syntheticTests =
         -- We expect an error because 'ide-backend-rts' is not (usually?) installed
         -- in the global package DB
         errs <- getSourceErrors session
+        let expected = "cannot satisfy -package ide-backend-rts"
         case errs of
-          [err] | "cannot satisfy -package ide-backend-rts" `isInfixOf` Text.unpack (errorMsg err) ->
-            return ()
-          _ -> assertFailure $ "Unexpected source errors: " ++ show3errors errs
+          [err] | expected `isInfixOf` Text.unpack (errorMsg err) -> return ()
+          [] -> assertFailure $ "Was expecting " ++ show expected
+          _  -> assertFailure $ "Unexpected source errors: " ++ show3errors errs
+    )
+  , ( "Make sure package DB is passed to ghc (configGenerateModInfo True)"
+    , withConfiguredSessionDetailed True [GlobalPackageDB] defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    ])
+        updateSessionD session upd 1
+        -- We expect an error because 'ide-backend-rts' is not (usually?) installed
+        -- in the global package DB
+        errs <- getSourceErrors session
+        let expected = "cannot satisfy -package ide-backend-rts"
+        case errs of
+          [err] | expected `isInfixOf` Text.unpack (errorMsg err) -> return ()
+          [] -> assertFailure $ "Was expecting " ++ show expected
+          _  -> assertFailure $ "Unexpected source errors: " ++ show3errors errs
     )
   ]
 
