@@ -126,8 +126,8 @@ testGhc cfg = do
         RunOk _ -> assertEqual "" (BSLC.pack "hi\n") output
         _       -> assertFailure $ "Unexpected run result: " ++ show result
 
-configs :: [Configuration]
-configs = filter validCfg $ concatMap aux packages
+configs :: (Configuration -> Bool) -> [Configuration]
+configs validCfg = filter validCfg $ concatMap aux packages
   where
     aux :: [PackageName] -> [Configuration]
     aux [] = return []
@@ -139,11 +139,13 @@ configs = filter validCfg $ concatMap aux packages
     packages :: [[PackageName]]
     packages = concatMap permutations $ subsequences ["A", "B", "C", "D"]
 
-    validCfg :: Configuration -> Bool
-    validCfg cfg = let dbStack = configToPackageDBStack (error "homedir") cfg
-                   in     not (null dbStack)
-                       && elemIndices GlobalPackageDB dbStack == [0]
-                       && elemIndices UserPackageDB dbStack `elem` [[], [1]]
+validGhcCfg :: Configuration -> Bool
+validGhcCfg cfg =
+       not (null dbStack)
+    && elemIndices GlobalPackageDB dbStack == [0]
+    && elemIndices UserPackageDB dbStack `elem` [[], [1]]
+  where
+    dbStack = configToPackageDBStack (error "homedir") cfg
 
 testCaseGhc :: Configuration -> Test
 testCaseGhc cfg =
@@ -151,7 +153,7 @@ testCaseGhc cfg =
 
 tests :: [Test]
 tests = [
-    testGroup "GHC" $ map testCaseGhc configs
+    testGroup "GHC" $ map testCaseGhc (configs validGhcCfg)
   , testGroup "Cabal" [
       ]
   ]
