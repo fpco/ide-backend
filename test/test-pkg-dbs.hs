@@ -143,6 +143,7 @@ configs = filter validCfg $ concatMap aux packages
     validCfg cfg = let dbStack = configToPackageDBStack (error "homedir") cfg
                    in     not (null dbStack)
                        && elemIndices GlobalPackageDB dbStack == [0]
+                       && elemIndices UserPackageDB dbStack `elem` [[], [1]]
 
 testCaseGhc :: Configuration -> Test
 testCaseGhc cfg =
