@@ -2702,6 +2702,27 @@ syntheticTests =
              RunOk _ -> assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
              _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Register a package, don't restart session, don't see the package"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package simple-lib17"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        deletePackage "test/simple-lib17"
+        restartSession session
+        let upd = updateModule "Main.hs" . BSLC.pack . unlines $
+                    [ "module Main where"
+                    , "import SimpleLib (simpleLib)"
+                    , "main = print simpleLib"
+                    ]
+        installPackage "test/simple-lib17"
+        -- No restartSession yet, hence the exception at session init.
+        let expected = "<command line>: cannot satisfy -package simple-lib17"
+        assertRaises "Was expecting ide-backend-rts or parallel errors"
+          (\(ExternalException err _) -> expected `isInfixOf` err)
+          (updateSessionD session upd 1)
+        deletePackage "test/simple-lib17"
+    )
   , ( "Register a package, restart session, see the package"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"
@@ -2715,12 +2736,8 @@ syntheticTests =
                     , "import SimpleLib (simpleLib)"
                     , "main = print simpleLib"
                     ]
-        updateSessionD session upd 1
-        assertOneError session
         installPackage "test/simple-lib17"
-        updateSessionD session upd 1
-        assertOneError session  -- no restartSession yet!
-        restartSession session
+        restartSession session  -- only now the package accessible
         updateSessionD session upd 1
         assertNoErrors session
         let m = "Main"
@@ -2741,19 +2758,15 @@ syntheticTests =
                     [ "module A where"
                     , "import Control.Parallel"
                     ])
-        updateSessionD session upd 1
         -- We expect an error because 'ide-backend-rts' and/or 'parallel'
         -- are not (usually?) installed in the global package DB.
-        errs <- getSourceErrors session
         let expected1 = "cannot satisfy -package ide-backend-rts"
             expected2 = "<command line>: cannot satisfy -package parallel"
-        case errs of
-          [err] | expected1 `isInfixOf` Text.unpack (errorMsg err)
-               || expected2 `isInfixOf` Text.unpack (errorMsg err)
-                 -> return ()
-          [] -> assertFailure
-                $ "Was expecting ide-backend-rts or parallel errors"
-          _  -> assertFailure $ "Unexpected source errors: " ++ show3errors errs
+        assertRaises "Was expecting ide-backend-rts or parallel errors"
+          (\(ExternalException err _) ->
+                expected1 `isInfixOf` err
+             || expected2 `isInfixOf` err)
+          (updateSessionD session upd 1)
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo True)"
     , let packageOpts = "-package parallel" : defOpts
@@ -2763,19 +2776,15 @@ syntheticTests =
                     [ "module A where"
                     , "import Control.Parallel"
                     ])
-        updateSessionD session upd 1
         -- We expect an error because 'ide-backend-rts' and/or 'parallel'
         -- are not (usually?) installed in the global package DB.
-        errs <- getSourceErrors session
         let expected1 = "cannot satisfy -package ide-backend-rts"
             expected2 = "<command line>: cannot satisfy -package parallel"
-        case errs of
-          [err] | expected1 `isInfixOf` Text.unpack (errorMsg err)
-               || expected2 `isInfixOf` Text.unpack (errorMsg err)
-                 -> return ()
-          [] -> assertFailure
-                $ "Was expecting ide-backend-rts or parallel errors"
-          _  -> assertFailure $ "Unexpected source errors: " ++ show3errors errs
+        assertRaises "Was expecting ide-backend-rts or parallel errors"
+          (\(ExternalException err _) ->
+                expected1 `isInfixOf` err
+             || expected2 `isInfixOf` err)
+          (updateSessionD session upd 1)
     )
   ]
 
