@@ -31,7 +31,7 @@
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
-import Test.HUnit (Assertion, assertEqual, assertFailure)
+import Test.HUnit (Assertion, assertEqual, assertFailure, assertBool)
 import Data.Monoid ((<>))
 import qualified Data.ByteString.Lazy.Char8 as BSLC (pack, unpack)
 import Data.Maybe (catMaybes)
@@ -66,6 +66,16 @@ pkgMod E1 = "Testing.TestPkgE"
 pkgMod E2 = "Testing.TestPkgE"
 pkgMod E3 = "Testing.TestPkgE"
 pkgMod E4 = "Testing.TestPkgE"
+
+pkgName :: Pkg -> String
+pkgName A  = "testpkg-A"
+pkgName B  = "testpkg-B"
+pkgName C  = "testpkg-C"
+pkgName D  = "testpkg-D"
+pkgName E1 = "testpkg-E"
+pkgName E2 = "testpkg-E"
+pkgName E3 = "testpkg-E"
+pkgName E4 = "testpkg-E"
 
 pkgFun :: Pkg -> String
 pkgFun A  = "testPkgA"
@@ -140,6 +150,11 @@ configToOutput = concatMap aux
   where
     aux (pkg, _) = pkgOut pkg
 
+configToStaticOpts :: Configuration -> [String]
+configToStaticOpts = map aux
+  where
+    aux (pkg, _) = "-package " ++ pkgName pkg
+
 {------------------------------------------------------------------------------
   Test which configurations are valid
 
@@ -206,6 +221,7 @@ testDBsCabal cfg = do
   let config = defaultSessionConfig {
            configPackageDBStack  = dbStack home $ configToPkgDBStack cfg
          , configGenerateModInfo = False
+         , configStaticOpts      = ["-package base"] ++ configToStaticOpts cfg
          }
 
   withSession config $ \session -> do
@@ -219,24 +235,18 @@ testDBsCabal cfg = do
     updateSession session upd (\_ -> return ())
 
     errs <- getSourceErrors session
-    unless (verifyErrors cfg errs) $ do
-      putStrLn $ " - Program:  " ++ show prog
-      putStrLn $ " - DB stack: " ++ show (configPackageDBStack config)
-      putStrLn $ " - Errors:   " ++ show errs
-      assertFailure "Unexpected errors"
+    assertBool "Unexpected errors" (null errs)
 
-    -- We only assertFailure above ^^ if there are *unexpected* errors
-    when (null errs) $ do
-      updateSession session (buildExe [(Text.pack "Main", "Main.hs")]) (\_ -> return ())
-      status <- getBuildExeStatus session
-      -- assertEqual "" (Just ExitSuccess) status
+    updateSession session (buildExe [(Text.pack "Main", "Main.hs")]) (\_ -> return ())
+    status <- getBuildExeStatus session
+    -- assertEqual "" (Just ExitSuccess) status
 
-      distDir <- getDistDir session
-      out     <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
-      assertEqual "" (configToOutput cfg) out
+    distDir <- getDistDir session
+    out     <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
+    assertEqual "" (configToOutput cfg) out
 
 configs :: (Configuration -> Bool) -> [Configuration]
-configs validCfg = filter validCfg $ concatMap aux packages
+configs isValid = filter isValid $ concatMap aux packages
   where
     aux :: [Pkg] -> [Configuration]
     aux [] = return []
@@ -254,8 +264,9 @@ validPkgDBStack stack =
   && elemIndices Global stack == [0]
   && elemIndices User stack `elem` [[], [1]]
 
-validGhcCfg :: Configuration -> Bool
-validGhcCfg cfg = validPkgDBStack (configToPkgDBStack cfg)
+validCfg :: Configuration -> Bool
+validCfg cfg = validPkgDBStack (configToPkgDBStack cfg)
+            && and (map snd cfg)
 
 {------------------------------------------------------------------------------
   Test package DB order
@@ -352,8 +363,12 @@ withSession config = Ex.bracket (initSession config) shutdownSession
 tests :: [Test]
 tests = [
     testGroup "Valid package DB stacks" [
-        testGroup "GHC"   $ map testCaseDBsGhc   (configs validGhcCfg)
-      , testGroup "Cabal" $ map testCaseDBsCabal (configs validGhcCfg)
+        testGroup "GHC"   $ map testCaseDBsGhc (configs (validPkgDBStack . configToPkgDBStack))
+        -- We don't want to test Cabal against packages in unknown DBs,
+        -- because we already test that ghc complains about those and we
+        -- require that ghc has loaded and type checked the modules that we
+        -- compile.
+      , testGroup "Cabal" $ map testCaseDBsCabal (configs validCfg)
       ]
   , testGroup "Check package DB order" [
         testGroup "GHC"   $ map testCaseOrderGhc   orderStacks
