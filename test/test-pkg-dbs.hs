@@ -57,15 +57,25 @@ data Pkg        = A | B | C | D | E1 | E2 | E3 | E4 deriving Show
 data PkgDB      = Global | User | DB1 | DB2         deriving (Show, Eq)
 type PkgDBStack = [PkgDB]
 
-pkgName :: Pkg -> String
-pkgName A  = "Testing.TestPkgA"
-pkgName B  = "Testing.TestPkgB"
-pkgName C  = "Testing.TestPkgC"
-pkgName D  = "Testing.TestPkgD"
-pkgName E1 = "Testing.TestPkgE"
-pkgName E2 = "Testing.TestPkgE"
-pkgName E3 = "Testing.TestPkgE"
-pkgName E4 = "Testing.TestPkgE"
+pkgMod :: Pkg -> String
+pkgMod A  = "Testing.TestPkgA"
+pkgMod B  = "Testing.TestPkgB"
+pkgMod C  = "Testing.TestPkgC"
+pkgMod D  = "Testing.TestPkgD"
+pkgMod E1 = "Testing.TestPkgE"
+pkgMod E2 = "Testing.TestPkgE"
+pkgMod E3 = "Testing.TestPkgE"
+pkgMod E4 = "Testing.TestPkgE"
+
+pkgFun :: Pkg -> String
+pkgFun A  = "testPkgA"
+pkgFun B  = "testPkgB"
+pkgFun C  = "testPkgC"
+pkgFun D  = "testPkgD"
+pkgFun E1 = "testPkgE"
+pkgFun E2 = "testPkgE"
+pkgFun E3 = "testPkgE"
+pkgFun E4 = "testPkgE"
 
 pkgDB :: Pkg -> PkgDB
 pkgDB A  = Global
@@ -112,13 +122,23 @@ type Configuration = [(Pkg, LoadDB)]
 configToImports :: Configuration -> [String]
 configToImports = map aux
   where
-    aux (pkg, _) = "import " ++ pkgName pkg
+    aux (pkg, _) = "import " ++ pkgMod pkg
 
 configToPkgDBStack :: Configuration -> PkgDBStack
 configToPkgDBStack = catMaybes . map aux
   where
     aux :: (Pkg, Bool) -> Maybe PkgDB
     aux (pkg, loadDB) = guard loadDB >> return (pkgDB pkg)
+
+configToProg :: Configuration -> [String]
+configToProg = map aux
+  where
+    aux (pkg, _) = "    putStrLn " ++ pkgFun pkg
+
+configToOutput :: Configuration -> String
+configToOutput = concatMap aux
+  where
+    aux (pkg, _) = pkgOut pkg
 
 {------------------------------------------------------------------------------
   Test which configurations are valid
@@ -142,7 +162,7 @@ verifyErrors cfg actualErrors =
     expectedErrors = catMaybes (map expectedError cfg)
 
     expectedError :: (Pkg, Bool) -> Maybe String
-    expectedError (pkg, False) = Just $ "Could not find module `" ++ pkgName pkg ++ "'"
+    expectedError (pkg, False) = Just $ "Could not find module `" ++ pkgMod pkg ++ "'"
     expectedError (_pkg, True) = Nothing
 
 testDBsGhc :: Configuration -> Assertion
@@ -156,9 +176,9 @@ testDBsGhc cfg = do
 
   withSession config $ \session -> do
     let prog = unlines $
-                 configToImports cfg ++ [
-                   "main = putStrLn \"hi\""
-                 ]
+                    configToImports cfg
+                 ++ ["main = do"]
+                 ++ configToProg cfg
     let upd = (updateCodeGeneration True)
            <> (updateModule "Main.hs" . BSLC.pack $ prog)
 
@@ -171,12 +191,49 @@ testDBsGhc cfg = do
       putStrLn $ " - Errors:   " ++ show errs
       assertFailure "Unexpected errors"
 
+    -- We only assertFailure above ^^ if there are *unexpected* errors
     when (null errs) $ do
       runActions <- runStmt session "Main" "main"
       (output, result) <- runWaitAll runActions
       case result of
-        RunOk _ -> assertEqual "" (BSLC.pack "hi\n") output
+        RunOk _ -> assertEqual "" (BSLC.pack $ configToOutput cfg) output
         _       -> assertFailure $ "Unexpected run result: " ++ show result
+
+testDBsCabal :: Configuration -> Assertion
+testDBsCabal cfg = do
+  home <- getHomeDirectory
+
+  let config = defaultSessionConfig {
+           configPackageDBStack  = dbStack home $ configToPkgDBStack cfg
+         , configGenerateModInfo = False
+         }
+
+  withSession config $ \session -> do
+    let prog = unlines $
+                    configToImports cfg
+                 ++ ["main = do"]
+                 ++ configToProg cfg
+    let upd = (updateCodeGeneration True)
+           <> (updateModule "Main.hs" . BSLC.pack $ prog)
+
+    updateSession session upd (\_ -> return ())
+
+    errs <- getSourceErrors session
+    unless (verifyErrors cfg errs) $ do
+      putStrLn $ " - Program:  " ++ show prog
+      putStrLn $ " - DB stack: " ++ show (configPackageDBStack config)
+      putStrLn $ " - Errors:   " ++ show errs
+      assertFailure "Unexpected errors"
+
+    -- We only assertFailure above ^^ if there are *unexpected* errors
+    when (null errs) $ do
+      updateSession session (buildExe [(Text.pack "Main", "Main.hs")]) (\_ -> return ())
+      status <- getBuildExeStatus session
+      -- assertEqual "" (Just ExitSuccess) status
+
+      distDir <- getDistDir session
+      out     <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
+      assertEqual "" (configToOutput cfg) out
 
 configs :: (Configuration -> Bool) -> [Configuration]
 configs validCfg = filter validCfg $ concatMap aux packages
@@ -236,12 +293,11 @@ testOrderGhc stack = do
       putStrLn $ " - Errors:   " ++ show errs
       assertFailure "Unexpected errors"
 
-    when (null errs) $ do
-      runActions <- runStmt session "Main" "main"
-      (output, result) <- runWaitAll runActions
-      case result of
-        RunOk _ -> assertEqual "" (pkgOut . dbE . last $ stack) (BSLC.unpack output)
-        _       -> assertFailure $ "Unexpected run result: " ++ show result
+    runActions <- runStmt session "Main" "main"
+    (output, result) <- runWaitAll runActions
+    case result of
+      RunOk _ -> assertEqual "" (pkgOut . dbE . last $ stack) (BSLC.unpack output)
+      _       -> assertFailure $ "Unexpected run result: " ++ show result
 
 testOrderCabal :: PkgDBStack -> Assertion
 testOrderCabal stack = do
@@ -296,9 +352,8 @@ withSession config = Ex.bracket (initSession config) shutdownSession
 tests :: [Test]
 tests = [
     testGroup "Valid package DB stacks" [
-        testGroup "GHC" $ map testCaseDBsGhc (configs validGhcCfg)
-      , testGroup "Cabal" [
-          ]
+        testGroup "GHC"   $ map testCaseDBsGhc   (configs validGhcCfg)
+      , testGroup "Cabal" $ map testCaseDBsCabal (configs validGhcCfg)
       ]
   , testGroup "Check package DB order" [
         testGroup "GHC"   $ map testCaseOrderGhc   orderStacks
@@ -307,6 +362,7 @@ tests = [
   ]
   where
     testCaseDBsGhc     cfg   = testCase (show cfg)   (testDBsGhc     cfg)
+    testCaseDBsCabal   cfg   = testCase (show cfg)   (testDBsCabal   cfg)
     testCaseOrderGhc   stack = testCase (show stack) (testOrderGhc   stack)
     testCaseOrderCabal stack = testCase (show stack) (testOrderCabal stack)
 
