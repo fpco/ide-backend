@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TemplateHaskell, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE CPP, TemplateHaskell #-}
 -- Copyright   : (c) JP Moresmau 2011,
 --                   Well-Typed 2012
 -- (JP Moresmau's buildwrapper package used as template for GHC API use)
@@ -30,6 +30,7 @@ module Run
   , defaultDynFlags
   , getSessionDynFlags
   , setSessionDynFlags
+  , parseDynamicFlags
   , hsExtensions
   , importList
   , autocompletion
@@ -81,7 +82,6 @@ import qualified Control.Exception as Ex
 import Control.Monad (filterM, liftM, void)
 import Control.Applicative ((<$>))
 import Data.List ((\\))
-import Data.Monoid (Monoid)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import System.FilePath.Find (find, always, extension)
@@ -99,18 +99,17 @@ import HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
 import Haddock
 import Debug
 
-newtype DynamicOpts = DynamicOpts [Located String]
-  deriving Monoid
+type DynamicOpts = [Located String]
 
 -- | Set static flags at server startup and return dynamic flags.
 submitStaticOpts :: [String] -> IO DynamicOpts
 submitStaticOpts opts = do
   (dynFlags, _) <- parseStaticFlags (map noLoc opts)
-  return $ DynamicOpts dynFlags
+  return dynFlags
 
 -- | Create dynamic flags from their command-line names.
 optsToDynFlags :: [String] -> DynamicOpts
-optsToDynFlags = DynamicOpts . map noLoc
+optsToDynFlags = map noLoc
 
 getGhcLibdir :: IO FilePath
 getGhcLibdir = do
@@ -157,7 +156,7 @@ compileInGhc :: FilePath            -- ^ target directory
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc (Strict [] SourceError, [ModuleName])
-compileInGhc configSourcesDir (DynamicOpts dynOpts)
+compileInGhc configSourcesDir dynOpts
              generateCode verbosity
              errsRef handlerOutput handlerRemaining = do
     -- Reset errors storage.

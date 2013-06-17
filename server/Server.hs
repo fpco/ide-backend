@@ -80,13 +80,14 @@ ghcServerEngine configGenerateModInfo
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
-    when configGenerateModInfo $ do
-      -- Register our plugin in dynamic flags.
-      dynFlags <- getSessionDynFlags
-      let dynFlags' = dynFlags {
-            sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins dynFlags
-          }
-      void $ setSessionDynFlags dynFlags'
+    -- Register startup options and perhaps our plugin in dynamic flags.
+    initialDynFlags <- getSessionDynFlags
+    (flags, _, _) <- parseDynamicFlags initialDynFlags dOpts
+    let dynFlags | configGenerateModInfo = flags {
+          sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins flags
+        }
+                 | otherwise = flags
+    void $ setSessionDynFlags dynFlags
 
     -- Start handling RPC calls
     let go args = do
@@ -94,7 +95,7 @@ ghcServerEngine configGenerateModInfo
           args' <- case req of
             ReqCompile opts dir genCode -> do
               ghcHandleCompile
-                conv dOpts opts pluginRef importsRef dir
+                conv opts pluginRef importsRef dir
                 genCode configGenerateModInfo
               return args
             ReqRun m fun outBMode errBMode -> do
@@ -130,7 +131,6 @@ data ModSummary = ModSummary {
 -- | Handle a compile or type check request
 ghcHandleCompile
   :: RpcConversation
-  -> DynamicOpts         -- ^ startup dynamic flags
   -> Maybe [String]      -- ^ new, user-submitted dynamic flags
   -> StrictIORef (Strict (Map ModuleName) PluginResult)
                          -- ^ ref where the ExtractIdsT plugin stores its data
@@ -141,7 +141,7 @@ ghcHandleCompile
   -> Bool                -- ^ should we generate code
   -> Bool                -- ^ should we generate per-module info
   -> Ghc ()
-ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
+ghcHandleCompile RpcConversation{..} ideNewOpts
                  pluginRef modsRef configSourcesDir
                  ideGenerateCode configGenerateModInfo = do
     errsRef <- liftIO $ newIORef StrictList.nil
@@ -290,7 +290,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
   where
     dynOpts :: DynamicOpts
     dynOpts =
-      let userOpts = maybe dOpts optsToDynFlags ideNewOpts
+      let userOpts = maybe [] optsToDynFlags ideNewOpts
           -- Just in case the user specified -hide-all-packages.
           rtsOpts = ["-package ide-backend-rts"]
           -- Include cabal_macros.h.
