@@ -40,29 +40,84 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import System.Directory(getHomeDirectory)
 import System.FilePath ((</>))
-import Control.Monad (when, unless)
+import Control.Monad (when, unless, guard)
 import qualified Data.Text as Text
 
 import IdeSession
 
+{------------------------------------------------------------------------------
+  Test package meta data
+
+  We abstract from "real" package DBs here because they really on knowing
+  the user's home directory
+------------------------------------------------------------------------------}
+
+data Pkg        = A | B | C | D | E1 | E2 | E3 | E4 deriving Show
+data PkgDB      = Global | User | DB1 | DB2         deriving (Show, Eq)
+type PkgDBStack = [PkgDB]
+
+pkgName :: Pkg -> String
+pkgName A  = "Testing.TestPkgA"
+pkgName B  = "Testing.TestPkgB"
+pkgName C  = "Testing.TestPkgC"
+pkgName D  = "Testing.TestPkgD"
+pkgName E1 = "Testing.TestPkgE"
+pkgName E2 = "Testing.TestPkgE"
+pkgName E3 = "Testing.TestPkgE"
+pkgName E4 = "Testing.TestPkgE"
+
+pkgDB :: Pkg -> PkgDB
+pkgDB A  = Global
+pkgDB B  = User
+pkgDB C  = DB1
+pkgDB D  = DB2
+pkgDB E1 = Global
+pkgDB E2 = User
+pkgDB E3 = DB1
+pkgDB E4 = DB2
+
+dbE :: PkgDB -> Pkg
+dbE Global = E1
+dbE User   = E2
+dbE DB1    = E3
+dbE DB2    = E4
+
+db :: FilePath -> PkgDB -> PackageDB
+db _home Global = GlobalPackageDB
+db _home User   = UserPackageDB
+db  home DB1    = SpecificPackageDB $ home </> ".cabal/db1"
+db  home DB2    = SpecificPackageDB $ home </> ".cabal/db2"
+
+dbStack :: FilePath -> PkgDBStack -> PackageDBStack
+dbStack = map . db
+
+{------------------------------------------------------------------------------
+  Test configuration (which packages and which package DBs do we load?)
+------------------------------------------------------------------------------}
+
 type LoadDB        = Bool
-type PackageName   = String
-type Configuration = [(PackageName, LoadDB)]
+type Configuration = [(Pkg, LoadDB)]
 
 configToImports :: Configuration -> [String]
 configToImports = map aux
   where
-    aux (pkg, _) = "import Testing.TestPkg" ++ pkg
+    aux (pkg, _) = "import " ++ pkgName pkg
 
-configToPackageDBStack :: FilePath -> Configuration -> PackageDBStack
-configToPackageDBStack homeDir = catMaybes . map aux
+configToPkgDBStack :: Configuration -> PkgDBStack
+configToPkgDBStack = catMaybes . map aux
   where
-    aux ("A", True) = Just GlobalPackageDB
-    aux ("B", True) = Just UserPackageDB
-    aux ("C", True) = Just $ SpecificPackageDB $ homeDir </> ".cabal/db1"
-    aux ("D", True) = Just $ SpecificPackageDB $ homeDir </> ".cabal/db2"
-    aux _           = Nothing
+    aux :: (Pkg, Bool) -> Maybe PkgDB
+    aux (pkg, loadDB) = guard loadDB >> return (pkgDB pkg)
 
+{------------------------------------------------------------------------------
+  Test which configurations are valid
+
+  This test focusses exclusively on the packages A, B, C, D, which are all
+  installed in different packages DBs. We import a subset of {A,B,C,D}, and
+  specify a subset of global, user, DB1 and DB2 databases, and check that we
+  get the expected compile errors. This also checks which combination of
+  packages DBs is actually supported.
+------------------------------------------------------------------------------}
 
 verifyErrors :: Configuration -> [SourceError] -> Bool
 verifyErrors cfg actualErrors =
@@ -75,29 +130,16 @@ verifyErrors cfg actualErrors =
     expectedErrors :: [String]
     expectedErrors = catMaybes (map expectedError cfg)
 
-    expectedError :: (PackageName, Bool) -> Maybe String
-    expectedError (pkg, False) = Just $ "Could not find module `Testing.TestPkg" ++ pkg ++ "'"
+    expectedError :: (Pkg, Bool) -> Maybe String
+    expectedError (pkg, False) = Just $ "Could not find module `" ++ pkgName pkg ++ "'"
     expectedError (_pkg, True) = Nothing
 
--- Find the first element satisfying the given the predicate, and return that
--- element and the list with the element extracted
-find :: (a -> Bool) -> [a] -> Maybe (a, [a])
-find p = go []
-  where
-    go _acc []                 = Nothing
-    go  acc (x:xs) | p x       = Just (x, reverse acc ++ xs)
-                   | otherwise = go (x:acc) xs
-
--- TODO: would it be useful to move this to IdeSession?
-withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
-withSession config = Ex.bracket (initSession config) shutdownSession
-
-testGhc :: Configuration -> Assertion
-testGhc cfg = do
-  homeDirectory <- getHomeDirectory
+testDBsGhc :: Configuration -> Assertion
+testDBsGhc cfg = do
+  home <- getHomeDirectory
 
   let config = defaultSessionConfig {
-           configPackageDBStack = configToPackageDBStack homeDirectory cfg
+           configPackageDBStack = dbStack home $ configToPkgDBStack cfg
            -- TODO: although we are not interested in mod info in this test,
            -- and hence it makes sense to set configGenerateModInfo to False,
            -- in fact the tests *fail* when we don't! That should not be the case.
@@ -131,34 +173,109 @@ testGhc cfg = do
 configs :: (Configuration -> Bool) -> [Configuration]
 configs validCfg = filter validCfg $ concatMap aux packages
   where
-    aux :: [PackageName] -> [Configuration]
+    aux :: [Pkg] -> [Configuration]
     aux [] = return []
     aux (pkg : pkgs) = do
       loadDB <- [True, False]
       config <- aux pkgs
       return $ (pkg, loadDB) : config
 
-    packages :: [[PackageName]]
-    packages = concatMap permutations $ subsequences ["A", "B", "C", "D"]
+    packages :: [[Pkg]]
+    packages = concatMap permutations $ subsequences [A, B, C, D]
+
+validPkgDBStack :: PkgDBStack -> Bool
+validPkgDBStack dbStack =
+     not (null dbStack)
+  && elemIndices Global dbStack == [0]
+  && elemIndices User dbStack `elem` [[], [1]]
 
 validGhcCfg :: Configuration -> Bool
-validGhcCfg cfg =
-       not (null dbStack)
-    && elemIndices GlobalPackageDB dbStack == [0]
-    && elemIndices UserPackageDB dbStack `elem` [[], [1]]
-  where
-    dbStack = configToPackageDBStack (error "homedir") cfg
+validGhcCfg cfg = validPkgDBStack (configToPkgDBStack cfg)
 
-testCaseGhc :: Configuration -> Test
-testCaseGhc cfg =
-  testCase (show cfg) (testGhc cfg {- `Ex.finally` threadDelay 1000000 -})
+{------------------------------------------------------------------------------
+  Test package DB order
+
+  In this test we focus on package E, which has version 0.1 installed in the
+  global DB, 0.2 in the user DB, 0.3 in db1 and 0.4 in db2. We always import
+  "package E" and print testPkgE (which is a simple string that includes the
+  package version), and specify a permutation of a non-empty subsequence of
+  {global, user, DB1, DB2} and check that we get the right version.
+------------------------------------------------------------------------------}
+
+testOrderGhc :: PkgDBStack -> Assertion
+testOrderGhc stack = do
+  home <- getHomeDirectory
+
+  let config = defaultSessionConfig {
+           configPackageDBStack = dbStack home stack
+           -- TODO: although we are not interested in mod info in this test,
+           -- and hence it makes sense to set configGenerateModInfo to False,
+           -- in fact the tests *fail* when we don't! That should not be the case.
+         , configGenerateModInfo = False
+         }
+
+  withSession config $ \session -> do
+    let prog = unlines $ [
+                   "import Testing.TestPkgE"
+                 , "main = putStrLn testPkgE"
+                 ]
+    let upd = (updateCodeGeneration True)
+           <> (updateModule "Main.hs" . BSLC.pack $ prog)
+
+    updateSession session upd (\_ -> return ())
+
+    errs <- getSourceErrors session
+    unless (null errs) $ do
+      putStrLn $ " - Program:  " ++ show prog
+      putStrLn $ " - DB stack: " ++ show stack
+      putStrLn $ " - Errors:   " ++ show errs
+      assertFailure "Unexpected errors"
+
+    let expectedOutput = case dbE (last stack) of
+                           E1 -> "This is test package E-0.1\n"
+                           E2 -> "This is test package E-0.2\n"
+                           E3 -> "This is test package E-0.3\n"
+                           E4 -> "This is test package E-0.4\n"
+                           _  -> undefined
+
+    when (null errs) $ do
+      runActions <- runStmt session "Main" "main"
+      (output, result) <- runWaitAll runActions
+      case result of
+        RunOk _ -> assertEqual "" expectedOutput (BSLC.unpack output)
+        _       -> assertFailure $ "Unexpected run result: " ++ show result
+
+orderStacks :: [PkgDBStack]
+orderStacks = filter validPkgDBStack
+            $ concatMap permutations
+            $ filter (not . null)
+            $ subsequences
+            $ [Global, User, DB1, DB2]
+
+{------------------------------------------------------------------------------
+  Driver
+------------------------------------------------------------------------------}
+
+-- TODO: would it be useful to move this to IdeSession?
+withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
+withSession config = Ex.bracket (initSession config) shutdownSession
 
 tests :: [Test]
 tests = [
-    testGroup "GHC" $ map testCaseGhc (configs validGhcCfg)
-  , testGroup "Cabal" [
+    testGroup "Valid package DB stacks" [
+        testGroup "GHC" $ map testCaseDBsGhc (configs validGhcCfg)
+      , testGroup "Cabal" [
+          ]
+      ]
+  , testGroup "Check package DB order" [
+        testGroup "GHC" $ map testCaseOrderGhc orderStacks
+      , testGroup "Cabal" [
+          ]
       ]
   ]
+  where
+    testCaseDBsGhc   cfg   = testCase (show cfg)   (testDBsGhc cfg)
+    testCaseOrderGhc stack = testCase (show stack) (testOrderGhc stack)
 
 main :: IO ()
 main = defaultMain tests
