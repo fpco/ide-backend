@@ -25,6 +25,8 @@
 
       cabal install --prefix=/Users/dev/.cabal \
         --package-db=/Users/dev/.cabal/db2
+
+    similar progression for testpkg-E-{0.1,0.2,0.3,0.4}
 -}
 
 import Test.Framework (Test, defaultMain, testGroup)
