@@ -127,7 +127,7 @@ test-suite test-pkg-dbs
 -- server for Debug:
   hs-source-dirs:     test server
   build-depends:      base, ide-backend,
-                      bytestring, directory, filepath,
+                      bytestring, directory, filepath, text,
                       HUnit, test-framework, test-framework-hunit
 
   default-language:   Haskell2010

@@ -38,7 +38,8 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import System.Directory(getHomeDirectory)
 import System.FilePath ((</>))
-import Control.Monad (when)
+import Control.Monad (when, unless)
+import qualified Data.Text as Text
 
 import IdeSession
 
@@ -60,20 +61,21 @@ configToPackageDBStack homeDir = catMaybes . map aux
     aux ("D", True) = Just $ SpecificPackageDB $ homeDir </> ".cabal/db2"
     aux _           = Nothing
 
--- TODO: this isn't quite right, because this assumes that we get errors
--- for *all* packages that couldn't be loaded, whereas in fact we only get one
--- (but it's not quite clear which one)
-verifyErrors :: Configuration -> [SourceError] -> Assertion
-verifyErrors [] errs =
-  assertBool ("Unexpected errors: " ++ show errs) (null errs)
-verifyErrors ((pkg, True) : cfg) errs =
-  verifyErrors cfg errs
-verifyErrors ((pkg, False) : cfg) errs = do
-  let expectedError = "Could not find module `Testing.TestPkg" ++ pkg ++ "'"
-      mErrs'        = find (\err -> expectedError `isInfixOf` show err) errs
-  case mErrs' of
-    Nothing         -> assertFailure $ "Expected error " ++ expectedError
-    Just (_, errs') -> verifyErrors cfg errs'
+
+verifyErrors :: Configuration -> [SourceError] -> Bool
+verifyErrors cfg actualErrors =
+       null expectedErrors == null actualErrors
+    && all isExpectedError actualErrors
+  where
+    isExpectedError :: SourceError -> Bool
+    isExpectedError actual = any (\expected -> expected `isInfixOf` Text.unpack (errorMsg actual)) expectedErrors
+
+    expectedErrors :: [String]
+    expectedErrors = catMaybes (map expectedError cfg)
+
+    expectedError :: (PackageName, Bool) -> Maybe String
+    expectedError (pkg, False) = Just $ "Could not find module `Testing.TestPkg" ++ pkg ++ "'"
+    expectedError (_pkg, True) = Nothing
 
 -- Find the first element satisfying the given the predicate, and return that
 -- element and the list with the element extracted
@@ -111,10 +113,11 @@ testGhc cfg = do
     updateSession session upd (\_ -> return ())
 
     errs <- getSourceErrors session
-    verifyErrors cfg errs `Ex.onException` do
+    unless (verifyErrors cfg errs) $ do
       putStrLn $ " - Program:  " ++ show prog
       putStrLn $ " - DB stack: " ++ show (configPackageDBStack config)
       putStrLn $ " - Errors:   " ++ show errs
+      assertFailure "Unexpected errors"
 
     when (null errs) $ do
       runActions <- runStmt session "Main" "main"
