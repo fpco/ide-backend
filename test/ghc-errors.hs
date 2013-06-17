@@ -2734,33 +2734,47 @@ syntheticTests =
         deletePackage "test/simple-lib17"
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo False)"
-    , withConfiguredSessionDetailed False [GlobalPackageDB] defOpts $ \session -> do
+    , let packageOpts = "-package parallel" : defOpts
+      in withConfiguredSessionDetailed False [GlobalPackageDB] packageOpts
+         $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
+                    , "import Control.Parallel"
                     ])
         updateSessionD session upd 1
-        -- We expect an error because 'ide-backend-rts' is not (usually?) installed
-        -- in the global package DB
+        -- We expect an error because 'ide-backend-rts' and/or 'parallel'
+        -- are not (usually?) installed in the global package DB.
         errs <- getSourceErrors session
-        let expected = "cannot satisfy -package ide-backend-rts"
+        let expected1 = "cannot satisfy -package ide-backend-rts"
+            expected2 = "<command line>: cannot satisfy -package parallel"
         case errs of
-          [err] | expected `isInfixOf` Text.unpack (errorMsg err) -> return ()
-          [] -> assertFailure $ "Was expecting " ++ show expected
+          [err] | expected1 `isInfixOf` Text.unpack (errorMsg err)
+               || expected2 `isInfixOf` Text.unpack (errorMsg err)
+                 -> return ()
+          [] -> assertFailure
+                $ "Was expecting ide-backend-rts or parallel errors"
           _  -> assertFailure $ "Unexpected source errors: " ++ show3errors errs
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo True)"
-    , withConfiguredSessionDetailed True [GlobalPackageDB] defOpts $ \session -> do
+    , let packageOpts = "-package parallel" : defOpts
+      in withConfiguredSessionDetailed True [GlobalPackageDB] packageOpts
+         $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
+                    , "import Control.Parallel"
                     ])
         updateSessionD session upd 1
-        -- We expect an error because 'ide-backend-rts' is not (usually?) installed
-        -- in the global package DB
+        -- We expect an error because 'ide-backend-rts' and/or 'parallel'
+        -- are not (usually?) installed in the global package DB.
         errs <- getSourceErrors session
-        let expected = "cannot satisfy -package ide-backend-rts"
+        let expected1 = "cannot satisfy -package ide-backend-rts"
+            expected2 = "<command line>: cannot satisfy -package parallel"
         case errs of
-          [err] | expected `isInfixOf` Text.unpack (errorMsg err) -> return ()
-          [] -> assertFailure $ "Was expecting " ++ show expected
+          [err] | expected1 `isInfixOf` Text.unpack (errorMsg err)
+               || expected2 `isInfixOf` Text.unpack (errorMsg err)
+                 -> return ()
+          [] -> assertFailure
+                $ "Was expecting ide-backend-rts or parallel errors"
           _  -> assertFailure $ "Unexpected source errors: " ++ show3errors errs
     )
   ]
