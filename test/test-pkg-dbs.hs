@@ -31,17 +31,18 @@
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
-import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure, (@?=))
-import Data.Monoid (mconcat, mempty, (<>))
-import qualified Data.ByteString.Lazy.Char8 as BSLC (pack, unpack, null)
+import Test.HUnit (Assertion, assertEqual, assertFailure)
+import Data.Monoid ((<>))
+import qualified Data.ByteString.Lazy.Char8 as BSLC (pack, unpack)
 import Data.Maybe (catMaybes)
 import Data.List (subsequences, permutations, elemIndices, isInfixOf)
-import Control.Concurrent (threadDelay)
+import qualified Data.Text as Text
 import qualified Control.Exception as Ex
+import Control.Monad (when, unless, guard)
 import System.Directory(getHomeDirectory)
 import System.FilePath ((</>))
-import Control.Monad (when, unless, guard)
-import qualified Data.Text as Text
+import System.Process (readProcess)
+import System.Exit (ExitCode (..))
 
 import IdeSession
 
@@ -91,6 +92,16 @@ db  home DB2    = SpecificPackageDB $ home </> ".cabal/db2"
 dbStack :: FilePath -> PkgDBStack -> PackageDBStack
 dbStack = map . db
 
+pkgOut :: Pkg -> String
+pkgOut A  = "This is test package A\n"
+pkgOut B  = "This is test package B\n"
+pkgOut C  = "This is test package C\n"
+pkgOut D  = "This is test package D\n"
+pkgOut E1 = "This is test package E-0.1\n"
+pkgOut E2 = "This is test package E-0.2\n"
+pkgOut E3 = "This is test package E-0.3\n"
+pkgOut E4 = "This is test package E-0.4\n"
+
 {------------------------------------------------------------------------------
   Test configuration (which packages and which package DBs do we load?)
 ------------------------------------------------------------------------------}
@@ -139,10 +150,7 @@ testDBsGhc cfg = do
   home <- getHomeDirectory
 
   let config = defaultSessionConfig {
-           configPackageDBStack = dbStack home $ configToPkgDBStack cfg
-           -- TODO: although we are not interested in mod info in this test,
-           -- and hence it makes sense to set configGenerateModInfo to False,
-           -- in fact the tests *fail* when we don't! That should not be the case.
+           configPackageDBStack  = dbStack home $ configToPkgDBStack cfg
          , configGenerateModInfo = False
          }
 
@@ -184,10 +192,10 @@ configs validCfg = filter validCfg $ concatMap aux packages
     packages = concatMap permutations $ subsequences [A, B, C, D]
 
 validPkgDBStack :: PkgDBStack -> Bool
-validPkgDBStack dbStack =
-     not (null dbStack)
-  && elemIndices Global dbStack == [0]
-  && elemIndices User dbStack `elem` [[], [1]]
+validPkgDBStack stack =
+     not (null stack)
+  && elemIndices Global stack == [0]
+  && elemIndices User stack `elem` [[], [1]]
 
 validGhcCfg :: Configuration -> Bool
 validGhcCfg cfg = validPkgDBStack (configToPkgDBStack cfg)
@@ -207,10 +215,7 @@ testOrderGhc stack = do
   home <- getHomeDirectory
 
   let config = defaultSessionConfig {
-           configPackageDBStack = dbStack home stack
-           -- TODO: although we are not interested in mod info in this test,
-           -- and hence it makes sense to set configGenerateModInfo to False,
-           -- in fact the tests *fail* when we don't! That should not be the case.
+           configPackageDBStack  = dbStack home stack
          , configGenerateModInfo = False
          }
 
@@ -231,19 +236,47 @@ testOrderGhc stack = do
       putStrLn $ " - Errors:   " ++ show errs
       assertFailure "Unexpected errors"
 
-    let expectedOutput = case dbE (last stack) of
-                           E1 -> "This is test package E-0.1\n"
-                           E2 -> "This is test package E-0.2\n"
-                           E3 -> "This is test package E-0.3\n"
-                           E4 -> "This is test package E-0.4\n"
-                           _  -> undefined
-
     when (null errs) $ do
       runActions <- runStmt session "Main" "main"
       (output, result) <- runWaitAll runActions
       case result of
-        RunOk _ -> assertEqual "" expectedOutput (BSLC.unpack output)
+        RunOk _ -> assertEqual "" (pkgOut . dbE . last $ stack) (BSLC.unpack output)
         _       -> assertFailure $ "Unexpected run result: " ++ show result
+
+testOrderCabal :: PkgDBStack -> Assertion
+testOrderCabal stack = do
+  home <- getHomeDirectory
+
+  let config = defaultSessionConfig {
+           configPackageDBStack  = dbStack home stack
+         , configGenerateModInfo = False
+         , configStaticOpts      = ["-package base", "-package testpkg-E"]
+         }
+
+  withSession config $ \session -> do
+    let prog = unlines $ [
+                   "import Testing.TestPkgE"
+                 , "main = putStrLn testPkgE"
+                 ]
+    let upd = (updateCodeGeneration False)
+           <> (updateModule "Main.hs" . BSLC.pack $ prog)
+
+    updateSession session upd (\_ -> return ())
+
+    errs <- getSourceErrors session
+    unless (null errs) $ do
+      putStrLn $ " - Program:  " ++ show prog
+      putStrLn $ " - DB stack: " ++ show stack
+      putStrLn $ " - Errors:   " ++ show errs
+      assertFailure "Unexpected errors"
+
+    updateSession session (buildExe [(Text.pack "Main", "Main.hs")]) (\_ -> return ())
+    status <- getBuildExeStatus session
+    assertEqual "" (Just ExitSuccess) status
+
+    distDir <- getDistDir session
+    out     <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
+    assertEqual "" (pkgOut . dbE . last $ stack) out
 
 orderStacks :: [PkgDBStack]
 orderStacks = filter validPkgDBStack
@@ -268,14 +301,14 @@ tests = [
           ]
       ]
   , testGroup "Check package DB order" [
-        testGroup "GHC" $ map testCaseOrderGhc orderStacks
-      , testGroup "Cabal" [
-          ]
+        testGroup "GHC"   $ map testCaseOrderGhc   orderStacks
+      , testGroup "Cabal" $ map testCaseOrderCabal orderStacks
       ]
   ]
   where
-    testCaseDBsGhc   cfg   = testCase (show cfg)   (testDBsGhc cfg)
-    testCaseOrderGhc stack = testCase (show stack) (testOrderGhc stack)
+    testCaseDBsGhc     cfg   = testCase (show cfg)   (testDBsGhc     cfg)
+    testCaseOrderGhc   stack = testCase (show stack) (testOrderGhc   stack)
+    testCaseOrderCabal stack = testCase (show stack) (testOrderCabal stack)
 
 main :: IO ()
 main = defaultMain tests

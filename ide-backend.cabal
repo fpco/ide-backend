@@ -132,7 +132,7 @@ test-suite test-pkg-dbs
   hs-source-dirs:     test server
   if flag(test-pkg-dbs)
     build-depends:      base, ide-backend,
-                        bytestring, directory, filepath, text,
+                        bytestring, directory, filepath, text, process,
                         HUnit, test-framework, test-framework-hunit
   else
     buildable: False
