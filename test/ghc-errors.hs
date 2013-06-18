@@ -2289,7 +2289,7 @@ syntheticTests =
         assertNoErrors session
         idInfo <- getSpanInfo session
         -- TODO: we get very strange types for some of the constructors
-        assertIdInfo idInfo "A" (4,3,4,6) "Num (DataName) :: ghc-prim:GHC.Prim.~# * ($a) Int -> Int -> Expr ($a) defined in main:A at A.hs@4:3-4:6 (binding occurrence)"
+        assertIdInfo idInfo "A" (4,3,4,6) "Num (DataName) :: GHC.Prim.~# * ($a) Int -> Int -> Expr ($a) defined in main:A at A.hs@4:3-4:6 (binding occurrence)"
         assertIdInfo idInfo "A" (4,23,4,26) "Int (TcClsName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Int) (wired in to the compiler)"
         assertIdInfo idInfo "A" (7,3,7,7) "Cond (DataName) :: Expr Bool -> Expr a -> Expr a -> Expr a defined in main:A at A.hs@7:3-7:7 (binding occurrence)"
         assertIdInfo idInfo "A" (7,18,7,19) "a (TvName) defined in main:A at A.hs@7:18-7:19 (binding occurrence)"
