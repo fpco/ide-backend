@@ -1,6 +1,8 @@
 module Main where
 
 import Testing.TestPkgE
+import Testing.TestPkgF
 
 main :: IO ()
-main = putStrLn testPkgE
+main = do putStrLn testPkgE
+          putStrLn testPkgF
