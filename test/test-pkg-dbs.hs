@@ -4,30 +4,31 @@
     Since we will always have the global package DB (otherwise we get an
     internal error from ghc) install the ide-backend-rts into the global DB.
 
-    for testpkg-A
-
-      cabal install --prefix=/Users/dev/.cabal --global
-
-    for testpkg-B
-
-      cabal install
-
-    for testpkg-C
+    Create two custom databases:
 
       ghc-pkg init /Users/dev/.cabal/db1
-
-      cabal install --prefix=/Users/dev/.cabal \
-        --package-db=/Users/dev/.cabal/db1
-
-    for testpkg-D
-
       ghc-pkg init /Users/dev/.cabal/db2
 
-      cabal install --prefix=/Users/dev/.cabal \
-        --package-db=/Users/dev/.cabal/db2
+    install A, B, C, D:
+
+      testpkg-A    cabal install --prefix=/Users/dev/.cabal --global
+      testpkg-B    cabal install
+      testpkg-C    cabal install --prefix=/Users/dev/.cabal --package-db=/Users/dev/.cabal/db1
+      testpkg-D    cabal install --prefix=/Users/dev/.cabal --package-db=/Users/dev/.cabal/db2
 
     similar progression for testpkg-E-{0.1,0.2,0.3,0.4}
-    similar progression for testpkg-F-{A,B,C,D}
+
+    for testpkg-F the installation is a tad more complicated because we cannot
+    install all versions to the same prefix, because then they would all
+    overwrite each other
+
+      mkdir ~/.cabal/f
+      mkdir ~/.cabal/f/{a,b,c,d}
+
+      testpkg-F-A  cabal install --prefix=/Users/dev/.cabal/f/a --global
+      testpkg-F-B  cabal install --prefix=/Users/dev/.cabal/f/b
+      testpkg-F-C  cabal install --prefix=/Users/dev/.cabal/f/c --package-db=/Users/dev/.cabal/db1
+      testpkg-F-D  cabal install --prefix=/Users/dev/.cabal/f/d --package-db=/Users/dev/.cabal/db2
 -}
 
 import Prelude hiding (exp)
@@ -351,9 +352,11 @@ testOrderCabal pkg expectedOutput stack = do
   let config = defaultSessionConfig {
            configPackageDBStack  = dbStack home stack
          , configGenerateModInfo = False
+{-
          , configStaticOpts      = [ "-package base"
                                    , "-package testpkg-" ++ pkg
                                    ]
+-}
          }
 
   withSession config $ \session -> do
