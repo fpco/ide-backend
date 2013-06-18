@@ -81,6 +81,16 @@ ghcServerEngine configGenerateModInfo
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
     -- Register startup options and perhaps our plugin in dynamic flags.
+    -- This is the only place where the @packageDbArgs@ options are used
+    -- and indeed, as the first invocation of @setSessionDynFlags@,
+    -- this is the only place they could take any effect.
+    -- This also implies that any options specifying package DBs
+    -- passed via @updateGhcOptions@ won't have any effect in GHC API
+    -- TODO: ban them or at least filter them out from the options
+    -- passed to Cabal in @buildExe@ (where they could have some effect).
+    -- TODO: options like "-hide-all-packages" or "-package foo"
+    -- are suspect as well, even though they work on subsequent invocations
+    -- of @updateGhcOptions@, because they nullify and replace cabal commands.
     initialDynFlags <- getSessionDynFlags
     (flags, _, _) <- parseDynamicFlags initialDynFlags dOpts
     let dynFlags | configGenerateModInfo = flags {

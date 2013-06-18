@@ -532,6 +532,7 @@ buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     let SessionConfig{ configDynLink
                      , configPackageDBStack
                      , configStaticOpts } = ideConfig
+        -- Note that these do not contain the @packageDbArgs@ options.
         ghcOpts = fromMaybe configStaticOpts ghcNewOpts
     exitCode <- lift $ Ex.bracket
       Dir.getCurrentDirectory

@@ -17,7 +17,7 @@ import IdeSession
 -- test file to fail. The same file type-checks OK with the ghc-errors
 -- test program (with no GHC extensions set).
 defOpts :: [String]
-defOpts = [ "-hide-all-packages"
+defOpts = [ "-hide-all-packages"  -- make sure we don't depend on local pkgs
           , "-XCPP"
           , "-XNoTemplateHaskell"  -- TH not available when profiling
           , "-XBangPatterns"
