@@ -352,11 +352,9 @@ testOrderCabal pkg expectedOutput stack = do
   let config = defaultSessionConfig {
            configPackageDBStack  = dbStack home stack
          , configGenerateModInfo = False
-{-
          , configStaticOpts      = [ "-package base"
                                    , "-package testpkg-" ++ pkg
                                    ]
--}
          }
 
   withSession config $ \session -> do
