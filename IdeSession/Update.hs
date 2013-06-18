@@ -520,15 +520,21 @@ runStmt IdeSession{ideState} m fun = do
 -- subdirectory of @getDistDir@, in subdirectories corresponding to the given
 -- module names. The build directory does not overlap with any of the other
 -- used directories and its path.
+--
+-- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
 buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
     let SessionConfig{ configDynLink
                      , configPackageDBStack
+                     , configGenerateModInfo
                      , configStaticOpts } = ideConfig
         -- Note that these do not contain the @packageDbArgs@ options.
         ghcOpts = fromMaybe configStaticOpts ghcNewOpts
+    when (not configGenerateModInfo) $
+      -- TODO: replace the check with an inspection of state component (#87)
+      fail "Features using cabal API require configGenerateModInfo, currently (#86)."
     exitCode <- lift $ Ex.bracket
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
@@ -543,14 +549,20 @@ buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 -- it needs the project modules to be already loaded within the session
 -- and the generated docs can be found in the @doc@ subdirectory
 -- of @getDistDir@.
+--
+-- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildDoc :: IdeSessionUpdate
 buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
     let SessionConfig{ configDynLink
                      , configPackageDBStack
+                     , configGenerateModInfo
                      , configStaticOpts } = ideConfig
         ghcOpts = fromMaybe configStaticOpts ghcNewOpts
+    when (not configGenerateModInfo) $
+      -- TODO: replace the check with an inspection of state component (#87)
+      fail "Features using cabal API require configGenerateModInfo, currently (#86)."
     exitCode <- lift $ Ex.bracket
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
@@ -564,10 +576,17 @@ buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 -- Similarly to 'buildExe', it needs the project modules to be already
 -- loaded within the session and the concatenated licences can be found
 -- in the @licenses.txt@ file of @getDistDir@.
+--
+-- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildLicenses :: FilePath -> IdeSessionUpdate
 buildLicenses cabalsDir = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     mcomputed <- get ideComputed
-    let SessionConfig{configPackageDBStack, configLicenseExc} = ideConfig
+    let SessionConfig{ configPackageDBStack
+                     , configGenerateModInfo
+                     , configLicenseExc } = ideConfig
+    when (not configGenerateModInfo) $
+      -- TODO: replace the check with an inspection of state component (#87)
+      fail "Features using cabal API require configGenerateModInfo, currently (#86)."
     exitCode <-
       lift $ buildLicenseCatenation cabalsDir ideDistDir configPackageDBStack
                                     configLicenseExc mcomputed callback

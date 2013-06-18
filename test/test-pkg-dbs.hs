@@ -211,11 +211,6 @@ configToOutput = concatMap aux
   where
     aux (pkg, _) = pkgOut pkg
 
-configToStaticOpts :: Configuration -> [String]
-configToStaticOpts = map aux
-  where
-    aux (pkg, _) = "-package " ++ pkgName pkg
-
 {------------------------------------------------------------------------------
   Test which configurations are valid
 
@@ -281,8 +276,7 @@ testDBsCabal cfg = do
 
   let config = defaultSessionConfig {
            configPackageDBStack  = dbStack home $ configToPkgDBStack cfg
-         , configGenerateModInfo = False
-         , configStaticOpts      = ["-package base"] ++ configToStaticOpts cfg
+         , configGenerateModInfo = True  -- see #86
          }
 
   withSession config $ \session -> do
@@ -377,10 +371,7 @@ testOrderCabal pkg expectedOutput stack = do
 
   let config = defaultSessionConfig {
            configPackageDBStack  = dbStack home stack
-         , configGenerateModInfo = False
-         , configStaticOpts      = [ "-package base"
-                                   , "-package testpkg-" ++ pkg
-                                   ]
+         , configGenerateModInfo = True  -- see #86
          }
 
   withSession config $ \session -> do
