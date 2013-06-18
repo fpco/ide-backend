@@ -6,6 +6,7 @@ module Conv (
   , moduleToModuleId
   ) where
 
+import Prelude hiding (mod)
 import Control.Applicative ((<$>))
 import qualified Data.Text as Text
 import Data.List (stripPrefix)

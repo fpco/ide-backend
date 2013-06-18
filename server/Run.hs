@@ -40,7 +40,7 @@ module Run
   , RunBufferMode(..)
   ) where
 
-#define DEBUG 1
+#define DEBUG 0
 
 import Prelude hiding (mod)
 
@@ -291,14 +291,14 @@ autocompletion summary = do
                                  } = do
         let go :: RnM (a, GlobalRdrEnv, b, c) -> IO [GlobalRdrElt]
             go op = do
-              ((_warns, errs), res) <- initTc session ms_hsc_src False ms_mod op
+              ((_warns, _errs), res) <- initTc session ms_hsc_src False ms_mod op
               case res of
                 Nothing -> do
                   -- TODO: deal with import errors
 #if DEBUG
                   appendFile "/tmp/ghc.importerrors" $ show
                                                      . map GHC.showSDoc
-                                                     $ ErrUtils.pprErrMsgBag errs
+                                                     $ ErrUtils.pprErrMsgBag _errs
 #endif
                   return []
                 Just (_, elts, _, _) ->

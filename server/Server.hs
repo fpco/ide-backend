@@ -40,7 +40,7 @@ import GhcMonad(Ghc(..))
 
 import Run
 import HsWalk
-import Haddock
+import Haddock (pkgDepsFromModSummary, updatePkgDepsFor)
 import Debug
 
 --------------------------------------------------------------------------------

@@ -37,7 +37,7 @@ import Control.Monad (when, void, forM, unless)
 import Control.Monad.State (MonadState, StateT, execStateT, lift)
 import Control.Monad.IO.Class (liftIO)
 import qualified Control.Exception as Ex
-import Data.List (delete)
+import Data.List (delete, elemIndices)
 import Data.Monoid (Monoid(..))
 import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
@@ -135,14 +135,9 @@ verifyConfig SessionConfig{..} = do
     checkPackageDbEnvVar
   where
     isValidPackageDB :: PackageDBStack -> Bool
-    isValidPackageDB _ = True
-   {-
-    isValidPackageDB [GlobalPackageDB] = True
-    isValidPackageDB [GlobalPackageDB, UserPackageDB] = True
-    isValidPackageDB [GlobalPackageDB, SpecificPackageDB _] = True
-    isValidPackageDB [GlobalPackageDB, UserPackageDB, SpecificPackageDB _] = True
-    isValidPackageDB _ = False
-   -}
+    isValidPackageDB stack =
+          elemIndices GlobalPackageDB stack == [0]
+       && elemIndices UserPackageDB stack `elem` [[], [1]]
 
 -- Copied directly from Cabal
 checkPackageDbEnvVar :: IO ()

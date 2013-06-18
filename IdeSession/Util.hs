@@ -216,5 +216,5 @@ restoreHandle :: Handle -> Fd -> FdBackup -> IO ()
 restoreHandle h fd fdBackup = do
   hFlush h
   closeFd fd
-  dup fdBackup
+  _ <- dup fdBackup
   closeFd fdBackup

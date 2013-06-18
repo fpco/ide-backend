@@ -160,7 +160,7 @@ extractIdsPlugin symbolRef = HscPlugin {..}
                                     -> HsQuasiQuote Name
                                     -> m (HsQuasiQuote Name)
     runHscQQ env qq@(HsQuasiQuote quoter _span _str) = liftIO $ do
-#ifdef DEBUG
+#if DEBUG
       appendFile "/tmp/ghc.qq" $ showSDoc (ppr qq)
 #endif
 
