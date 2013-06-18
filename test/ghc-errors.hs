@@ -469,14 +469,7 @@ syntheticTests =
         -- assertEqual "Main with cabal macro exe output" "5\n" mOut
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package mtl"
-                        , "-package base"
-                        , "-package array"
-                        , "-package bytestring"
-                        , "-package containers"
-                        , "-package binary"
-                        ]
+    , let packageOpts = []
       in withConfiguredSession packageOpts $ \session -> do
         let update = updateDataFileFromFile "EventLogFormat.h"
                                             "test/Puns/EventLogFormat.h"
@@ -499,14 +492,7 @@ syntheticTests =
 --      assertNoErrors msgs2
     )
   , ( "Build licenses from NamedFieldPuns"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package mtl"
-                        , "-package base"
-                        , "-package array"
-                        , "-package bytestring"
-                        , "-package containers"
-                        , "-package binary"
-                        ]
+    , let packageOpts = []
       in withConfiguredSession packageOpts $ \session -> do
         loadModulesFrom session "test/Puns"
         let upd = buildLicenses "test/Puns/cabals"
@@ -526,14 +512,7 @@ syntheticTests =
         assertEqual "licenses length" 27142 (length licenses)
     )
   , ( "Build licenses with wrong cabal files and fail"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package mtl"
-                        , "-package base"
-                        , "-package array"
-                        , "-package bytestring"
-                        , "-package containers"
-                        , "-package binary"
-                        ]
+    , let packageOpts = []
       in withConfiguredSession packageOpts $ \session -> do
         loadModulesFrom session "test/Puns"
         let upd = buildLicenses "test/Puns/cabals/parse_error"
@@ -577,7 +556,7 @@ syntheticTests =
           (BSLC.pack "new content\n") output2
     )
   , ( "Test CWD in executable building"
-    , let packageOpts = defOpts ++ ["-package template-haskell"]
+    , let packageOpts = []
       in withConfiguredSession packageOpts $ \session -> do
         let update = updateCodeGeneration True
                      <> updateDataFile "test.txt" (BSLC.pack "test data")
@@ -639,8 +618,7 @@ syntheticTests =
         assertOneError session
     )
   , ( "Test TH; code generation on"
-    , let packageOpts =
-            defOpts ++ ["-package template-haskell", "-XTemplateHaskell"]
+    , let packageOpts = defOpts ++ ["-XTemplateHaskell"]
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test"
         (originalUpdate, lm) <- getModulesFrom session "TH"
@@ -655,7 +633,7 @@ syntheticTests =
           _ -> assertFailure "Unexpected snippet run result"
     )
   , ( "Build executable from TH"
-    , let packageOpts = defOpts ++ ["-package template-haskell", "-XTemplateHaskell"]
+    , let packageOpts = defOpts ++ ["-XTemplateHaskell"]
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test"
         (originalUpdate, lm) <- getModulesFrom session "TH"
@@ -673,7 +651,7 @@ syntheticTests =
                     out
     )
   , ( "Build haddocks from TH"
-    , let packageOpts = defOpts ++ ["-package template-haskell", "-XTemplateHaskell"]
+    , let packageOpts = defOpts ++ ["-XTemplateHaskell"]
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test"
         (originalUpdate, lm) <- getModulesFrom session "TH"
@@ -707,9 +685,7 @@ syntheticTests =
         assertIdInfo idInfo "Good" (8,1,8,2) "x (VarName) :: [a] defined in main:Good at Good.hs@8:1-8:2 (binding occurrence)"
     )
   , ( "Reject a wrong CPP directive"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-XCPP"
-                        ]
+    , let packageOpts = ["-XCPP"]
       in withConfiguredSession packageOpts $ \session -> do
         let update = loadModule "M.hs" "#ifdef"
                      <> updateCodeGeneration True
@@ -1627,6 +1603,22 @@ syntheticTests =
         -}
     )
   , ( "Build executable from Main"
+    , let packageOpts = []
+      in withConfiguredSession packageOpts $ \session -> do
+        setCurrentDirectory "test/MainModule"
+        loadModulesFrom session "."
+        assertNoErrors session
+        setCurrentDirectory "../../"
+        let m = "Main"
+            upd = buildExe [(Text.pack m, "ParFib.hs")]
+        updateSessionD session upd 4
+        distDir <- getDistDir session
+        fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "ParFib exe output"
+                    "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                    fibOut
+    )
+  , ( "Build executable from Main with explicit -package"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"
                         , "-package parallel"
@@ -1647,11 +1639,7 @@ syntheticTests =
                     fibOut
     )
   , ( "Build executable from ParFib.Main"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package base"
-                        , "-package parallel"
-                        , "-package old-time"
-                        ]
+    , let packageOpts = []
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
@@ -1670,11 +1658,7 @@ syntheticTests =
                     fibOut
     )
   , ( "Build executable and fail"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package base"
-                        , "-package parallel"
-                        , "-package old-time"
-                        ]
+    , let packageOpts = []
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
@@ -1689,11 +1673,7 @@ syntheticTests =
         assertEqual "failure after exe build" (Just $ ExitFailure 1) status1
     )
   , ( "Build haddocks from ParFib"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package base"
-                        , "-package parallel"
-                        , "-package old-time"
-                        ]
+    , let packageOpts = []
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
@@ -1711,11 +1691,7 @@ syntheticTests =
         (withConfiguredSessionDetailed True [] defOpts $ \_ -> return ())
     )
   , ( "Build licenses from ParFib"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package base"
-                        , "-package parallel"
-                        , "-package old-time"
-                        ]
+    , let packageOpts = []
       in withConfiguredSession packageOpts $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
@@ -1736,19 +1712,7 @@ syntheticTests =
         assertEqual "licenses length" 21409 (length licenses)
     )
   -- , ( "Build licenses from Cabal"
-  --   , let packageOpts = [ "-hide-all-packages"
-  --                       , "-package base"
-  --                       , "-package deepseq"
-  --                       , "-package filepath"
-  --                       , "-package directory"
-  --                       , "-package process"
-  --                       , "-package old-time"
-  --                       , "-package containers"
-  --                       , "-package array"
-  --                       , "-package pretty"
-  --                       , "-package bytestring"
-  --                       , "-package unix"
-  --                       ]
+  --   , let packageOpts = []
   --     in withConfiguredSession packageOpts $ \session -> do
   --       setCurrentDirectory "test/Cabal"
   --       loadModulesFrom session "."
@@ -1884,8 +1848,7 @@ syntheticTests =
     )
   , ( "Type information 5: External packages, type sigs, scoped type vars, kind sigs"
     , let opts = defOpts ++ [
-                     "-package parallel"
-                   , "-XScopedTypeVariables"
+                     "-XScopedTypeVariables"
                    , "-XKindSignatures"
                    ]
       in withConfiguredSession opts $ \session -> do
@@ -2057,7 +2020,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,9,2,13) infoPrint
     )
   , ( "Type information 9a: Quasi-quotation (QQ in own package)"
-    , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
@@ -2105,7 +2068,7 @@ syntheticTests =
         assertIdInfo idInfo "B" (7,7,7,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter defined in main:A at A.hs@4:1-4:3 (imported from main:A at B.hs@3:1-3:9)"
     )
   , ( "Type information 9b: Quasi-quotation (QQ in separate package, check home module info)"
-    , withConfiguredSession ("-package template-haskell" : "-package yesod" : defOpts) $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateModule "Main.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TypeFamilies, QuasiQuotes, MultiParamTypeClasses,"
@@ -2139,7 +2102,7 @@ syntheticTests =
             putStrLn "WARNING: Skipping due to errors (probably yesod package not installed)"
     )
   , ( "Type information 10: Template Haskell"
-    , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
@@ -2193,7 +2156,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,8,2,13) "print (VarName) :: Show a => a -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
     )
   , ( "Type information 12: Take advantage of scope (2)"
-    , withConfiguredSession ("-package bytestring" : defOpts) $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString (append)"
@@ -2205,7 +2168,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (3,7,3,13) "append (VarName) :: Data.ByteString.Internal.ByteString -> Data.ByteString.Internal.ByteString -> Data.ByteString.Internal.ByteString defined in bytestring-0.9.2.1:Data.ByteString at <no location info> (home bytestring-0.9.2.1:Data.ByteString) (imported from bytestring-0.9.2.1:Data.ByteString at A.hs@2:25-2:31)"
     )
   , ( "Type information 13: Take advantage of scope (3)"
-    , withConfiguredSession ("-package bytestring" : defOpts) $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString"
@@ -2217,7 +2180,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (3,7,3,13) "append (VarName) :: ByteString -> ByteString -> ByteString defined in bytestring-0.9.2.1:Data.ByteString at <no location info> (home bytestring-0.9.2.1:Data.ByteString) (imported from bytestring-0.9.2.1:Data.ByteString at A.hs@2:1-2:23)"
     )
   , ( "Type information 14: Take advantage of scope (4)"
-    , withConfiguredSession ("-package bytestring" : defOpts) $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString (append)"
@@ -2375,7 +2338,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (9,25,9,29) "Bool (TcClsName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)"
     )
   , ( "Test internal consistency of local id markers"
-    , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import qualified Text.PrettyPrint as Disp"
@@ -2389,7 +2352,7 @@ syntheticTests =
         assertOneError session
     )
   , ( "Test internal consistency of imported id markers"
-    , withConfiguredSession ("-package pretty" : defOpts) $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import qualified Text.PrettyPrint as Disp"
@@ -2407,7 +2370,7 @@ syntheticTests =
         assertNoErrors session
     )
   , ( "Autocomplete 1: Imports for partial module"
-    , withConfiguredSession ("-XPackageImports" : "-package parallel" : defOpts) $ \session -> do
+    , withConfiguredSession ("-XPackageImports" : defOpts) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import Control.Monad"
@@ -2606,7 +2569,7 @@ syntheticTests =
         assertEqual "" [Text.pack "M"] mods
     )
   , ( "Package dependencies"
-    , withConfiguredSession ("-package mtl" : "-package parallel" : defOpts) $ \session -> do
+    , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     ])
@@ -2703,10 +2666,7 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Register a package, don't restart session, don't see the package"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package base"
-                        , "-package simple-lib17"
-                        ]
+    , let packageOpts = ["-package simple-lib17"]
       in withConfiguredSession packageOpts $ \session -> do
         deletePackage "test/simple-lib17"
         restartSession session
@@ -2724,10 +2684,7 @@ syntheticTests =
         deletePackage "test/simple-lib17"
     )
   , ( "Register a package, restart session, see the package"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package base"
-                        , "-package simple-lib17"
-                        ]
+    , let packageOpts = []
       in withConfiguredSession packageOpts $ \session -> do
         deletePackage "test/simple-lib17"
         restartSession session
@@ -2826,7 +2783,7 @@ diff (x:xs) (y:ys)
   | otherwise = diff xs ys
 
 defOpts :: [String]
-defOpts = [ "-hide-all-packages", "-package base" ]
+defOpts = []
 
 -- Set of projects and options to use for them.
 projects :: [(String, FilePath, [String])]
@@ -2834,27 +2791,11 @@ projects =
   [ ("A depends on B, throws exception", "test/ABnoError", defOpts)
   , ( "Cabal code"
     , "test/Cabal"
-    , [ "-hide-all-packages"
-      , "-package base"
-      , "-package deepseq"
-      , "-package filepath"
-      , "-package directory"
-      , "-package process"
-      , "-package old-time"
-      , "-package containers"
-      , "-package array"
-      , "-package pretty"
-      , "-package bytestring"
-      , "-package unix"
-      ]
+    , []
     )
   , ("A single file with a code to run in parallel"
     , "test/MainModule"
-    , [ "-hide-all-packages"
-      , "-package base"
-      , "-package parallel"
-      , "-package old-time"
-      ])
+    , [])
   ]
 
 -- Driver
