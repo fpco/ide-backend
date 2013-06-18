@@ -416,7 +416,7 @@ syntheticTests =
         status1 <- getBuildDocStatus session
         assertEqual "failure after doc build" (Just $ ExitFailure 1) status1
     )
-  , ( "Use cabal macro for a package we really depend on"
+  , ( "Use cabal macro MIN_VERSION for a package we really depend on"
     , let packageOpts = defOpts ++ ["-XCPP"]
       in withConfiguredSession packageOpts $ \session -> do
         macros <- getSourceModule "cabal_macros.h" session
@@ -433,6 +433,7 @@ syntheticTests =
         assertNoErrors session
         let update2 = updateCodeGeneration True
         updateSessionD session update2 1
+        assertNoErrors session
         runActions <- runStmt session "Main" "main"
         (output, _) <- runWaitAll runActions
         assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
@@ -443,7 +444,7 @@ syntheticTests =
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "Main with cabal macro exe output" "5\n" mOut
     )
-  , ( "Use cabal macro for a package we don't really depend on"
+  , ( "Use cabal macro MIN_VERSION for a package we don't really depend on"
     , let packageOpts = defOpts ++ ["-XCPP"]
       in withConfiguredSession packageOpts $ \session -> do
         let update = updateModule "Main.hs" $ BSLC.pack $ unlines
@@ -457,6 +458,7 @@ syntheticTests =
         assertNoErrors session
         let update2 = updateCodeGeneration True
         updateSessionD session update2 1
+        assertNoErrors session
         runActions <- runStmt session "Main" "main"
         (output, _) <- runWaitAll runActions
         assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
@@ -467,6 +469,59 @@ syntheticTests =
         -- distDir <- getDistDir session
         -- mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         -- assertEqual "Main with cabal macro exe output" "5\n" mOut
+    )
+  , ( "Use cabal macro VERSION by checking if defined"
+    , let packageOpts = defOpts ++ ["-XCPP"]
+      in withConfiguredSession packageOpts $ \session -> do
+        macros <- getSourceModule "cabal_macros.h" session
+        assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
+        let update = updateModule "M.hs" $ BSLC.pack $ unlines
+              [ "module M where"
+              , "#ifdef VERSION_base"
+              , ""
+              , "#if defined(VERSION_base)"
+              , "main = print 5"
+              , "#else"
+              , "terrible error"
+              , "#endif"
+              , ""
+              , "#else"
+              , "terrible error 2"
+              , "#endif"
+              ]
+        updateSessionD session (update <> updateCodeGeneration True) 1
+        assertNoErrors session
+        runActions <- runStmt session "M" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
+        let m = "M"
+            upd = buildExe [(Text.pack m, "M.hs")]
+        updateSessionD session upd 4
+        distDir <- getDistDir session
+        mOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "M with cabal macro exe output" "5\n" mOut
+    )
+  , ( "Use cabal macro VERSION by including the macros file"
+    , let packageOpts = defOpts ++ ["-XCPP"]
+      in withConfiguredSession packageOpts $ \session -> do
+        macros <- getSourceModule "cabal_macros.h" session
+        assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
+        let update = updateModule "M.hs" $ BSLC.pack $ unlines
+              [ "module M where"
+              , "#include \"cabal_macros.h\""
+              , "main = print $ VERSION_base == \"foo\""
+              ]
+        updateSessionD session (update <> updateCodeGeneration True) 1
+        assertNoErrors session
+        runActions <- runStmt session "M" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "result of ifdefed print 5" (BSLC.pack "False\n") output
+        let m = "M"
+            upd = buildExe [(Text.pack m, "M.hs")]
+        updateSessionD session upd 4
+        distDir <- getDistDir session
+        mOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "M with cabal macro exe output" "False\n" mOut
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = []
