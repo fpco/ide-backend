@@ -27,8 +27,10 @@
         --package-db=/Users/dev/.cabal/db2
 
     similar progression for testpkg-E-{0.1,0.2,0.3,0.4}
+    similar progression for testpkg-F-{A,B,C,D}
 -}
 
+import Prelude hiding (exp)
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertEqual, assertFailure, assertBool)
@@ -53,8 +55,14 @@ import IdeSession
   the user's home directory
 ------------------------------------------------------------------------------}
 
-data Pkg        = A | B | C | D | E1 | E2 | E3 | E4 deriving Show
-data PkgDB      = Global | User | DB1 | DB2         deriving (Show, Eq)
+data Pkg = A  | B  | C  | D
+         | E1 | E2 | E3 | E4
+         | FA | FB | FC | FD
+  deriving (Show, Eq, Ord, Enum)
+
+data PkgDB = Global | User | DB1 | DB2
+  deriving (Show, Eq)
+
 type PkgDBStack = [PkgDB]
 
 pkgMod :: Pkg -> String
@@ -66,6 +74,10 @@ pkgMod E1 = "Testing.TestPkgE"
 pkgMod E2 = "Testing.TestPkgE"
 pkgMod E3 = "Testing.TestPkgE"
 pkgMod E4 = "Testing.TestPkgE"
+pkgMod FA = "Testing.TestPkgF"
+pkgMod FB = "Testing.TestPkgF"
+pkgMod FC = "Testing.TestPkgF"
+pkgMod FD = "Testing.TestPkgF"
 
 pkgName :: Pkg -> String
 pkgName A  = "testpkg-A"
@@ -76,6 +88,10 @@ pkgName E1 = "testpkg-E"
 pkgName E2 = "testpkg-E"
 pkgName E3 = "testpkg-E"
 pkgName E4 = "testpkg-E"
+pkgName FA = "testpkg-F"
+pkgName FB = "testpkg-F"
+pkgName FC = "testpkg-F"
+pkgName FD = "testpkg-F"
 
 pkgFun :: Pkg -> String
 pkgFun A  = "testPkgA"
@@ -86,6 +102,10 @@ pkgFun E1 = "testPkgE"
 pkgFun E2 = "testPkgE"
 pkgFun E3 = "testPkgE"
 pkgFun E4 = "testPkgE"
+pkgFun FA = "testPkgF"
+pkgFun FB = "testPkgF"
+pkgFun FC = "testPkgF"
+pkgFun FD = "testPkgF"
 
 pkgDB :: Pkg -> PkgDB
 pkgDB A  = Global
@@ -96,6 +116,10 @@ pkgDB E1 = Global
 pkgDB E2 = User
 pkgDB E3 = DB1
 pkgDB E4 = DB2
+pkgDB FA = Global
+pkgDB FB = User
+pkgDB FC = DB1
+pkgDB FD = DB2
 
 dbE :: PkgDB -> Pkg
 dbE Global = E1
@@ -103,14 +127,11 @@ dbE User   = E2
 dbE DB1    = E3
 dbE DB2    = E4
 
-db :: FilePath -> PkgDB -> PackageDB
-db _home Global = GlobalPackageDB
-db _home User   = UserPackageDB
-db  home DB1    = SpecificPackageDB $ home </> ".cabal/db1"
-db  home DB2    = SpecificPackageDB $ home </> ".cabal/db2"
-
-dbStack :: FilePath -> PkgDBStack -> PackageDBStack
-dbStack = map . db
+dbF :: PkgDB -> Pkg
+dbF Global = FA
+dbF User   = FB
+dbF DB1    = FC
+dbF DB2    = FD
 
 pkgOut :: Pkg -> String
 pkgOut A  = "This is test package A\n"
@@ -121,6 +142,19 @@ pkgOut E1 = "This is test package E-0.1\n"
 pkgOut E2 = "This is test package E-0.2\n"
 pkgOut E3 = "This is test package E-0.3\n"
 pkgOut E4 = "This is test package E-0.4\n"
+pkgOut FA = "This is test package F-A\n"
+pkgOut FB = "This is test package F-B\n"
+pkgOut FC = "This is test package F-C\n"
+pkgOut FD = "This is test package F-D\n"
+
+db :: FilePath -> PkgDB -> PackageDB
+db _home Global = GlobalPackageDB
+db _home User   = UserPackageDB
+db  home DB1    = SpecificPackageDB $ home </> ".cabal/db1"
+db  home DB2    = SpecificPackageDB $ home </> ".cabal/db2"
+
+dbStack :: FilePath -> PkgDBStack -> PackageDBStack
+dbStack = map . db
 
 {------------------------------------------------------------------------------
   Test configuration (which packages and which package DBs do we load?)
@@ -256,7 +290,7 @@ configs isValid = filter isValid $ concatMap aux packages
       return $ (pkg, loadDB) : config
 
     packages :: [[Pkg]]
-    packages = concatMap permutations $ subsequences [A, B, C, D]
+    packages = concatMap permutations $ subsequences [A .. D]
 
 validPkgDBStack :: PkgDBStack -> Bool
 validPkgDBStack stack =
@@ -278,8 +312,8 @@ validCfg cfg = validPkgDBStack (configToPkgDBStack cfg)
   {global, user, DB1, DB2} and check that we get the right version.
 ------------------------------------------------------------------------------}
 
-testOrderGhc :: PkgDBStack -> Assertion
-testOrderGhc stack = do
+testOrderGhc :: String -> (PkgDBStack -> String) -> PkgDBStack -> Assertion
+testOrderGhc pkg expectedOutput stack = do
   home <- getHomeDirectory
 
   let config = defaultSessionConfig {
@@ -289,8 +323,8 @@ testOrderGhc stack = do
 
   withSession config $ \session -> do
     let prog = unlines $ [
-                   "import Testing.TestPkgE"
-                 , "main = putStrLn testPkgE"
+                   "import Testing.TestPkg" ++ pkg
+                 , "main = do putStrLn testPkg" ++ pkg
                  ]
     let upd = (updateCodeGeneration True)
            <> (updateModule "Main.hs" . BSLC.pack $ prog)
@@ -307,23 +341,25 @@ testOrderGhc stack = do
     runActions <- runStmt session "Main" "main"
     (output, result) <- runWaitAll runActions
     case result of
-      RunOk _ -> assertEqual "" (pkgOut . dbE . last $ stack) (BSLC.unpack output)
+      RunOk _ -> assertEqual "" (expectedOutput stack) (BSLC.unpack output)
       _       -> assertFailure $ "Unexpected run result: " ++ show result
 
-testOrderCabal :: PkgDBStack -> Assertion
-testOrderCabal stack = do
+testOrderCabal :: String -> (PkgDBStack -> String) -> PkgDBStack -> Assertion
+testOrderCabal pkg expectedOutput stack = do
   home <- getHomeDirectory
 
   let config = defaultSessionConfig {
            configPackageDBStack  = dbStack home stack
          , configGenerateModInfo = False
-         , configStaticOpts      = ["-package base", "-package testpkg-E"]
+         , configStaticOpts      = [ "-package base"
+                                   , "-package testpkg-" ++ pkg
+                                   ]
          }
 
   withSession config $ \session -> do
     let prog = unlines $ [
-                   "import Testing.TestPkgE"
-                 , "main = putStrLn testPkgE"
+                   "import Testing.TestPkg" ++ pkg
+                 , "main = putStrLn testPkg" ++ pkg
                  ]
     let upd = (updateCodeGeneration False)
            <> (updateModule "Main.hs" . BSLC.pack $ prog)
@@ -343,7 +379,7 @@ testOrderCabal stack = do
 
     distDir <- getDistDir session
     out     <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
-    assertEqual "" (pkgOut . dbE . last $ stack) out
+    assertEqual "" (expectedOutput stack) out
 
 orderStacks :: [PkgDBStack]
 orderStacks = filter validPkgDBStack
@@ -370,16 +406,24 @@ tests = [
         -- compile.
       , testGroup "Cabal" $ map testCaseDBsCabal (configs validCfg)
       ]
-  , testGroup "Check package DB order" [
-        testGroup "GHC"   $ map testCaseOrderGhc   orderStacks
-      , testGroup "Cabal" $ map testCaseOrderCabal orderStacks
+  , testGroup "Check package DB order (different versions in different DBs)" [
+        testGroup "GHC"   $ map (testCaseOrderGhc   "E" expectedOutputE) orderStacks
+      , testGroup "Cabal" $ map (testCaseOrderCabal "E" expectedOutputE) orderStacks
+      ]
+  , testGroup "Check package DB order (same version in all DBs)" [
+        testGroup "GHC"   $ map (testCaseOrderGhc   "F" expectedOutputF) orderStacks
+      , testGroup "Cabal" $ map (testCaseOrderCabal "F" expectedOutputF) orderStacks
       ]
   ]
   where
     testCaseDBsGhc     cfg   = testCase (show cfg)   (testDBsGhc     cfg)
     testCaseDBsCabal   cfg   = testCase (show cfg)   (testDBsCabal   cfg)
-    testCaseOrderGhc   stack = testCase (show stack) (testOrderGhc   stack)
-    testCaseOrderCabal stack = testCase (show stack) (testOrderCabal stack)
+    testCaseOrderGhc   pkg exp stack = testCase (show stack) (testOrderGhc   pkg exp stack)
+    testCaseOrderCabal pkg exp stack = testCase (show stack) (testOrderCabal pkg exp stack)
+
+    expectedOutputE, expectedOutputF :: PkgDBStack -> String
+    expectedOutputE = pkgOut . maximum . map dbE
+    expectedOutputF = pkgOut . last    . map dbF
 
 main :: IO ()
 main = defaultMain tests
