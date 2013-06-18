@@ -11,10 +11,10 @@
 
     install A, B, C, D:
 
-      testpkg-A    cabal install --prefix=/Users/dev/.cabal --global
-      testpkg-B    cabal install
-      testpkg-C    cabal install --prefix=/Users/dev/.cabal --package-db=/Users/dev/.cabal/db1
-      testpkg-D    cabal install --prefix=/Users/dev/.cabal --package-db=/Users/dev/.cabal/db2
+      testpkg-A      cabal install --prefix=/Users/dev/.cabal --global
+      testpkg-B      cabal install
+      testpkg-C      cabal install --prefix=/Users/dev/.cabal --package-db=/Users/dev/.cabal/db1
+      testpkg-D      cabal install --prefix=/Users/dev/.cabal --package-db=/Users/dev/.cabal/db2
 
     similar progression for testpkg-E-{0.1,0.2,0.3,0.4}
 
@@ -25,10 +25,19 @@
       mkdir ~/.cabal/f
       mkdir ~/.cabal/f/{a,b,c,d}
 
-      testpkg-F-A  cabal install --prefix=/Users/dev/.cabal/f/a --global
-      testpkg-F-B  cabal install --prefix=/Users/dev/.cabal/f/b
-      testpkg-F-C  cabal install --prefix=/Users/dev/.cabal/f/c --package-db=/Users/dev/.cabal/db1
-      testpkg-F-D  cabal install --prefix=/Users/dev/.cabal/f/d --package-db=/Users/dev/.cabal/db2
+      testpkg-F-A    cabal install --prefix=/Users/dev/.cabal/f/a --global
+      testpkg-F-B    cabal install --prefix=/Users/dev/.cabal/f/b
+      testpkg-F-C    cabal install --prefix=/Users/dev/.cabal/f/c --package-db=/Users/dev/.cabal/db1
+      testpkg-F-D    cabal install --prefix=/Users/dev/.cabal/f/d --package-db=/Users/dev/.cabal/db2
+
+    for testpkg-G we test what happens when one DB contains multiple versions
+    of the same package: 0.1 in User, {0.2,0.3} in Global, and {0.3,0.4} in DB1
+
+      testpkg-G-0.1  cabal install --prefix=/Users/dev/.cabal --global
+      testpkg-G-0.2  cabal install --prefix=/Users/dev/.cabal
+      testpkg-G-0.3  cabal install --prefix=/Users/dev/.cabal
+      testpkg-G-0.3  cabal install --prefix=/Users/dev/.cabal --package-db=/Users/dev/.cabal/db1
+      testpkg-G-0.4  cabal install --prefix=/Users/dev/.cabal --package-db=/Users/dev/.cabal/db1
 -}
 
 import Prelude hiding (exp)
@@ -59,6 +68,7 @@ import IdeSession
 data Pkg = A  | B  | C  | D
          | E1 | E2 | E3 | E4
          | FA | FB | FC | FD
+         | G1 | G2 | G3 | G4
   deriving (Show, Eq, Ord, Enum)
 
 data PkgDB = Global | User | DB1 | DB2
@@ -79,6 +89,10 @@ pkgMod FA = "Testing.TestPkgF"
 pkgMod FB = "Testing.TestPkgF"
 pkgMod FC = "Testing.TestPkgF"
 pkgMod FD = "Testing.TestPkgF"
+pkgMod G1 = "Testing.TestPkgG"
+pkgMod G2 = "Testing.TestPkgG"
+pkgMod G3 = "Testing.TestPkgG"
+pkgMod G4 = "Testing.TestPkgG"
 
 pkgName :: Pkg -> String
 pkgName A  = "testpkg-A"
@@ -93,6 +107,10 @@ pkgName FA = "testpkg-F"
 pkgName FB = "testpkg-F"
 pkgName FC = "testpkg-F"
 pkgName FD = "testpkg-F"
+pkgName G1 = "testpkg-G"
+pkgName G2 = "testpkg-G"
+pkgName G3 = "testpkg-G"
+pkgName G4 = "testpkg-G"
 
 pkgFun :: Pkg -> String
 pkgFun A  = "testPkgA"
@@ -107,6 +125,10 @@ pkgFun FA = "testPkgF"
 pkgFun FB = "testPkgF"
 pkgFun FC = "testPkgF"
 pkgFun FD = "testPkgF"
+pkgFun G1 = "testPkgG"
+pkgFun G2 = "testPkgG"
+pkgFun G3 = "testPkgG"
+pkgFun G4 = "testPkgG"
 
 pkgDB :: Pkg -> PkgDB
 pkgDB A  = Global
@@ -147,6 +169,10 @@ pkgOut FA = "This is test package F-A\n"
 pkgOut FB = "This is test package F-B\n"
 pkgOut FC = "This is test package F-C\n"
 pkgOut FD = "This is test package F-D\n"
+pkgOut G1 = "This is test package G-0.1\n"
+pkgOut G2 = "This is test package G-0.2\n"
+pkgOut G3 = "This is test package G-0.3\n"
+pkgOut G4 = "This is test package G-0.4\n"
 
 db :: FilePath -> PkgDB -> PackageDB
 db _home Global = GlobalPackageDB
@@ -415,6 +441,20 @@ tests = [
         testGroup "GHC"   $ map (testCaseOrderGhc   "F" expectedOutputF) orderStacks
       , testGroup "Cabal" $ map (testCaseOrderCabal "F" expectedOutputF) orderStacks
       ]
+  , testGroup "Check package DB order (multiple versions per DB)" [
+       testGroup "GHC" [
+           testCaseOrderGhc "G" (\_ -> pkgOut G1) [Global]
+         , testCaseOrderGhc "G" (\_ -> pkgOut G3) [Global,User]
+         , testCaseOrderGhc "G" (\_ -> pkgOut G4) [Global,DB1]
+         , testCaseOrderGhc "G" (\_ -> pkgOut G4) [Global,User,DB1]
+         ]
+     , testGroup "Cabal" [
+           testCaseOrderCabal "G" (\_ -> pkgOut G1) [Global]
+         , testCaseOrderCabal "G" (\_ -> pkgOut G3) [Global,User]
+         , testCaseOrderCabal "G" (\_ -> pkgOut G4) [Global,DB1]
+         , testCaseOrderCabal "G" (\_ -> pkgOut G4) [Global,User,DB1]
+         ]
+     ]
   ]
   where
     testCaseDBsGhc     cfg   = testCase (show cfg)   (testDBsGhc     cfg)
