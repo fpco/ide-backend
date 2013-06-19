@@ -14,6 +14,7 @@ import IdeSession.Strict.Container
 import qualified IdeSession.Types.Public  as Public
 import qualified IdeSession.Types.Private as Private
 import qualified IdeSession.Strict.IntMap as StrictIntMap
+import qualified IdeSession.Strict.Maybe  as StrictMaybe
 
 -- | The associated type with explicit sharing
 type family XShared a
@@ -75,10 +76,16 @@ showNormalized :: forall a. (Show a, ExplicitSharing a)
 showNormalized cache x = show (removeExplicitSharing cache x :: a)
 
 instance ExplicitSharing Public.IdProp where
-  removeExplicitSharing _cache Private.IdProp{..} = Public.IdProp {
-      Public.idName  = idName
-    , Public.idSpace = idSpace
-    , Public.idType  = toLazyMaybe idType
+  removeExplicitSharing cache Private.IdProp{..} = Public.IdProp {
+      Public.idName       = idName
+    , Public.idSpace      = idSpace
+    , Public.idType       = toLazyMaybe idType
+    , Public.idDefSpan    = removeExplicitSharing cache idDefSpan
+    , Public.idDefinedIn  = removeExplicitSharing cache idDefinedIn
+    , Public.idHomeModule = StrictMaybe.maybe
+                              Nothing
+                              (Just . removeExplicitSharing cache)
+                              idHomeModule
     }
 
 instance ExplicitSharing Public.IdInfo where
@@ -102,13 +109,9 @@ instance ExplicitSharing Public.PackageId where
 instance ExplicitSharing Public.IdScope where
   removeExplicitSharing cache idScope = case idScope of
     Private.Binder -> Public.Binder
-    Private.Local {..} -> Public.Local {
-        Public.idDefSpan = removeExplicitSharing cache idDefSpan
-      }
+    Private.Local  -> Public.Local
     Private.Imported {..} -> Public.Imported {
-        Public.idDefSpan      = removeExplicitSharing cache idDefSpan
-      , Public.idDefinedIn    = removeExplicitSharing cache idDefinedIn
-      , Public.idImportedFrom = removeExplicitSharing cache idImportedFrom
+        Public.idImportedFrom = removeExplicitSharing cache idImportedFrom
       , Public.idImportSpan   = removeExplicitSharing cache idImportSpan
       , Public.idImportQual   = idImportQual
       }

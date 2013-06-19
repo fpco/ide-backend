@@ -86,7 +86,8 @@ instance Binary a => Binary (Strict Maybe a) where
   put = put . toLazyMaybe
   get = force <$> get
 
-deriving instance Eq a => Eq (Strict Maybe a)
+deriving instance Eq  a => Eq  (Strict Maybe a)
+deriving instance Ord a => Ord (Strict Maybe a)
 
 instance Functor (Strict Maybe) where
   fmap f = force . fmap f . toLazyMaybe

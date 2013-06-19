@@ -6,6 +6,7 @@ module IdeSession.Util (
   , accessorName
   , lookup'
   , writeFileAtomic
+  , setupEnv
     -- * Simple diffs
   , Diff(..)
   , applyMapDiff
@@ -17,7 +18,7 @@ module IdeSession.Util (
   , restoreStdError
   ) where
 
-import Control.Monad (void)
+import Control.Monad (void, forM_)
 import Data.Typeable (typeOf)
 import qualified Control.Exception as Ex
 import Data.Accessor (Accessor, accessor)
@@ -38,6 +39,7 @@ import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import qualified System.Posix.Files as Files
 import qualified Data.ByteString.Char8 as BSSC (pack)
+import System.Posix.Env (setEnv, unsetEnv)
 
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map as StrictMap
@@ -127,6 +129,11 @@ makeBlocks n = go . BSL.toChunks
 instance Binary Text where
   put = put . Text.encodeUtf8
   get = Text.decodeUtf8 <$> get
+
+setupEnv :: [(String, Maybe String)] -> IO ()
+setupEnv env = forM_ env $ \(var, mVal) ->
+  case mVal of Just val -> setEnv var val True
+               Nothing  -> unsetEnv var
 
 {------------------------------------------------------------------------------
   Simple diffs

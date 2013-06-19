@@ -1,0 +1,35 @@
+name:		deepseq
+version:        1.3.0.0
+license:	BSD3
+license-file:	LICENSE
+maintainer:	libraries@haskell.org
+synopsis:	Deep evaluation of data structures
+category:       Control
+description:
+    This package provides methods for fully evaluating data structures
+    (\"deep evaluation\"). Deep evaluation is often used for adding
+    strictness to a program, e.g. in order to force pending exceptions,
+    remove space leaks, or force lazy I/O to happen. It is also useful
+    in parallel programs, to ensure pending work does not migrate to the
+    wrong thread.
+    .
+    The primary use of this package is via the 'deepseq' function, a
+    \"deep\" version of 'seq'. It is implemented on top of an 'NFData'
+    typeclass (\"Normal Form Data\", data structures with no unevaluated
+    components) which defines strategies for fully evaluating different
+    data types.
+    .
+build-type:     Simple
+cabal-version:  >=1.6
+
+source-repository head
+    type:     git
+    location: http://darcs.haskell.org/packages/deepseq.git/
+
+library {
+  exposed-modules: Control.DeepSeq
+  build-depends: base       >= 3   && < 5, 
+                 array      >= 0.1 && < 0.5
+  ghc-options: -Wall
+  extensions: CPP
+}

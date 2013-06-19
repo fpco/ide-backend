@@ -1,7 +1,7 @@
 From 2684a8f9aeaec8189e4ebbc01fe657469253d9e8 Mon Sep 17 00:00:00 2001
 From: Edsko de Vries <edsko@well-typed.com>
 Date: Fri, 3 May 2013 09:46:20 +0100
-Subject: [PATCH] Provide access to the TID of the runStmt sandbox
+Subject: [PATCH 4/9] Provide access to the TID of the runStmt sandbox
 
 We were emulating this inside ide-backend itself, but that meant that we might
 send a UserInterrupt to ghc while compiling the statement rather than to the

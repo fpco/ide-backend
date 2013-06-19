@@ -11,8 +11,7 @@ module IdeSession.Query (
   , getSessionConfig
   , getSourcesDir
   , getDataDir
-  , getBuildDir
-  , getDocDir
+  , getDistDir
   , getSourceModule
   , getDataFile
   , getAllDataFiles
@@ -23,12 +22,14 @@ module IdeSession.Query (
   , getManagedFiles
   , getBuildExeStatus
   , getBuildDocStatus
+  , getBuildLicensesStatus
     -- * Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
   , getSpanInfo
   , getImports
   , getAutocompletion
+  , getPkgDeps
     -- * Debugging (internal use only)
   , dumpIdInfo
   ) where
@@ -49,7 +50,7 @@ import IdeSession.State
 import IdeSession.Types.Translation
 import IdeSession.Types.Public
 import qualified IdeSession.Types.Private as Private
-import IdeSession.GHC.Server (GhcServer)
+import IdeSession.GHC.Client (GhcServer)
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map  as StrictMap
 import qualified IdeSession.Strict.List as StrictList
@@ -91,15 +92,11 @@ getSourcesDir = staticQuery $ return . ideSourcesDir
 getDataDir :: Query FilePath
 getDataDir = staticQuery $ return . ideDataDir
 
--- | Obtain the directory prefix for executables compiled in this session.
--- Each executable is in a subdirectory with the same name as the file, e.g.:
--- "BUILD_DIR/typecheck-dir/typecheck-dir".
-getBuildDir :: Query FilePath
-getBuildDir = staticQuery $ return . (</> "build") . ideDistDir
-
--- | Obtain the directory prefix for documentation built in this session.
-getDocDir :: Query FilePath
-getDocDir = staticQuery $ return . (</> "doc") . ideDistDir
+-- | Obtain the directory prefix for results of Cabal invocations.
+-- Executables compiled in this session end up in a subdirectory @build@,
+-- haddocks in @doc@, concatenated licenses in file @licenses@, etc.
+getDistDir :: Query FilePath
+getDistDir = staticQuery $ return . ideDistDir
 
 -- | Read the current value of one of the source modules.
 getSourceModule :: FilePath -> Query BSL.ByteString
@@ -157,6 +154,10 @@ getBuildExeStatus = simpleQuery $ getVal ideBuildExeStatus
 getBuildDocStatus :: Query (Maybe ExitCode)
 getBuildDocStatus = simpleQuery $ getVal ideBuildDocStatus
 
+-- Get exit status of the last invocation of 'buildLicenses', if any.
+getBuildLicensesStatus :: Query (Maybe ExitCode)
+getBuildLicensesStatus = simpleQuery $ getVal ideBuildLicensesStatus
+
 {------------------------------------------------------------------------------
   Queries that rely on computed state
 ------------------------------------------------------------------------------}
@@ -199,13 +200,14 @@ getSpanInfo = computedQuery $ \Computed{..} mod span ->
       -- For now, however, there are only two possibilities: the span has
       -- nothing to do with a quasi-quote and will therefore be a single
       -- SpanId, or the span is a quasi-quote, and we will have a SpanQQ
-      -- *somewhere* in the list.
+      -- \*somewhere* in the list.
       -- Once we report span info for subexpressions, however, this is no
       -- longer true, and the ordering of the spaninfo becomes significant.
       -- In that case we will need to ensure that: the order of the dominators
       -- is correct (with larger spans later in the list, and the immediate
-      -- dominator first), and that the SpanQQ immediately follows to "top-level"
-      -- node in the AST that corresponds to the expansion of the quasi-quote.
+      -- dominator first), and that the SpanQQ immediately follows
+      -- to "top-level" node in the AST that corresponds to the expansion
+      -- of the quasi-quote.
       in case filter isQQ doms of
            [qq] -> [qq]
            _    -> doms
@@ -240,6 +242,14 @@ getAutocompletion = computedQuery $ \Computed{..} ->
              . StrictTrie.elems
              . StrictTrie.submap n
              $ mapOfTries StrictMap.! modName
+
+-- | (Transitive) package dependencies
+--
+-- These are only available for modules that got compiled successfully.
+getPkgDeps :: Query (ModuleName -> Maybe [PackageId])
+getPkgDeps = computedQuery $ \Computed{..} mod ->
+  fmap (toLazyList . StrictList.map (removeExplicitSharing computedCache)) $
+    StrictMap.lookup mod computedPkgDeps
 
 {------------------------------------------------------------------------------
   Debugging

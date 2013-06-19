@@ -1,202 +1,45 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 -- | Implementation of the server that controls the long-running GHC instance.
--- This is the place where the GHC-specific part joins the parts
--- implementing the general RPC infrastructure and session management.
---
--- The modules importing any GHC internals, as well as the modules
--- implementing the RPC infrastructure, should be accessible to the rest
--- of the program only indirectly, through @IdeSession.GHC.Server@.
-module IdeSession.GHC.Server
-  ( -- * A handle to the server
-    GhcServer
-    -- * Server-side operations
-  , ghcServer
-    -- * Client-side operations
-  , InProcess
-  , forkGhcServer
-  , rpcCompile
-  , RunActions(..)
-  , runWaitAll
-  , rpcRun
-  , rpcSetEnv
-  , rpcCrash
-  , shutdownGhcServer
-  , forceShutdownGhcServer
-  , getGhcExitCode
-  , RunResult(..)
-  , RunBufferMode(..)
-  ) where
+-- This interacts with the ide-backend library through serialized data only.
+module Server (ghcServer) where
 
-import Control.Concurrent (ThreadId, throwTo, forkIO, killThread, myThreadId, threadDelay)
-import Control.Concurrent.Async (async, cancel, withAsync)
-import Control.Concurrent.Chan (Chan, newChan, writeChan)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, newMVar)
-import Control.Applicative ((<$>), (<*>))
+import Control.Concurrent (ThreadId, throwTo, forkIO, myThreadId, threadDelay)
+import Control.Concurrent.Async (async)
+import Control.Concurrent.MVar (MVar, newEmptyMVar)
 import qualified Control.Exception as Ex
-import Control.Monad (void, forM_, forever, unless, when)
+import Control.Monad (void, unless, when)
 import Control.Monad.State (StateT, runStateT)
 import Control.Monad.Trans.Class (lift)
-import qualified Data.ByteString as BSS (ByteString, hGetSome, hPut, null)
-import qualified Data.ByteString.Char8 as BSSC (pack)
-import qualified Data.ByteString.Lazy as BSL (ByteString, fromChunks)
-import System.Exit (ExitCode)
+import qualified Data.ByteString as BSS (hGetSome, hPut, null)
 import qualified Data.Text as Text
-import Data.Binary (Binary)
-import qualified Data.Binary as Binary
 import Data.List (sortBy)
 import Data.Function (on)
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
-
-import System.Directory (doesFileExist)
-import System.FilePath ((</>))
-
 import System.IO (Handle, hFlush)
 import System.Posix (Fd)
-import System.Posix.Env (setEnv, unsetEnv)
 import System.Posix.IO.ByteString
 import System.Time (ClockTime)
+import System.Environment (withArgs)
 
-import IdeSession.GHC.HsWalk
-import IdeSession.GHC.Run
+import IdeSession.GHC.API
 import IdeSession.RPC.Server
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
-import IdeSession.Debug
 import IdeSession.Util
-import IdeSession.BlockingOps (modifyMVar, modifyMVar_, readChan, withMVar, wait)
+import IdeSession.BlockingOps (withMVar, wait)
 import IdeSession.Strict.IORef
 import IdeSession.Strict.Container
-import qualified IdeSession.Strict.Map    as StrictMap
-import qualified IdeSession.Strict.IntMap as StrictIntMap
-import qualified IdeSession.Strict.List   as StrictList
-import qualified IdeSession.Strict.Trie   as StrictTrie
+import qualified IdeSession.Strict.Map  as StrictMap
+import qualified IdeSession.Strict.List as StrictList
 
 import qualified GHC
+import GhcMonad(Ghc(..))
 
-import Paths_ide_backend
-
-data GhcRequest
-  = ReqCompile {
-        reqCompileOptions   :: Maybe [String]
-      , reqCompileSourceDir :: FilePath
-      , reqCompileGenCode   :: Bool
-      }
-  | ReqRun {
-        reqRunModule   :: String
-      , reqRunFun      :: String
-      , reqRunOutBMode :: RunBufferMode
-      , reqRunErrBMode :: RunBufferMode
-      }
-  | ReqSetEnv {
-         reqSetEnv :: [(String, Maybe String)]
-       }
-    -- | For debugging only! :)
-  | ReqCrash {
-         reqCrashDelay :: Maybe Int
-       }
-
-data GhcCompileResponse =
-    GhcCompileProgress {
-        ghcCompileProgress :: Progress
-      }
-  | GhcCompileDone {
-        ghcCompileErrors   :: Strict [] SourceError
-      , ghcCompileLoaded   :: Strict [] ModuleName
-      , ghcCompileImports  :: Strict (Map ModuleName) (Diff (Strict [] Import))
-      , ghcCompileAuto     :: Strict (Map ModuleName) (Diff (Strict [] IdInfo))
-      , ghcCompileSpanInfo :: Strict (Map ModuleName) (Diff IdList)
-      , ghcCompileCache    :: ExplicitSharingCache
-      }
-
-data GhcRunResponse =
-    GhcRunOutp BSS.ByteString
-  | GhcRunDone RunResult
-
-data GhcRunRequest =
-    GhcRunInput BSS.ByteString
-  | GhcRunInterrupt
-  | GhcRunAckDone
-
-instance Binary GhcRequest where
-  put ReqCompile{..} = do
-    Binary.putWord8 0
-    Binary.put reqCompileOptions
-    Binary.put reqCompileSourceDir
-    Binary.put reqCompileGenCode
-  put ReqRun{..} = do
-    Binary.putWord8 1
-    Binary.put reqRunModule
-    Binary.put reqRunFun
-    Binary.put reqRunOutBMode
-    Binary.put reqRunErrBMode
-  put ReqSetEnv{..} = do
-    Binary.putWord8 2
-    Binary.put reqSetEnv
-  put ReqCrash{..} = do
-    Binary.putWord8 3
-    Binary.put reqCrashDelay
-
-  get = do
-    header <- Binary.getWord8
-    case header of
-      0 -> ReqCompile <$> Binary.get <*> Binary.get <*> Binary.get
-      1 -> ReqRun     <$> Binary.get <*> Binary.get <*> Binary.get <*> Binary.get
-      2 -> ReqSetEnv  <$> Binary.get
-      3 -> ReqCrash   <$> Binary.get
-      _ -> fail "GhcRequest.Binary.get: invalid header"
-
-instance Binary GhcCompileResponse where
-  put GhcCompileProgress {..} = do
-    Binary.putWord8 0
-    Binary.put ghcCompileProgress
-  put GhcCompileDone {..} = do
-    Binary.putWord8 1
-    Binary.put ghcCompileErrors
-    Binary.put ghcCompileLoaded
-    Binary.put ghcCompileImports
-    Binary.put ghcCompileAuto
-    Binary.put ghcCompileSpanInfo
-    Binary.put ghcCompileCache
-
-  get = do
-    header <- Binary.getWord8
-    case header of
-      0 -> GhcCompileProgress <$> Binary.get
-      1 -> GhcCompileDone     <$> Binary.get <*> Binary.get <*> Binary.get
-                              <*> Binary.get <*> Binary.get <*> Binary.get
-      _ -> fail "GhcCompileRespone.Binary.get: invalid header"
-
-instance Binary GhcRunResponse where
-  put (GhcRunOutp bs) = Binary.putWord8 0 >> Binary.put bs
-  put (GhcRunDone r)  = Binary.putWord8 1 >> Binary.put r
-
-  get = do
-    header <- Binary.getWord8
-    case header of
-      0 -> GhcRunOutp <$> Binary.get
-      1 -> GhcRunDone <$> Binary.get
-      _ -> fail "GhcRunResponse.get: invalid header"
-
-instance Binary GhcRunRequest where
-  put (GhcRunInput bs) = Binary.putWord8 0 >> Binary.put bs
-  put GhcRunInterrupt  = Binary.putWord8 1
-  put GhcRunAckDone    = Binary.putWord8 2
-
-  get = do
-    header <- Binary.getWord8
-    case header of
-      0 -> GhcRunInput <$> Binary.get
-      1 -> return GhcRunInterrupt
-      2 -> return GhcRunAckDone
-      _ -> fail "GhcRunRequest.get: invalid header"
-
-data GhcServer = OutProcess RpcServer
-               | InProcess RpcConversation ThreadId
-
-conversation :: GhcServer -> (RpcConversation -> IO a) -> IO a
-conversation (OutProcess server) = rpcConversation server
-conversation (InProcess conv _)  = ($ conv)
+import Run
+import HsWalk
+import Haddock
+import Debug
 
 --------------------------------------------------------------------------------
 -- Server-side operations                                                     --
@@ -205,16 +48,28 @@ conversation (InProcess conv _)  = ($ conv)
 -- | Start the RPC server. Used from within the server executable.
 ghcServer :: [String] -> IO ()
 ghcServer fdsAndOpts = do
-  let (opts, "--ghc-opts-end" : configGenerateModInfo : fds) =
+  let (opts, "--ghc-opts-end" : configGenerateModInfo : clientApiVersion : fds) =
         span (/= "--ghc-opts-end") fdsAndOpts
-  rpcServer fds (ghcServerEngine (read configGenerateModInfo) opts)
+  rpcServer fds $ ghcServerEngine (read configGenerateModInfo)
+                                  (read clientApiVersion)
+                                  opts
 
 -- | The GHC server engine proper.
 --
 -- This function runs in end endless loop inside the @Ghc@ monad, making
 -- incremental compilation possible.
-ghcServerEngine :: Bool -> [String] -> RpcConversation -> IO ()
-ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
+ghcServerEngine :: Bool -> Int -> [String] -> RpcConversation -> IO ()
+ghcServerEngine configGenerateModInfo
+                clientApiVersion
+                staticOpts
+                conv@RpcConversation{..} = do
+  -- Check API versions
+  unless (clientApiVersion == ideBackendApiVersion) $
+    Ex.throwIO . userError $ "API version mismatch between ide-backend "
+                          ++ "(" ++ show clientApiVersion ++ ") "
+                          ++ "and ide-backend-server "
+                          ++ "(" ++ show ideBackendApiVersion ++ ")"
+
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts (ideBackendRTSOpts ++ staticOpts)
   -- Set up references for the current session of Ghc monad computations.
@@ -232,19 +87,29 @@ ghcServerEngine configGenerateModInfo staticOpts conv@RpcConversation{..} = do
       void $ setSessionDynFlags dynFlags'
 
     -- Start handling RPC calls
-    forever $ do
-      req <- liftIO get
-      case req of
-        ReqCompile opts dir genCode ->
-          ghcHandleCompile
-            conv dOpts opts pluginRef importsRef dir
-            genCode configGenerateModInfo
-        ReqRun m fun outBMode errBMode ->
-          ghcHandleRun conv m fun outBMode errBMode
-        ReqSetEnv env ->
-          ghcHandleSetEnv conv env
-        ReqCrash delay ->
-          ghcHandleCrash delay
+    let go args = do
+          req <- liftIO get
+          args' <- case req of
+            ReqCompile opts dir genCode -> do
+              ghcHandleCompile
+                conv dOpts opts pluginRef importsRef dir
+                genCode configGenerateModInfo
+              return args
+            ReqRun m fun outBMode errBMode -> do
+              ghcWithArgs args $ ghcHandleRun conv m fun outBMode errBMode
+              return args
+            ReqSetEnv env -> do
+              ghcHandleSetEnv conv env
+              return args
+            ReqSetArgs args' -> do
+              liftIO $ put ()
+              return args'
+            ReqCrash delay -> do
+              ghcHandleCrash delay
+              return args
+          go args'
+
+    go []
   where
     ideBackendRTSOpts = [
         -- Just in case the user specified -hide-all-packages
@@ -271,7 +136,7 @@ ghcHandleCompile
   :: RpcConversation
   -> DynamicOpts         -- ^ startup dynamic flags
   -> Maybe [String]      -- ^ new, user-submitted dynamic flags
-  -> StrictIORef (Strict (Map ModuleName) IdList)
+  -> StrictIORef (Strict (Map ModuleName) PluginResult)
                          -- ^ ref where the ExtractIdsT plugin stores its data
                          -- (We clear this at the end of each call)
   -> StrictIORef (Strict (Map ModuleName) ModSummary)
@@ -302,6 +167,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
           -- We construct the diffs incrementally
           , ghcCompileImports  = StrictMap.empty
           , ghcCompileAuto     = StrictMap.empty
+          , ghcCompilePkgDeps  = StrictMap.empty
           , ghcCompileSpanInfo = StrictMap.empty
           }
 
@@ -351,10 +217,16 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
                          -> StateT GhcCompileResponse Ghc (ModuleName, ModSummary)
             updateModule m oldSummary ghcSummary = do
               (imports, importsChanged) <-
+                -- We recompute imports when the file changed, rather than when
+                -- it got (successfully) recompiled because we provide the
+                -- imports even for modules with type errors
                 if modTimestamp oldSummary == ms_hs_date ghcSummary
                   then return (modImports oldSummary, False)
-                  else do imports <- lift $ importList ghcSummary
+                  else do dynFlags <- lift $ getSessionDynFlags
+                          imports <- lift $ importList ghcSummary
                           set (importsFor m) (Insert imports)
+                          let pkgDeps = pkgDepsFromModSummary dynFlags ghcSummary
+                          lift . liftIO $ updatePkgDepsFor m pkgDeps
                           return (imports, imports /= modImports oldSummary)
 
               -- We recompute autocompletion info if the imported modules have
@@ -397,13 +269,14 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
               mapM_ removeOldModule (map fst old)
               mapM addNewModule new
 
-        let addSpanInfo :: [(ModuleName, IdList)]
-                        -> StateT GhcCompileResponse Ghc ()
-            addSpanInfo = mapM_ $ \(m, spanInfo) ->
-              set (spanInfoFor m) (Insert spanInfo)
+        let sendPluginResult :: [(ModuleName, PluginResult)]
+                             -> StateT GhcCompileResponse Ghc ()
+            sendPluginResult = mapM_ $ \(m, result) -> do
+              set (spanInfoFor m) (Insert (pluginIdList result))
+              set (pkgDepsFor m)  (Insert (pluginPkgDeps result))
 
         (newSummaries, finalResponse) <- flip runStateT initialResponse $ do
-          addSpanInfo (StrictMap.toList pluginIdMaps)
+          sendPluginResult (StrictMap.toList pluginIdMaps)
 
           graph <- lift $ getModuleGraph
           let sortedGraph = sortBy (compare `on` ms_mod_name) graph
@@ -416,6 +289,7 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
         return finalResponse
 
     cache <- liftIO $ constructExplicitSharingCache
+    -- Should we call clearLinkEnvCache here?
     liftIO . put $ response { ghcCompileCache = cache }
   where
     dynOpts :: DynamicOpts
@@ -436,10 +310,15 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
     allImports  = accessor ghcCompileImports  (\is st -> st { ghcCompileImports  = is })
     allAuto     = accessor ghcCompileAuto     (\as st -> st { ghcCompileAuto     = as })
     allSpanInfo = accessor ghcCompileSpanInfo (\ss st -> st { ghcCompileSpanInfo = ss })
+    allPkgDeps  = accessor ghcCompilePkgDeps  (\ds st -> st { ghcCompilePkgDeps  = ds })
 
     importsFor  m = allImports  .> StrictMap.accessorDefault Keep m
     autoFor     m = allAuto     .> StrictMap.accessorDefault Keep m
     spanInfoFor m = allSpanInfo .> StrictMap.accessorDefault Keep m
+    pkgDepsFor  m = allPkgDeps  .> StrictMap.accessorDefault Keep m
+
+
+
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation
@@ -546,8 +425,8 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
       -- Backup stdout, then replace stdout and stderr with the pipe's write end
       stdOutputBackup <- liftIO $ dup stdOutput
       stdErrorBackup  <- liftIO $ dup stdError
-      dupTo stdOutputWr stdOutput
-      dupTo stdOutputWr stdError
+      _ <- dupTo stdOutputWr stdOutput
+      _ <- dupTo stdOutputWr stdError
       closeFd stdOutputWr
 
       -- Convert to the read end to a handle and return
@@ -562,7 +441,7 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
 
       -- Swizzle stdin
       stdInputBackup <- liftIO $ dup stdInput
-      dupTo stdInputRd stdInput
+      _ <- dupTo stdInputRd stdInput
       closeFd stdInputRd
 
       -- Convert the write end to a handle and return
@@ -575,11 +454,6 @@ ghcHandleSetEnv RpcConversation{put} env = liftIO $ do
   setupEnv env
   put ()
 
-setupEnv :: [(String, Maybe String)] -> IO ()
-setupEnv env = forM_ env $ \(var, mVal) ->
-  case mVal of Just val -> setEnv var val True
-               Nothing  -> unsetEnv var
-
 -- | Handle a crash request (debugging)
 ghcHandleCrash :: Maybe Int -> Ghc ()
 ghcHandleCrash delay = liftIO $ do
@@ -591,222 +465,10 @@ ghcHandleCrash delay = liftIO $ do
     crash = userError "Intentional crash"
 
 --------------------------------------------------------------------------------
--- Client-side operations                                                     --
---------------------------------------------------------------------------------
-
-type InProcess = Bool
-
-forkGhcServer :: Bool -> [String] -> Maybe String -> InProcess -> IO GhcServer
-forkGhcServer configGenerateModInfo opts workingDir False = do
-  bindir <- getBinDir
-  let prog = bindir </> "ide-backend-server"
-
-  exists <- doesFileExist prog
-  unless exists $
-    fail $ "The 'ide-backend-server' program was expected to "
-        ++ "be at location " ++ prog ++ " but it is not."
-
-  server <- forkRpcServer prog
-                          (opts ++ [ "--ghc-opts-end"
-                                   , show configGenerateModInfo ])
-                          workingDir
-  return (OutProcess server)
-{- TODO: Reenable in-process
-forkGhcServer configGenerateModInfo opts workingDir True = do
-  let conv a b = RpcConversation {
-                   get = do bs <- $readChan a
-                            case decode' bs of
-                              Just x  -> return x
-                              Nothing -> fail "JSON failure"
-                 , put = writeChan b . encode
-                 }
-  a   <- newChan
-  b   <- newChan
-  tid <- forkIO $ ghcServerEngine configGenerateModInfo opts (conv a b)
-  return $ InProcess (conv b a) tid
--}
-
--- | Compile or typecheck
-rpcCompile :: GhcServer           -- ^ GHC server
-           -> Maybe [String]      -- ^ Options
-           -> FilePath            -- ^ Source directory
-           -> Bool                -- ^ Should we generate code?
-           -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ( Strict [] SourceError
-                 , Strict [] ModuleName
-                 , Strict (Map ModuleName) (Diff (Strict [] Import))
-                 , Strict (Map ModuleName) (Diff (Strict Trie (Strict [] IdInfo)))
-                 , Strict (Map ModuleName) (Diff IdList)
-                 , ExplicitSharingCache
-                 )
-rpcCompile server opts dir genCode callback =
-  conversation server $ \RpcConversation{..} -> do
-    put (ReqCompile opts dir genCode)
-
-    let go = do response <- get
-                case response of
-                  GhcCompileProgress pcounter ->
-                    callback pcounter >> go
-                  GhcCompileDone errs loaded imports auto spanInfo cache ->
-                    return ( errs
-                           , loaded
-                           , imports
-                           , StrictMap.map (fmap (constructAuto cache)) auto
-                           , spanInfo
-                           , cache
-                           )
-    go
-
-constructAuto :: ExplicitSharingCache -> Strict [] IdInfo
-              -> Strict Trie (Strict [] IdInfo)
-constructAuto cache lk =
-  StrictTrie.fromListWith (StrictList.++) $ map aux (toLazyList lk)
-  where
-    aux :: IdInfo -> (BSS.ByteString, Strict [] IdInfo)
-    aux idInfo@IdInfo{idProp = k} =
-      let idProp = idPropCache cache StrictIntMap.! idPropPtr k
-      in ( BSSC.pack . Text.unpack . idName $ idProp
-         , StrictList.singleton idInfo )
-
--- | Handles to the running code, through which one can interact with the code.
-data RunActions = RunActions {
-    -- | Wait for the code to output something or terminate
-    runWait                     :: IO (Either BSS.ByteString RunResult)
-    -- | Send a UserInterrupt exception to the code
-    --
-    -- A call to 'interrupt' after the snippet has terminated has no effect.
-  , interrupt                   :: IO ()
-    -- | Make data available on the code's stdin
-    --
-    -- A call to 'supplyStdin' after the snippet has terminated has no effect.
-  , supplyStdin                 :: BSS.ByteString -> IO ()
-    -- | Register a callback to be invoked when the program terminates
-    -- The callback will only be invoked once.
-    --
-    -- A call to 'registerTerminationCallback' after the snippet has terminated
-    -- has no effect. The termination handler is NOT called when the the
-    -- 'RunActions' is 'forceCancel'ed.
-  , registerTerminationCallback :: (RunResult -> IO ()) -> IO ()
-    -- | Force terminate the runaction
-    -- (The server will be useless after this -- for internal use only).
-    --
-    -- Guranteed not to block.
-  , forceCancel                 :: IO ()
-  }
-
--- | Repeatedly call 'runWait' until we receive a 'Right' result, while
--- collecting all 'Left' results
-runWaitAll :: RunActions -> IO (BSL.ByteString, RunResult)
-runWaitAll RunActions{runWait} = go []
-  where
-    go :: [BSS.ByteString] -> IO (BSL.ByteString, RunResult)
-    go acc = do
-      resp <- runWait
-      case resp of
-        Left  bs        -> go (bs : acc)
-        Right runResult -> return (BSL.fromChunks (reverse acc), runResult)
-
--- | Run code
-rpcRun :: GhcServer       -- ^ GHC server
-       -> String          -- ^ Module
-       -> String          -- ^ Function
-       -> RunBufferMode   -- ^ Buffer mode for stdout
-       -> RunBufferMode   -- ^ Buffer mode for stderr
-       -> IO RunActions
-rpcRun server m fun outBMode errBMode = do
-  runWaitChan <- newChan :: IO (Chan (Either BSS.ByteString RunResult))
-  reqChan     <- newChan :: IO (Chan GhcRunRequest)
-
-  conv <- async . Ex.handle (handleExternalException runWaitChan) $
-    conversation server $ \RpcConversation{..} -> do
-      put (ReqRun m fun outBMode errBMode)
-      withAsync (sendRequests put reqChan) $ \sentAck -> do
-        let go = do resp <- get
-                    case resp of
-                      GhcRunDone result -> writeChan runWaitChan (Right result)
-                      GhcRunOutp bs     -> writeChan runWaitChan (Left bs) >> go
-        go
-        $wait sentAck
-
-  -- The runActionState initially is the termination callback to be called
-  -- when the snippet terminates. After termination it becomes (Right outcome).
-  -- This means that we will only execute the termination callback once, and
-  -- the user can safely call runWait after termination and get the same
-  -- result.
-  let onTermination :: RunResult -> IO ()
-      onTermination _ = do writeChan reqChan GhcRunAckDone
-                           $wait conv
-  runActionsState <- newMVar (Left onTermination)
-
-  return RunActions {
-      runWait = $modifyMVar runActionsState $ \st -> case st of
-        Right outcome ->
-          return (Right outcome, Right outcome)
-        Left terminationCallback -> do
-          outcome <- $readChan runWaitChan
-          case outcome of
-            Left bs ->
-              return (Left terminationCallback, Left bs)
-            Right res@RunForceCancelled ->
-              return (Right res, Right res)
-            Right res -> do
-              terminationCallback res
-              return (Right res, Right res)
-    , interrupt   = writeChan reqChan GhcRunInterrupt
-    , supplyStdin = writeChan reqChan . GhcRunInput
-    , registerTerminationCallback = \callback' ->
-        $modifyMVar_ runActionsState $ \st -> case st of
-          Right outcome ->
-            return (Right outcome)
-          Left callback ->
-            return (Left (\res -> callback res >> callback' res))
-    , forceCancel = do
-        writeChan runWaitChan (Right RunForceCancelled)
-        cancel conv
-    }
-  where
-    sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> IO ()
-    sendRequests put reqChan =
-      let go = do req <- $readChan reqChan
-                  put req
-                  case req of
-                    GhcRunAckDone -> return ()
-                    _             -> go
-      in go
-
-    -- TODO: should we restart the session when ghc crashes?
-    -- Maybe recommend that the session is started on GhcExceptions?
-    handleExternalException :: Chan (Either BSS.ByteString RunResult)
-                            -> ExternalException
-                            -> IO ()
-    handleExternalException ch = writeChan ch . Right . RunGhcException . show
-
--- | Set the environment
-rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()
-rpcSetEnv (OutProcess server) env = rpc server (ReqSetEnv env)
-rpcSetEnv (InProcess _ _)     env = setupEnv env
-
--- | Crash the GHC server (for debugging purposes)
-rpcCrash :: GhcServer -> Maybe Int -> IO ()
-rpcCrash server delay = conversation server $ \RpcConversation{..} ->
-  put (ReqCrash delay)
-
-shutdownGhcServer :: GhcServer -> IO ()
-shutdownGhcServer (OutProcess server) = shutdown server
-shutdownGhcServer (InProcess _ tid)   = killThread tid
-
-forceShutdownGhcServer :: GhcServer -> IO ()
-forceShutdownGhcServer (OutProcess server) = forceShutdown server
-forceShutdownGhcServer (InProcess _ tid)   = killThread tid
-
-getGhcExitCode :: GhcServer -> IO (Maybe ExitCode)
-getGhcExitCode (OutProcess server) = getRpcExitCode server
-
---------------------------------------------------------------------------------
 -- Auxiliary                                                                  --
 --------------------------------------------------------------------------------
 
--- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
+-- | Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
 -- We suppress stdout during compilation to avoid stray messages, e.g. from
 -- the linker.
 -- TODO: send all suppressed messages to a debug log file.
@@ -816,3 +478,13 @@ suppressGhcStdout p = do
   x <- p
   liftIO $ restoreStdOutput stdOutputBackup
   return x
+
+-- | Lift operations on `IO` to the `Ghc` monad. This is unsafe as it makes
+-- operations possible in the `Ghc` monad that weren't possible before
+-- (for instance, @unsafeLiftIO forkIO@ is probably a bad idea!).
+unsafeLiftIO :: (IO a -> IO b) -> Ghc a -> Ghc b
+unsafeLiftIO f (Ghc ghc) = Ghc $ \session -> f (ghc session)
+
+-- | Lift `withArgs` to the `Ghc` monad. Relies on `unsafeLiftIO`.
+ghcWithArgs :: [String] -> Ghc a -> Ghc a
+ghcWithArgs = unsafeLiftIO . withArgs

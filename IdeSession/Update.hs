@@ -19,10 +19,12 @@ module IdeSession.Update (
   , updateDataFileFromFile
   , updateDataFileDelete
   , updateEnv
+  , updateArgs
   , updateStdoutBufferMode
   , updateStderrBufferMode
   , buildExe
   , buildDoc
+  , buildLicenses
     -- * Running code
   , runStmt
     -- * Debugging
@@ -49,9 +51,10 @@ import System.IO.Temp (createTempDirectory)
 import qualified Data.Text as Text
 
 import IdeSession.State
-import IdeSession.Cabal (buildExecutable, buildHaddock)
+import IdeSession.Cabal (buildExecutable, buildHaddock, buildLicenseCatenation)
 import IdeSession.Config
-import IdeSession.GHC.Server
+import IdeSession.GHC.API
+import IdeSession.GHC.Client
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util
@@ -89,8 +92,11 @@ initSession ideConfig@SessionConfig{..} = do
                         , _ideManagedFiles     = ManagedFilesInternal [] []
                         , _ideBuildExeStatus   = Nothing
                         , _ideBuildDocStatus   = Nothing
+                        , _ideBuildLicensesStatus = Nothing
                         , _ideEnv              = []
+                        , _ideArgs             = []
                         , _ideUpdatedEnv       = False
+                        , _ideUpdatedArgs      = False -- Server default is []
                           -- Make sure 'ideComputed' is set on first call
                           -- to updateSession
                         , _ideUpdatedCode      = True
@@ -170,6 +176,7 @@ restartSession IdeSession{ideStaticInfo, ideState} = do
       return . IdeSessionIdle
              . (ideComputed    ^= Maybe.nothing)
              . (ideUpdatedEnv  ^= True)
+             . (ideUpdatedArgs ^= True)
              . (ideUpdatedCode ^= True)
              . (ideGhcServer   ^= server)
              $ idleState
@@ -219,6 +226,9 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
         when (idleState' ^. ideUpdatedEnv) $
           rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
 
+        when (idleState' ^. ideUpdatedArgs) $
+          rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
+
         -- Recompile
         computed <- if (idleState' ^. ideUpdatedCode)
           then do
@@ -227,6 +237,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
              , diffImports
              , diffAuto
              , diffIdList
+             , diffPkgDeps
              , cache ) <- rpcCompile (idleState' ^. ideGhcServer)
                                      (idleState' ^. ideNewOpts)
                                      (ideSourcesDir ideStaticInfo)
@@ -248,6 +259,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
               , computedImports       = diffImports `applyDiff` computedImports
               , computedAutoMap       = diffAuto    `applyDiff` computedAutoMap
               , computedSpanInfo      = diffSpan    `applyDiff` computedSpanInfo
+              , computedPkgDeps       = diffPkgDeps `applyDiff` computedPkgDeps
               , computedCache         = mkRelative cache
               }
           else return $ idleState' ^. ideComputed
@@ -257,6 +269,7 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
                . (ideComputed    ^= computed)
                . (ideUpdatedEnv  ^= False)
                . (ideUpdatedCode ^= False)
+               . (ideUpdatedArgs ^= False)
                $ idleState'
 
       IdeSessionRunning _ _ ->
@@ -376,6 +389,13 @@ updateEnv var val = IdeSessionUpdate $ \_ _ -> do
   set (ideEnv .> lookup' var) (Just val)
   set ideUpdatedEnv True
 
+-- | Set command line arguments for snippets
+-- (i.e., the expected value of `getArgs`)
+updateArgs :: [String] -> IdeSessionUpdate
+updateArgs args = IdeSessionUpdate $ \_ _ -> do
+  set ideArgs args
+  set ideUpdatedArgs True
+
 -- | Set buffering mode for snippets' stdout
 updateStdoutBufferMode :: RunBufferMode -> IdeSessionUpdate
 updateStdoutBufferMode bufferMode = IdeSessionUpdate $ \_ _ ->
@@ -391,7 +411,7 @@ updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ _ ->
 -- The function resembles a query, but it's not instantaneous
 -- and the running code can be interrupted or interacted with.
 runStmt :: IdeSession -> String -> String -> IO RunActions
-runStmt IdeSession{ideStaticInfo, ideState} m fun = do
+runStmt IdeSession{ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
     IdeSessionIdle idleState ->
      case (toLazyMaybe (idleState ^. ideComputed), idleState ^. ideGenerateCode) of
@@ -433,34 +453,58 @@ runStmt IdeSession{ideStaticInfo, ideState} m fun = do
 --
 -- We assume any indicated module is already successfully processed by GHC API in a compilation mode that makes @computedImports@ available (but no code needs to be generated). The environment (package dependencies, ghc options, preprocessor program options, etc.) for building the exe is the same as when previously compiling the code via GHC API. The module does not have to be called @Main@, but we assume the main function is always @main@ (we don't check this and related conditions, but GHC does when eventually called to build the exe).
 --
--- The executable files are placed in the filesystem inside the @build/@ directory, in subdirectories corresponding to the given module names. The build directory does not overlap with any of the other used directories and its path can be obtained via a call to @getBuildDir@.
+-- The executable files are placed in the filesystem inside the @build@ subdirectory of @getDistDir@, in subdirectories corresponding to the given module names. The build directory does not overlap with any of the other used directories and its path.
 buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
 buildExe ms = IdeSessionUpdate
               $ \callback
                  IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
-    let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
+    let SessionConfig{ configDynLink
+                     , configPackageDBStack
+                     , configStaticOpts } = ideConfig
+        ghcOpts = fromMaybe configStaticOpts ghcNewOpts
     exitCode <-
       lift $ buildExecutable ideSourcesDir ideDistDir ghcOpts
-                             (configDynLink ideConfig) mcomputed callback ms
+                             configDynLink configPackageDBStack
+                             mcomputed callback ms
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
 -- the ide-backend updateModule* mechanism. Similarly to 'buildExe',
 -- it needs the project modules to be already loaded within the session
--- and the generated docs can be found in a subdirectory of @getDocDir@.
+-- and the generated docs can be found in the @doc@ subdirectory
+-- of @getDistDir@.
 buildDoc :: IdeSessionUpdate
 buildDoc = IdeSessionUpdate
            $ \callback
               IdeStaticInfo{ideSourcesDir, ideDistDir, ideConfig} -> do
     mcomputed <- get ideComputed
     ghcNewOpts <- get ideNewOpts
-    let ghcOpts = fromMaybe (configStaticOpts ideConfig) ghcNewOpts
+    let SessionConfig{ configDynLink
+                     , configPackageDBStack
+                     , configStaticOpts } = ideConfig
+        ghcOpts = fromMaybe configStaticOpts ghcNewOpts
     exitCode <-
       lift $ buildHaddock ideSourcesDir ideDistDir ghcOpts
-                          (configDynLink ideConfig) mcomputed callback
+                          configDynLink configPackageDBStack
+                          mcomputed callback
     set ideBuildDocStatus (Just exitCode)
+
+-- | Build a file containing licenses of all used packages.
+-- Similarly to 'buildExe', it needs the project modules to be already
+-- loaded within the session and the concatenated licences can be found
+-- in the @licenses.txt@ file of @getDistDir@.
+buildLicenses :: FilePath -> IdeSessionUpdate
+buildLicenses cabalsDir = IdeSessionUpdate
+                          $ \callback
+                             IdeStaticInfo{ideDistDir, ideConfig} -> do
+    mcomputed <- get ideComputed
+    let SessionConfig{configPackageDBStack, configLicenseExc} = ideConfig
+    exitCode <-
+      lift $ buildLicenseCatenation cabalsDir ideDistDir configPackageDBStack
+                                    configLicenseExc mcomputed callback
+    set ideBuildLicensesStatus (Just exitCode)
 
 {------------------------------------------------------------------------------
   Debugging

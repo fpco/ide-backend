@@ -1,7 +1,7 @@
 From d218c93b19490f9e15ccf87f2ea72188511aea3c Mon Sep 17 00:00:00 2001
 From: Edsko de Vries <edsko@well-typed.com>
 Date: Fri, 22 Feb 2013 14:06:33 +0000
-Subject: [PATCH 1/2] Add support for "frontend plugins"
+Subject: [PATCH 1/9] Add support for "frontend plugins"
 
 ---
  compiler/ghc.cabal.in           |  1 +

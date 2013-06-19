@@ -3,7 +3,7 @@ module IdeSession.Config (
   , defaultSessionConfig
   ) where
 
-import IdeSession.GHC.Server (InProcess) -- Should this be someplace else?
+import IdeSession.GHC.Client (InProcess)
 
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.
@@ -21,6 +21,11 @@ data SessionConfig = SessionConfig {
   , configGenerateModInfo :: Bool
     -- Build shared libraries and dynamically link executables.
   , configDynLink :: Bool
+    -- Package dbs to consult. Assumes global and user dbs, if @Nothing@.
+  , configPackageDBStack :: Maybe [FilePath]
+    -- Packages that don't need the .cabal files provided for license
+    -- concatenation (e.g., because they are covered by the core license set).
+  , configLicenseExc :: [String]
   }
 
 -- | Default session configuration
@@ -42,4 +47,8 @@ defaultSessionConfig = SessionConfig {
   , configInProcess       = False
   , configGenerateModInfo = True
   , configDynLink         = False
+  , configPackageDBStack  = Nothing
+    -- ghc-prim, integer-gmp, etc., all have their own licenses specified
+    -- in their .cabal files.
+  , configLicenseExc      = ["rts"]
   }

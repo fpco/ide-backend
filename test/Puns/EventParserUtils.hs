@@ -30,7 +30,7 @@ import qualified Data.IntMap as M
 import Data.List
 
 #define EVENTLOG_CONSTANTS_ONLY
-#include "EventLogFormat.h"
+-- #include "EventLogFormat.h"
 
 import GHC.RTS.EventTypes
 

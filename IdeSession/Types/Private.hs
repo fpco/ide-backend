@@ -53,9 +53,12 @@ data IdInfo = IdInfo {
   deriving Show
 
 data IdProp = IdProp {
-    idName  :: !Text
-  , idSpace :: !Public.IdNameSpace
-  , idType  :: !(Strict Maybe Text)
+    idName       :: !Text
+  , idSpace      :: !Public.IdNameSpace
+  , idType       :: !(Strict Maybe Text)
+  , idDefinedIn  :: {-# UNPACK #-} !ModuleId
+  , idDefSpan    :: !EitherSpan
+  , idHomeModule :: !(Strict Maybe ModuleId)
   }
   deriving Show
 
@@ -63,14 +66,10 @@ data IdScope =
     -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
     Binder
     -- | Defined within this module
-  | Local {
-        idDefSpan :: !EitherSpan
-      }
+  | Local
     -- | Imported from a different module
   | Imported {
-        idDefSpan      :: !EitherSpan
-      , idDefinedIn    :: {-# UNPACK #-} !ModuleId
-      , idImportedFrom :: {-# UNPACK #-} !ModuleId
+        idImportedFrom :: {-# UNPACK #-} !ModuleId
       , idImportSpan   :: !EitherSpan
         -- | Qualifier used for the import
         --
@@ -115,7 +114,7 @@ data PackageId = PackageId
   { packageName    :: !Text
   , packageVersion :: !(Strict Maybe Text)
   }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 -- | Used before we convert it to an IdMap
 type IdList = [(SourceSpan, SpanInfo)]
@@ -201,11 +200,8 @@ instance Binary IdInfo where
 
 instance Binary IdScope where
   put Binder       = putWord8 0
-  put Local{..}    = do putWord8 1
-                        put idDefSpan
+  put Local        = do putWord8 1
   put Imported{..} = do putWord8 2
-                        put idDefSpan
-                        put idDefinedIn
                         put idImportedFrom
                         put idImportSpan
                         put idImportQual
@@ -215,8 +211,8 @@ instance Binary IdScope where
     header <- getWord8
     case header of
       0 -> return Binder
-      1 -> Local <$> get
-      2 -> Imported <$> get <*> get <*> get <*> get <*> get
+      1 -> return Local
+      2 -> Imported <$> get <*> get <*> get
       3 -> return WiredIn
       _ -> fail "IdScope.get: invalid header"
 
@@ -237,8 +233,11 @@ instance Binary IdProp where
     put idName
     put idSpace
     put idType
+    put idDefinedIn
+    put idDefSpan
+    put idHomeModule
 
-  get = IdProp <$> get <*> get <*> get
+  get = IdProp <$> get <*> get <*> get <*> get <*> get <*> get
 
 {-
 instance Binary IdMap where

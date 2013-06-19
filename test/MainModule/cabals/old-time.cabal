@@ -1,0 +1,38 @@
+name:		old-time
+version:	1.1.0.0
+license:	BSD3
+license-file:	LICENSE
+maintainer:	libraries@haskell.org
+bug-reports: http://hackage.haskell.org/trac/ghc/newticket?component=libraries/old-time
+synopsis:	Time library
+category:	System
+description:
+	This package provides the old time library.
+    For new code, the new time library is recommended.
+build-type: Configure
+extra-source-files:
+        aclocal.m4
+        config.guess config.sub install-sh
+        configure.ac configure
+        include/HsTimeConfig.h.in
+extra-tmp-files:
+        config.log config.status autom4te.cache
+        include/HsTimeConfig.h
+Cabal-Version: >= 1.6
+
+Library
+    exposed-modules:
+        System.Time
+    c-sources:
+        cbits/timeUtils.c
+    include-dirs: include
+    includes:	HsTime.h
+    install-includes:	HsTime.h HsTimeConfig.h
+    extensions:	CPP, ForeignFunctionInterface
+    build-depends: base >= 4.4 && < 5, old-locale
+    nhc98-options: -K2M
+
+source-repository head
+    type:     git
+    location: http://darcs.haskell.org/packages/old-time.git/
+

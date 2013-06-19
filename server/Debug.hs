@@ -1,4 +1,4 @@
-module IdeSession.Debug (
+module Debug (
     dVerbosity
   , debugFile
   , debug

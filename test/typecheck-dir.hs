@@ -7,7 +7,6 @@ import System.Environment
 import System.FilePath.Find (always, extension, find)
 import System.IO.Temp (withTempDirectory)
 
-import IdeSession.GHC.Run (hsExtensions)
 import IdeSession
 
 --- A sample program using the library. It type-checks all files
@@ -50,19 +49,16 @@ defOpts = [ "-hide-all-packages"
 main :: IO ()
 main = do
   args <- getArgs
-  case args of
-    "--server" : opts -> ghcServer opts  -- @opts@ are GHC static flags
-    _ -> do
-      let (originalSourcesDir, opts) = case args of
-            ["--help"] ->
-              error "usage: typecheck-dir [source-dir [ghc-options]]"
-            [dir] -> (dir, defOpts)
-            dir : optsArg -> (dir, optsArg)
-            [] -> ("test/Cabal",
-                   defOpts)
-      slashTmp <- getTemporaryDirectory
-      withTempDirectory slashTmp "typecheck-dir."
-        $ check opts originalSourcesDir
+  let (originalSourcesDir, opts) = case args of
+        ["--help"] ->
+          error "usage: typecheck-dir [source-dir [ghc-options]]"
+        [dir] -> (dir, defOpts)
+        dir : optsArg -> (dir, optsArg)
+        [] -> ("test/Cabal",
+               defOpts)
+  slashTmp <- getTemporaryDirectory
+  withTempDirectory slashTmp "typecheck-dir."
+    $ check opts originalSourcesDir
 
 check :: [String] -> FilePath -> FilePath -> IO ()
 check opts what configDir = do

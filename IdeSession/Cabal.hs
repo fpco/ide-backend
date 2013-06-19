@@ -1,38 +1,55 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module IdeSession.Cabal (
-    buildExecutable, buildHaddock
+    buildExecutable, buildHaddock, buildLicenseCatenation
   ) where
 
 import qualified Control.Exception as Ex
 import Control.Monad
-import Data.List (delete)
-import Data.Maybe (catMaybes, fromMaybe)
+import qualified Data.ByteString.Lazy as BSL
+import Data.List (delete, sort, nub)
+import Data.Maybe (catMaybes, fromMaybe, isNothing)
+import Data.Time
+  ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
-import System.Exit (ExitCode (ExitSuccess))
-import System.Environment (getEnvironment)
-import System.FilePath ((</>))
+import System.Exit (ExitCode (ExitSuccess, ExitFailure))
+import System.FilePath ((</>), takeFileName, splitPath, joinPath)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.IO.Temp (createTempDirectory)
 import Data.List.Split (splitOn)
+import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr)
+import System.Environment (getEnvironment)
 
+import Distribution.InstalledPackageInfo
+  (InstalledPackageInfo_ (InstalledPackageInfo, haddockInterfaces))
 import Distribution.License (License (..))
 import qualified Distribution.ModuleName
 import Distribution.PackageDescription
 import qualified Distribution.Package as Package
+import Distribution.ParseUtils ( parseFields, simpleField, ParseResult(..)
+                               , FieldDescr, parseLicenseQ, parseFilePathQ
+                               , parseFreeText, showFilePath, showFreeText
+                               , locatedErrorMsg, showPWarning, PWarning )
 import qualified Distribution.Simple.Build as Build
 import qualified Distribution.Simple.Haddock as Haddock
-import Distribution.Simple.Compiler (CompilerFlavor (GHC), PackageDB (SpecificPackageDB))
+import Distribution.Simple.Compiler ( CompilerFlavor (GHC)
+                                    , PackageDB(..), PackageDBStack )
 import Distribution.Simple.Configure (configure)
-import Distribution.Simple.LocalBuildInfo (localPkgDescr)
+import Distribution.Simple.GHC (getInstalledPackages)
+import Distribution.Simple.LocalBuildInfo (localPkgDescr, withPackageDB)
+import Distribution.Simple.PackageIndex (lookupSourcePackageId)
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
+import Distribution.Simple.Program.Db (configureAllKnownPrograms)
+import qualified Distribution.Text
 import Distribution.Version (anyVersion, thisVersion)
 import Language.Haskell.Extension (Language (Haskell2010))
 
+import IdeSession.Licenses
+  ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
 import IdeSession.State
 import IdeSession.Strict.Container
 import IdeSession.Types.Progress
@@ -41,6 +58,8 @@ import IdeSession.Types.Translation
 import qualified IdeSession.Strict.List as StrictList
 import qualified IdeSession.Strict.Map  as StrictMap
 import IdeSession.Util
+
+import qualified Paths_ide_backend as Self
 
 -- TODO: factor out common parts of exe building and haddock generation
 -- after Cabal and the code that calls it are improved not to require
@@ -158,11 +177,12 @@ externalDeps pkgs =
   in liftM catMaybes $ mapM depOfName pkgs
 
 configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
-                  -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
+                  -> PackageDBStack -> [PackageId]
+                  -> [ModuleName] -> (Progress -> IO ())
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
 configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
-                  pkgs loadedMs callback ms = do
+                  withPackageDB pkgs loadedMs callback ms = do
   counter <- newIORef initialProgress
   let markProgress = do
         oldCounter <- readIORef counter
@@ -237,7 +257,8 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
-        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+        lbiRaw <- configure (gpDesc, hookedBuildInfo) confFlags
+        let lbi = lbiRaw {withPackageDB}
         markProgress
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
         markProgress)
@@ -247,10 +268,11 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
   -- or filter stdout and display progress on each good line.
 
 configureAndHaddock :: FilePath -> FilePath -> [String] -> Bool
-                    -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
+                    -> PackageDBStack -> [PackageId]
+                    -> [ModuleName] -> (Progress -> IO ())
                     -> IO ExitCode
 configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
-                    pkgs loadedMs callback = do
+                    withPackageDB pkgs loadedMs callback = do
   counter <- newIORef initialProgress
   let markProgress = do
         oldCounter <- readIORef counter
@@ -300,7 +322,8 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
-        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+        lbiRaw <- configure (gpDesc, hookedBuildInfo) confFlags
+        let lbi = lbiRaw {withPackageDB}
         markProgress
         Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
         markProgress)
@@ -309,50 +332,234 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
   -- as they are emitted, similarly as log_action in GHC API,
   -- or filter stdout and display progress on each good line.
 
-buildExecutable :: FilePath -> FilePath -> [String] -> Bool
+buildExecutable :: FilePath -> FilePath -> [String] -> Bool -> Maybe [FilePath]
                 -> Strict Maybe Computed -> (Progress -> IO ())
                 -> [(ModuleName, FilePath)]
                 -> IO ExitCode
-buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink
+buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
                 mcomputed callback ms = do
-  case toLazyMaybe mcomputed of
-    Nothing -> fail "This session state does not admit executable building."
-    Just Computed{..} -> do
-      let loadedMs = toLazyList computedLoadedModules
-          imp m = do
-            let mimports =
-                  fmap (toLazyList . StrictList.map (removeExplicitSharing
-                                                       computedCache)) $
-                    StrictMap.lookup m computedImports
-            case mimports of
-              Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
-              Just imports ->
-                return $ map (modulePackage . importModule) imports
-      imps <- mapM imp loadedMs
-      let pkgs = concat imps
-      configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
-                        pkgs loadedMs callback ms
-      -- TODO: keep a list of built (and up-to-date?) executables?
+  (loadedMs, pkgs) <- buildDeps mcomputed
+  let defaultDB = GlobalPackageDB : UserPackageDB : []
+      toDB l = fmap SpecificPackageDB l
+      withPackageDB = maybe defaultDB toDB extraPackageDB
+  configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
+                    withPackageDB pkgs loadedMs callback ms
 
-buildHaddock :: FilePath -> FilePath -> [String] -> Bool
+buildHaddock :: FilePath -> FilePath -> [String] -> Bool -> Maybe [FilePath]
              -> Strict Maybe Computed -> (Progress -> IO ())
              -> IO ExitCode
-buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink
+buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink extraPackageDB
              mcomputed callback = do
+  (loadedMs, pkgs) <- buildDeps mcomputed
+  let defaultDB = GlobalPackageDB : UserPackageDB : []
+      toDB l = fmap SpecificPackageDB l
+      withPackageDB = maybe defaultDB toDB extraPackageDB
+  configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
+                      withPackageDB pkgs loadedMs callback
+
+lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
+lFieldDescrs =
+ [ simpleField "license"
+     Distribution.Text.disp              parseLicenseQ
+     (\(t1, _, _) -> fromMaybe BSD3 t1)  (\l (_, t2, t3) -> (Just l, t2, t3))
+ , simpleField "license-file"
+     showFilePath                        parseFilePathQ
+     (\(_, t2, _) -> fromMaybe "" t2)    (\lf (t1, _, t3) -> (t1, Just lf, t3))
+ , simpleField "author"
+     showFreeText                        parseFreeText
+     (\(_, _, t3) -> fromMaybe "???" t3) (\a (t1, t2, _) -> (t1, t2, Just a))
+ ]
+
+buildLicenseCatenation :: FilePath -> FilePath -> Maybe [FilePath] -> [String]
+                       -> Strict Maybe Computed -> (Progress -> IO ())
+                       -> IO ExitCode
+buildLicenseCatenation cabalsDir ideDistDir extraPackageDB configLicenseExc
+                       mcomputed callback = do
+  let defaultDB = GlobalPackageDB : UserPackageDB : []
+      toDB l = fmap SpecificPackageDB l
+      withPackageDB = maybe defaultDB toDB extraPackageDB
+  counter <- newIORef initialProgress
+  let markProgress = do
+        oldCounter <- readIORef counter
+        modifyIORef counter (updateProgress "")
+        callback oldCounter
+  (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
+  let stdoutLog  = ideDistDir </> "licenses.stdout"  -- warnings
+      stderrLog  = ideDistDir </> "licenses.stderr"  -- errors
+      licensesFN = ideDistDir </> "licenses.txt"     -- result
+  licensesFile <- openBinaryFile licensesFN WriteMode
+  -- The file containing concatenated licenses for core components.
+  -- If not present in @cabalsDir@, taken from the default location.
+  let cabalCoreFN = cabalsDir </> "CoreLicenses.txt"
+  defaultCoreFN <- Self.getDataFileName "CoreLicenses.txt"
+  cabalCoreExists <- doesFileExist cabalCoreFN
+  defaultCoreExists <- doesFileExist defaultCoreFN
+  let coreFN | cabalCoreExists = cabalCoreFN
+             | defaultCoreExists = defaultCoreFN
+             | otherwise = "CoreLicenses.txt"  -- in-place, for testing mostly
+  bsCore <- BSL.readFile coreFN
+  BSL.hPut licensesFile bsCore
+  let mainPackageName = Text.pack "main"
+      f :: PackageId -> IO ()
+      f PackageId{packageName} | packageName == mainPackageName = return ()
+      f PackageId{..} = do
+        let nameString = Text.unpack packageName
+            packageFile = cabalsDir </> nameString ++ ".cabal"
+            versionString = maybe "" Text.unpack packageVersion
+        version <- parseVersionString versionString
+        let _outputWarns :: [PWarning] -> IO ()
+            _outputWarns [] = return ()
+            _outputWarns warns = do
+              let warnMsg = "Parse warnings for " ++ packageFile ++ ":\n"
+                            ++ unlines (map (showPWarning packageFile) warns)
+                            ++ "\n"
+              appendFile stdoutLog warnMsg
+        b <- doesFileExist packageFile
+        if b then do
+          hPutStr licensesFile $ "\nLicense for " ++ nameString ++ ":\n\n"
+          pkgS <- readFile packageFile
+          -- We can't use @parsePackageDescription@, because it defaults to
+          -- AllRightsReserved and we default to BSD3. It's very hard
+          -- to use the machinery from the inside of @parsePackageDescription@,
+          -- so instead we use the much simpler @ParseUtils.parseFields@.
+          -- The downside is that we are much less past- and future-proof
+          -- against .cabal format changes. The upside is @parseFields@
+          -- is faster and does not care about most parsing errors
+          -- the .cabal file may (appear to) have.
+          case parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS of
+            ParseFailed err -> fail $ snd $ locatedErrorMsg err
+            ParseOk _warns (_, Just lf, _) -> do
+              -- outputWarns warns  -- false positives
+              programDB <- configureAllKnownPrograms  -- won't die
+                             minBound defaultProgramConfiguration
+              pkgIndex <- getInstalledPackages minBound withPackageDB programDB
+              let pkgId = Package.PackageIdentifier
+                            { pkgName = Package.PackageName nameString
+                            , pkgVersion = version }
+                  pkgInfos = lookupSourcePackageId pkgIndex pkgId
+              case pkgInfos of
+                InstalledPackageInfo{haddockInterfaces = hIn : _} : _ -> do
+                  let ps = splitPath hIn
+                      prefix = joinPath $ take (length ps - 2) ps
+                      -- The directory of the licence file is ignored
+                      -- in installed packages, hence @takeFileName@.
+                      stdLocation = prefix </> takeFileName lf
+                  bstd <- doesFileExist stdLocation
+                  if bstd then do
+                    bs <- BSL.readFile stdLocation
+                    BSL.hPut licensesFile bs
+                  else do
+                    -- Assume the package is not installed, but in a GHC tree.
+                    let treePs = splitPath prefix
+                        treePrefix = joinPath $ take (length treePs - 3) treePs
+                        treeLocation = treePrefix </> takeFileName lf
+                    btree <- doesFileExist treeLocation
+                    if btree then do
+                      bs <- BSL.readFile treeLocation
+                      BSL.hPut licensesFile bs
+                    else do
+                      -- Assume the package is not installed, but in a GHC tree
+                      -- with an alternative layout (OSX?).
+                      let osxPrefix = joinPath $ take (length ps - 1) ps
+                          osxLocation = osxPrefix </> takeFileName lf
+                      bosx <- doesFileExist osxLocation
+                      if bosx then do
+                        bs <- BSL.readFile osxLocation
+                        BSL.hPut licensesFile bs
+                      else fail $ "Package " ++ nameString
+                                  ++ " has no license file in path "
+                                  ++ stdLocation
+                                  ++ " nor " ++ treeLocation
+                                  ++ " nor " ++ osxLocation
+                _ -> fail $ "Package " ++ nameString
+                             ++ " not properly installed."
+            ParseOk _warns (l, Nothing, mauthor) -> do
+              -- outputWarns warns  -- false positives
+              when (isNothing l) $ do
+                let warnMsg =
+                      "WARNING: Package " ++ packageFile
+                      ++ " has no license nor license file specified.\n"
+                appendFile stdoutLog warnMsg
+              let license = fromMaybe BSD3 l
+                  author = fromMaybe "???" mauthor
+              ms <- licenseText license author
+              case ms of
+                Nothing -> fail $ "No license text can be found for package "
+                                  ++ nameString ++ "."
+                Just s -> do
+                  hPutStr licensesFile s
+                  let assumed = if isNothing l
+                                then " and the assumed"
+                                else ", but"
+                      warnMsg =
+                        "WARNING: No license file specified for package "
+                        ++ packageFile
+                        ++ assumed
+                        ++ " license is "
+                        ++ show license
+                        ++ ". Reproducing standard license text.\n"
+                  appendFile stdoutLog warnMsg
+        else
+          unless (nameString `elem` configLicenseExc) $
+            fail $ "No .cabal file provided for package "
+                   ++ nameString ++ " so no license can be found."
+        markProgress
+  res <- Ex.try $ mapM_ f pkgs
+  hClose licensesFile
+  let handler :: Ex.IOException -> IO ExitCode
+      handler e = do
+        let msg = "Licenses concatenation failed. The exception is:\n"
+                  ++ show e
+        writeFile stderrLog msg
+        return $ ExitFailure 1
+  either handler (const $ return ExitSuccess) res
+
+-- Gives a list of all modules and a list of all transitive package
+-- dependencies of the currently loaded project.
+buildDeps :: Strict Maybe Computed -> IO ([ModuleName], [PackageId])
+buildDeps mcomputed = do
   case toLazyMaybe mcomputed of
-    Nothing -> fail "This session state does not admit haddock generation."
+    Nothing -> fail "This session state does not admit artifact generation."
     Just Computed{..} -> do
       let loadedMs = toLazyList computedLoadedModules
           imp m = do
-            let mimports =
+            let mdeps =
                   fmap (toLazyList . StrictList.map (removeExplicitSharing
                                                        computedCache)) $
-                    StrictMap.lookup m computedImports
-            case mimports of
-              Nothing -> fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
-              Just imports ->
-                return $ map (modulePackage . importModule) imports
+                    StrictMap.lookup m computedPkgDeps
+                missing = fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
+            return $ fromMaybe missing mdeps
       imps <- mapM imp loadedMs
-      let pkgs = concat imps
-      configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
-                          pkgs loadedMs callback
+      return $ (loadedMs, nub $ sort $ concat imps)
+
+licenseText :: License -> String -> IO (Maybe String)
+licenseText license author = do
+  year <- getYear
+  return $! case license of
+    BSD3 -> Just $ bsd3 author (show year)
+
+    (GPL (Just (Version {versionBranch = [2]})))
+      -> Just gplv2
+
+    (GPL (Just (Version {versionBranch = [3]})))
+      -> Just gplv3
+
+    (LGPL (Just (Version {versionBranch = [2]})))
+      -> Just lgpl2
+
+    (LGPL (Just (Version {versionBranch = [3]})))
+      -> Just lgpl3
+
+-- TODO: needs to wait for a newer version of Cabal
+--    (Apache (Just (Version {versionBranch = [2, 0]})))
+--      -> Just apache20
+
+    _ -> Nothing
+
+getYear :: IO Integer
+getYear = do
+  u <- getCurrentTime
+  z <- getCurrentTimeZone
+  let l = utcToLocalTime z u
+      (y, _, _) = toGregorian $ localDay l
+  return y

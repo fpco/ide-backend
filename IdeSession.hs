@@ -122,10 +122,12 @@ module IdeSession (
   , updateDataFileFromFile
   , updateDataFileDelete
   , updateEnv
+  , updateArgs
   , updateStdoutBufferMode
   , updateStderrBufferMode
   , buildExe
   , buildDoc
+  , buildLicenses
     -- ** Progress
   , Progress(..)
   , initialProgress
@@ -145,8 +147,7 @@ module IdeSession (
   , getSessionConfig
   , getSourcesDir
   , getDataDir
-  , getBuildDir
-  , getDocDir
+  , getDistDir
   , getSourceModule
   , getDataFile
   , getAllDataFiles
@@ -160,9 +161,11 @@ module IdeSession (
   , getLoadedModules
   , getBuildExeStatus
   , getBuildDocStatus
+  , getBuildLicensesStatus
   , getSpanInfo
   , getImports
   , getAutocompletion
+  , getPkgDeps
     -- * Types for identifier info, errors, etc.
     -- ** Types
   , IdNameSpace(..)
@@ -188,11 +191,12 @@ module IdeSession (
   -- * Exception types
   , ExternalException(..)
   -- * For internal/debugging use only
-  , ghcServer
   , getGhcExitCode
   , forceRecompile
   , dumpIdInfo
   , crashGhcServer
+  , hsExtensions
+  , ideBackendApiVersion
 ) where
 
 import IdeSession.Config
@@ -201,5 +205,6 @@ import IdeSession.Query
 import IdeSession.State (IdeSession)
 import IdeSession.Types.Public
 import IdeSession.Types.Progress
-import IdeSession.GHC.Server
+import IdeSession.GHC.API
+import IdeSession.GHC.Client
 import IdeSession.RPC.Server (ExternalException (..))

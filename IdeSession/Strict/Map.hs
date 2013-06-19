@@ -11,12 +11,14 @@ module IdeSession.Strict.Map (
   , empty
   , insert
   , union
+  , unions
   , filterWithKey
   , lookup
   , findWithDefault
   , keysSet
   , (\\)
   , alter
+  , adjust
   , member
   , (!)
   , keys
@@ -30,6 +32,7 @@ import Data.Set (Set)
 import qualified Data.Map as Map
 import Data.Accessor (Accessor)
 import qualified Data.Accessor as Acc
+import qualified Data.List as List
 
 import IdeSession.Strict.Container
 
@@ -59,6 +62,9 @@ insert k v = StrictMap . Map.insertWith' const k v . toLazyMap
 union :: Ord k => Strict (Map k) v -> Strict (Map k) v -> Strict (Map k) v
 union a b = StrictMap $ Map.union (toLazyMap a) (toLazyMap b)
 
+unions :: Ord k => [Strict (Map k) v] -> Strict (Map k) v
+unions = StrictMap . Map.unions . List.map toLazyMap
+
 filterWithKey :: Ord k => (k -> v -> Bool) -> Strict (Map k) v -> Strict (Map k) v
 filterWithKey p = StrictMap . Map.filterWithKey p . toLazyMap
 
@@ -82,6 +88,14 @@ alter f k = StrictMap . Map.alter aux k . toLazyMap
     aux ma = case f ma of
                Nothing -> Nothing
                Just a  -> a `seq` Just a
+
+-- We use alter because it gives us something to anchor a seq to
+adjust :: forall k v. Ord k => (v -> v) -> k -> Strict (Map k) v -> Strict (Map k) v
+adjust f i = StrictMap . Map.alter aux i . toLazyMap
+  where
+    aux :: Maybe v -> Maybe v
+    aux Nothing  = Nothing
+    aux (Just v) = let v' = f v in v' `seq` Just v'
 
 member :: Ord k => k -> Strict (Map k) v -> Bool
 member k = Map.member k . toLazyMap

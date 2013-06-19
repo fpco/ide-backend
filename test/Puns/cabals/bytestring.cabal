@@ -1,0 +1,91 @@
+Name:                bytestring
+Version:             0.9.2.1
+Synopsis:            Fast, packed, strict and lazy byte arrays with a list interface
+Description:
+    A time and space-efficient implementation of byte vectors using
+    packed Word8 arrays, suitable for high performance use, both in terms
+    of large data quantities, or high speed requirements. Byte vectors
+    are encoded as strict 'Word8' arrays of bytes, and lazy lists of
+    strict chunks, held in a 'ForeignPtr', and can be passed between C
+    and Haskell with little effort.
+    .
+    Test coverage data for this library is available at:
+        <http://code.haskell.org/~dons/tests/bytestring/hpc_index.html>
+
+License:             BSD3
+License-file:        LICENSE
+Category:            Data
+Copyright:           Copyright (c) Don Stewart   2005-2009,
+                               (c) Duncan Coutts 2006-2009,
+                               (c) David Roundy  2003-2005.
+Author:              Don Stewart, Duncan Coutts
+Maintainer:          dons00@gmail.com, duncan@community.haskell.org
+Homepage:            http://www.cse.unsw.edu.au/~dons/fps.html
+Tested-With:         GHC==7.0.2, GHC==6.12.3, GHC==6.10.4, GHC ==6.8.2
+Build-Type:          Simple
+Cabal-Version:       >= 1.8
+extra-source-files:  README TODO
+
+library
+  build-depends:     base >= 3 && < 5
+
+  if impl(ghc >= 6.10)
+    build-depends:   ghc-prim, base >= 4
+
+  exposed-modules:   Data.ByteString
+                     Data.ByteString.Char8
+                     Data.ByteString.Unsafe
+                     Data.ByteString.Internal
+                     Data.ByteString.Lazy
+                     Data.ByteString.Lazy.Char8
+                     Data.ByteString.Lazy.Internal
+                     Data.ByteString.Fusion
+
+  extensions:        CPP, ForeignFunctionInterface
+
+  if impl(ghc)
+      extensions:   UnliftedFFITypes,
+                    MagicHash,
+                    UnboxedTuples,
+                    DeriveDataTypeable
+                    ScopedTypeVariables
+  if impl(ghc >= 6.11)
+      extensions:   NamedFieldPuns
+
+  --TODO: eliminate orphan instances:
+  ghc-options:      -Wall -fno-warn-orphans
+                    -O2
+                    -funbox-strict-fields 
+                    -fmax-simplifier-iterations10
+                    -fdicts-cheap
+
+  c-sources:         cbits/fpstring.c
+  include-dirs:      include
+  includes:          fpstring.h
+  install-includes:  fpstring.h
+
+  nhc98-options:     -K4M -K3M
+
+-- QC properties, with GHC RULES disabled
+test-suite prop-compiled
+  type:             exitcode-stdio-1.0
+  main-is:          Properties.hs
+  hs-source-dirs:   . tests
+  build-depends:    base, random, directory,
+                    QuickCheck >= 2.3 && < 3
+  if impl(ghc >= 6.10)
+    build-depends:  ghc-prim
+  c-sources:        cbits/fpstring.c
+  include-dirs:     include
+  if impl(ghc >= 6.10)
+    ghc-options:    -fno-enable-rewrite-rules
+  else
+    ghc-options:    -fno-rewrite-rules
+  if impl(ghc)
+      extensions:   UnliftedFFITypes,
+                    MagicHash,
+                    UnboxedTuples,
+                    DeriveDataTypeable
+                    ScopedTypeVariables
+  if impl(ghc >= 6.11)
+      extensions:   NamedFieldPuns
