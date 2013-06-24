@@ -2799,7 +2799,10 @@ syntheticTests =
           (updateSessionD session upd 1)
     )
   , ( "Consistency of IdMap/explicit sharing cache through multiple updates (#88)"
-    , withConfiguredSession defOpts $ \sess -> do
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        ]
+      in withConfiguredSession packageOpts $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
             updMod = \mod code -> updateModule mod (BSLC.pack code)
@@ -2866,6 +2869,111 @@ syntheticTests =
         do gif <- getSpanInfo sess
            assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
            assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar (VarName) :: IO () defined in main:Foo at Foo.hs@7:1-7:7 (imported from main:Foo at Baz.hs@3:1-3:11)"
+    )
+  , ( "Consistency of mutliple modules of the same name"
+{-
+18:45 < mikolaj> from http://www.haskell.org/ghc/docs/7.4.2/html/users_guide/packages.html#package-overlaps
+18:45 < mikolaj> It is possible that by using packages you might end up with a program that contains two modules with the same name: perhaps you used a package P that has a hidden module M, and there is also a module M in your program.
+                 Or perhaps the dependencies of packages that you used contain some overlapping modules. Perhaps the program even contains multiple versions of a certain package, due to dependencies from other packages.
+18:45 < mikolaj> None of these scenarios gives rise to an error on its own[8], but they may have some interesting consequences. For instance, if you have a type M.T from version 1 of package P, then this is not the same as the type M.T
+                 from version 2 of package P, and GHC will report an error if you try to use one where the other is expected.
+18:46 < mikolaj> so it seems it's unspecified which module will be used --- it just happens that our idInfo code picks a different package than GHC API in this case
+-}
+    , withConfiguredSession defOpts $ \sess -> do
+        let cb = \_ -> return ()
+            update = flip (updateSession sess) cb
+            updMod = \mod code -> updateModule mod (BSLC.pack code)
+
+        update $ updMod "Control/Parallel.hs"
+            "module Control.Parallel where\n\
+            \\n\
+            \import Bar\n\
+            \\n\
+            \foo = bar >> bar\n\
+            \\n\
+            \foobar = putStrLn \"Baz\"\n"
+
+        update $ updMod "Bar.hs"
+            "module Bar where\n\
+            \\n\
+            \bar = putStrLn \"Hello, world!\"\n"
+
+        update $ updMod "Baz.hs"
+            "module Baz where\n\
+            \\n\
+            \import Control.Parallel\n\
+            \import Bar\n\
+            \\n\
+            \baz = foobar\n"
+
+        assertNoErrors sess
+
+        do gif <- getSpanInfo sess
+           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
+-- would fail:            assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar (VarName) :: IO () defined in main:Control.Parallel at Control/Parallel.hs@7:1-7:7 (imported from main:Control.Parallel at Baz.hs@3:1-3:24)"
+
+        update $ updMod "Baz.hs"
+            "module Baz where\n\
+            \\n\
+            \import Control.Parallel\n\
+            \import Bar\n\
+            \\n\
+            \baz = foobar >>>> foo >> bar\n"
+
+        assertOneError sess
+
+        do gif <- getSpanInfo sess
+           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
+           -- Baz is broken at this point
+
+        update $ updMod "Baz.hs"
+            "module Baz where\n\
+            \\n\
+            \import Control.Parallel\n\
+            \import Bar\n\
+            \\n\
+            \baz = foobar >> foo >> bar\n"
+
+        assertNoErrors sess
+
+        do gif <- getSpanInfo sess
+           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
+-- would fail:           assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar (VarName) :: IO () defined in main:Control.Parallel at Control/Parallel.hs@7:1-7:7 (imported from main:Control/Parallel at Baz.hs@3:1-3:24)"
+    )
+  , ( "Consistency of mutliple modules of the same name: PackageImports"
+    , withConfiguredSession defOpts $ \sess -> do
+        let cb = \_ -> return ()
+            update = flip (updateSession sess) cb
+            updMod = \mod code -> updateModule mod (BSLC.pack code)
+
+        update $ updMod "Control/Parallel.hs"
+            "module Control.Parallel where\n\
+            \\n\
+            \import Bar\n\
+            \\n\
+            \foo = bar >> bar\n\
+            \\n\
+            \par = putStrLn \"Baz\"\n"
+
+        update $ updMod "Bar.hs"
+            "module Bar where\n\
+            \\n\
+            \bar = putStrLn \"Hello, world!\"\n"
+
+        update $ updMod "Baz.hs"
+            "{-# LANGUAGE PackageImports #-}\n\
+            \module Baz where\n\
+            \\n\
+            \import \"parallel\" Control.Parallel\n\
+            \import Bar\n\
+            \\n\
+            \baz = par\n"
+
+        assertNoErrors sess
+
+        do gif <- getSpanInfo sess
+           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
+           assertIdInfo gif "Baz" (7, 8, 7, 9) "par (VarName) :: a1 -> b1 -> b1 defined in parallel-X.Y.Z:Control.Parallel at <no location info> (imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35)"
     )
   ]
 
@@ -3006,7 +3114,9 @@ assertIdInfo idInfo mod (frLine, frCol, toLine, toCol) expected =
     versionRegexp :: String
     versionRegexp = "[0-9]+(\\.[0-9]+)+"
 
-    actual = show . snd . head $ idInfo (Text.pack mod) span
+    actual = case idInfo (Text.pack mod) span of
+      [] -> ""
+      hd : _ -> show $ snd hd
 
     span = SourceSpan { spanFilePath   = mod ++ ".hs"
                       , spanFromLine   = frLine
