@@ -279,11 +279,11 @@ ghcHandleCompile RpcConversation{..} dOpts ideNewOpts
           sendPluginResult (StrictMap.toList pluginIdMaps)
 
           graph <- lift $ getModuleGraph
-          let sortedGraph = sortBy (compare `on` ms_mod_name) graph
-              name s      = Text.pack (moduleNameString (ms_mod_name s))
-              namedGraph  = map (\s -> (name s, s)) sortedGraph
+          let name s      = Text.pack (moduleNameString (ms_mod_name s))
+              namedGraph  = map (\s -> (name s, s)) graph
+              sortedGraph = sortBy (compare `on` fst) namedGraph
           oldSummaries <- lift . liftIO $ readIORef modsRef
-          go (StrictMap.toList oldSummaries) namedGraph
+          go (StrictMap.toList oldSummaries) sortedGraph
 
         liftIO $ writeIORef modsRef (StrictMap.fromList newSummaries)
         return finalResponse
