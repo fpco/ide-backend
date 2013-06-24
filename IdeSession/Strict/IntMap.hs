@@ -6,23 +6,24 @@
 module IdeSession.Strict.IntMap (
     fromList
   , toList
-  , (!)
+  , findWithDefault
   , empty
   , adjust
   , insertWith
   , map
   , reverseLookup
+  , filter
   ) where
 
-import Prelude hiding (map)
+import Prelude hiding (map, filter)
 import Data.Tuple (swap)
 import qualified Data.IntMap as IntMap
 import qualified Data.List as List
 
 import IdeSession.Strict.Container
 
-(!) :: Strict IntMap v -> Int -> v
-(!) = (IntMap.!) . toLazyIntMap
+findWithDefault :: v -> Int -> Strict IntMap v -> v
+findWithDefault def i = IntMap.findWithDefault def i . toLazyIntMap
 
 fromList :: [(Int, v)] -> Strict IntMap v
 fromList = force . IntMap.fromList
@@ -50,3 +51,6 @@ map f = force . IntMap.map f . toLazyIntMap
 -- O(n)
 reverseLookup :: Eq v => Strict IntMap v -> v -> Maybe Int
 reverseLookup m v = lookup v $ List.map swap $ toList m
+
+filter :: (v -> Bool) -> Strict IntMap v -> Strict IntMap v
+filter p = StrictIntMap . IntMap.filter p . toLazyIntMap

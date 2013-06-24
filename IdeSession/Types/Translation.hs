@@ -90,7 +90,11 @@ instance ExplicitSharing Public.IdProp where
 
 instance ExplicitSharing Public.IdInfo where
   removeExplicitSharing cache Private.IdInfo{..} = Public.IdInfo {
-      Public.idProp  = removeExplicitSharing cache (Private.idPropCache cache StrictIntMap.! Private.idPropPtr idProp)
+      Public.idProp  = removeExplicitSharing cache $
+                         StrictIntMap.findWithDefault
+                           (error "IdInfo.removeExplicitSharing: could not resolve idPropPtr")
+                           (Private.idPropPtr idProp)
+                           (Private.idPropCache cache)
     , Public.idScope = removeExplicitSharing cache idScope
     }
 
@@ -119,7 +123,11 @@ instance ExplicitSharing Public.IdScope where
 
 instance ExplicitSharing Public.SourceSpan where
   removeExplicitSharing cache Private.SourceSpan{..} = Public.SourceSpan {
-      Public.spanFilePath   = BSSC.unpack $ Private.filePathCache cache StrictIntMap.! Private.filePathPtr spanFilePath
+      Public.spanFilePath   = BSSC.unpack $
+                                StrictIntMap.findWithDefault
+                                  (error "SourceSpan.removeExplicitSharing: could not resolve idPropPtr")
+                                  (Private.filePathPtr spanFilePath)
+                                  (Private.filePathCache cache)
     , Public.spanFromLine   = spanFromLine
     , Public.spanFromColumn = spanFromColumn
     , Public.spanToLine     = spanToLine

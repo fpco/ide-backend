@@ -110,18 +110,18 @@ mkFilePathPtr path = do
 
 -- | Construct the explicit sharing cache
 --
--- NOTE: This wipes the IdPropCache. This should only be called at the end
--- of a compile cycle.
+-- TODO: We should remove entries from the cache that are no longer necessary
+-- (from modules in the home package that got unloaded, or from modules
+-- in other packages that are no longer imported); moreover, we should avoid
+-- sending the entire cache over on every call to compile.
 constructExplicitSharingCache :: IO ExplicitSharingCache
 constructExplicitSharingCache = do
     -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
     -- for long-running sessions with many added and removed definitions.
-    idPropCache <- readIORef idPropCacheRef
-    liftIO $ writeIORef idPropCacheRef IntMap.empty
-
+    idPropCache       <- readIORef idPropCacheRef
     (filePathHash, _) <- readIORef filePathCacheRef
-    let filePathCache = IntMap.fromList . map convert $ HashMap.toList filePathHash
 
+    let filePathCache = IntMap.fromList . map convert $ HashMap.toList filePathHash
     return ExplicitSharingCache {..}
   where
     convert :: (FilePath, Int) -> (Int, ByteString)

@@ -2798,6 +2798,75 @@ syntheticTests =
              || expected2 `isInfixOf` err)
           (updateSessionD session upd 1)
     )
+  , ( "Consistency of IdMap/explicit sharing cache through multiple updates (#88)"
+    , withConfiguredSession defOpts $ \sess -> do
+        let cb = \_ -> return ()
+            update = flip (updateSession sess) cb
+            updMod = \mod code -> updateModule mod (BSLC.pack code)
+
+        update $ updateCodeGeneration True
+        update $ updateStdoutBufferMode (RunLineBuffering Nothing)
+        update $ updateStderrBufferMode (RunLineBuffering Nothing)
+
+        update $ updMod "Foo.hs"
+            "module Foo where\n\
+            \\n\
+            \import Bar\n\
+            \\n\
+            \foo = bar >> bar\n\
+            \\n\
+            \foobar = putStrLn \"Baz\"\n"
+
+        update $ updMod "Bar.hs"
+            "module Bar where\n\
+            \\n\
+            \bar = putStrLn \"Hello, world!\"\n"
+
+        do gif <- getSpanInfo sess
+           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
+
+        update $ updMod "Baz.hs"
+            "module Baz where\n\
+            \\n\
+            \import Foo\n\
+            \import Bar\n\
+            \\n\
+            \baz = foobar\n"
+
+        assertNoErrors sess
+
+        do gif <- getSpanInfo sess
+           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
+           assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar (VarName) :: IO () defined in main:Foo at Foo.hs@7:1-7:7 (imported from main:Foo at Baz.hs@3:1-3:11)"
+
+        update $ updMod "Baz.hs"
+            "module Baz where\n\
+            \\n\
+            \import Foo\n\
+            \import Bar\n\
+            \\n\
+            \baz = foobar >>>> foo >> bar\n"
+
+        assertOneError sess
+
+        do gif <- getSpanInfo sess
+           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
+           -- Baz is broken at this point
+
+        update $ updMod "Baz.hs"
+            "module Baz where\n\
+            \\n\
+            \import Foo\n\
+            \import Bar\n\
+            \\n\
+            \baz = foobar >> foo >> bar\n"
+
+        assertNoErrors sess
+
+        do gif <- getSpanInfo sess
+           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
+           assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar (VarName) :: IO () defined in main:Foo at Foo.hs@7:1-7:7 (imported from main:Foo at Baz.hs@3:1-3:11)"
+    )
   ]
 
 deletePackage :: FilePath -> IO ()

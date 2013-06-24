@@ -198,7 +198,10 @@ rpcCompile server opts dir genCode callback =
       where
         aux :: IdInfo -> (BSS.ByteString, Strict [] IdInfo)
         aux idInfo@IdInfo{idProp = k} =
-          let idProp = idPropCache cache StrictIntMap.! idPropPtr k
+          let idProp = StrictIntMap.findWithDefault
+                         (error "constructAuto: could not resolve idPropPtr")
+                         (idPropPtr k)
+                         (idPropCache cache)
           in ( BSS.pack . Text.unpack . idName $ idProp
              , StrictList.singleton idInfo )
 
