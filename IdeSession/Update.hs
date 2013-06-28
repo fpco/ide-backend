@@ -355,11 +355,14 @@ updateCodeGeneration b = IdeSessionUpdate $ \_ _ -> do
 
 -- | A session update that changes a data file by giving a new value for the
 -- file. This can be used to add a new file or update an existing one.
+-- Since source files can include data files (e.g., via TH), we set
+-- @ideUpdatedCode@ to force recompilation (see #94).
 --
 updateDataFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate
 updateDataFile n bs = IdeSessionUpdate $ \_ IdeStaticInfo{ideDataDir} -> do
   liftIO $ writeFileAtomic (ideDataDir </> n) bs
   modify (ideManagedFiles .> managedData) (n :)
+  set ideUpdatedCode True
 
 -- | Like 'updateDataFile' except that instead of passing the file content by
 -- value, it's given by reference to an existing file (the second argument),
@@ -373,6 +376,7 @@ updateDataFileFromFile n p = IdeSessionUpdate
   liftIO $ Dir.createDirectoryIfMissing True targetDir
   liftIO $ Dir.copyFile p targetPath
   modify (ideManagedFiles .> managedData) (n :)
+  set ideUpdatedCode True
 
 -- | A session update that deletes an existing data file.
 --
@@ -380,6 +384,7 @@ updateDataFileDelete :: FilePath -> IdeSessionUpdate
 updateDataFileDelete n = IdeSessionUpdate $ \_ IdeStaticInfo{ideDataDir} -> do
   liftIO $ Dir.removeFile (ideDataDir </> n)
   modify (ideManagedFiles .> managedData) $ delete n
+  set ideUpdatedCode True
 
 -- | Set an environment variable
 --
