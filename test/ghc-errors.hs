@@ -619,8 +619,7 @@ syntheticTests =
               [ "{-# LANGUAGE TemplateHaskell #-}"
               , "module Main where"
               , "import Language.Haskell.TH.Syntax"
-              , "main = do"
-              , "  putStrLn $(qRunIO (readFile \"test.txt\") >>= lift)"
+              , "main = putStrLn $(qRunIO (readFile \"test.txt\") >>= lift)"
               ]
         updateSessionD session (update <> update2) 1
         assertNoErrors session
@@ -2974,6 +2973,64 @@ syntheticTests =
         do gif <- getSpanInfo sess
            assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
            assertIdInfo gif "Baz" (7, 8, 7, 9) "par (VarName) :: a1 -> b1 -> b1 defined in parallel-X.Y.Z:Control.Parallel at <no location info> (imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35)"
+    )
+  , ( "Quickfix for Updating static files never triggers recompilation"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = updateDataFile "A.foo" (BSLC.pack "unboundVarName")
+               <> (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module A where"
+                    , "import Language.Haskell.TH.Syntax"
+                    , "goodVarName = 42"
+                    , "foo :: Int"
+                    , "foo = $(do"
+                    , "          qAddDependentFile \"A.foo\""
+                    , "          s <- qRunIO (readFile \"A.foo\")"
+                    , "          return $ VarE (mkName s))"
+                    ])
+        updateSessionD session upd 1
+        assertOneError session
+        let upd2 = updateDataFile "A.foo" (BSLC.pack "goodVarName")
+        updateSessionD session upd2 1
+        assertNoErrors session
+    )
+  , ( "Quickfix for Updating static files never triggers --- illegal var name"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = updateDataFile "A.foo" (BSLC.pack "42 is a wrong var name")
+               <> (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module A where"
+                    , "import Language.Haskell.TH.Syntax"
+                    , "goodVarName = 42"
+                    , "foo :: Int"
+                    , "foo = $(do"
+                    , "          qAddDependentFile \"A.foo\""
+                    , "          s <- qRunIO (readFile \"A.foo\")"
+                    , "          return $ VarE (mkName s))"
+                    ])
+        updateSessionD session upd 1
+        assertOneError session
+        let upd2 = updateDataFile "A.foo" (BSLC.pack "goodVarName")
+        updateSessionD session upd2 1
+        assertNoErrors session
+    )
+  , ( "Quickfix for Updating static files never triggers --- missing file"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module A where"
+                    , "import Language.Haskell.TH.Syntax"
+                    , "foo :: String"
+                    , "foo = $(do"
+                    , "          qAddDependentFile \"A.foo\""
+                    , "          x <- qRunIO (readFile \"A.foo\")"
+                    , "          lift x)"
+                    ])
+        updateSessionD session upd 1
+        assertOneError session
+        let upd2 = updateDataFile "A.foo" (BSLC.pack "fooString")
+        updateSessionD session upd2 1
+        assertNoErrors session
     )
   ]
 
