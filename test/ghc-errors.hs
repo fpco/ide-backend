@@ -6,10 +6,10 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad (forM_, liftM, void, when)
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
-import qualified Data.ByteString.Lazy.Char8 as BSLC (pack, unpack, null)
+import qualified Data.ByteString.Lazy.Char8 as BSLC (null, pack, unpack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.List (isPrefixOf, isSuffixOf, isInfixOf, sort)
+import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
 import qualified Data.List as List
 import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
@@ -3031,6 +3031,34 @@ syntheticTests =
         let upd2 = updateDataFile "A.foo" (BSLC.pack "fooString")
         updateSessionD session upd2 1
         assertNoErrors session
+    )
+  , ( "Module name visible from 2 packages"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package MonadCatchIO-mtl"
+                        , "-package MonadCatchIO-transformers"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "import Control.Monad.CatchIO"
+                    ])
+        updateSessionD session upd 1
+        assertOneError session
+    )
+  , ( "Module name visible from 2 packages --- no configGenerateModInfo"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package MonadCatchIO-mtl"
+                        , "-package MonadCatchIO-transformers"
+                        ]
+      in withConfiguredSessionDetailed False defaultDbStack packageOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "import Control.Monad.CatchIO"
+                    ])
+        updateSessionD session upd 1
+        assertOneError session
     )
   ]
 
