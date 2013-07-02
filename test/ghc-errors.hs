@@ -3077,7 +3077,7 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at <no location info> (imported from MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:57)"
+        assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at <no location info> (home MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO) (imported from MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:57)"
     )
   , ( "Module name visible from 2 packages --- picked from -mtl"
     , let packageOpts = [ "-hide-all-packages"
@@ -3095,7 +3095,7 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at <no location info> (imported from MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:48)"
+        assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at <no location info> (home MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO) (imported from MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:48)"
     )
   ]
 
