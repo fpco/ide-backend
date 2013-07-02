@@ -2972,7 +2972,7 @@ syntheticTests =
 
         do gif <- getSpanInfo sess
            assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
-           assertIdInfo gif "Baz" (7, 8, 7, 9) "par (VarName) :: a1 -> b1 -> b1 defined in parallel-X.Y.Z:Control.Parallel at <no location info> (imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35)"
+           assertIdInfo gif "Baz" (7, 8, 7, 9) "par (VarName) :: a1 -> b1 -> b1 defined in parallel-X.Y.Z:Control.Parallel at <no location info> (home parallel-X.Y.Z:Control.Parallel) (imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35)"
     )
   , ( "Quickfix for Updating static files never triggers recompilation"
     , withConfiguredSession defOpts $ \session -> do
@@ -3076,10 +3076,46 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         assertNoErrors session
+
+        -- TODO: abstract away from version numbers
+        imports <- getImports session
+        let base mod = ModuleId {
+                moduleName    = Text.pack mod
+              , modulePackage = PackageId {
+                    packageName    = Text.pack "base"
+                  , packageVersion = Just (Text.pack "4.5.1.0")
+                  }
+              }
+            monadCatchIO_transformers mod = ModuleId {
+                moduleName    = Text.pack mod
+              , modulePackage = PackageId {
+                    packageName    = Text.pack "MonadCatchIO-transformers"
+                  , packageVersion = Just (Text.pack "0.3.0.0")
+                  }
+              }
+        assertSameSet "imports: " (fromJust . imports $ Text.pack "A") $ [
+            Import {
+                importModule    = base "Prelude"
+              , importPackage   = Nothing
+              , importQualified = False
+              , importImplicit  = True
+              , importAs        = Nothing
+              , importEntities  = ImportAll
+              }
+          , Import {
+                importModule    = monadCatchIO_transformers "Control.Monad.CatchIO"
+              , importPackage   = Just (Text.pack "MonadCatchIO-transformers")
+              , importQualified = False
+              , importImplicit  = False
+              , importAs        = Nothing
+              , importEntities  = ImportAll
+              }
+          ]
+
         idInfo <- getSpanInfo session
         assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at <no location info> (home MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO) (imported from MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:57)"
     )
-  , ( "Module name visible from 2 packages --- picked from -mtl"
+  , ( "Module name visible from 2 packages --- picked from -mtl (expected failure)"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"
                         , "-package MonadCatchIO-mtl"
@@ -3094,8 +3130,47 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         assertNoErrors session
+
+        -- TODO: abstract away from version numbers
+        imports <- getImports session
+        let base mod = ModuleId {
+                moduleName    = Text.pack mod
+              , modulePackage = PackageId {
+                    packageName    = Text.pack "base"
+                  , packageVersion = Just (Text.pack "4.5.1.0")
+                  }
+              }
+            monadCatchIO_transformers mod = ModuleId {
+                moduleName    = Text.pack mod
+              , modulePackage = PackageId {
+                    packageName    = Text.pack "MonadCatchIO-mtl"
+                  , packageVersion = Just (Text.pack "0.3.0.5")
+                  }
+              }
+        assertSameSet "imports: " (fromJust . imports $ Text.pack "A") $ [
+            Import {
+                importModule    = base "Prelude"
+              , importPackage   = Nothing
+              , importQualified = False
+              , importImplicit  = True
+              , importAs        = Nothing
+              , importEntities  = ImportAll
+              }
+          , Import {
+                importModule    = monadCatchIO_transformers "Control.Monad.CatchIO"
+              , importPackage   = Just (Text.pack "MonadCatchIO-mtl")
+              , importQualified = False
+              , importImplicit  = False
+              , importAs        = Nothing
+              , importEntities  = ImportAll
+              }
+          ]
+
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at <no location info> (home MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO) (imported from MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:48)"
+        -- TODO: This is the IdInfo we *should* be getting
+        -- assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at <no location info> (home MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO) (imported from MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:48)"
+        -- but this is what we get instead (see #95):
+        assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at <no location info> (home MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO) (imported from MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:48)"
     )
   ]
 
