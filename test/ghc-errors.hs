@@ -3040,13 +3040,14 @@ syntheticTests =
                         ]
       in withConfiguredSession packageOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
-                    [ "module A where"
+                    [ "{-# LANGUAGE PackageImports #-}"
+                    , "module A where"
                     , "import Control.Monad.CatchIO"
                     ])
         updateSessionD session upd 1
         assertOneError session
     )
-  , ( "Module name visible from 2 packages --- no configGenerateModInfo"
+  , ( "Module name visible from 2 packages --- w/o configGenerateModInfo"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"
                         , "-package MonadCatchIO-mtl"
@@ -3059,6 +3060,42 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         assertOneError session
+    )
+  , ( "Module name visible from 2 packages --- picked from -transformers"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package MonadCatchIO-mtl"
+                        , "-package MonadCatchIO-transformers"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE PackageImports #-}"
+                    , "module A where"
+                    , "import \"MonadCatchIO-transformers\" Control.Monad.CatchIO"
+                    , "f x = catches (print 1) [x]"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at <no location info> (imported from MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:57)"
+    )
+  , ( "Module name visible from 2 packages --- picked from -mtl"
+    , let packageOpts = [ "-hide-all-packages"
+                        , "-package base"
+                        , "-package MonadCatchIO-mtl"
+                        , "-package MonadCatchIO-transformers"
+                        ]
+      in withConfiguredSession packageOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE PackageImports #-}"
+                    , "module A where"
+                    , "import \"MonadCatchIO-mtl\" Control.Monad.CatchIO"
+                    , "f x = catches (print 1) [x]"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at <no location info> (imported from MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:48)"
     )
   ]
 
@@ -3237,7 +3274,7 @@ assertNoErrors session = do
 
 assertSomeErrors :: [SourceError] -> Assertion
 assertSomeErrors msgs = do
-  assertBool "Type error lost" $ length msgs >= 1
+  assertBool "An error was expected, but not found" $ length msgs >= 1
 
 assertOneError :: IdeSession -> Assertion
 assertOneError session = do
