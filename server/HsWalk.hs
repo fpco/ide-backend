@@ -475,13 +475,17 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
                              return (Just scope)
               Nothing  -> return Nothing
 
+      -- We need to guess the PackageId here, because this is not stored as
+      -- part of the ImpDeclSpec (listed as a TODO in the ghc sources).
+      -- For now we pass 'Nothing' as the PackageQualifier. It *might* be
+      -- possible to recover the package qualifier using 'impSpan'.
       scopeFromProv :: MonadIO m => RdrName.Provenance -> m IdScope
       scopeFromProv RdrName.LocalDef = do
         return Local
       scopeFromProv (RdrName.Imported spec) = do
         (impMod, impSpan, impQual) <- extractImportInfo spec
         return Imported {
-            idImportedFrom = moduleNameToId dflags impMod
+            idImportedFrom = moduleNameToId dflags Nothing impMod
           , idImportSpan   = impSpan
           , idImportQual   = Text.pack $ impQual
           }
