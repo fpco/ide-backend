@@ -11,7 +11,6 @@ import Control.Applicative ((<$>))
 import qualified Data.Text as Text
 import Data.List (stripPrefix)
 import Data.Maybe (fromMaybe)
-import Control.Arrow (first)
 import Data.Version (showVersion)
 
 import GHC (DynFlags(pkgState))
@@ -27,11 +26,8 @@ import IdeSession.Strict.Maybe as Maybe
 moduleToPackageId :: DynFlags -> GHC.ModuleName -> Maybe GHC.PackageId
 moduleToPackageId dflags impMod = case pkgExposed of
     []  -> Nothing
-    [p] -> Just $ Packages.packageConfigId (fst p)
-    _   -> let pkgIds = map (first (Module.packageIdString
-                                     . Packages.packageConfigId)) pkgExposed
-           in error $ "modToPkg: " ++ Module.moduleNameString impMod
-                   ++ ": " ++ show pkgIds
+--    _ : p : _ -> Just $ Packages.packageConfigId (fst p)
+    p : _ -> Just $ Packages.packageConfigId (fst p)
   where
     pkgAll     = Packages.lookupModuleInAllPackages dflags impMod
     pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
