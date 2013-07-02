@@ -4,7 +4,7 @@ module Main (main) where
 import Control.Applicative ((<$>))
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
-import Control.Monad (forM_, liftM, void, when)
+import Control.Monad (forM_, liftM, void, when, replicateM_)
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (null, pack, unpack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
@@ -2608,6 +2608,22 @@ syntheticTests =
         assertRaises ""
           (\(ExternalException stderr _) -> stderr == show (userError "Intentional crash"))
           (updateSession session (updateEnv "Foo" Nothing) (\_ -> return ()))
+    )
+  , ( "GHC crash 4: Multiple follow up requests"
+    , withConfiguredSession defOpts $ \session -> do
+        updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
+        do errs <- getSourceErrors session
+           assertBool "No errors" (null errs)
+
+        crashGhcServer session Nothing
+        replicateM_ 5 $
+          assertRaises ""
+            (\(ExternalException stderr _) -> stderr == show (userError "Intentional crash"))
+            (updateSession session (updateEnv "Foo" Nothing) (\_ -> return ()))
+
+        -- TODO: should we expect an exception here instead?
+        do errs <- getSourceErrors session
+           assertBool "No errors" (null errs)
     )
   , ( "getLoadedModules while configGenerateModInfo off"
     , withConfiguredSessionDetailed False defaultDbStack defOpts $ \session -> do
