@@ -68,13 +68,14 @@ pkgDepsFromModSummary :: DynFlags
                       -> GHC.ModSummary
                       -> [GHC.PackageId]
 pkgDepsFromModSummary dflags s =
-    catMaybes (map (moduleToPackageId dflags) impMods)
+    catMaybes (map (uncurry (moduleToPackageId dflags)) impMods)
   where
     aux :: Located (ImportDecl RdrName)
-        -> GHC.ModuleName
-    aux = unLoc . ideclName . unLoc
+        -> (PackageQualifier, GHC.ModuleName)
+    aux lIdecl = let idecl = unLoc lIdecl
+                 in (ideclPkgQual idecl, unLoc (ideclName idecl))
 
-    impMods :: [GHC.ModuleName]
+    impMods :: [(PackageQualifier, GHC.ModuleName)]
     impMods = map aux (GHC.ms_srcimps      s)
            ++ map aux (GHC.ms_textual_imps s)
 

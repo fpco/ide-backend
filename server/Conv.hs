@@ -4,11 +4,12 @@ module Conv (
   , moduleNameToId
   , fillVersion
   , moduleToModuleId
+  , PackageQualifier
   ) where
 
 import Control.Applicative ((<$>))
 import qualified Data.Text as Text
-import Data.List (stripPrefix)
+import Data.List (stripPrefix, isPrefixOf)
 import Data.Maybe (fromMaybe)
 import Control.Arrow (first)
 import Data.Version (showVersion)
@@ -17,28 +18,37 @@ import GHC (DynFlags(pkgState))
 import qualified GHC
 import qualified Packages
 import qualified Module
+import FastString (FastString, unpackFS)
 
 import IdeSession.Types.Private
 import IdeSession.Strict.Maybe as Maybe
 
+type PackageQualifier = Maybe FastString
+
 -- | Returns Nothing for the main package, or Just a package ID otherwise.
 -- Throws an exception if the module cannot be found.
-moduleToPackageId :: DynFlags -> GHC.ModuleName -> Maybe GHC.PackageId
-moduleToPackageId dflags impMod = case pkgExposed of
-    []  -> Nothing
-    [p] -> Just $ Packages.packageConfigId (fst p)
-    _   -> let pkgIds = map (first (Module.packageIdString
-                                     . Packages.packageConfigId)) pkgExposed
-           in error $ "modToPkg: " ++ Module.moduleNameString impMod
-                   ++ ": " ++ show pkgIds
+moduleToPackageId :: DynFlags -> PackageQualifier -> GHC.ModuleName -> Maybe GHC.PackageId
+moduleToPackageId dflags pkgQual impMod = case pkgMatching of
+    []    -> Nothing
+    p : _ -> Just p
   where
-    pkgAll     = Packages.lookupModuleInAllPackages dflags impMod
-    pkgExposed = filter (\ (p, b) -> b && Packages.exposed p) pkgAll
+    pkgAll      = Packages.lookupModuleInAllPackages dflags impMod
+    pkgExposed  = flip filter pkgAll $ \(p, b) ->
+                       b                  -- Is the module  exposed?
+                    && Packages.exposed p -- Is the package exposed?
+    pkgIds      = map (Packages.packageConfigId . fst) pkgExposed
+    pkgMatching = filter (matchesPkgQual pkgQual) pkgIds
 
-moduleNameToId :: DynFlags -> GHC.ModuleName -> ModuleId
-moduleNameToId dflags impMod = ModuleId {
-    moduleName    = Text.pack $ Module.moduleNameString $ impMod
-  , modulePackage = case moduleToPackageId dflags impMod of
+    -- TODO: This is a bit of a hack. I'm not sure what matching ghc does
+    -- exactly, but PackageId's are just strings, they don't have any structure
+    matchesPkgQual Nothing   _     = True
+    matchesPkgQual (Just fs) pkgId =
+      unpackFS fs `isPrefixOf` Module.packageIdString pkgId
+
+moduleNameToId :: DynFlags -> PackageQualifier -> GHC.ModuleName -> ModuleId
+moduleNameToId dflags pkgQual impMod = ModuleId {
+    moduleName    = Text.pack $ Module.moduleNameString impMod
+  , modulePackage = case moduleToPackageId dflags pkgQual impMod of
                       Just pkg -> fillVersion dflags pkg
                       Nothing  -> mainPackage
   }

@@ -94,9 +94,10 @@ import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
 import qualified IdeSession.Strict.List  as StrictList
 
-import HsWalk (extractSourceSpan, idInfoForName, moduleNameToId)
+import HsWalk (extractSourceSpan, idInfoForName)
 import Haddock
 import Debug
+import Conv
 
 newtype DynamicOpts = DynamicOpts [Located String]
 
@@ -241,7 +242,7 @@ importList summary = do
     dflags  <- getSessionDynFlags
     let goImp :: Located (ImportDecl RdrName) -> Import
         goImp (L _ decl) = Import {
-            importModule    = moduleNameToId dflags (unLoc (ideclName decl))
+            importModule    = moduleNameToId dflags (ideclPkgQual decl) (unLoc (ideclName decl))
           , importPackage   = force $ ((Text.pack . unpackFS) <$> ideclPkgQual decl)
           , importQualified = ideclQualified decl
           , importImplicit  = ideclImplicit decl
