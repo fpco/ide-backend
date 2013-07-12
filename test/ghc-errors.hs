@@ -1816,79 +1816,79 @@ syntheticTests =
         assertIdInfo idInfo "B" (3,1,3,4) "foo (VarName) :: T defined in main:B at B.hs@3:1-3:4 (binding occurrence)"
         assertIdInfo idInfo "B" (3,7,3,10) "MkT (DataName) :: T defined in main:A at A.hs@2:10-2:13 (imported from main:A at B.hs@2:1-2:9)"
     )
-  , ( "Type information 5: External packages, type sigs, scoped type vars, kind sigs"
-    , let opts = defOpts ++ [
-                     "-package parallel"
-                   , "-XScopedTypeVariables"
-                   , "-XKindSignatures"
-                   ]
-      in withConfiguredSession opts $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
-                    [ "module A where"
+  -- , ( "Type information 5: External packages, type sigs, scoped type vars, kind sigs"
+  --   , let opts = defOpts ++ [
+  --                    "-package parallel"
+  --                  , "-XScopedTypeVariables"
+  --                  , "-XKindSignatures"
+  --                  ]
+  --     in withConfiguredSession opts $ \session -> do
+  --       let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+  --                   [ "module A where"
 
-                    , "import Control.Parallel"
+  --                   , "import Control.Parallel"
 
-                    , "e = True `pseq` False"
+  --                   , "e = True `pseq` False"
 
-                    , "f :: a -> a"
-                    , "f x = x"
+  --                   , "f :: a -> a"
+  --                   , "f x = x"
 
-                    , "g :: forall a. a -> a"
-                    , "g x = x"
+  --                   , "g :: forall a. a -> a"
+  --                   , "g x = x"
 
-                    , "h :: forall a. a -> a"
-                    , "h x = y"
-                    , "  where"
-                    , "    y :: a"
-                    , "    y = x"
+  --                   , "h :: forall a. a -> a"
+  --                   , "h x = y"
+  --                   , "  where"
+  --                   , "    y :: a"
+  --                   , "    y = x"
 
-                    , "i :: forall (t :: * -> *) a. t a -> t a"
-                    , "i x = x"
-                    ])
-        updateSessionD session upd 2
-        assertNoErrors session
-        idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (3,1,3,2) "e (VarName) :: Bool defined in main:A at A.hs@3:1-3:2 (binding occurrence)"
-        assertIdInfo idInfo "A" (3,5,3,9) "True (DataName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)"
-        assertIdInfo idInfo "A" (3,10,3,16) "pseq (VarName) :: a -> b -> b defined in parallel-3.2.0.3:Control.Parallel at <no location info> (home parallel-3.2.0.3:Control.Parallel) (imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24)"
-        assertIdInfo idInfo "A" (3,17,3,22) "False (DataName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)"
-        assertIdInfo idInfo "A" (4,1,4,2) "f (VarName) :: a -> a defined in main:A at A.hs@5:1-5:2 (defined locally)"
-        assertIdInfo idInfo "A" (4,6,4,7) "a (TvName) defined in main:A at A.hs@4:6-4:7 (defined locally)"
-        assertIdInfo idInfo "A" (4,11,4,12) "a (TvName) defined in main:A at A.hs@4:6-4:7 (defined locally)"
-        assertIdInfo idInfo "A" (5,1,5,2) "f (VarName) :: a -> a defined in main:A at A.hs@5:1-5:2 (binding occurrence)"
-        assertIdInfo idInfo "A" (5,3,5,4) "x (VarName) :: a defined in main:A at A.hs@5:3-5:4 (binding occurrence)"
-        assertIdInfo idInfo "A" (5,7,5,8) "x (VarName) :: a defined in main:A at A.hs@5:3-5:4 (defined locally)"
-        assertIdInfo idInfo "A" (6,1,6,2) "g (VarName) :: a -> a defined in main:A at A.hs@7:1-7:2 (defined locally)"
-        assertIdInfo idInfo "A" (6,13,6,14) "a (TvName) defined in main:A at A.hs@6:13-6:14 (binding occurrence)"
-        assertIdInfo idInfo "A" (6,16,6,17) "a (TvName) defined in main:A at A.hs@6:13-6:14 (defined locally)"
-        assertIdInfo idInfo "A" (6,21,6,22) "a (TvName) defined in main:A at A.hs@6:13-6:14 (defined locally)"
-        assertIdInfo idInfo "A" (7,1,7,2) "g (VarName) :: a -> a defined in main:A at A.hs@7:1-7:2 (binding occurrence)"
-        assertIdInfo idInfo "A" (7,3,7,4) "x (VarName) :: a defined in main:A at A.hs@7:3-7:4 (binding occurrence)"
-        assertIdInfo idInfo "A" (7,7,7,8) "x (VarName) :: a defined in main:A at A.hs@7:3-7:4 (defined locally)"
-        assertIdInfo idInfo "A" (8,1,8,2) "h (VarName) :: a -> a defined in main:A at A.hs@9:1-9:2 (defined locally)"
-        assertIdInfo idInfo "A" (8,13,8,14) "a (TvName) defined in main:A at A.hs@8:13-8:14 (binding occurrence)"
-        assertIdInfo idInfo "A" (8,16,8,17) "a (TvName) defined in main:A at A.hs@8:13-8:14 (defined locally)"
-        assertIdInfo idInfo "A" (8,21,8,22) "a (TvName) defined in main:A at A.hs@8:13-8:14 (defined locally)"
-        assertIdInfo idInfo "A" (9,1,9,2) "h (VarName) :: a -> a defined in main:A at A.hs@9:1-9:2 (binding occurrence)"
-        assertIdInfo idInfo "A" (9,3,9,4) "x (VarName) :: a defined in main:A at A.hs@9:3-9:4 (binding occurrence)"
-        assertIdInfo idInfo "A" (9,7,9,8) "y (VarName) :: a defined in main:A at A.hs@12:5-12:6 (defined locally)"
-        assertIdInfo idInfo "A" (11,5,11,6) "y (VarName) :: a defined in main:A at A.hs@12:5-12:6 (defined locally)"
-        assertIdInfo idInfo "A" (11,5,11,6) "y (VarName) :: a defined in main:A at A.hs@12:5-12:6 (defined locally)"
-        assertIdInfo idInfo "A" (11,10,11,11) "a (TvName) defined in main:A at A.hs@8:13-8:14 (defined locally)"
-        assertIdInfo idInfo "A" (11,10,11,11) "a (TvName) defined in main:A at A.hs@8:13-8:14 (defined locally)"
-        assertIdInfo idInfo "A" (12,5,12,6) "y (VarName) :: a defined in main:A at A.hs@12:5-12:6 (binding occurrence)"
-        assertIdInfo idInfo "A" (12,9,12,10) "x (VarName) :: a defined in main:A at A.hs@9:3-9:4 (defined locally)"
-        assertIdInfo idInfo "A" (13,1,13,2) "i (VarName) :: t a -> t a defined in main:A at A.hs@14:1-14:2 (defined locally)"
-        assertIdInfo idInfo "A" (13,13,13,26) "t (TvName) defined in main:A at A.hs@13:13-13:26 (binding occurrence)"
-        assertIdInfo idInfo "A" (13,27,13,28) "a (TvName) defined in main:A at A.hs@13:27-13:28 (binding occurrence)"
-        assertIdInfo idInfo "A" (13,30,13,31) "t (TvName) defined in main:A at A.hs@13:13-13:26 (defined locally)"
-        assertIdInfo idInfo "A" (13,32,13,33) "a (TvName) defined in main:A at A.hs@13:27-13:28 (defined locally)"
-        assertIdInfo idInfo "A" (13,37,13,38) "t (TvName) defined in main:A at A.hs@13:13-13:26 (defined locally)"
-        assertIdInfo idInfo "A" (13,39,13,40) "a (TvName) defined in main:A at A.hs@13:27-13:28 (defined locally)"
-        assertIdInfo idInfo "A" (14,1,14,2) "i (VarName) :: t a -> t a defined in main:A at A.hs@14:1-14:2 (binding occurrence)"
-        assertIdInfo idInfo "A" (14,3,14,4) "x (VarName) :: t a defined in main:A at A.hs@14:3-14:4 (binding occurrence)"
-        assertIdInfo idInfo "A" (14,7,14,8) "x (VarName) :: t a defined in main:A at A.hs@14:3-14:4 (defined locally)"
-    )
+  --                   , "i :: forall (t :: * -> *) a. t a -> t a"
+  --                   , "i x = x"
+  --                   ])
+  --       updateSessionD session upd 2
+  --       assertNoErrors session
+  --       idInfo <- getSpanInfo session
+  --       assertIdInfo idInfo "A" (3,1,3,2) "e (VarName) :: Bool defined in main:A at A.hs@3:1-3:2 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (3,5,3,9) "True (DataName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)"
+  --       assertIdInfo idInfo "A" (3,10,3,16) "pseq (VarName) :: a -> b -> b defined in parallel-3.2.0.3:Control.Parallel at <no location info> (home parallel-3.2.0.3:Control.Parallel) (imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24)"
+  --       assertIdInfo idInfo "A" (3,17,3,22) "False (DataName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)"
+  --       assertIdInfo idInfo "A" (4,1,4,2) "f (VarName) :: a -> a defined in main:A at A.hs@5:1-5:2 (defined locally)"
+  --       assertIdInfo idInfo "A" (4,6,4,7) "a (TvName) defined in main:A at A.hs@4:6-4:7 (defined locally)"
+  --       assertIdInfo idInfo "A" (4,11,4,12) "a (TvName) defined in main:A at A.hs@4:6-4:7 (defined locally)"
+  --       assertIdInfo idInfo "A" (5,1,5,2) "f (VarName) :: a -> a defined in main:A at A.hs@5:1-5:2 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (5,3,5,4) "x (VarName) :: a defined in main:A at A.hs@5:3-5:4 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (5,7,5,8) "x (VarName) :: a defined in main:A at A.hs@5:3-5:4 (defined locally)"
+  --       assertIdInfo idInfo "A" (6,1,6,2) "g (VarName) :: a -> a defined in main:A at A.hs@7:1-7:2 (defined locally)"
+  --       assertIdInfo idInfo "A" (6,13,6,14) "a (TvName) defined in main:A at A.hs@6:13-6:14 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (6,16,6,17) "a (TvName) defined in main:A at A.hs@6:13-6:14 (defined locally)"
+  --       assertIdInfo idInfo "A" (6,21,6,22) "a (TvName) defined in main:A at A.hs@6:13-6:14 (defined locally)"
+  --       assertIdInfo idInfo "A" (7,1,7,2) "g (VarName) :: a -> a defined in main:A at A.hs@7:1-7:2 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (7,3,7,4) "x (VarName) :: a defined in main:A at A.hs@7:3-7:4 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (7,7,7,8) "x (VarName) :: a defined in main:A at A.hs@7:3-7:4 (defined locally)"
+  --       assertIdInfo idInfo "A" (8,1,8,2) "h (VarName) :: a -> a defined in main:A at A.hs@9:1-9:2 (defined locally)"
+  --       assertIdInfo idInfo "A" (8,13,8,14) "a (TvName) defined in main:A at A.hs@8:13-8:14 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (8,16,8,17) "a (TvName) defined in main:A at A.hs@8:13-8:14 (defined locally)"
+  --       assertIdInfo idInfo "A" (8,21,8,22) "a (TvName) defined in main:A at A.hs@8:13-8:14 (defined locally)"
+  --       assertIdInfo idInfo "A" (9,1,9,2) "h (VarName) :: a -> a defined in main:A at A.hs@9:1-9:2 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (9,3,9,4) "x (VarName) :: a defined in main:A at A.hs@9:3-9:4 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (9,7,9,8) "y (VarName) :: a defined in main:A at A.hs@12:5-12:6 (defined locally)"
+  --       assertIdInfo idInfo "A" (11,5,11,6) "y (VarName) :: a defined in main:A at A.hs@12:5-12:6 (defined locally)"
+  --       assertIdInfo idInfo "A" (11,5,11,6) "y (VarName) :: a defined in main:A at A.hs@12:5-12:6 (defined locally)"
+  --       assertIdInfo idInfo "A" (11,10,11,11) "a (TvName) defined in main:A at A.hs@8:13-8:14 (defined locally)"
+  --       assertIdInfo idInfo "A" (11,10,11,11) "a (TvName) defined in main:A at A.hs@8:13-8:14 (defined locally)"
+  --       assertIdInfo idInfo "A" (12,5,12,6) "y (VarName) :: a defined in main:A at A.hs@12:5-12:6 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (12,9,12,10) "x (VarName) :: a defined in main:A at A.hs@9:3-9:4 (defined locally)"
+  --       assertIdInfo idInfo "A" (13,1,13,2) "i (VarName) :: t a -> t a defined in main:A at A.hs@14:1-14:2 (defined locally)"
+  --       assertIdInfo idInfo "A" (13,13,13,26) "t (TvName) defined in main:A at A.hs@13:13-13:26 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (13,27,13,28) "a (TvName) defined in main:A at A.hs@13:27-13:28 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (13,30,13,31) "t (TvName) defined in main:A at A.hs@13:13-13:26 (defined locally)"
+  --       assertIdInfo idInfo "A" (13,32,13,33) "a (TvName) defined in main:A at A.hs@13:27-13:28 (defined locally)"
+  --       assertIdInfo idInfo "A" (13,37,13,38) "t (TvName) defined in main:A at A.hs@13:13-13:26 (defined locally)"
+  --       assertIdInfo idInfo "A" (13,39,13,40) "a (TvName) defined in main:A at A.hs@13:27-13:28 (defined locally)"
+  --       assertIdInfo idInfo "A" (14,1,14,2) "i (VarName) :: t a -> t a defined in main:A at A.hs@14:1-14:2 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (14,3,14,4) "x (VarName) :: t a defined in main:A at A.hs@14:3-14:4 (binding occurrence)"
+  --       assertIdInfo idInfo "A" (14,7,14,8) "x (VarName) :: t a defined in main:A at A.hs@14:3-14:4 (defined locally)"
+  --   )
   , ( "Type information 6: Reusing type variables"
     , withConfiguredSession ("-XScopedTypeVariables" : defOpts) $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
@@ -2038,40 +2038,40 @@ syntheticTests =
         assertIdInfo idInfo "B" (6,7,6,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter defined in main:A at A.hs@4:1-4:3 (imported from main:A at B.hs@3:1-3:9)"
         assertIdInfo idInfo "B" (7,7,7,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter defined in main:A at A.hs@4:1-4:3 (imported from main:A at B.hs@3:1-3:9)"
     )
-  , ( "Type information 9b: Quasi-quotation (QQ in separate package, check home module info)"
-    , withConfiguredSession ("-package template-haskell" : "-package yesod" : defOpts) $ \session -> do
-        let upd = updateCodeGeneration True
-               <> (updateModule "Main.hs" . BSLC.pack . unlines $
-                    [ "{-# LANGUAGE TypeFamilies, QuasiQuotes, MultiParamTypeClasses,"
-                    , "             TemplateHaskell, OverloadedStrings #-}"
-                    , "import Yesod"
+  -- , ( "Type information 9b: Quasi-quotation (QQ in separate package, check home module info)"
+  --   , withConfiguredSession ("-package template-haskell" : "-package yesod" : defOpts) $ \session -> do
+  --       let upd = updateCodeGeneration True
+  --              <> (updateModule "Main.hs" . BSLC.pack . unlines $
+  --                   [ "{-# LANGUAGE TypeFamilies, QuasiQuotes, MultiParamTypeClasses,"
+  --                   , "             TemplateHaskell, OverloadedStrings #-}"
+  --                   , "import Yesod"
 
-                    , "data Piggies = Piggies"
+  --                   , "data Piggies = Piggies"
 
-                    , "instance Yesod Piggies"
+  --                   , "instance Yesod Piggies"
 
-                    , "mkYesod \"Piggies\" [parseRoutes|"
-                    , "  / HomeR GET"
-                    , "|]"
+  --                   , "mkYesod \"Piggies\" [parseRoutes|"
+  --                   , "  / HomeR GET"
+  --                   , "|]"
 
-                    , "getHomeR = defaultLayout [whamlet|"
-                    , "  Welcome to the Pigsty!"
-                    , "  |]"
+  --                   , "getHomeR = defaultLayout [whamlet|"
+  --                   , "  Welcome to the Pigsty!"
+  --                   , "  |]"
 
-                    , "main = warpEnv Piggies"
-                    ])
-        updateSessionD session upd 2
+  --                   , "main = warpEnv Piggies"
+  --                   ])
+  --       updateSessionD session upd 2
 
-        errs <- getSourceErrors session
-        case errs of
-          [] -> do
-            idInfo <- getSpanInfo session
+  --       errs <- getSourceErrors session
+  --       case errs of
+  --         [] -> do
+  --           idInfo <- getSpanInfo session
 
-            assertIdInfo idInfo "Main" (6,19,8,3) "quasi-quote with quoter parseRoutes (VarName) defined in yesod-routes-1.2.0.1:Yesod.Routes.Parse at <no location info> (home yesod-core-1.2.2:Yesod.Core.Dispatch) (imported from yesod-1.2.1:Yesod at Main.hs@3:1-3:13)"
-            assertIdInfo idInfo "Main" (9,26,11,5) "quasi-quote with quoter whamlet (VarName) defined in yesod-core-1.2.2:Yesod.Core.Widget at <no location info> (home yesod-core-1.2.2:Yesod.Core.Widget) (imported from yesod-1.2.1:Yesod at Main.hs@3:1-3:13)"
-          _ ->
-            putStrLn "WARNING: Skipping due to errors (probably yesod package not installed)"
-    )
+  --           assertIdInfo idInfo "Main" (6,19,8,3) "quasi-quote with quoter parseRoutes (VarName) defined in yesod-routes-1.2.0.1:Yesod.Routes.Parse at <no location info> (home yesod-core-1.2.2:Yesod.Core.Dispatch) (imported from yesod-1.2.1:Yesod at Main.hs@3:1-3:13)"
+  --           assertIdInfo idInfo "Main" (9,26,11,5) "quasi-quote with quoter whamlet (VarName) defined in yesod-core-1.2.2:Yesod.Core.Widget at <no location info> (home yesod-core-1.2.2:Yesod.Core.Widget) (imported from yesod-1.2.1:Yesod at Main.hs@3:1-3:13)"
+  --         _ ->
+  --           putStrLn "WARNING: Skipping due to errors (probably yesod package not installed)"
+  --   )
   , ( "Type information 10: Template Haskell"
     , withConfiguredSession ("-package template-haskell" : defOpts) $ \session -> do
         let upd = updateCodeGeneration True
