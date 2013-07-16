@@ -83,9 +83,9 @@ withConfiguredSessionDetailed configGenerateModInfo configPackageDBStack
 withConfiguredSession :: [String] -> (IdeSession -> IO a) -> IO a
 withConfiguredSession = withConfiguredSessionDetailed True defaultDbStack
 
-withConfiguredSessionWTsystem :: [String] -> (IdeSession -> IO ()) -> IO ()
-withConfiguredSessionWTsystem opts io = do
-  wtsystem <- (System.Environment.getEnv "WELL_TYPED_SYSTEM")
+ifIdeBackendHaddockTestsEnabled :: [String] -> (IdeSession -> IO ()) -> IO ()
+ifIdeBackendHaddockTestsEnabled opts io = do
+  wtsystem <- (System.Environment.getEnv "IDE_BACKEND_DISABLE_HADDOCK_TESTS")
                `Ex.catch` (\(_ :: Ex.IOException) -> return "1")
   unless (wtsystem == "0" || wtsystem == "False") $
     withConfiguredSession opts io
@@ -1790,7 +1790,7 @@ syntheticTests =
   --       assertEqual "licenses length" 4933 (length licenses)
   --   )
   , ( "Type information 1: Local identifiers and Prelude"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "a = (5 :: Int)"
@@ -1828,7 +1828,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,10,2,13) "MkT (DataName) :: T defined in main:A at A.hs@2:10-2:13 (binding occurrence)"
     )
   , ( "Type information 3: Polymorphism"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "data TMaybe a = TNothing | TJust a"
@@ -1913,7 +1913,7 @@ syntheticTests =
                      "-XScopedTypeVariables"
                    , "-XKindSignatures"
                    ]
-      in withConfiguredSessionWTsystem opts $ \session -> do
+      in ifIdeBackendHaddockTestsEnabled opts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
 
@@ -2047,7 +2047,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (11,17,11,18) "x (VarName) :: t defined in main:A at A.hs@11:9-11:10 (defined locally)"
     )
   , ( "Type information 7: Qualified imports"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.Maybe"
@@ -2064,7 +2064,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (5,33,5,37) "on (VarName) :: (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 defined in base-4.5.1.0:Data.Function at <no location info> (home base-4.5.1.0:Data.Function) (imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36)"
     )
   , ( "Type information 8: Imprecise source spans"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "main = print True"
@@ -2130,7 +2130,7 @@ syntheticTests =
         assertIdInfo idInfo "B" (7,7,7,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter defined in main:A at A.hs@4:1-4:3 (imported from main:A at B.hs@3:1-3:9)"
     )
   , ( "Type information 9b: Quasi-quotation (QQ in separate package, check home module info)"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateModule "Main.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TypeFamilies, QuasiQuotes, MultiParamTypeClasses,"
@@ -2164,7 +2164,7 @@ syntheticTests =
             putStrLn "WARNING: Skipping due to errors (probably yesod package not installed)"
     )
   , ( "Type information 10: Template Haskell"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
@@ -2207,7 +2207,7 @@ syntheticTests =
         assertIdInfo idInfo "B" (5,7,5,11) "ex1 (VarName) :: Q Exp defined in main:A at A.hs@5:1-5:4 (imported from main:A at B.hs@3:1-3:9)"
     )
   , ( "Type information 11: Take advantage of scope (1)"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "main = print True"
@@ -2218,7 +2218,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,8,2,13) "print (VarName) :: Show a => a -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
     )
   , ( "Type information 12: Take advantage of scope (2)"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString (append)"
@@ -2230,7 +2230,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (3,7,3,13) "append (VarName) :: Data.ByteString.Internal.ByteString -> Data.ByteString.Internal.ByteString -> Data.ByteString.Internal.ByteString defined in bytestring-0.9.2.1:Data.ByteString at <no location info> (home bytestring-0.9.2.1:Data.ByteString) (imported from bytestring-0.9.2.1:Data.ByteString at A.hs@2:25-2:31)"
     )
   , ( "Type information 13: Take advantage of scope (3)"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString"
@@ -2242,7 +2242,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (3,7,3,13) "append (VarName) :: ByteString -> ByteString -> ByteString defined in bytestring-0.9.2.1:Data.ByteString at <no location info> (home bytestring-0.9.2.1:Data.ByteString) (imported from bytestring-0.9.2.1:Data.ByteString at A.hs@2:1-2:23)"
     )
   , ( "Type information 14: Take advantage of scope (4)"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString (append)"
@@ -2255,7 +2255,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (4,7,4,13) "append (VarName) :: BS.ByteString -> BS.ByteString -> BS.ByteString defined in bytestring-0.9.2.1:Data.ByteString at <no location info> (home bytestring-0.9.2.1:Data.ByteString) (imported from bytestring-0.9.2.1:Data.ByteString as 'BS.' at A.hs@3:1-3:39)"
     )
   , ( "Type information 15: Other constructs"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ {-  1 -} "{-# LANGUAGE StandaloneDeriving, DoRec #-}"
                     , {-  2 -} "module A where"
@@ -2308,7 +2308,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (18,35,18,37) "xs (VarName) :: [Int] defined in main:A at A.hs@18:19-18:21 (defined locally)"
     )
   , ( "Type information 16: FFI"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE ForeignFunctionInterface #-}"
                     , "module A where"
@@ -2336,7 +2336,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (10,33,10,40) "CDouble (TcClsName) defined in base-4.5.1.0:Foreign.C.Types at <no location info> (home base-4.5.1.0:Foreign.C.Types) (imported from base-4.5.1.0:Foreign.C at A.hs@4:1-4:17)"
     )
   , ( "Type information 17: GADTs"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE GADTs, KindSignatures, RankNTypes #-}"
                     , "module A where"
@@ -2359,7 +2359,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (7,59,7,60) "a (TvName) defined in main:A at A.hs@7:18-7:19 (defined locally)"
     )
   , ( "Type information 18: Other types"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ {-  1 -} "{-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, TypeFamilies #-}"
                     , {-  2 -} "module A where"
@@ -2581,7 +2581,7 @@ syntheticTests =
            assertEqual "" expected (show completeFoob)
     )
   , ( "Autocomplete 3: Autocompletion entries should have home module info"
-    , withConfiguredSessionWTsystem defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     ])
@@ -2825,7 +2825,7 @@ syntheticTests =
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"
                         ]
-      in withConfiguredSessionWTsystem packageOpts $ \sess -> do
+      in ifIdeBackendHaddockTestsEnabled packageOpts $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
             updMod = \mod code -> updateModule mod (BSLC.pack code)
@@ -2902,7 +2902,7 @@ syntheticTests =
                  from version 2 of package P, and GHC will report an error if you try to use one where the other is expected.
 18:46 < mikolaj> so it seems it's unspecified which module will be used --- it just happens that our idInfo code picks a different package than GHC API in this case
 -}
-    , withConfiguredSessionWTsystem defOpts $ \sess -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
             updMod = \mod code -> updateModule mod (BSLC.pack code)
@@ -2964,7 +2964,7 @@ syntheticTests =
 -- would fail:           assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar (VarName) :: IO () defined in main:Control.Parallel at Control/Parallel.hs@7:1-7:7 (imported from main:Control/Parallel at Baz.hs@3:1-3:24)"
     )
   , ( "Consistency of mutliple modules of the same name: PackageImports"
-    , withConfiguredSessionWTsystem defOpts $ \sess -> do
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
             updMod = \mod code -> updateModule mod (BSLC.pack code)
@@ -3091,7 +3091,7 @@ syntheticTests =
                         , "-package MonadCatchIO-mtl"
                         , "-package MonadCatchIO-transformers"
                         ]
-      in withConfiguredSessionWTsystem packageOpts $ \session -> do
+      in ifIdeBackendHaddockTestsEnabled packageOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE PackageImports #-}"
                     , "module A where"
@@ -3145,7 +3145,7 @@ syntheticTests =
                         , "-package MonadCatchIO-mtl"
                         , "-package MonadCatchIO-transformers"
                         ]
-      in withConfiguredSessionWTsystem packageOpts $ \session -> do
+      in ifIdeBackendHaddockTestsEnabled packageOpts $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE PackageImports #-}"
                     , "module A where"
