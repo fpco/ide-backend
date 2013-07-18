@@ -20,10 +20,6 @@ Flag test-pkg-dbs
   description: Build the test suite for package DBs
   default:     False
 
-Flag fpco
-  description: Use fpco-specific dependencies
-  default:     False
-
 library
   exposed-modules:    IdeSession
   other-modules:      IdeSession.State,
@@ -81,12 +77,9 @@ library
                       transformers         >= 0.3     && < 0.4,
                       time                 >= 1.4     && < 1.5,
                       ide-backend-rts      >= 0.1.1,
-                      template-haskell
-
-  if flag(fpco)
-    build-depends:    Cabal-fpco           >= 1.16    && < 1.17
-  else
-    build-depends:    Cabal                >= 1.16    && < 1.17
+                      template-haskell,
+                      -- our own private fork:
+                      Cabal-ide-backend
 
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,
