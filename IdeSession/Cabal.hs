@@ -7,8 +7,7 @@ module IdeSession.Cabal (
 import qualified Control.Exception as Ex
 import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
-import Data.Function
-import Data.List (delete, sort, nub, nubBy)
+import Data.List (delete, sort, group, nub)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
@@ -24,8 +23,6 @@ import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr)
 
 import Distribution.InstalledPackageInfo
   (InstalledPackageInfo_ ( InstalledPackageInfo
-                         , installedPackageId
-                         , sourcePackageId
                          , haddockInterfaces ))
 import Distribution.License (License (..))
 import qualified Distribution.ModuleName
@@ -43,16 +40,17 @@ import Distribution.Simple.Compiler (CompilerFlavor (GHC))
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.GHC (getInstalledPackages)
 import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo (..)
-                                          , ComponentLocalBuildInfo (..)
-                                          , localPkgDescr, withPackageDB)
-import Distribution.Simple.PackageIndex ( allPackages
-                                        , lookupSourcePackageId )
+                                          , localPkgDescr)
+import Distribution.Simple.PackageIndex ( lookupSourcePackageId )
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
 import Distribution.Simple.Program (defaultProgramConfiguration)
-import Distribution.Simple.Program.Db (configureAllKnownPrograms)
+import Distribution.Simple.Program.Db (configureAllKnownPrograms, requireProgram)
+import Distribution.Simple.Program.Builtin (ghcPkgProgram)
+import qualified Distribution.Simple.Program.HcPkg as HcPkg
 import qualified Distribution.Text
 import Distribution.Version (anyVersion, thisVersion)
+import Distribution.Verbosity (silent)
 import Language.Haskell.Extension (Language (Haskell2010))
 
 import IdeSession.Licenses ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
@@ -571,40 +569,9 @@ packageDbArgs (Version ver _) dbstack = case dbstack of
 
 generateMacros :: PackageDBStack -> IO String
 generateMacros packageDbStack = do
-  programDB <- configureAllKnownPrograms minBound defaultProgramConfiguration
-  pkgIndex <- getInstalledPackages minBound packageDbStack programDB
-  let cpd ipInfo = (installedPackageId ipInfo, sourcePackageId ipInfo)
-      samePkg = (==) `on` Package.pkgName . sourcePackageId
-      newestDeps = nubBy samePkg $ reverse $ allPackages pkgIndex
-      componentPackageDeps = map cpd newestDeps
-      libraryConfig = Just ComponentLocalBuildInfo {componentPackageDeps}
-      -- @generate@ needs only a few fields.
-      lbi = LocalBuildInfo { libraryConfig
-                           , executableConfigs   = []
-                           , testSuiteConfigs    = []
-                           , benchmarkConfigs    = []
-                           , localPkgDescr       = pkgDesc
-                           , configFlags         = undefined
-                           , extraConfigArgs     = undefined
-                           , installDirTemplates = undefined
-                           , compiler            = undefined
-                           , buildDir            = undefined
-                           , scratchDir          = undefined
-                           , compBuildOrder      = undefined
-                           , installedPkgs       = undefined
-                           , pkgDescrFile        = undefined
-                           , withPrograms        = undefined
-                           , withVanillaLib      = undefined
-                           , withProfLib         = undefined
-                           , withSharedLib       = undefined
-                           , withDynExe          = undefined
-                           , withProfExe         = undefined
-                           , withOptimization    = undefined
-                           , withGHCiLib         = undefined
-                           , splitObjs           = undefined
-                           , stripExes           = undefined
-                           , withPackageDB       = undefined
-                           , progPrefix          = undefined
-                           , progSuffix          = undefined
-                           }
-  return $ generate undefined lbi
+  let verbosity = silent
+  (ghcPkg, _) <- requireProgram verbosity ghcPkgProgram defaultProgramConfiguration
+  pkgidss <- mapM (HcPkg.list verbosity ghcPkg) packageDbStack
+  let newestPkgs = map last . group . sort . concat $ pkgidss
+  return $ generatePackageVersionMacros newestPkgs
+
