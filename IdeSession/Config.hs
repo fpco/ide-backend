@@ -28,6 +28,9 @@ data SessionConfig = SessionConfig {
     -- | Packages that don't need the .cabal files provided for license
     -- concatenation (e.g., because they are covered by the core license set).
   , configLicenseExc :: [String]
+    -- | Function to be used for logging. Messages logged in this manner may be
+    -- provided to users in a special debugging UI.
+  , configLog :: String -> IO ()
   }
 
 -- | Default session configuration
@@ -55,4 +58,5 @@ defaultSessionConfig = SessionConfig {
     -- ghc-prim, integer-gmp, etc., all have their own licenses specified
     -- in their .cabal files.
   , configLicenseExc      = ["rts"]
+  , configLog             = const $ return ()
   }
