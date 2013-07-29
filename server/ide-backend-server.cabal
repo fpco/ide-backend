@@ -1,5 +1,5 @@
 name:                 ide-backend-server
-version:              0.6
+version:              0.6.0.2
 synopsis:             An IDE backend server
 -- description:
 license:              AllRightsReserved

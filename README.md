@@ -38,6 +38,15 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
+ *  Version 0.6.0.2
+
+     * Fix problem with cabal_macros in package databases with multiple 
+       versions of the same package.
+
+     * Merge pull request from fpco/looger (#105)
+
+     * Traverse class default methods for id info (#106)
+
  *  Version 0.6.0.1
 
      * Now uses a private Cabal fork as a sub-repo. Branch is ide-backend.
