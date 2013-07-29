@@ -2399,6 +2399,19 @@ syntheticTests =
         assertIdInfo idInfo "A" (9,19,9,22) "Int (TcClsName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Int) (wired in to the compiler)"
         assertIdInfo idInfo "A" (9,25,9,29) "Bool (TcClsName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)"
     )
+  , ( "Type information 19: Default methods"
+    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "class Foo a where"
+                    , "  foo :: a -> Int"
+                    , "  foo _ = succ 1"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        idInfo <- getSpanInfo session
+        assertIdInfo idInfo "A" (4,11,4,15) "succ (VarName) :: Enum a1 => a1 -> a1 defined in base-4.5.1.0:GHC.Enum at <no location info> (home base-4.5.1.0:Prelude) (imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
+    )
   , ( "Test internal consistency of local id markers"
     , withConfiguredSession defOpts $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $

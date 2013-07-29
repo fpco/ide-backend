@@ -66,7 +66,7 @@ import PprTyThing (pprTypeForUser)
 import Conv
 import Haddock
 
-#define DEBUG 0
+#define DEBUG 1
 
 {------------------------------------------------------------------------------
   Caching
@@ -1084,6 +1084,7 @@ instance Record id => ExtractIds (LTyClDecl id) where
     extractIds (tcdTyVars decl)
     -- Sadly, we don't get location info for the functional dependencies
     extractIds (tcdSigs decl)
+    extractIds (tcdMeths decl)
     extractIds (tcdATs decl)
     extractIds (tcdATDefs decl)
     extractIds (tcdDocs decl)
