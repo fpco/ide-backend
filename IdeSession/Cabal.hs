@@ -7,7 +7,8 @@ module IdeSession.Cabal (
 import qualified Control.Exception as Ex
 import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
-import Data.List (delete, sort, group, nub)
+import Data.Function (on)
+import Data.List (delete, sort, groupBy, nub)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
@@ -572,6 +573,6 @@ generateMacros packageDbStack = do
   let verbosity = silent
   (ghcPkg, _) <- requireProgram verbosity ghcPkgProgram defaultProgramConfiguration
   pkgidss <- mapM (HcPkg.list verbosity ghcPkg) packageDbStack
-  let newestPkgs = map last . group . sort . concat $ pkgidss
+  let newestPkgs = map last . groupBy ((==) `on` Package.packageName) . sort . concat $ pkgidss
   return $ generatePackageVersionMacros newestPkgs
 
