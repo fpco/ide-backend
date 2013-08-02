@@ -52,6 +52,7 @@ executable ide-backend-server
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,
                       BangPatterns, RecordWildCards, NamedFieldPuns
+  other-extensions:   TemplateHaskell
 
   ghc-options:        -Wall
                       -threaded
