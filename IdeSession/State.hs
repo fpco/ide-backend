@@ -44,6 +44,7 @@ import IdeSession.GHC.API (RunBufferMode)
 import IdeSession.GHC.Client (RunActions, GhcServer)
 import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
+import IdeSession.RPC.Server (ExternalException)
 
 data Computed = Computed {
     -- | Last compilation and run errors
@@ -99,6 +100,7 @@ data IdeSessionState =
     IdeSessionIdle IdeIdleState
   | IdeSessionRunning RunActions IdeIdleState
   | IdeSessionShutdown
+  | IdeSessionServerDied ExternalException IdeIdleState
 
 type LogicalTimestamp = EpochTime
 

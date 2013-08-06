@@ -4,6 +4,7 @@ module IdeSession.Strict.Maybe (
     nothing
   , just
   , maybe
+  , fromMaybe
   ) where
 
 import Prelude hiding (maybe)
@@ -18,3 +19,6 @@ just = force . Just
 
 maybe :: b -> (a -> b) -> Strict Maybe a -> b
 maybe x f =  Maybe.maybe x f . toLazyMaybe
+
+fromMaybe :: a -> Strict Maybe a -> a
+fromMaybe def = Maybe.fromMaybe def . toLazyMaybe

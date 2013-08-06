@@ -63,6 +63,7 @@ import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util
 import IdeSession.Strict.Container
+import IdeSession.RPC.Server (ExternalException)
 import qualified IdeSession.Strict.IntMap as IntMap
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
@@ -186,7 +187,10 @@ shutdownSession IdeSession{ideState, ideStaticInfo} = do
     IdeSessionIdle idleState -> do
       shutdownGhcServer $ _ideGhcServer idleState
       cleanupDirs
-    IdeSessionShutdown -> return ()
+    IdeSessionShutdown ->
+      return ()
+    IdeSessionServerDied _ _ ->
+      cleanupDirs
  where
   cleanupDirs = do
     let dataDir    = ideDataDir ideStaticInfo
@@ -219,6 +223,8 @@ restartSession IdeSession{ideStaticInfo, ideState} = do
           restart idleState
         IdeSessionShutdown ->
           fail "Shutdown session cannot be restarted."
+        IdeSessionServerDied _externalException idleState ->
+          restart idleState
   where
     restart :: IdeIdleState -> IO IdeSessionState
     restart idleState = do
@@ -267,10 +273,10 @@ instance Monoid IdeSessionUpdate where
 -- The update can be a long running operation, so we support a callback
 -- which can be used to monitor progress of the operation.
 updateSession :: IdeSession -> IdeSessionUpdate -> (Progress -> IO ()) -> IO ()
-updateSession IdeSession{ideStaticInfo, ideState} update callback = do
-  modifyMVar_ ideState $ \state ->
-    case state of
-      IdeSessionIdle idleState -> do
+updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
+    -- We don't want to call 'restartSession' while we hold the lock
+    shouldRestart <- modifyMVar ideState $ \state -> case state of
+      IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
         idleState' <-
           execStateT (runSessionUpdate update callback ideStaticInfo)
                      idleState
@@ -318,17 +324,26 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
           else return $ idleState' ^. ideComputed
 
         -- Update state
-        return . IdeSessionIdle
+        return ( IdeSessionIdle
                . (ideComputed    ^= computed)
                . (ideUpdatedEnv  ^= False)
                . (ideUpdatedCode ^= False)
                . (ideUpdatedArgs ^= False)
                $ idleState'
+               , False
+               )
+
+      IdeSessionServerDied _ _ ->
+        return (state, True)
 
       IdeSessionRunning _ _ ->
         Ex.throwIO (userError "Cannot update session in running mode")
       IdeSessionShutdown ->
         Ex.throwIO (userError "Session already shut down.")
+
+    when shouldRestart $ do
+      restartSession session
+      updateSession session update callback
   where
     mkRelative :: ExplicitSharingCache -> ExplicitSharingCache
     mkRelative ExplicitSharingCache{..} =
@@ -339,7 +354,8 @@ updateSession IdeSession{ideStaticInfo, ideState} update callback = do
       , idPropCache   = idPropCache
       }
 
-
+    handleExternal :: IdeIdleState -> ExternalException -> IO (IdeSessionState, Bool)
+    handleExternal idleState e = return (IdeSessionServerDied e idleState, False)
 
 -- | A session update that changes a source module by giving a new value for
 -- the module source. This can be used to add a new module or update an
@@ -497,6 +513,8 @@ runStmt IdeSession{ideState} m fun = do
       fail "Cannot run code concurrently"
     IdeSessionShutdown ->
       fail "Session already shut down."
+    IdeSessionServerDied _ _ ->
+      fail "Server died (reset or call updateSession)"
   where
     restoreToIdle :: RunResult -> IO ()
     restoreToIdle _ = modifyMVar_ ideState $ \state -> case state of
@@ -505,6 +523,8 @@ runStmt IdeSession{ideState} m fun = do
       IdeSessionRunning _ idleState -> do
         return $ IdeSessionIdle idleState
       IdeSessionShutdown ->
+        return state
+      IdeSessionServerDied _ _ ->
         return state
 
 -- | Build an exe from sources added previously via the ide-backend

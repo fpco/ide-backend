@@ -4,7 +4,7 @@ module Main (main) where
 import Control.Applicative ((<$>))
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
-import Control.Monad (forM_, liftM, void, when, unless, replicateM_)
+import Control.Monad
 import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
 import qualified Data.ByteString.Lazy.Char8 as BSLC (null, pack, unpack)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
@@ -339,12 +339,12 @@ syntheticTests =
   , ( "Compile a project: A depends on B, error in A"
     , withConfiguredSession defOpts $ \session -> do
         loadModulesFrom session "test/AerrorB"
-        assertSourceErrors session [(Just "A.hs", "No instance for (Num (IO ()))")]
+        assertSourceErrors session [[(Just "A.hs", "No instance for (Num (IO ()))")]]
      )
   , ( "Compile a project: A depends on B, error in B"
     , withConfiguredSession defOpts $ \session -> do
         loadModulesFrom session "test/ABerror"
-        assertSourceErrors session [(Just "B.hs", "No instance for (Num (IO ()))")]
+        assertSourceErrors session [[(Just "B.hs", "No instance for (Num (IO ()))")]]
     )
   , ( "Compile and run a project with some .lhs files"
     , withConfiguredSession defOpts $ \session -> do
@@ -2617,34 +2617,47 @@ syntheticTests =
   , ( "GHC crash 2: No delay, follow up request"
     , withConfiguredSession defOpts $ \session -> do
         crashGhcServer session Nothing
-        assertRaises ""
-          (\(ExternalException stderr _) -> stderr == show (userError "Intentional crash"))
-          (updateSession session (updateEnv "Foo" Nothing) (\_ -> return ()))
+        updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
+        assertSourceErrors' session ["Intentional crash"]
     )
   , ( "GHC crash 3: Delay, follow up request"
     , withConfiguredSession defOpts $ \session -> do
         crashGhcServer session (Just 1000000)
         updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
         threadDelay 2000000
-        assertRaises ""
-          (\(ExternalException stderr _) -> stderr == show (userError "Intentional crash"))
-          (updateSession session (updateEnv "Foo" Nothing) (\_ -> return ()))
+        updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
+        assertSourceErrors' session ["Intentional crash"]
     )
   , ( "GHC crash 4: Multiple follow up requests"
     , withConfiguredSession defOpts $ \session -> do
-        updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
-        do errs <- getSourceErrors session
-           assertBool "No errors" (null errs)
+        -- Compile some code
+        let upd = (updateCodeGeneration True)
+               <> (updateModule "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.Environment (getEnv)"
+                    , "printFoo :: IO ()"
+                    , "printFoo = getEnv \"Foo\" >>= putStr"
+                    ])
+--        updateSessionD session upd 1
+        updateSession session upd print
+        assertNoErrors session
 
+        -- Now crash the server
         crashGhcServer session Nothing
-        replicateM_ 5 $
-          assertRaises ""
-            (\(ExternalException stderr _) -> stderr == show (userError "Intentional crash"))
-            (updateSession session (updateEnv "Foo" Nothing) (\_ -> return ()))
 
-        -- TODO: should we expect an exception here instead?
-        do errs <- getSourceErrors session
-           assertBool "No errors" (null errs)
+        -- The next request fails, and we get a source error
+        updateSession session (updateEnv "Foo" (Just "Value1")) print
+        assertSourceErrors' session ["Intentional crash"]
+
+        -- The next request, however, succeeds (and restarts the server)
+        updateSession session (updateEnv "Foo" (Just "Value2")) print
+
+        -- The code should have recompiled and we should be able to execute it
+        do runActions <- runStmt session "M" "printFoo"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
+             _       -> assertFailure $ "Unexpected result " ++ show result
     )
   , ( "getLoadedModules while configGenerateModInfo off"
     , withConfiguredSessionDetailed False defaultDbStack defOpts $ \session -> do
@@ -2769,9 +2782,8 @@ syntheticTests =
         installPackage "test/simple-lib17"
         -- No restartSession yet, hence the exception at session init.
         let expected = "<command line>: cannot satisfy -package simple-lib17"
-        assertRaises "Was expecting ide-backend-rts or parallel errors"
-          (\(ExternalException err _) -> expected `isInfixOf` err)
-          (updateSessionD session upd 1)
+        updateSessionD session upd 1
+        assertSourceErrors' session [expected]
         deletePackage "test/simple-lib17"
     )
   , ( "Register a package, restart session, see the package"
@@ -2809,12 +2821,12 @@ syntheticTests =
         -- We expect an error because 'ide-backend-rts' and/or 'parallel'
         -- are not (usually?) installed in the global package DB.
         let expected1 = "cannot satisfy -package ide-backend-rts"
-            expected2 = "<command line>: cannot satisfy -package parallel"
-        assertRaises "Was expecting ide-backend-rts or parallel errors"
-          (\(ExternalException err _) ->
-                expected1 `isInfixOf` err
-             || expected2 `isInfixOf` err)
-          (updateSessionD session upd 1)
+            expected2 = "cannot satisfy -package parallel"
+        updateSessionD session upd 1
+        assertSourceErrors session [[
+            (Nothing, expected1)
+          , (Nothing, expected2)
+          ]]
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo True)"
     , let packageOpts = "-package parallel" : defOpts
@@ -2828,11 +2840,11 @@ syntheticTests =
         -- are not (usually?) installed in the global package DB.
         let expected1 = "cannot satisfy -package ide-backend-rts"
             expected2 = "<command line>: cannot satisfy -package parallel"
-        assertRaises "Was expecting ide-backend-rts or parallel errors"
-          (\(ExternalException err _) ->
-                expected1 `isInfixOf` err
-             || expected2 `isInfixOf` err)
-          (updateSessionD session upd 1)
+        updateSessionD session upd 1
+        assertSourceErrors session [[
+            (Nothing, expected1)
+          , (Nothing, expected2)
+          ]]
     )
   , ( "Consistency of IdMap/explicit sharing cache through multiple updates (#88)"
     , let packageOpts = [ "-hide-all-packages"
@@ -3361,23 +3373,43 @@ assertIdInfo idInfo mod (frLine, frCol, toLine, toCol) expected =
 
 assertSourceErrors' :: IdeSession -> [String] -> Assertion
 assertSourceErrors' session = assertSourceErrors session . map
-  (\err -> (Nothing, err))
+  (\err -> [(Nothing, err)])
 
-assertSourceErrors :: IdeSession -> [(Maybe FilePath, String)] -> Assertion
+-- @assertSourceErrors session [[a,b,c],[d,e,f],..] checks that there are
+-- exactly as many errors as elements in the outer list, and each of those
+-- errors must match one of the errors inside the inner lists
+assertSourceErrors :: IdeSession -> [[(Maybe FilePath, String)]] -> Assertion
 assertSourceErrors session expected = do
   errs <- getSourceErrors session
   if length errs /= length expected
     then assertFailure $ "Unexpected source errors: " ++ show3errors errs
-    else forM_ (zip expected errs) $ \((mFilePath, expectedErr), SourceError _ loc actual) -> do
-           case mFilePath of
-             Nothing           -> return ()
-             Just expectedPath -> case loc of
-                                    ProperSpan (SourceSpan actualPath _ _ _ _) ->
-                                      assertBool "Wrong file" $ expectedPath `isSuffixOf` actualPath
-                                    _ ->
-                                      assertFailure $ "Expected location"
-           assertBool ("Unexpected error: " ++ Text.unpack actual) $
-             expectedErr `isPrefixOf` Text.unpack actual
+    else forM_ (zip expected errs) $ \(potentialExpected, actualErr) ->
+           assertErrorOneOf actualErr potentialExpected
+
+assertErrorOneOf :: SourceError -> [(Maybe FilePath, String)] -> Assertion
+assertErrorOneOf (SourceError _ loc actual) potentialExpected =
+    case foldr1 mplus (map matches potentialExpected) of
+      Left err -> assertFailure err
+      Right () -> return ()
+  where
+    matches (mFP, expErr) = do
+      matchesFilePath mFP
+      matchesError expErr
+
+    matchesFilePath Nothing = Right ()
+    matchesFilePath (Just expectedPath) =
+      case loc of
+        ProperSpan (SourceSpan actualPath _ _ _ _) ->
+          if expectedPath `isSuffixOf` actualPath
+            then Right ()
+            else Left "Wrong file"
+        _ ->
+          Left "Expected location"
+
+    matchesError expectedErr =
+      if expectedErr `isInfixOf` Text.unpack actual
+        then Right ()
+        else Left $ "Unexpected error: " ++ Text.unpack actual
 
 assertNoErrors :: IdeSession -> Assertion
 assertNoErrors session = do

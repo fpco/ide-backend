@@ -21,7 +21,8 @@ Flag test-pkg-dbs
   default:     False
 
 library
-  exposed-modules:    IdeSession
+  exposed-modules:    IdeSession,
+                      Paths_ide_backend
   other-modules:      IdeSession.State,
                       IdeSession.Config,
                       IdeSession.Cabal,
@@ -46,8 +47,7 @@ library
                       IdeSession.Strict.IntervalMap
                       IdeSession.Strict.MVar
                       IdeSession.Strict.IORef
-                      IdeSession.Strict.StateT,
-                      Paths_ide_backend
+                      IdeSession.Strict.StateT
 
   build-depends:      base                 ==4.*,
                       filemanip            >= 0.3.6.2 && < 0.4,

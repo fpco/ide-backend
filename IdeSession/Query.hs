@@ -36,14 +36,14 @@ module IdeSession.Query (
 
 import Prelude hiding (mod, span)
 import Data.List (isInfixOf)
-import Data.Accessor ((^.), getVal)
+import Data.Accessor ((^.), (^:), getVal)
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
 import System.Exit (ExitCode)
 import System.FilePath ((</>))
 import Control.Monad (forM_)
-import qualified Data.Text as Text (unpack)
+import qualified Data.Text as Text (pack, unpack)
 
 import IdeSession.Config
 import IdeSession.State
@@ -51,10 +51,13 @@ import IdeSession.Types.Translation
 import IdeSession.Types.Public
 import qualified IdeSession.Types.Private as Private
 import IdeSession.GHC.Client (GhcServer)
+import IdeSession.RPC.Server (ExternalException)
 import IdeSession.Strict.Container
-import qualified IdeSession.Strict.Map  as StrictMap
-import qualified IdeSession.Strict.List as StrictList
-import qualified IdeSession.Strict.Trie as StrictTrie
+import qualified IdeSession.Strict.Map    as StrictMap
+import qualified IdeSession.Strict.List   as StrictList
+import qualified IdeSession.Strict.Trie   as StrictTrie
+import qualified IdeSession.Strict.Maybe  as StrictMaybe
+import qualified IdeSession.Strict.IntMap as StrictIntMap
 import qualified IdeSession.Strict.IntervalMap as StrictIntervalMap
 import IdeSession.Strict.MVar (withMVar)
 
@@ -269,13 +272,43 @@ dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
   Auxiliary
 ------------------------------------------------------------------------------}
 
+-- | For the purposes of queries, we pretend that the 'IdeSessionServerDied'
+-- state is a regular state, but we report the exception as a 'SourceError'
 withIdleState :: IdeSession -> (IdeIdleState -> IO a) -> IO a
 withIdleState IdeSession{ideState} f =
   withMVar ideState $ \st ->
     case st of
-      IdeSessionIdle      idleState -> f idleState
-      IdeSessionRunning _ idleState -> f idleState
-      IdeSessionShutdown            -> fail "Session already shut down."
+      IdeSessionIdle         idleState -> f idleState
+      IdeSessionRunning _    idleState -> f idleState
+      IdeSessionServerDied e idleState -> f (reportExAsErr e idleState)
+      IdeSessionShutdown               -> fail "Session already shut down."
+  where
+    reportExAsErr :: ExternalException -> IdeIdleState -> IdeIdleState
+    reportExAsErr e = ideComputed ^:
+      StrictMaybe.just . updateComputed e . StrictMaybe.fromMaybe emptyComputed
+
+    updateComputed :: ExternalException -> Computed -> Computed
+    updateComputed e c =
+      let err = Private.SourceError {
+              Private.errorKind = Private.KindError
+            , Private.errorSpan = Private.TextSpan (Text.pack "<<server died>>")
+            , Private.errorMsg  = Text.pack (show e)
+            }
+      in c { computedErrors = StrictList.singleton err }
+
+    emptyComputed :: Computed
+    emptyComputed = Computed {
+        computedErrors        = StrictList.nil
+      , computedLoadedModules = StrictList.nil
+      , computedSpanInfo      = StrictMap.empty
+      , computedImports       = StrictMap.empty
+      , computedAutoMap       = StrictMap.empty
+      , computedPkgDeps       = StrictMap.empty
+      , computedCache         = Private.ExplicitSharingCache {
+            Private.filePathCache = StrictIntMap.empty
+          , Private.idPropCache   = StrictIntMap.empty
+          }
+      }
 
 withComputedState :: IdeSession -> (IdeIdleState -> Computed -> IO a) -> IO a
 withComputedState session f = withIdleState session $ \idleState ->
