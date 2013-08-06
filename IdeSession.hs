@@ -130,9 +130,6 @@ module IdeSession (
   , buildLicenses
     -- ** Progress
   , Progress(..)
-  , initialProgress
-  , updateProgress
-  , progressStep
     -- ** Running code
   , RunActions(..)
   , RunResult(..)

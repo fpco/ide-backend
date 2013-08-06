@@ -17,7 +17,6 @@ import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.FilePath ((</>), takeFileName, splitPath, joinPath)
-import Data.IORef (newIORef, readIORef, modifyIORef)
 import System.Directory (doesFileExist, createDirectoryIfMissing)
 import System.IO.Temp (createTempDirectory)
 import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr)
@@ -200,17 +199,14 @@ configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
                   -> IO ExitCode
 configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
                   packageDbStack pkgs loadedMs callback ms = do
-  counter <- newIORef initialProgress
-  let markProgress = do
-        oldCounter <- readIORef counter
-        modifyIORef counter (updateProgress "")
-        callback oldCounter
-  markProgress
+  -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
+  -- meaningful,  and if so, replace the Nothings with Just meaningful messages
+  callback $ Progress 1 4 Nothing
   libDeps <- externalDeps pkgs
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
   executables <- mapM (exeDesc ideSourcesDir ideDistDir ghcOpts) ms
-  markProgress
+  callback $ Progress 2 4 Nothing
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
   hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
@@ -259,9 +255,9 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         -- Setting @withPackageDB@ here is too late, @configure@ would fail
         -- already. Hence we set it in @mkConfFlags@ (can be reverted,
         -- when/if we construct @lbi@ without @configure@).
-        markProgress
+        callback $ Progress 3 4 Nothing
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
-        markProgress)
+        callback $ Progress 4 4 Nothing)
   return $! either id (const ExitSuccess) exitCode
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API,
@@ -273,14 +269,11 @@ configureAndHaddock :: FilePath -> FilePath -> [String] -> Bool
                     -> IO ExitCode
 configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
                     packageDbStack pkgs loadedMs callback = do
-  counter <- newIORef initialProgress
-  let markProgress = do
-        oldCounter <- readIORef counter
-        modifyIORef counter (updateProgress "")
-        callback oldCounter
-  markProgress
+  -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
+  -- meaningful,  and if so, replace the Nothings with Just meaningful messages
+  callback $ Progress 1 4 Nothing
   libDeps <- externalDeps pkgs
-  markProgress
+  callback $ Progress 2 4 Nothing
   let condExecutables = []
   hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
   lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
@@ -317,9 +310,9 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
-        markProgress
+        callback $ Progress 3 4 Nothing
         Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
-        markProgress)
+        callback $ Progress 4 4 Nothing)
   return $! either id (const ExitSuccess) exitCode
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API,
@@ -362,11 +355,6 @@ buildLicenseCatenation :: FilePath -> FilePath -> PackageDBStack -> [String]
                        -> IO ExitCode
 buildLicenseCatenation cabalsDir ideDistDir packageDbStack configLicenseExc
                        mcomputed callback = do
-  counter <- newIORef initialProgress
-  let markProgress = do
-        oldCounter <- readIORef counter
-        modifyIORef counter (updateProgress "")
-        callback oldCounter
   (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
   let stdoutLog  = ideDistDir </> "licenses.stdout"  -- warnings
       stderrLog  = ideDistDir </> "licenses.stderr"  -- errors
@@ -383,10 +371,14 @@ buildLicenseCatenation cabalsDir ideDistDir packageDbStack configLicenseExc
              | otherwise = "CoreLicenses.txt"  -- in-place, for testing mostly
   bsCore <- BSL.readFile coreFN
   BSL.hPut licensesFile bsCore
-  let mainPackageName = Text.pack "main"
-      f :: PackageId -> IO ()
-      f PackageId{packageName} | packageName == mainPackageName = return ()
-      f PackageId{..} = do
+
+  let numSteps        = length pkgs
+      mainPackageName = Text.pack "main"
+
+      f :: (PackageId, Int) -> IO ()
+      f (PackageId{packageName}, step) | packageName == mainPackageName =
+        callback $ Progress step numSteps (Just packageName)
+      f (PackageId{..}, step) = do
         let nameString = Text.unpack packageName
             packageFile = cabalsDir </> nameString ++ ".cabal"
             versionString = maybe "" Text.unpack packageVersion
@@ -487,8 +479,9 @@ buildLicenseCatenation cabalsDir ideDistDir packageDbStack configLicenseExc
           unless (nameString `elem` configLicenseExc) $
             fail $ "No .cabal file provided for package "
                    ++ nameString ++ " so no license can be found."
-        markProgress
-  res <- Ex.try $ mapM_ f pkgs
+        callback $ Progress step numSteps (Just packageName)
+
+  res <- Ex.try $ mapM_ f (zip pkgs [1..])
   hClose licensesFile
   let handler :: Ex.IOException -> IO ExitCode
       handler e = do

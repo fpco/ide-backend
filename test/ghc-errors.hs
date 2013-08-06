@@ -2638,19 +2638,22 @@ syntheticTests =
                     , "printFoo :: IO ()"
                     , "printFoo = getEnv \"Foo\" >>= putStr"
                     ])
---        updateSessionD session upd 1
-        updateSession session upd print
+
+        let compilingProgress = [(1, 1, "Compiling M")]
+
+        updateSessionP session upd compilingProgress
         assertNoErrors session
 
         -- Now crash the server
         crashGhcServer session Nothing
 
         -- The next request fails, and we get a source error
-        updateSession session (updateEnv "Foo" (Just "Value1")) print
+        updateSessionP session (updateEnv "Foo" (Just "Value1")) []
         assertSourceErrors' session ["Intentional crash"]
 
-        -- The next request, however, succeeds (and restarts the server)
-        updateSession session (updateEnv "Foo" (Just "Value2")) print
+        -- The next request, however, succeeds (and restarts the server,
+        -- and recompiles the code)
+        updateSessionP session (updateEnv "Foo" (Just "Value2")) compilingProgress
 
         -- The code should have recompiled and we should be able to execute it
         do runActions <- runStmt session "M" "printFoo"
@@ -3299,21 +3302,50 @@ tests =
 main :: IO ()
 main = defaultMain tests
 
--- Extra debug facilities. Normally turned off.
+updateSessionP :: IdeSession -> IdeSessionUpdate -> [(Int, Int, String)] -> IO ()
+updateSessionP session update expectedProgressUpdates = do
+  progressRef <- newIORef []
 
-displayCounter :: Int -> Progress -> Assertion
-displayCounter i p = do
-  debug dVerbosity $ show p
-  assertBool (show p ++ " exceeds " ++ show i) (progressStep p <= i)
+  -- We just collect the progress messages first, and verify them afterwards
+  updateSession session update $ \p -> do
+    progressUpdates <- readIORef progressRef
+    writeIORef progressRef $ progressUpdates ++ [p]
+
+  progressUpdates <- readIORef progressRef
+  assertBool ("We expected " ++ show expectedProgressUpdates ++ ", but got " ++ show progressUpdates)
+             (length progressUpdates <= length expectedProgressUpdates)
+
+  forM_ (zip progressUpdates expectedProgressUpdates) $ \(actual, expected@(step, numSteps, msg)) ->
+    assertBool ("Unexpected progress update " ++ show actual ++ "; expected " ++ show expected)
+               (progressStep actual == step &&
+                progressNumSteps actual == numSteps &&
+                case progressMsg actual of
+                  Just actualMsg -> msg `isInfixOf` Text.unpack actualMsg
+                  Nothing        -> False)
 
 updateSessionD :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
-updateSessionD session update i = do
-  updateSession session update (displayCounter i)
-  {-
-  msgs <- getSourceErrors session
-  debug dVerbosity $ "getSourceErrors after update: "
-                     ++ List.intercalate "\n" (map show msgs)
-  -}
+updateSessionD session update numProgressUpdates = do
+  progressRef <- newIORef []
+
+  -- We just collect the progress messages first, and verify them afterwards
+  updateSession session update $ \p -> do
+    progressUpdates <- readIORef progressRef
+    writeIORef progressRef $ progressUpdates ++ [p]
+
+  -- These progress messages are often something like
+  --
+  -- [18 of 27] Compiling IdeSession.Types.Private ( IdeSession/Types/Private.hs, dist/build/IdeSession/Types/Private.o )
+  -- [19 of 27] Compiling IdeSession.GHC.API ( IdeSession/GHC/API.hs, dist/build/IdeSession/GHC/API.o )
+  -- [20 of 27] Compiling IdeSession.GHC.Client ( IdeSession/GHC/Client.hs, dist/build/IdeSession/GHC/Client.p_o )
+  -- [21 of 27] Compiling IdeSession.Types.Translation ( IdeSession/Types/Translation.hs, dist/build/IdeSession/Types/Translation.p_o )
+  -- [23 of 27] Compiling IdeSession.State ( IdeSession/State.hs, dist/build/IdeSession/State.p_o )
+  --
+  -- So these numbers don't need to start at 1, may be discontiguous, out of
+  -- order, and may not end with [X of X]. The only thing we can check here is
+  -- that we get at most the number of progress messages we expect.
+  progressUpdates <- readIORef progressRef
+  assertBool ("We expected " ++ show numProgressUpdates ++ " progress messages, but got " ++ show progressUpdates)
+             (length progressUpdates <= numProgressUpdates)
 
 -- Extra test tools.
 --

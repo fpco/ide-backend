@@ -21,7 +21,7 @@ import qualified Module
 import FastString (FastString, unpackFS)
 
 import IdeSession.Types.Private
-import IdeSession.Strict.Maybe as Maybe
+import qualified IdeSession.Strict.Maybe as Maybe
 
 type PackageQualifier = Maybe FastString
 

@@ -13,7 +13,7 @@ import Control.Monad.Trans.Class (lift)
 import qualified Data.ByteString as BSS (hGetSome, hPut, null)
 import Data.Monoid ((<>))
 import qualified Data.Text as Text
-import Data.List (sortBy)
+import Data.List (sortBy, isPrefixOf)
 import Data.Function (on)
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
@@ -155,14 +155,13 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
                  pluginRef modsRef configSourcesDir
                  ideGenerateCode configGenerateModInfo = do
     errsRef <- liftIO $ newIORef StrictList.nil
-    counter <- liftIO $ newIORef initialProgress
     (errs, loadedModules) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
                                        verbosity
                                        errsRef
-                                       (progressCallback counter)
+                                       progressCallback
                                        (\_ -> return ()) -- TODO: log?
 
 
@@ -312,12 +311,18 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
     verbosity :: Int
     verbosity = 1
 
-    -- TODO: verify that _ is the "compiling M" message
-    progressCallback :: StrictIORef Progress -> String -> IO ()
-    progressCallback counter ghcMsg = do
-      oldCounter <- readIORef counter
-      modifyIORef counter (updateProgress ghcMsg)
-      put $ GhcCompileProgress oldCounter
+    progressCallback :: String -> IO ()
+    progressCallback ghcMsg = do
+      case parseProgressMessage ghcMsg of
+        [(step, numSteps, msg)] ->
+          put $ GhcCompileProgress $ Progress {
+               progressStep     = step
+             , progressNumSteps = numSteps
+             , progressMsg      = Just (Text.pack msg)
+             }
+        _ ->
+          -- Ignore messages we cannot parse
+          return ()
 
     -- Various accessors
     allImports  = accessor ghcCompileImports  (\is st -> st { ghcCompileImports  = is })
@@ -330,8 +335,23 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
     spanInfoFor m = allSpanInfo .> StrictMap.accessorDefault Keep m
     pkgDepsFor  m = allPkgDeps  .> StrictMap.accessorDefault Keep m
 
-
-
+-- TODO: The error message that we return still contains full paths
+-- We might want to strip these out or at least make them relative to the
+-- root of the session
+parseProgressMessage :: String -> [(Int, Int, String)]
+parseProgressMessage str0 = do
+    ((),    str1) <- expect "["    str0
+    (step,  str2) <- reads         str1
+    ((),    str3) <- expect " of " str2
+    (cnt,   str4) <- reads         str3
+    ((),   _str5) <- expect "] "   str4
+    return (step, cnt, str0) -- We return the full msg from ghc as the msg
+  where
+    expect :: String -> ReadS ()
+    expect prefix str =
+      if prefix `isPrefixOf` str
+        then [((), drop (length prefix) str)]
+        else []
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation
