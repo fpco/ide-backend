@@ -38,6 +38,16 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
+ *  Version 0.6.0.3
+    
+     * Report server crashes as SourceErrors, and implicitly restart the session
+       on the _next_ call to updateSession (#107). Note that if the server is
+       in dead state (i.e., after the serve crash and before the next call to
+       updateSession) a call to runStmt will throw an exception (just like when
+       you call runStmt when no code is compiled at all). It is the 
+       responsibility of the client code to check for source errors
+       (using getSourceErrors) before calling runStmt.
+
  *  Version 0.6.0.2
 
      * Fix problem with cabal_macros in package databases with multiple 

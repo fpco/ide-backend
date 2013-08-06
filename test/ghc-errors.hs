@@ -2628,7 +2628,7 @@ syntheticTests =
         updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
         assertSourceErrors' session ["Intentional crash"]
     )
-  , ( "GHC crash 4: Multiple follow up requests"
+  , ( "GHC crash 4: Make sure session gets restarted on second update"
     , withConfiguredSession defOpts $ \session -> do
         -- Compile some code
         let upd = (updateCodeGeneration True)
@@ -2661,6 +2661,42 @@ syntheticTests =
            case result of
              RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
              _       -> assertFailure $ "Unexpected result " ++ show result
+    )
+  , ( "GHC crash 5: Repeated crashes and restarts"
+    , withConfiguredSession defOpts $ \session -> do
+        -- Compile some code
+        let upd = (updateCodeGeneration True)
+               <> (updateModule "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.Environment (getEnv)"
+                    , "printFoo :: IO ()"
+                    , "printFoo = getEnv \"Foo\" >>= putStr"
+                    ])
+
+        let compilingProgress = [(1, 1, "Compiling M")]
+
+        updateSessionP session upd compilingProgress
+        assertNoErrors session
+
+        -- We repeat the test of 'crash 4' a number of times
+        replicateM_ 5 $ do
+          -- Now crash the server
+          crashGhcServer session Nothing
+
+          -- The next request fails, and we get a source error
+          updateSessionP session (updateEnv "Foo" (Just "Value1")) []
+          assertSourceErrors' session ["Intentional crash"]
+
+          -- The next request, however, succeeds (and restarts the server,
+          -- and recompiles the code)
+          updateSessionP session (updateEnv "Foo" (Just "Value2")) compilingProgress
+
+          -- The code should have recompiled and we should be able to execute it
+          do runActions <- runStmt session "M" "printFoo"
+             (output, result) <- runWaitAll runActions
+             case result of
+               RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
+               _       -> assertFailure $ "Unexpected result " ++ show result
     )
   , ( "getLoadedModules while configGenerateModInfo off"
     , withConfiguredSessionDetailed False defaultDbStack defOpts $ \session -> do

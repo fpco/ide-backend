@@ -484,6 +484,11 @@ updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ _ ->
 -- is the one between @module ... end@, which may differ from the file name).
 -- The function resembles a query, but it's not instantaneous
 -- and the running code can be interrupted or interacted with.
+--
+-- 'runStmt' will throw an exception if the code has not been compiled yet,
+-- or when the server is in a dead state (i.e., when ghc has crashed). In the
+-- latter case 'getSourceErrors' will report the ghc exception; it is the
+-- responsibility of the client code to check for this.
 runStmt :: IdeSession -> String -> String -> IO RunActions
 runStmt IdeSession{ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
