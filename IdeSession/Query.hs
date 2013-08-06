@@ -296,6 +296,9 @@ withIdleState IdeSession{ideState} f =
             }
       in c { computedErrors = StrictList.singleton err }
 
+    -- TODO: Do we really want an empty computed here? This means that if the
+    -- user does not check getSourceErrors they might get nil/empty rather
+    -- than an error.
     emptyComputed :: Computed
     emptyComputed = Computed {
         computedErrors        = StrictList.nil
