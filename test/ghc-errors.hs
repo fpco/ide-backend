@@ -2698,6 +2698,139 @@ syntheticTests =
                RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
                _       -> assertFailure $ "Unexpected result " ++ show result
     )
+  , ( "GHC crash 6: Add additional code after update"
+    , withConfiguredSession defOpts $ \session -> do
+        let updA = (updateCodeGeneration True)
+                <> (updateModule "A.hs" . BSLC.pack . unlines $
+                     [ "module A where"
+                     , "printA :: IO ()"
+                     , "printA = putStr \"A\""
+                     ])
+        let updB = (updateCodeGeneration True)
+                <> (updateModule "B.hs" . BSLC.pack . unlines $
+                     [ "module B where"
+                     , "import A"
+                     , "printAB :: IO ()"
+                     , "printAB = printA >> putStr \"B\""
+                     ])
+
+        let compProgA n = [(1, n, "Compiling A")]
+            compProgB n = [(2, n, "Compiling B")]
+
+        updateSessionP session updA (compProgA 1)
+        assertNoErrors session
+
+        -- Now crash the server
+        crashGhcServer session Nothing
+
+        -- The next request fails, and we get a source error
+        updateSessionP session updB []
+        assertSourceErrors' session ["Intentional crash"]
+
+        -- The next request, however, succeeds (and restarts the server,
+        -- and recompiles the code)
+        updateSessionP session updB $ (compProgA 2 ++ compProgB 2)
+
+        -- The code should have recompiled and we should be able to execute it
+        do runActions <- runStmt session "B" "printAB"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "AB") output
+             _       -> assertFailure $ "Unexpected result " ++ show result
+    )
+  , ( "GHC crash 7: Update imported module after update"
+    , withConfiguredSession defOpts $ \session -> do
+        let updA = (updateCodeGeneration True)
+                <> (updateModule "A.hs" . BSLC.pack . unlines $
+                     [ "module A where"
+                     , "printA :: IO ()"
+                     , "printA = putStr \"A\""
+                     ])
+        let updB = (updateCodeGeneration True)
+                <> (updateModule "B.hs" . BSLC.pack . unlines $
+                     [ "module B where"
+                     , "import A"
+                     , "printAB :: IO ()"
+                     , "printAB = printA >> putStr \"B\""
+                     ])
+
+        let compProgA n = [(1, n, "Compiling A")]
+            compProgB n = [(2, n, "Compiling B")]
+
+        updateSessionP session (mconcat [updA, updB]) (compProgA 2 ++ compProgB 2)
+        assertNoErrors session
+
+        -- Now crash the server
+        crashGhcServer session Nothing
+
+        -- The next request fails, and we get a source error
+        let updA2 = (updateCodeGeneration True)
+                 <> (updateModule "A.hs" . BSLC.pack . unlines $
+                      [ "module A where"
+                      , "printA :: IO ()"
+                      , "printA = putStr \"A2\""
+                      ])
+        updateSessionP session updA2 []
+        assertSourceErrors' session ["Intentional crash"]
+
+        -- The next request, however, succeeds (and restarts the server,
+        -- and recompiles the code)
+        updateSessionP session updA2 $ mconcat [compProgA 2, compProgB 2]
+
+        -- The code should have recompiled and we should be able to execute it
+        do runActions <- runStmt session "B" "printAB"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "A2B") output
+             _       -> assertFailure $ "Unexpected result " ++ show result
+    )
+  , ( "GHC crash 8: Update importing module after update"
+    , withConfiguredSession defOpts $ \session -> do
+        let updA = (updateCodeGeneration True)
+                <> (updateModule "A.hs" . BSLC.pack . unlines $
+                     [ "module A where"
+                     , "printA :: IO ()"
+                     , "printA = putStr \"A\""
+                     ])
+        let updB = (updateCodeGeneration True)
+                <> (updateModule "B.hs" . BSLC.pack . unlines $
+                     [ "module B where"
+                     , "import A"
+                     , "printAB :: IO ()"
+                     , "printAB = printA >> putStr \"B\""
+                     ])
+
+        let compProgA n = [(1, n, "Compiling A")]
+            compProgB n = [(2, n, "Compiling B")]
+
+        updateSessionP session (mconcat [updA, updB]) (compProgA 2 ++ compProgB 2)
+        assertNoErrors session
+
+        -- Now crash the server
+        crashGhcServer session Nothing
+
+        -- The next request fails, and we get a source error
+        let updB2 = (updateCodeGeneration True)
+                 <> (updateModule "B.hs" . BSLC.pack . unlines $
+                      [ "module B where"
+                      , "import A"
+                      , "printAB :: IO ()"
+                      , "printAB = printA >> putStr \"B2\""
+                      ])
+        updateSessionP session updB2 []
+        assertSourceErrors' session ["Intentional crash"]
+
+        -- The next request, however, succeeds (and restarts the server,
+        -- and recompiles the code)
+        updateSessionP session updB2 $ mconcat [compProgA 2, compProgB 2]
+
+        -- The code should have recompiled and we should be able to execute it
+        do runActions <- runStmt session "B" "printAB"
+           (output, result) <- runWaitAll runActions
+           case result of
+             RunOk _ -> assertEqual "" (BSLC.pack "AB2") output
+             _       -> assertFailure $ "Unexpected result " ++ show result
+    )
   , ( "getLoadedModules while configGenerateModInfo off"
     , withConfiguredSessionDetailed False defaultDbStack defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
