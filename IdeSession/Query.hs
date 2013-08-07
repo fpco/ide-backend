@@ -15,6 +15,7 @@ module IdeSession.Query (
   , getSourceModule
   , getDataFile
   , getAllDataFiles
+  , getCabalMacros
     -- * Queries that do not rely on computed state
   , getCodeGeneration
   , getEnv
@@ -47,6 +48,7 @@ import qualified Data.Text as Text (pack, unpack)
 
 import IdeSession.Config
 import IdeSession.State
+import IdeSession.GHC.API (cabalMacrosLocation)
 import IdeSession.Types.Translation
 import IdeSession.Types.Public
 import qualified IdeSession.Types.Private as Private
@@ -118,6 +120,10 @@ getAllDataFiles = staticQuery $ \IdeStaticInfo{ideDataDir} ->
   Find.find Find.always
             (Find.fileType Find.==? Find.RegularFile)
             ideDataDir
+
+getCabalMacros :: Query BSL.ByteString
+getCabalMacros = staticQuery $ \IdeStaticInfo{ideSourcesDir} ->
+  BSL.readFile $ cabalMacrosLocation ideSourcesDir
 
 {------------------------------------------------------------------------------
   Queries that do not rely on computed state

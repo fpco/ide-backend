@@ -41,7 +41,7 @@ import Data.List (delete, elemIndices)
 import Data.Monoid (Monoid(..))
 import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
-import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString.Char8 as BSS
 import Data.Maybe (fromMaybe)
 import qualified System.Directory as Dir
@@ -122,7 +122,7 @@ initSession ideConfig@SessionConfig{..} = do
 
   -- TODO: for now, this location is safe, but when the user
   -- is allowed to overwrite .h files, we need to create an extra dir.
-  writeMacros ideConfig ideSourcesDir
+  writeMacros ideConfig ideSourcesDir configCabalMacros
 
   return session
 
@@ -158,10 +158,12 @@ checkPackageDbEnvVar = do
     catchIO = Ex.catch
 
 -- | Write per-package CPP macros.
-writeMacros :: SessionConfig -> FilePath -> IO ()
-writeMacros SessionConfig{configPackageDBStack} path = do
-  macros <- generateMacros configPackageDBStack
-  writeFile (path </> cppHeaderName) macros
+writeMacros :: SessionConfig -> FilePath -> Maybe BSL.ByteString -> IO ()
+writeMacros SessionConfig{configPackageDBStack} ideSourcesDir configCabalMacros = do
+  macros <- case configCabalMacros of
+              Nothing     -> generateMacros configPackageDBStack
+              Just macros -> return (BSL.unpack macros)
+  writeFile (cabalMacrosLocation ideSourcesDir) macros
 
 -- | Close a session down, releasing the resources.
 --

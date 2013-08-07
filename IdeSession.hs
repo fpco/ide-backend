@@ -148,6 +148,7 @@ module IdeSession (
   , getSourceModule
   , getDataFile
   , getAllDataFiles
+  , getCabalMacros
     -- ** Queries that do not rely on computed state
   , getCodeGeneration
   , getEnv

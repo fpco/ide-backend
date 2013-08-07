@@ -65,23 +65,20 @@ loadModulesFrom session originalSourcesDir = do
 
 -- | Run the specified action with a new IDE session, configured to use a
 -- temporary directory
-withConfiguredSessionDetailed :: Bool -> PackageDBStack -> [String]
+withConfiguredSessionDetailed :: SessionConfig
                               -> (IdeSession -> IO a)
                               -> IO a
-withConfiguredSessionDetailed configGenerateModInfo configPackageDBStack
-                              opts io = do
+withConfiguredSessionDetailed config io = do
   slashTmp <- getTemporaryDirectory
-  withTempDirectory slashTmp "ide-backend-test." $ \configDir -> do
-    let sessionConfig = defaultSessionConfig{
-                            configDir
-                          , configStaticOpts = opts
-                          , configGenerateModInfo
-                          , configPackageDBStack
-                          }
-    withSession sessionConfig io
+  withTempDirectory slashTmp "ide-backend-test." $ \configDir ->
+    withSession config { configDir } io
 
 withConfiguredSession :: [String] -> (IdeSession -> IO a) -> IO a
-withConfiguredSession = withConfiguredSessionDetailed True defaultDbStack
+withConfiguredSession opts = withConfiguredSessionDetailed defaultSessionConfig {
+    configGenerateModInfo = True
+  , configPackageDBStack  = defaultDbStack
+  , configStaticOpts      = opts
+  }
 
 ifIdeBackendHaddockTestsEnabled :: [String] -> (IdeSession -> IO ()) -> IO ()
 ifIdeBackendHaddockTestsEnabled opts io = do
@@ -427,7 +424,7 @@ syntheticTests =
   , ( "Use cabal macro MIN_VERSION for a package we really depend on"
     , let packageOpts = defOpts ++ ["-XCPP"]
       in withConfiguredSession packageOpts $ \session -> do
-        macros <- getSourceModule "cabal_macros.h" session
+        macros <- getCabalMacros session
         assertBool "Main with cabal macro exe output" (not $ BSLC.null macros)
         -- assertEqual "Main with cabal macro exe output" (BSLC.pack "") macros
         let update = updateModule "Main.hs" $ BSLC.pack $ unlines
@@ -481,7 +478,7 @@ syntheticTests =
   , ( "Use cabal macro VERSION by checking if defined"
     , let packageOpts = defOpts ++ ["-XCPP"]
       in withConfiguredSession packageOpts $ \session -> do
-        macros <- getSourceModule "cabal_macros.h" session
+        macros <- getCabalMacros session
         assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
         let update = updateModule "M.hs" $ BSLC.pack $ unlines
               [ "module M where"
@@ -512,7 +509,7 @@ syntheticTests =
   , ( "Use cabal macro VERSION by including the macros file"
     , let packageOpts = defOpts ++ ["-XCPP"]
       in withConfiguredSession packageOpts $ \session -> do
-        macros <- getSourceModule "cabal_macros.h" session
+        macros <- getCabalMacros session
         assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
         let update = updateModule "M.hs" $ BSLC.pack $ unlines
               [ "module M where"
@@ -530,6 +527,46 @@ syntheticTests =
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "M with cabal macro exe output" "False\n" mOut
+    )
+  , ( "Caching cabal macros"
+    , let packageOpts = defOpts ++ ["-XCPP"]
+      in do
+        macros <- withConfiguredSession packageOpts $ \session ->
+                    getCabalMacros session
+        let config = defaultSessionConfig {
+                         configStaticOpts  = packageOpts
+                       , configCabalMacros = Just macros
+                       }
+        withConfiguredSessionDetailed config $ \session -> do
+          let update = (updateCodeGeneration True)
+                    <> (updateModule "Main.hs" $ BSLC.pack $ unlines [
+                            "#if !MIN_VERSION_base(999,0,0)"
+                          , "main = print 5"
+                          , "#else"
+                          , "terrible error"
+                          , "#endif"
+                          ])
+          updateSessionD session update 1
+          assertNoErrors session
+          runActions <- runStmt session "Main" "main"
+          (output, _) <- runWaitAll runActions
+          assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
+        let customMacros = BSLC.pack "#define HELLO 1"
+            config'      = config { configCabalMacros = Just customMacros }
+        withConfiguredSessionDetailed config' $ \session -> do
+          let update = (updateCodeGeneration True)
+                    <> (updateModule "Main.hs" $ BSLC.pack $ unlines [
+                            "#if HELLO"
+                          , "main = print 6"
+                          , "#else"
+                          , "main = print 7"
+                          , "#endif"
+                          ])
+          updateSessionD session update 1
+          assertNoErrors session
+          runActions <- runStmt session "Main" "main"
+          (output, _) <- runWaitAll runActions
+          assertEqual "result of ifdefed print 6" (BSLC.pack "6\n") output
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , let packageOpts = []
@@ -1748,9 +1785,14 @@ syntheticTests =
         assertBool "ParFib haddock files" indexExists
     )
   , ( "Fail on empty package DB"
-    , assertRaises ""
-        (\e -> e == userError "Invalid package DB stack: []")
-        (withConfiguredSessionDetailed True [] defOpts $ \_ -> return ())
+    , let config = defaultSessionConfig {
+                       configGenerateModInfo = True
+                     , configPackageDBStack  = []
+                     , configStaticOpts      = defOpts
+                     }
+      in assertRaises ""
+           (\e -> e == userError "Invalid package DB stack: []")
+           (withConfiguredSessionDetailed config $ \_ -> return ())
     )
   , ( "Build licenses from ParFib"
     , let packageOpts = []
@@ -2911,7 +2953,12 @@ syntheticTests =
                           (map abstract progressUpdates)
     )
   , ( "getLoadedModules while configGenerateModInfo off"
-    , withConfiguredSessionDetailed False defaultDbStack defOpts $ \session -> do
+    , let config = defaultSessionConfig {
+                       configGenerateModInfo = False
+                     , configPackageDBStack  = defaultDbStack
+                     , configStaticOpts      = defOpts
+                     }
+      in withConfiguredSessionDetailed config $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -3063,8 +3110,12 @@ syntheticTests =
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo False)"
     , let packageOpts = "-package parallel" : defOpts
-      in withConfiguredSessionDetailed False [GlobalPackageDB] packageOpts
-         $ \session -> do
+          config      = defaultSessionConfig {
+                            configGenerateModInfo = False
+                          , configPackageDBStack  = [GlobalPackageDB]
+                          , configStaticOpts      = packageOpts
+                          }
+      in withConfiguredSessionDetailed config $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Control.Parallel"
@@ -3081,8 +3132,12 @@ syntheticTests =
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo True)"
     , let packageOpts = "-package parallel" : defOpts
-      in withConfiguredSessionDetailed True [GlobalPackageDB] packageOpts
-         $ \session -> do
+          config      = defaultSessionConfig {
+                            configGenerateModInfo = True
+                          , configPackageDBStack  = [GlobalPackageDB]
+                          , configStaticOpts      = packageOpts
+                          }
+      in withConfiguredSessionDetailed config $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Control.Parallel"
@@ -3353,7 +3408,12 @@ syntheticTests =
                         , "-package MonadCatchIO-mtl"
                         , "-package MonadCatchIO-transformers"
                         ]
-      in withConfiguredSessionDetailed False defaultDbStack packageOpts $ \session -> do
+          config      = defaultSessionConfig {
+                            configGenerateModInfo = False
+                          , configPackageDBStack  = defaultDbStack
+                          , configStaticOpts      = packageOpts
+                          }
+      in withConfiguredSessionDetailed config $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Control.Monad.CatchIO"
@@ -3536,9 +3596,14 @@ tests =
       caseFeature genModInfo featureName check k
                   (projectName, originalSourcesDir, opts) = do
         let caseName = projectName ++ " (" ++ show k ++ ")"
+            config   = defaultSessionConfig {
+                           configGenerateModInfo = genModInfo
+                         , configPackageDBStack  = defaultDbStack
+                         , configStaticOpts      = opts
+                         }
         testCase caseName $ do
           debug dVerbosity $ featureName ++ " / " ++ caseName ++ ":"
-          withConfiguredSessionDetailed genModInfo defaultDbStack opts $ \session -> do
+          withConfiguredSessionDetailed config $ \session -> do
             (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
             check session originalUpdate lm
   in [ testGroup "Full integration tests on multiple projects"

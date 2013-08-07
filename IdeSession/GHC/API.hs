@@ -14,13 +14,14 @@ module IdeSession.GHC.API (
     -- * Configuration
   , ideBackendApiVersion
   , hsExtensions
-  , cppHeaderName
+  , cabalMacrosLocation
   ) where
 
 import Data.Binary
 import Data.ByteString (ByteString)
 import Control.Applicative ((<$>), (<*>))
 import Data.Aeson.TH (deriveJSON)
+import System.FilePath ((</>))
 
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
@@ -253,5 +254,5 @@ hsExtensions = [".hs", ".lhs"]
 -- but not made proper targets. This is probably similar to .h files.
 -- hsExtentions = [".hs", ".lhs", ".hs-boot", ".lhs-boot", ".hi-boot"]
 
-cppHeaderName :: FilePath
-cppHeaderName = "cabal_macros.h"
+cabalMacrosLocation :: FilePath -> FilePath
+cabalMacrosLocation ideSourcesDir = ideSourcesDir </> "cabal_macros.h"
