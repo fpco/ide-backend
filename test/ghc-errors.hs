@@ -2858,6 +2858,58 @@ syntheticTests =
                        (map abstract progressUpdates)
 
     )
+  , ( "Parse ghc 'Compiling' messages (with TH)"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module A where"
+                    , "import Language.Haskell.TH"
+                    , "foo :: Q Exp"
+                    , "foo = [| True |]"
+                    ])
+               <> (updateModule "Main.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module Main where"
+                    , "import A"
+                    , "main :: IO ()"
+                    , "main = print $foo"
+                    ])
+
+        let abstract (Progress {..}) = (progressStep, progressNumSteps, Text.unpack `liftM` progressParsedMsg)
+        progressUpdatesRef <- newIORef []
+        updateSession session upd $ \p -> do
+          progressUpdates <- readIORef progressUpdatesRef
+          writeIORef progressUpdatesRef (progressUpdates ++ [p])
+        assertNoErrors session
+
+        do progressUpdates <- readIORef progressUpdatesRef
+           assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling Main")]
+                          (map abstract progressUpdates)
+
+        -- Now we touch A, triggering recompilation of both A and B
+        -- This will cause ghc to report "[TH]" as part of the progress message
+        -- (at least on the command line). It doesn't seem to happen with the
+        -- API; but just in case, we check that we still get the right messages
+        -- (and not, for instance, '[TH]' as the module name).
+
+        let upd2 = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module A where"
+                    , "import Language.Haskell.TH"
+                    , "foo :: Q Exp"
+                    , "foo = [| False |]"
+                    ])
+        writeIORef progressUpdatesRef []
+        updateSession session upd2 $ \p -> do
+          progressUpdates <- readIORef progressUpdatesRef
+          writeIORef progressUpdatesRef (progressUpdates ++ [p])
+        assertNoErrors session
+
+        do progressUpdates <- readIORef progressUpdatesRef
+           assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling Main")]
+                          (map abstract progressUpdates)
+    )
   , ( "getLoadedModules while configGenerateModInfo off"
     , withConfiguredSessionDetailed False defaultDbStack defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
