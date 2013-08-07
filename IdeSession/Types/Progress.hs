@@ -9,14 +9,33 @@ import IdeSession.Util () -- instance Binary Text
 
 -- | This type represents intermediate progress information during compilation.
 data Progress = Progress {
-    progressStep     :: Int
+    -- | The current step number
+    --
+    -- When these Progress messages are generated from progress updates from
+    -- ghc, it is entirely possible that we might get step 4/26, 16/26, 3/26;
+    -- the steps may not be continuous, might even be out of order, and may
+    -- not finish at X/X.
+    progressStep :: Int
+
+    -- | The total number of steps
   , progressNumSteps :: Int
-  , progressMsg      :: Maybe Text
+
+    -- | The parsed message. For instance, in the case of progress messages
+    -- during compilation, 'progressOrigMsg' might be
+    --
+    -- > [1 of 2] Compiling M (some/path/to/file.hs, some/other/path/to/file.o)
+    --
+    -- while 'progressMsg' will just be 'Compiling M'
+  , progressParsedMsg :: Maybe Text
+
+    -- | The full original message (see 'progressMsg')
+  , progressOrigMsg :: Maybe Text
   }
   deriving (Show, Eq, Ord)
 
 instance Binary Progress where
   put (Progress {..}) = do put progressStep
                            put progressNumSteps
-                           put progressMsg
-  get = Progress <$> get <*> get <*> get
+                           put progressParsedMsg
+                           put progressOrigMsg
+  get = Progress <$> get <*> get <*> get <*> get

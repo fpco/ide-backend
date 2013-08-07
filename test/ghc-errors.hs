@@ -3488,7 +3488,7 @@ updateSessionP session update expectedProgressUpdates = do
     assertBool ("Unexpected progress update " ++ show actual ++ "; expected " ++ show expected)
                (progressStep actual == step &&
                 progressNumSteps actual == numSteps &&
-                case progressMsg actual of
+                case progressOrigMsg actual of
                   Just actualMsg -> msg `isInfixOf` Text.unpack actualMsg
                   Nothing        -> False)
 

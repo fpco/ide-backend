@@ -201,12 +201,12 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
                   packageDbStack pkgs loadedMs callback ms = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
-  callback $ Progress 1 4 Nothing
+  callback $ Progress 1 4 Nothing Nothing
   libDeps <- externalDeps pkgs
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
   executables <- mapM (exeDesc ideSourcesDir ideDistDir ghcOpts) ms
-  callback $ Progress 2 4 Nothing
+  callback $ Progress 2 4 Nothing Nothing
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
   hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
@@ -255,9 +255,9 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         -- Setting @withPackageDB@ here is too late, @configure@ would fail
         -- already. Hence we set it in @mkConfFlags@ (can be reverted,
         -- when/if we construct @lbi@ without @configure@).
-        callback $ Progress 3 4 Nothing
+        callback $ Progress 3 4 Nothing Nothing
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
-        callback $ Progress 4 4 Nothing)
+        callback $ Progress 4 4 Nothing Nothing)
   return $! either id (const ExitSuccess) exitCode
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API,
@@ -271,9 +271,9 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
                     packageDbStack pkgs loadedMs callback = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
-  callback $ Progress 1 4 Nothing
+  callback $ Progress 1 4 Nothing Nothing
   libDeps <- externalDeps pkgs
-  callback $ Progress 2 4 Nothing
+  callback $ Progress 2 4 Nothing Nothing
   let condExecutables = []
   hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
   lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
@@ -310,9 +310,9 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
-        callback $ Progress 3 4 Nothing
+        callback $ Progress 3 4 Nothing Nothing
         Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
-        callback $ Progress 4 4 Nothing)
+        callback $ Progress 4 4 Nothing Nothing)
   return $! either id (const ExitSuccess) exitCode
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API,
@@ -377,7 +377,7 @@ buildLicenseCatenation cabalsDir ideDistDir packageDbStack configLicenseExc
 
       f :: (PackageId, Int) -> IO ()
       f (PackageId{packageName}, step) | packageName == mainPackageName =
-        callback $ Progress step numSteps (Just packageName)
+        callback $ Progress step numSteps (Just packageName) (Just packageName)
       f (PackageId{..}, step) = do
         let nameString = Text.unpack packageName
             packageFile = cabalsDir </> nameString ++ ".cabal"
@@ -479,7 +479,7 @@ buildLicenseCatenation cabalsDir ideDistDir packageDbStack configLicenseExc
           unless (nameString `elem` configLicenseExc) $
             fail $ "No .cabal file provided for package "
                    ++ nameString ++ " so no license can be found."
-        callback $ Progress step numSteps (Just packageName)
+        callback $ Progress step numSteps (Just packageName) (Just packageName)
 
   res <- Ex.try $ mapM_ f (zip pkgs [1..])
   hClose licensesFile

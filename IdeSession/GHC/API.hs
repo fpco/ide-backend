@@ -32,7 +32,7 @@ import IdeSession.Util (Diff)
 -- We use a Unix timestamp for this so that these API versions have some
 -- semantics (http://www.epochconverter.com/, GMT).
 ideBackendApiVersion :: Int
-ideBackendApiVersion = 1375795946
+ideBackendApiVersion = 1375860214
 
 {------------------------------------------------------------------------------
   Requests

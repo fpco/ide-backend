@@ -316,9 +316,10 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
       case parseProgressMessage ghcMsg of
         [(step, numSteps, msg)] ->
           put $ GhcCompileProgress $ Progress {
-               progressStep     = step
-             , progressNumSteps = numSteps
-             , progressMsg      = Just (Text.pack msg)
+               progressStep      = step
+             , progressNumSteps  = numSteps
+             , progressParsedMsg = Just (Text.pack msg)
+             , progressOrigMsg   = Just (Text.pack ghcMsg)
              }
         _ ->
           -- Ignore messages we cannot parse
@@ -340,12 +341,12 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
 -- root of the session
 parseProgressMessage :: String -> [(Int, Int, String)]
 parseProgressMessage str0 = do
-    ((),    str1) <- expect "["    str0
-    (step,  str2) <- reads         str1
-    ((),    str3) <- expect " of " str2
-    (cnt,   str4) <- reads         str3
-    ((),   _str5) <- expect "] "   str4
-    return (step, cnt, str0) -- We return the full msg from ghc as the msg
+    ((),   str1) <- expect "["    str0
+    (step, str2) <- reads         str1
+    ((),   str3) <- expect " of " str2
+    (cnt,  str4) <- reads         str3
+    ((),   str5) <- expect "] "   str4
+    return (step, cnt, str5)
   where
     expect :: String -> ReadS ()
     expect prefix str =
