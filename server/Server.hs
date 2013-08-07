@@ -7,14 +7,17 @@ import Control.Concurrent (ThreadId, throwTo, forkIO, myThreadId, threadDelay)
 import Control.Concurrent.Async (async)
 import Control.Concurrent.MVar (MVar, newEmptyMVar)
 import qualified Control.Exception as Ex
-import Control.Monad (void, unless, when)
+import Control.Monad (void, unless, when, mplus)
 import Control.Monad.State (StateT, runStateT)
 import Control.Monad.Trans.Class (lift)
+import Data.Char (isSpace)
 import qualified Data.ByteString as BSS (hGetSome, hPut, null)
 import Data.Monoid ((<>))
+import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.List (sortBy, isPrefixOf)
+import Data.List (sortBy)
 import Data.Function (on)
+import qualified Data.Attoparsec.Text as Att
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
 import System.FilePath ((</>))
@@ -313,13 +316,14 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
 
     progressCallback :: String -> IO ()
     progressCallback ghcMsg = do
-      case parseProgressMessage ghcMsg of
-        [(step, numSteps, msg)] ->
+      let ghcMsg' = Text.pack ghcMsg
+      case parseProgressMessage ghcMsg' of
+        Right (step, numSteps, msg) ->
           put $ GhcCompileProgress $ Progress {
                progressStep      = step
              , progressNumSteps  = numSteps
-             , progressParsedMsg = Just (Text.pack msg)
-             , progressOrigMsg   = Just (Text.pack ghcMsg)
+             , progressParsedMsg = Just msg
+             , progressOrigMsg   = Just ghcMsg'
              }
         _ ->
           -- Ignore messages we cannot parse
@@ -336,23 +340,24 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
     spanInfoFor m = allSpanInfo .> StrictMap.accessorDefault Keep m
     pkgDepsFor  m = allPkgDeps  .> StrictMap.accessorDefault Keep m
 
--- TODO: The error message that we return still contains full paths
--- We might want to strip these out or at least make them relative to the
--- root of the session
-parseProgressMessage :: String -> [(Int, Int, String)]
-parseProgressMessage str0 = do
-    ((),   str1) <- expect "["    str0
-    (step, str2) <- reads         str1
-    ((),   str3) <- expect " of " str2
-    (cnt,  str4) <- reads         str3
-    ((),   str5) <- expect "] "   str4
-    return (step, cnt, str5)
+parseProgressMessage :: Text -> Either String (Int, Int, Text)
+parseProgressMessage = Att.parseOnly parser
   where
-    expect :: String -> ReadS ()
-    expect prefix str =
-      if prefix `isPrefixOf` str
-        then [((), drop (length prefix) str)]
-        else []
+    parser :: Att.Parser (Int, Int, Text)
+    parser = do
+      _    <- Att.char '['
+      step <- Att.decimal
+      _    <- Att.string (Text.pack " of ")
+      numS <- Att.decimal
+      _    <- Att.char ']' >> Att.space
+      rest <- parseCompiling `mplus` Att.takeText
+      return (step, numS, rest)
+
+    parseCompiling :: Att.Parser Text
+    parseCompiling = do
+      compiling <- Att.string (Text.pack "Compiling ")
+      modName   <- Att.takeTill isSpace
+      return (Text.append compiling modName)
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation

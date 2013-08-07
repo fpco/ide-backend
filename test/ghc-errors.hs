@@ -2831,6 +2831,33 @@ syntheticTests =
              RunOk _ -> assertEqual "" (BSLC.pack "AB2") output
              _       -> assertFailure $ "Unexpected result " ++ show result
     )
+  , ( "Parse ghc 'Compiling' messages"
+    , withConfiguredSession defOpts $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "printA :: IO ()"
+                    , "printA = putStr \"A\""
+                    ])
+               <> (updateModule "B.hs" . BSLC.pack . unlines $
+                    [ "module B where"
+                    , "import A"
+                    , "printAB :: IO ()"
+                    , "printAB = printA >> putStr \"B\""
+                    ])
+
+        progressUpdatesRef <- newIORef []
+        updateSession session upd $ \p -> do
+          progressUpdates <- readIORef progressUpdatesRef
+          writeIORef progressUpdatesRef (progressUpdates ++ [p])
+        assertNoErrors session
+
+        let abstract (Progress {..}) = (progressStep, progressNumSteps, Text.unpack `liftM` progressParsedMsg)
+        progressUpdates <- readIORef progressUpdatesRef
+        assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling B")]
+                       (map abstract progressUpdates)
+
+    )
   , ( "getLoadedModules while configGenerateModInfo off"
     , withConfiguredSessionDetailed False defaultDbStack defOpts $ \session -> do
         let upd = (updateCodeGeneration True)
