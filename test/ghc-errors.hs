@@ -3090,7 +3090,7 @@ syntheticTests =
            assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
            assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar (VarName) :: IO () defined in main:Foo at Foo.hs@7:1-7:7 (imported from main:Foo at Baz.hs@3:1-3:11)"
     )
-  , ( "Consistency of mutliple modules of the same name"
+  , ( "Consistency of multiple modules of the same name"
 {-
 18:45 < mikolaj> from http://www.haskell.org/ghc/docs/7.4.2/html/users_guide/packages.html#package-overlaps
 18:45 < mikolaj> It is possible that by using packages you might end up with a program that contains two modules with the same name: perhaps you used a package P that has a hidden module M, and there is also a module M in your program.
@@ -3160,7 +3160,7 @@ syntheticTests =
            assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn (VarName) :: String -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11)"
 -- would fail:           assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar (VarName) :: IO () defined in main:Control.Parallel at Control/Parallel.hs@7:1-7:7 (imported from main:Control/Parallel at Baz.hs@3:1-3:24)"
     )
-  , ( "Consistency of mutliple modules of the same name: PackageImports"
+  , ( "Consistency of multiple modules of the same name: PackageImports"
     , ifIdeBackendHaddockTestsEnabled defOpts $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
