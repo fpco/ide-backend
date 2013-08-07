@@ -4,7 +4,6 @@ module IdeSession.Config (
   ) where
 
 import Distribution.Simple (PackageDB(..), PackageDBStack)
-import qualified Data.ByteString.Lazy as BSL
 
 import IdeSession.GHC.Client (InProcess)
 
@@ -32,8 +31,6 @@ data SessionConfig = SessionConfig {
     -- | Function to be used for logging. Messages logged in this manner may be
     -- provided to users in a special debugging UI.
   , configLog :: String -> IO ()
-    -- | Cached cabal macros file, or 'Nothing' to have ide-backend generate it
-  , configCabalMacros :: Maybe BSL.ByteString
   }
 
 -- | Default session configuration
@@ -62,5 +59,4 @@ defaultSessionConfig = SessionConfig {
     -- in their .cabal files.
   , configLicenseExc      = ["rts"]
   , configLog             = const $ return ()
-  , configCabalMacros     = Nothing
   }

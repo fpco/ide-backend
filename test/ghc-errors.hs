@@ -63,42 +63,35 @@ loadModulesFrom session originalSourcesDir = do
   (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
   updateSessionD session originalUpdate (length lm)
 
--- | Run the specified action with a new IDE session, configured to use a
--- temporary directory
-withConfiguredSessionDetailed :: SessionConfig
-                              -> (IdeSession -> IO a)
-                              -> IO a
-withConfiguredSessionDetailed config io = do
-  slashTmp <- getTemporaryDirectory
-  withTempDirectory slashTmp "ide-backend-test." $ \configDir ->
-    withSession config { configDir } io
-
-withConfiguredSession :: [String] -> (IdeSession -> IO a) -> IO a
-withConfiguredSession opts = withConfiguredSessionDetailed defaultSessionConfig {
-    configGenerateModInfo = True
-  , configPackageDBStack  = defaultDbStack
-  , configStaticOpts      = opts
-  }
-
-ifIdeBackendHaddockTestsEnabled :: [String] -> (IdeSession -> IO ()) -> IO ()
-ifIdeBackendHaddockTestsEnabled opts io = do
+ifIdeBackendHaddockTestsEnabled :: SessionConfig -> (IdeSession -> IO ()) -> IO ()
+ifIdeBackendHaddockTestsEnabled sessionConfig io = do
   wtsystem <- (System.Environment.getEnv "IDE_BACKEND_DISABLE_HADDOCK_TESTS")
                `Ex.catch` (\(_ :: Ex.IOException) -> return "1")
   unless (wtsystem == "0" || wtsystem == "False") $
-    withConfiguredSession opts io
+    withSession sessionConfig io
 
-defaultDbStack :: PackageDBStack
-defaultDbStack = [GlobalPackageDB, UserPackageDB]
-
--- | Run the specified action with a new IDE session
+-- | Run the specified action with a new IDE session, configured to use a
+-- temporary directory
 withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
-withSession config = Ex.bracket (initSession config) shutdownSession
+withSession = withSession' defaultSessionInitParams
 
--- | Like 'withSession', but with a monadic configuration
-withSession' :: IO SessionConfig -> (IdeSession -> IO a) -> IO a
-withSession' config' io = do
-  config <- config'
-  withSession config io
+withSession' :: SessionInitParams -> SessionConfig -> (IdeSession -> IO a) -> IO a
+withSession' initParams config io = do
+  slashTmp <- getTemporaryDirectory
+  withTempDirectory slashTmp "ide-backend-test." $ \tempDir -> do
+    -- Only actually use the temp dir if it's not specifically overriden
+    let config' = config {
+            configDir = if configDir config == configDir defaultSessionConfig
+                          then tempDir
+                          else configDir config
+          }
+    Ex.bracket (initSession initParams config') shutdownSession io
+
+withOpts :: [String] -> SessionConfig
+withOpts opts =
+  defaultSessionConfig {
+      configStaticOpts = opts
+    }
 
 -- Set of api calls and checks to perform on each project.
 --
@@ -217,14 +210,14 @@ multipleTests =
         case mex of
           Right _runActions -> return ()  -- don't runWaitAll
           Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
-        restartSession session
+        restartSession session Nothing
         updateSessionD session mempty (length lm)  -- all compiled anew
         assertNoErrors session
         mex2 <- Ex.try $ runStmt session "Main" "main"
         case mex2 of
           Right runActions -> void $ runWaitAll runActions  -- now runWaitAll
           Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
-        restartSession session
+        restartSession session Nothing
         let update2 = mconcat $ map updateModuleDelete lm
         updateSessionD session update2 0  -- if any file missing, would yell
         assertNoErrors session
@@ -238,7 +231,7 @@ multipleTests =
 syntheticTests :: [(String, Assertion)]
 syntheticTests =
   [ ( "Maintain list of compiled modules I"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let assEq name goodMods =
               assertEqual name (map Text.pack goodMods)
                 =<< (sort <$> getLoadedModules session)
@@ -261,7 +254,7 @@ syntheticTests =
         assEq "wrong3" ["A3", "XXX"]
     )
   , ( "Maintain list of compiled modules II"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let assEq name goodMods =
               assertEqual name (map Text.pack goodMods)
                 =<< (sort <$> getLoadedModules session)
@@ -288,7 +281,7 @@ syntheticTests =
         assEq "wrong3" ["A", "A2", "A3", "XXX"]
     )
   , ( "Maintain list of compiled modules III"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let assEq name goodMods =
               assertEqual name (sort (map Text.pack goodMods))
                 =<< getLoadedModules session
@@ -308,12 +301,12 @@ syntheticTests =
         assEq "3 []" []
     )
   , ( "Duplicate shutdown"
-    , withConfiguredSession defOpts $ \session ->
+    , withSession defaultSessionConfig $ \session ->
         -- withConfiguredSession will shutdown the session as well
         shutdownSession session
     )
   , ( "Permit a session within a session and duplicated shutdownSession"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         loadModulesFrom session "test/ABnoError"
         config <- getSessionConfig session
         let tweakConfig :: Int -> SessionConfig -> IO SessionConfig
@@ -321,30 +314,34 @@ syntheticTests =
               let newDir = configDir </> "new" ++ show n
               createDirectory newDir
               return cfg { configDir = newDir }
-        withSession' (tweakConfig 2 config) $ \s2 -> do
-         withSession' (tweakConfig 3 config) $ \s3 -> do
-          withSession' (tweakConfig 4 config) $ \_s4 -> do
+        config2 <- tweakConfig 2 config
+        config3 <- tweakConfig 3 config
+        config4 <- tweakConfig 4 config
+        config5 <- tweakConfig 5 config
+        withSession config2 $ \s2 -> do
+         withSession config3 $ \s3 -> do
+          withSession config4 $ \_s4 -> do
            let update2 = loadModule "M.hs" "a = unknownX"
            updateSessionD s2 update2 1
            assertOneError s2
-           withSession' (tweakConfig 5 config) $ \s5 -> do
+           withSession config5 $ \s5 -> do
             let update3 = loadModule "M.hs" "a = 3"
             updateSessionD s3 update3 1
             assertNoErrors session
             shutdownSession s5 -- <-- duplicate "nested" shutdown
     )
   , ( "Compile a project: A depends on B, error in A"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         loadModulesFrom session "test/AerrorB"
         assertSourceErrors session [[(Just "A.hs", "No instance for (Num (IO ()))")]]
      )
   , ( "Compile a project: A depends on B, error in B"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         loadModulesFrom session "test/ABerror"
         assertSourceErrors session [[(Just "B.hs", "No instance for (Num (IO ()))")]]
     )
   , ( "Compile and run a project with some .lhs files"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         loadModulesFrom session "test/compiler/utils"
         assertNoErrors session
         let update2 = updateCodeGeneration True
@@ -357,7 +354,7 @@ syntheticTests =
           _ -> assertFailure "Unexpected snippet run result"
     )
   , ( "Build executable from some .lhs files"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         setCurrentDirectory "test/compiler/utils"
         loadModulesFrom session "."
         setCurrentDirectory "../../../"
@@ -394,7 +391,7 @@ syntheticTests =
         assertEqual "after all exe builds" (Just ExitSuccess) status4
     )
   , ( "Build haddocks from some .lhs files"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         status0 <- getBuildDocStatus session
         assertEqual "before module loading" Nothing status0
         setCurrentDirectory "test/compiler/utils"
@@ -410,7 +407,7 @@ syntheticTests =
         assertBool ".lhs haddock files" indexExists
     )
   , ( "Build haddocks and fail"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         setCurrentDirectory "test/ABerror"
         loadModulesFrom session "."
         setCurrentDirectory "../.."
@@ -422,8 +419,7 @@ syntheticTests =
         assertEqual "failure after doc build" (Just $ ExitFailure 1) status1
     )
   , ( "Use cabal macro MIN_VERSION for a package we really depend on"
-    , let packageOpts = defOpts ++ ["-XCPP"]
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts ["-XCPP"]) $ \session -> do
         macros <- getCabalMacros session
         assertBool "Main with cabal macro exe output" (not $ BSLC.null macros)
         -- assertEqual "Main with cabal macro exe output" (BSLC.pack "") macros
@@ -450,8 +446,7 @@ syntheticTests =
         assertEqual "Main with cabal macro exe output" "5\n" mOut
     )
   , ( "Use cabal macro MIN_VERSION for a package we don't really depend on"
-    , let packageOpts = defOpts ++ ["-XCPP"]
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts ["-XCPP"]) $ \session -> do
         let update = updateModule "Main.hs" $ BSLC.pack $ unlines
               [ "#if !MIN_VERSION_containers(999,0,0)"
               , "main = print 5"
@@ -476,8 +471,7 @@ syntheticTests =
         -- assertEqual "Main with cabal macro exe output" "5\n" mOut
     )
   , ( "Use cabal macro VERSION by checking if defined"
-    , let packageOpts = defOpts ++ ["-XCPP"]
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts ["-XCPP"]) $ \session -> do
         macros <- getCabalMacros session
         assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
         let update = updateModule "M.hs" $ BSLC.pack $ unlines
@@ -507,8 +501,7 @@ syntheticTests =
         assertEqual "M with cabal macro exe output" "5\n" mOut
     )
   , ( "Use cabal macro VERSION by including the macros file"
-    , let packageOpts = defOpts ++ ["-XCPP"]
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts ["-XCPP"]) $ \session -> do
         macros <- getCabalMacros session
         assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
         let update = updateModule "M.hs" $ BSLC.pack $ unlines
@@ -529,48 +522,45 @@ syntheticTests =
         assertEqual "M with cabal macro exe output" "False\n" mOut
     )
   , ( "Caching cabal macros"
-    , let packageOpts = defOpts ++ ["-XCPP"]
-      in do
-        macros <- withConfiguredSession packageOpts $ \session ->
-                    getCabalMacros session
-        let config = defaultSessionConfig {
-                         configStaticOpts  = packageOpts
-                       , configCabalMacros = Just macros
-                       }
-        withConfiguredSessionDetailed config $ \session -> do
-          let update = (updateCodeGeneration True)
-                    <> (updateModule "Main.hs" $ BSLC.pack $ unlines [
-                            "#if !MIN_VERSION_base(999,0,0)"
-                          , "main = print 5"
-                          , "#else"
-                          , "terrible error"
-                          , "#endif"
-                          ])
-          updateSessionD session update 1
-          assertNoErrors session
-          runActions <- runStmt session "Main" "main"
-          (output, _) <- runWaitAll runActions
-          assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
-        let customMacros = BSLC.pack "#define HELLO 1"
-            config'      = config { configCabalMacros = Just customMacros }
-        withConfiguredSessionDetailed config' $ \session -> do
-          let update = (updateCodeGeneration True)
-                    <> (updateModule "Main.hs" $ BSLC.pack $ unlines [
-                            "#if HELLO"
-                          , "main = print 6"
-                          , "#else"
-                          , "main = print 7"
-                          , "#endif"
-                          ])
-          updateSessionD session update 1
-          assertNoErrors session
-          runActions <- runStmt session "Main" "main"
-          (output, _) <- runWaitAll runActions
-          assertEqual "result of ifdefed print 6" (BSLC.pack "6\n") output
+    , do macros <- withSession defaultSessionConfig getCabalMacros
+         let initParams = defaultSessionInitParams {
+                              sessionInitCabalMacros = Just macros
+                            }
+         withSession' initParams (withOpts ["-XCPP"]) $ \session -> do
+           let update = (updateCodeGeneration True)
+                     <> (updateModule "Main.hs" $ BSLC.pack $ unlines [
+                             "#if !MIN_VERSION_base(999,0,0)"
+                           , "main = print 5"
+                           , "#else"
+                           , "terrible error"
+                           , "#endif"
+                           ])
+           updateSessionD session update 1
+           assertNoErrors session
+           runActions <- runStmt session "Main" "main"
+           (output, _) <- runWaitAll runActions
+           assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
+         let customMacros = BSLC.pack "#define HELLO 1"
+             initParams'  = initParams {
+                                 sessionInitCabalMacros = Just customMacros
+                               }
+         withSession' initParams' (withOpts ["-XCPP"]) $ \session -> do
+           let update = (updateCodeGeneration True)
+                     <> (updateModule "Main.hs" $ BSLC.pack $ unlines [
+                             "#if HELLO"
+                           , "main = print 6"
+                           , "#else"
+                           , "main = print 7"
+                           , "#endif"
+                           ])
+           updateSessionD session update 1
+           assertNoErrors session
+           runActions <- runStmt session "Main" "main"
+           (output, _) <- runWaitAll runActions
+           assertEqual "result of ifdefed print 6" (BSLC.pack "6\n") output
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
-    , let packageOpts = []
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         let update = updateDataFileFromFile "EventLogFormat.h"
                                             "test/Puns/EventLogFormat.h"
         updateSessionD session update 0
@@ -581,7 +571,7 @@ syntheticTests =
         -- and the data dir can't be set to the source dir. See #10.
         msgs <- getSourceErrors session
         assertSomeErrors msgs
-        let punOpts = packageOpts ++ [ "-XNamedFieldPuns", "-XRecordWildCards"]
+        let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
             update2 = updateGhcOptions (Just punOpts)
         (_, lm) <- getModules session
         updateSessionD session update2 (length lm)
@@ -592,8 +582,7 @@ syntheticTests =
 --      assertNoErrors msgs2
     )
   , ( "Build licenses from NamedFieldPuns"
-    , let packageOpts = []
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         loadModulesFrom session "test/Puns"
         let upd = buildLicenses "test/Puns/cabals"
         updateSessionD session upd 99
@@ -612,8 +601,7 @@ syntheticTests =
         assertEqual "licenses length" 27142 (length licenses)
     )
   , ( "Build licenses with wrong cabal files and fail"
-    , let packageOpts = []
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         loadModulesFrom session "test/Puns"
         let upd = buildLicenses "test/Puns/cabals/parse_error"
         updateSessionD session upd 99
@@ -632,7 +620,7 @@ syntheticTests =
           "Licenses concatenation failed. The exception is:\nuser error (No license text can be found for package mtl.)"
     )
   , ( "Test CWD by reading a data file"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let update = updateDataFile "datafile.dat"
                                     (BSLC.pack "test data content")
         updateSessionD session update 0
@@ -656,8 +644,7 @@ syntheticTests =
           (BSLC.pack "new content\n") output2
     )
   , ( "Test CWD in executable building"
-    , let packageOpts = []
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         let update = updateCodeGeneration True
                      <> updateDataFile "test.txt" (BSLC.pack "test data")
         let update2 = updateModule "Main.hs" $ BSLC.pack $ unlines
@@ -681,35 +668,35 @@ syntheticTests =
     )
 {- Now that we always load the RTS, we're never in this situation
   , ("Reject getSourceErrors without updateSession"
-    , withConfiguredSession defOpts $ \session ->
+    , withSession defaultSessionConfig $ \session ->
         assertRaises "getSourceErrors session"
           (== userError "This session state does not admit queries.")
           (getSourceErrors session)
     )
 -}
   , ("Reject updateSession after shutdownSession"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         shutdownSession session
         assertRaises "updateSessionD session mempty"
           (== userError "Session already shut down.")
           (updateSessionD session mempty 0)
     )
   , ("Reject getSourceErrors after shutdownSession"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         shutdownSession session
         assertRaises "getSourceErrors session"
           (== userError "Session already shut down.")
           (getSourceErrors session)
     )
   , ("Reject runStmt after shutdownSession"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         shutdownSession session
         assertRaises "runStmt session Main main"
           (== userError "Session already shut down.")
           (runStmt session "Main" "main")
     )
   , ( "Test recursive modules"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         loadModulesFrom session "test/bootMods"
         -- Fails, because special support is needed, similar to .h files.
         -- Proabably, the .hs-boot files should be copied to the src dir,
@@ -717,8 +704,7 @@ syntheticTests =
         assertOneError session
     )
   , ( "Test TH; code generation on"
-    , let packageOpts = defOpts ++ ["-XTemplateHaskell"]
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
         setCurrentDirectory "test"
         (originalUpdate, lm) <- getModulesFrom session "TH"
         let update = originalUpdate <> updateCodeGeneration True
@@ -732,8 +718,7 @@ syntheticTests =
           _ -> assertFailure "Unexpected snippet run result"
     )
   , ( "Build executable from TH"
-    , let packageOpts = defOpts ++ ["-XTemplateHaskell"]
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
         setCurrentDirectory "test"
         (originalUpdate, lm) <- getModulesFrom session "TH"
         let update = originalUpdate <> updateCodeGeneration True
@@ -750,8 +735,7 @@ syntheticTests =
                     out
     )
   , ( "Build haddocks from TH"
-    , let packageOpts = defOpts ++ ["-XTemplateHaskell"]
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
         setCurrentDirectory "test"
         (originalUpdate, lm) <- getModulesFrom session "TH"
         let update = originalUpdate <> updateCodeGeneration True
@@ -766,8 +750,7 @@ syntheticTests =
 
     )
   , ( "Test CPP: ifdefed module header"
-    , let packageOpts = defOpts ++ ["-XCPP"]
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts ["-XCPP"]) $ \session -> do
         let update = updateModule "Good.hs" $ BSLC.pack $ unlines
               [ "#if __GLASGOW_HASKELL__ < 600"
               , "module Bad where"
@@ -784,8 +767,7 @@ syntheticTests =
         assertIdInfo idInfo "Good" (8,1,8,2) "x (VarName) :: [a] defined in main:Good at Good.hs@8:1-8:2 (binding occurrence)"
     )
   , ( "Reject a wrong CPP directive"
-    , let packageOpts = ["-XCPP"]
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts ["-XCPP"]) $ \session -> do
         let update = loadModule "M.hs" "#ifdef"
                      <> updateCodeGeneration True
         updateSessionD session update 1
@@ -798,7 +780,7 @@ syntheticTests =
           (runStmt session "Main" "main")
     )
   , ( "Reject a module with mangled header"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let update = updateModule "M.hs"
                                   (BSLC.pack "module very-wrong where")
         updateSessionD session update 1
@@ -809,7 +791,7 @@ syntheticTests =
         assertSourceErrors' session ["parse error on input `.'\n"]
     )
   , ( "Interrupt runStmt (after 1 sec)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -828,7 +810,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
   , ( "Interrupt runStmt (immediately)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -846,7 +828,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
   , ( "Interrupt runStmt (black hole; after 1 sec)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -864,7 +846,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
   , ( "Capture stdout (single putStrLn)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -880,7 +862,7 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Capture stdout (single putStr)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -896,7 +878,7 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Capture stdout (single putStr with delay)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -914,7 +896,7 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Capture stdout (multiple putStrLn)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -932,7 +914,7 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Capture stdout (mixed putStr and putStrLn)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -950,7 +932,7 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Capture stdin (simple echo process)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -967,7 +949,7 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Capture stdin (infinite echo process)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -996,7 +978,7 @@ syntheticTests =
              _ -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Two calls to runStmt"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1023,7 +1005,7 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Make sure we can terminate the IDE session when code is running"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1036,7 +1018,7 @@ syntheticTests =
         return ()
      )
   , ( "Capture stderr"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1053,7 +1035,7 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Merge stdout and stderr"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1085,7 +1067,7 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Set environment variables"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1150,7 +1132,7 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected result " ++ show result
     )
   , ( "Update during run"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1165,7 +1147,7 @@ syntheticTests =
           (updateSessionD session upd 1)
     )
   , ( "getSourceErrors during run"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "{-# OPTIONS_GHC -Wall #-}"
@@ -1181,7 +1163,7 @@ syntheticTests =
         assertEqual "Running code does not affect getSourceErrors" msgs1 msgs2
     )
   , ( "getLoadedModules during run"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "{-# OPTIONS_GHC -Wall #-}"
@@ -1196,7 +1178,7 @@ syntheticTests =
         assertEqual "Running code does not affect getLoadedModules" mods mods'
     )
   , ( "Interrupt, then capture stdout"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         updateSession session (updateCodeGeneration True) (\_ -> return ())
         let upd1 = updateModule "Main.hs" . BSLC.pack . unlines $
                      [ "import Control.Monad"
@@ -1260,7 +1242,7 @@ syntheticTests =
                  ] (ExitFailure 1)
     )
   , ( "Make sure environment is restored after session restart"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1283,7 +1265,7 @@ syntheticTests =
 
         -- Start a new server
         serverBefore <- getGhcServer session
-        restartSession session
+        restartSession session Nothing
 
         -- Compile the code on the new server
         updateSessionD session upd 1
@@ -1327,8 +1309,7 @@ syntheticTests =
     , do withTempDirectory "." "ide-backend-test." $ \fullPath -> do
            relativePath <- makeRelativeToCurrentDirectory fullPath
            let sessionConfig = defaultSessionConfig {
-                                   configDir        = relativePath
-                                 , configStaticOpts = defOpts
+                                   configDir = relativePath
                                  }
            withSession sessionConfig $ \session -> do
              let upd = (updateCodeGeneration True)
@@ -1346,7 +1327,7 @@ syntheticTests =
                _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Call runWait after termination (normal termination)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1366,7 +1347,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show result'
     )
   , ( "Call runWait after termination (interrupted)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1389,7 +1370,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show resOrEx'
     )
   , ( "Call runWait after termination (restarted session)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1401,7 +1382,7 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "M" "loop"
         threadDelay 1000000
-        restartSession session
+        restartSession session Nothing
         resOrEx <- runWait runActions
         case resOrEx of
           Right RunForceCancelled -> return ()
@@ -1412,7 +1393,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show resOrEx'
     )
   , ( "Call runWait after termination (started new snippet in meantime)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -1456,7 +1437,7 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Don't recompile unnecessarily (single module)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
@@ -1474,7 +1455,7 @@ syntheticTests =
         assertCounter counter 0
     )
   , ( "Don't recompile unnecessarily (A depends on B)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         -- 'updA' is defined so that the interface of 'updA n' is different
         -- to the interface of 'updA m' (with n /= m)
         let updA n = updateModule "A.hs" . BSLC.pack . unlines $
@@ -1521,7 +1502,7 @@ syntheticTests =
         assertCounter counter 1
     )
   , ( "First snippet closes stdin; next snippet unaffected"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let updates2 = mconcat
                 [ updateCodeGeneration True
                 , updateModule "Main.hs" (BSLC.pack "import System.IO\nmain = hClose stdin")
@@ -1544,7 +1525,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected result " ++ show out3b
     )
   , ( "First snippet closes stdin (interrupted 'interact'); next snippet unaffected"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let updates2 = mconcat
                 [ updateCodeGeneration True
                 , updateModule "Main.hs" (BSLC.pack "main = getContents >>= putStr")
@@ -1575,7 +1556,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected result " ++ show out3b
     )
   , ( "First snippet closes stdout; next snippet unaffected"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let updates2 = mconcat
                 [ updateCodeGeneration True
                 , updateModule "Main.hs" (BSLC.pack "import System.IO\nmain = hClose stdout")
@@ -1598,7 +1579,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected result " ++ show out3b
     )
   , ( "First snippet closes stderr; next snippet unaffected"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let updates2 = mconcat
                 [ updateCodeGeneration True
                 , updateModule "Main.hs" (BSLC.pack "import System.IO\nmain = hClose stderr")
@@ -1621,7 +1602,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected result " ++ show out3b
     )
   , ( "Snippet closes stderr, using timeout buffering"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = mconcat [
                       updateCodeGeneration True
                     , updateStdoutBufferMode $ RunLineBuffering Nothing
@@ -1650,7 +1631,7 @@ syntheticTests =
           _ -> assertFailure $ "Unexpected result " ++ show finalResult
      )
   , ( "Make sure encoding is UTF8"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSL8.fromString . unlines $
                     [ "module M where"
@@ -1668,7 +1649,7 @@ syntheticTests =
   , ( "Using something from a different package (no \"Loading package\" msg)"
       -- We pick something from the haskell platform but that doesn't come with ghc itself
       -- https://github.com/haskell/haskell-platform/blob/2012.4.0.0/haskell-platform.cabal
-    , withConfiguredSession [] $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSL8.fromString . unlines $
                     [ "module M where"
@@ -1685,7 +1666,7 @@ syntheticTests =
           _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Using the FFI (expected failure)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = mconcat [
                 updateCodeGeneration True
               , updateModuleFromFile "test/FFI/Main.hs"
@@ -1702,8 +1683,7 @@ syntheticTests =
         -}
     )
   , ( "Build executable from Main"
-    , let packageOpts = []
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
         assertNoErrors session
@@ -1723,7 +1703,7 @@ syntheticTests =
                         , "-package parallel"
                         , "-package old-time"
                         ]
-      in withConfiguredSession packageOpts $ \session -> do
+      in withSession (withOpts packageOpts) $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
         assertNoErrors session
@@ -1738,8 +1718,7 @@ syntheticTests =
                     fibOut
     )
   , ( "Build executable from ParFib.Main"
-    , let packageOpts = []
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
         assertNoErrors session
@@ -1757,8 +1736,7 @@ syntheticTests =
                     fibOut
     )
   , ( "Build executable and fail"
-    , let packageOpts = []
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
         assertNoErrors session
@@ -1772,8 +1750,7 @@ syntheticTests =
         assertEqual "failure after exe build" (Just $ ExitFailure 1) status1
     )
   , ( "Build haddocks from ParFib"
-    , let packageOpts = []
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
         assertNoErrors session
@@ -1785,18 +1762,13 @@ syntheticTests =
         assertBool "ParFib haddock files" indexExists
     )
   , ( "Fail on empty package DB"
-    , let config = defaultSessionConfig {
-                       configGenerateModInfo = True
-                     , configPackageDBStack  = []
-                     , configStaticOpts      = defOpts
-                     }
+    , let config = defaultSessionConfig { configPackageDBStack  = [] }
       in assertRaises ""
            (\e -> e == userError "Invalid package DB stack: []")
-           (withConfiguredSessionDetailed config $ \_ -> return ())
+           (withSession config $ \_ -> return ())
     )
   , ( "Build licenses from ParFib"
-    , let packageOpts = []
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
         assertNoErrors session
@@ -1832,7 +1804,7 @@ syntheticTests =
   --       assertEqual "licenses length" 4933 (length licenses)
   --   )
   , ( "Type information 1: Local identifiers and Prelude"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "a = (5 :: Int)"
@@ -1858,7 +1830,7 @@ syntheticTests =
         -}
     )
   , ( "Type information 2: Simple ADTs"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "data T = MkT"
@@ -1870,7 +1842,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,10,2,13) "MkT (DataName) :: T defined in main:A at A.hs@2:10-2:13 (binding occurrence)"
     )
   , ( "Type information 3: Polymorphism"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "data TMaybe a = TNothing | TJust a"
@@ -1929,7 +1901,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (16,20,16,21) "x (VarName) :: t defined in main:A at A.hs@16:13-16:14 (defined locally)"
     )
   , ( "Type information 4: Multiple modules"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "data T = MkT"
@@ -1951,11 +1923,10 @@ syntheticTests =
         assertIdInfo idInfo "B" (3,7,3,10) "MkT (DataName) :: T defined in main:A at A.hs@2:10-2:13 (imported from main:A at B.hs@2:1-2:9)"
     )
   , ( "Type information 5: External packages, type sigs, scoped type vars, kind sigs"
-    , let opts = defOpts ++ [
-                     "-XScopedTypeVariables"
-                   , "-XKindSignatures"
-                   ]
-      in ifIdeBackendHaddockTestsEnabled opts $ \session -> do
+    , let opts = [ "-XScopedTypeVariables"
+                 , "-XKindSignatures"
+                 ]
+      in ifIdeBackendHaddockTestsEnabled (withOpts opts) $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
 
@@ -2023,7 +1994,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (14,7,14,8) "x (VarName) :: t a defined in main:A at A.hs@14:3-14:4 (defined locally)"
     )
   , ( "Type information 6: Reusing type variables"
-    , withConfiguredSession ("-XScopedTypeVariables" : defOpts) $ \session -> do
+    , withSession (withOpts ["-XScopedTypeVariables"]) $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
 
@@ -2089,7 +2060,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (11,17,11,18) "x (VarName) :: t defined in main:A at A.hs@11:9-11:10 (defined locally)"
     )
   , ( "Type information 7: Qualified imports"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.Maybe"
@@ -2106,7 +2077,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (5,33,5,37) "on (VarName) :: (b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1 defined in base-4.5.1.0:Data.Function at <no location info> (home base-4.5.1.0:Data.Function) (imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36)"
     )
   , ( "Type information 8: Imprecise source spans"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "main = print True"
@@ -2124,7 +2095,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,9,2,13) infoPrint
     )
   , ( "Type information 9a: Quasi-quotation (QQ in own package)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
@@ -2172,7 +2143,7 @@ syntheticTests =
         assertIdInfo idInfo "B" (7,7,7,14) "quasi-quote with quoter qq (VarName) :: QuasiQuoter defined in main:A at A.hs@4:1-4:3 (imported from main:A at B.hs@3:1-3:9)"
     )
   , ( "Type information 9b: Quasi-quotation (QQ in separate package, check home module info)"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateModule "Main.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TypeFamilies, QuasiQuotes, MultiParamTypeClasses,"
@@ -2206,7 +2177,7 @@ syntheticTests =
             putStrLn "WARNING: Skipping due to errors (probably yesod package not installed)"
     )
   , ( "Type information 10: Template Haskell"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
@@ -2249,7 +2220,7 @@ syntheticTests =
         assertIdInfo idInfo "B" (5,7,5,11) "ex1 (VarName) :: Q Exp defined in main:A at A.hs@5:1-5:4 (imported from main:A at B.hs@3:1-3:9)"
     )
   , ( "Type information 11: Take advantage of scope (1)"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "main = print True"
@@ -2260,7 +2231,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (2,8,2,13) "print (VarName) :: Show a => a -> IO () defined in base-4.5.1.0:System.IO at <no location info> (home base-4.5.1.0:System.IO) (imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
     )
   , ( "Type information 12: Take advantage of scope (2)"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString (append)"
@@ -2272,7 +2243,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (3,7,3,13) "append (VarName) :: Data.ByteString.Internal.ByteString -> Data.ByteString.Internal.ByteString -> Data.ByteString.Internal.ByteString defined in bytestring-0.9.2.1:Data.ByteString at <no location info> (home bytestring-0.9.2.1:Data.ByteString) (imported from bytestring-0.9.2.1:Data.ByteString at A.hs@2:25-2:31)"
     )
   , ( "Type information 13: Take advantage of scope (3)"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString"
@@ -2284,7 +2255,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (3,7,3,13) "append (VarName) :: ByteString -> ByteString -> ByteString defined in bytestring-0.9.2.1:Data.ByteString at <no location info> (home bytestring-0.9.2.1:Data.ByteString) (imported from bytestring-0.9.2.1:Data.ByteString at A.hs@2:1-2:23)"
     )
   , ( "Type information 14: Take advantage of scope (4)"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString (append)"
@@ -2297,7 +2268,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (4,7,4,13) "append (VarName) :: BS.ByteString -> BS.ByteString -> BS.ByteString defined in bytestring-0.9.2.1:Data.ByteString at <no location info> (home bytestring-0.9.2.1:Data.ByteString) (imported from bytestring-0.9.2.1:Data.ByteString as 'BS.' at A.hs@3:1-3:39)"
     )
   , ( "Type information 15: Other constructs"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ {-  1 -} "{-# LANGUAGE StandaloneDeriving, DoRec #-}"
                     , {-  2 -} "module A where"
@@ -2350,7 +2321,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (18,35,18,37) "xs (VarName) :: [Int] defined in main:A at A.hs@18:19-18:21 (defined locally)"
     )
   , ( "Type information 16: FFI"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE ForeignFunctionInterface #-}"
                     , "module A where"
@@ -2378,7 +2349,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (10,33,10,40) "CDouble (TcClsName) defined in base-4.5.1.0:Foreign.C.Types at <no location info> (home base-4.5.1.0:Foreign.C.Types) (imported from base-4.5.1.0:Foreign.C at A.hs@4:1-4:17)"
     )
   , ( "Type information 17: GADTs"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE GADTs, KindSignatures, RankNTypes #-}"
                     , "module A where"
@@ -2401,7 +2372,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (7,59,7,60) "a (TvName) defined in main:A at A.hs@7:18-7:19 (defined locally)"
     )
   , ( "Type information 18: Other types"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ {-  1 -} "{-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, TypeFamilies #-}"
                     , {-  2 -} "module A where"
@@ -2442,7 +2413,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (9,25,9,29) "Bool (TcClsName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)"
     )
   , ( "Type information 19: Default methods"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "class Foo a where"
@@ -2455,7 +2426,7 @@ syntheticTests =
         assertIdInfo idInfo "A" (4,11,4,15) "succ (VarName) :: Enum a1 => a1 -> a1 defined in base-4.5.1.0:GHC.Enum at <no location info> (home base-4.5.1.0:Prelude) (imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
     )
   , ( "Test internal consistency of local id markers"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import qualified Text.PrettyPrint as Disp"
@@ -2469,7 +2440,7 @@ syntheticTests =
         assertOneError session
     )
   , ( "Test internal consistency of imported id markers"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import qualified Text.PrettyPrint as Disp"
@@ -2487,7 +2458,7 @@ syntheticTests =
         assertNoErrors session
     )
   , ( "Autocomplete 1: Imports for partial module"
-    , withConfiguredSession ("-XPackageImports" : defOpts) $ \session -> do
+    , withSession (withOpts ["-XPackageImports"]) $ \session -> do
         let upd = (updateModule "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import Control.Monad"
@@ -2596,7 +2567,7 @@ syntheticTests =
           ]
     )
   , ( "Autocomplete 2: Recompute after recompilation"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "foobar :: Bool -> Bool"
@@ -2636,7 +2607,7 @@ syntheticTests =
            assertEqual "" expected (show completeFoob)
     )
   , ( "Autocomplete 3: Autocompletion entries should have home module info"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     ])
@@ -2653,17 +2624,17 @@ syntheticTests =
     -- - Explicitly hiding something that wasn't exported
     -- - Use of PackageImports without the flag
   , ( "GHC crash 1: No delay, no further requests"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         crashGhcServer session Nothing
     )
   , ( "GHC crash 2: No delay, follow up request"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         crashGhcServer session Nothing
         updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
         assertSourceErrors' session ["Intentional crash"]
     )
   , ( "GHC crash 3: Delay, follow up request"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         crashGhcServer session (Just 1000000)
         updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
         threadDelay 2000000
@@ -2671,7 +2642,7 @@ syntheticTests =
         assertSourceErrors' session ["Intentional crash"]
     )
   , ( "GHC crash 4: Make sure session gets restarted on second update"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         -- Compile some code
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
@@ -2705,7 +2676,7 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected result " ++ show result
     )
   , ( "GHC crash 5: Repeated crashes and restarts"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         -- Compile some code
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
@@ -2741,7 +2712,7 @@ syntheticTests =
                _       -> assertFailure $ "Unexpected result " ++ show result
     )
   , ( "GHC crash 6: Add additional code after update"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let updA = (updateCodeGeneration True)
                 <> (updateModule "A.hs" . BSLC.pack . unlines $
                      [ "module A where"
@@ -2781,7 +2752,7 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected result " ++ show result
     )
   , ( "GHC crash 7: Update imported module after update"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let updA = (updateCodeGeneration True)
                 <> (updateModule "A.hs" . BSLC.pack . unlines $
                      [ "module A where"
@@ -2827,7 +2798,7 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected result " ++ show result
     )
   , ( "GHC crash 8: Update importing module after update"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let updA = (updateCodeGeneration True)
                 <> (updateModule "A.hs" . BSLC.pack . unlines $
                      [ "module A where"
@@ -2874,7 +2845,7 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected result " ++ show result
     )
   , ( "Parse ghc 'Compiling' messages"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
@@ -2901,7 +2872,7 @@ syntheticTests =
 
     )
   , ( "Parse ghc 'Compiling' messages (with TH)"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
@@ -2953,12 +2924,8 @@ syntheticTests =
                           (map abstract progressUpdates)
     )
   , ( "getLoadedModules while configGenerateModInfo off"
-    , let config = defaultSessionConfig {
-                       configGenerateModInfo = False
-                     , configPackageDBStack  = defaultDbStack
-                     , configStaticOpts      = defOpts
-                     }
-      in withConfiguredSessionDetailed config $ \session -> do
+    , let config = defaultSessionConfig { configGenerateModInfo = False }
+      in withSession config $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -2971,7 +2938,7 @@ syntheticTests =
         assertEqual "" [Text.pack "M"] mods
     )
   , ( "Package dependencies"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     ])
@@ -2993,7 +2960,7 @@ syntheticTests =
         assertEqual "" "Just [mtl-2.1.2,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0,transformers-0.3.0.0]" (show (deps (Text.pack "C")))
      )
   , ( "Set command line arguments"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -3036,7 +3003,7 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Check that command line arguments survive restartSession"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -3056,7 +3023,7 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected run result: " ++ show result
 
         -- Restart and update the session
-        restartSession session
+        restartSession session Nothing
         updateSessionD session upd 1
         assertNoErrors session
 
@@ -3068,10 +3035,9 @@ syntheticTests =
              _       -> assertFailure $ "Unexpected run result: " ++ show result
     )
   , ( "Register a package, don't restart session, don't see the package"
-    , let packageOpts = ["-package simple-lib17"]
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts ["-package simple-lib17"]) $ \session -> do
         deletePackage "test/simple-lib17"
-        restartSession session
+        restartSession session (Just defaultSessionInitParams)
         let upd = updateModule "Main.hs" . BSLC.pack . unlines $
                     [ "module Main where"
                     , "import SimpleLib (simpleLib)"
@@ -3085,17 +3051,16 @@ syntheticTests =
         deletePackage "test/simple-lib17"
     )
   , ( "Register a package, restart session, see the package"
-    , let packageOpts = []
-      in withConfiguredSession packageOpts $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         deletePackage "test/simple-lib17"
-        restartSession session
+        restartSession session (Just defaultSessionInitParams)
         let upd = updateModule "Main.hs" . BSLC.pack . unlines $
                     [ "module Main where"
                     , "import SimpleLib (simpleLib)"
                     , "main = print simpleLib"
                     ]
         installPackage "test/simple-lib17"
-        restartSession session  -- only now the package accessible
+        restartSession session (Just defaultSessionInitParams) -- only now the package accessible
         updateSessionD session upd 1
         assertNoErrors session
         let m = "Main"
@@ -3109,13 +3074,13 @@ syntheticTests =
         deletePackage "test/simple-lib17"
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo False)"
-    , let packageOpts = "-package parallel" : defOpts
+    , let packageOpts = ["-package parallel"]
           config      = defaultSessionConfig {
                             configGenerateModInfo = False
                           , configPackageDBStack  = [GlobalPackageDB]
                           , configStaticOpts      = packageOpts
                           }
-      in withConfiguredSessionDetailed config $ \session -> do
+      in withSession config $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Control.Parallel"
@@ -3131,13 +3096,13 @@ syntheticTests =
           ]]
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo True)"
-    , let packageOpts = "-package parallel" : defOpts
+    , let packageOpts = ["-package parallel"]
           config      = defaultSessionConfig {
                             configGenerateModInfo = True
                           , configPackageDBStack  = [GlobalPackageDB]
                           , configStaticOpts      = packageOpts
                           }
-      in withConfiguredSessionDetailed config $ \session -> do
+      in withSession config $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Control.Parallel"
@@ -3156,7 +3121,7 @@ syntheticTests =
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"
                         ]
-      in ifIdeBackendHaddockTestsEnabled packageOpts $ \sess -> do
+      in ifIdeBackendHaddockTestsEnabled (withOpts packageOpts) $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
             updMod = \mod code -> updateModule mod (BSLC.pack code)
@@ -3233,7 +3198,7 @@ syntheticTests =
                  from version 2 of package P, and GHC will report an error if you try to use one where the other is expected.
 18:46 < mikolaj> so it seems it's unspecified which module will be used --- it just happens that our idInfo code picks a different package than GHC API in this case
 -}
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \sess -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
             updMod = \mod code -> updateModule mod (BSLC.pack code)
@@ -3295,7 +3260,7 @@ syntheticTests =
 -- would fail:           assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar (VarName) :: IO () defined in main:Control.Parallel at Control/Parallel.hs@7:1-7:7 (imported from main:Control/Parallel at Baz.hs@3:1-3:24)"
     )
   , ( "Consistency of multiple modules of the same name: PackageImports"
-    , ifIdeBackendHaddockTestsEnabled defOpts $ \sess -> do
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
             updMod = \mod code -> updateModule mod (BSLC.pack code)
@@ -3330,7 +3295,7 @@ syntheticTests =
            assertIdInfo gif "Baz" (7, 8, 7, 9) "par (VarName) :: a1 -> b1 -> b1 defined in parallel-X.Y.Z:Control.Parallel at <no location info> (home parallel-X.Y.Z:Control.Parallel) (imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35)"
     )
   , ( "Quickfix for Updating static files never triggers recompilation"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = updateDataFile "A.foo" (BSLC.pack "unboundVarName")
                <> (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
@@ -3350,7 +3315,7 @@ syntheticTests =
         assertNoErrors session
     )
   , ( "Quickfix for Updating static files never triggers --- illegal var name"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = updateDataFile "A.foo" (BSLC.pack "42 is a wrong var name")
                <> (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
@@ -3370,7 +3335,7 @@ syntheticTests =
         assertNoErrors session
     )
   , ( "Quickfix for Updating static files never triggers --- missing file"
-    , withConfiguredSession defOpts $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
                     , "module A where"
@@ -3393,7 +3358,7 @@ syntheticTests =
                         , "-package MonadCatchIO-mtl"
                         , "-package MonadCatchIO-transformers"
                         ]
-      in withConfiguredSession packageOpts $ \session -> do
+      in withSession (withOpts packageOpts) $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE PackageImports #-}"
                     , "module A where"
@@ -3410,10 +3375,9 @@ syntheticTests =
                         ]
           config      = defaultSessionConfig {
                             configGenerateModInfo = False
-                          , configPackageDBStack  = defaultDbStack
                           , configStaticOpts      = packageOpts
                           }
-      in withConfiguredSessionDetailed config $ \session -> do
+      in withSession config $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Control.Monad.CatchIO"
@@ -3427,7 +3391,7 @@ syntheticTests =
                         , "-package MonadCatchIO-mtl"
                         , "-package MonadCatchIO-transformers"
                         ]
-      in ifIdeBackendHaddockTestsEnabled packageOpts $ \session -> do
+      in ifIdeBackendHaddockTestsEnabled (withOpts packageOpts) $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE PackageImports #-}"
                     , "module A where"
@@ -3481,7 +3445,7 @@ syntheticTests =
                         , "-package MonadCatchIO-mtl"
                         , "-package MonadCatchIO-transformers"
                         ]
-      in ifIdeBackendHaddockTestsEnabled packageOpts $ \session -> do
+      in ifIdeBackendHaddockTestsEnabled (withOpts packageOpts) $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE PackageImports #-}"
                     , "module A where"
@@ -3571,20 +3535,21 @@ diff (x:xs) (y:ys)
   | x >  y    = ("Unexpected " ++ show y) : diff (x:xs) ys
   | otherwise = diff xs ys
 
-defOpts :: [String]
-defOpts = []
-
 -- Set of projects and options to use for them.
 projects :: [(String, FilePath, [String])]
 projects =
-  [ ("A depends on B, throws exception", "test/ABnoError", defOpts)
+  [ ( "A depends on B, throws exception"
+    , "test/ABnoError"
+    , []
+    )
   , ( "Cabal code"
     , "test/Cabal"
     , []
     )
   , ("A single file with a code to run in parallel"
     , "test/MainModule"
-    , [])
+    , []
+    )
   ]
 
 -- Driver
@@ -3598,12 +3563,11 @@ tests =
         let caseName = projectName ++ " (" ++ show k ++ ")"
             config   = defaultSessionConfig {
                            configGenerateModInfo = genModInfo
-                         , configPackageDBStack  = defaultDbStack
                          , configStaticOpts      = opts
                          }
         testCase caseName $ do
           debug dVerbosity $ featureName ++ " / " ++ caseName ++ ":"
-          withConfiguredSessionDetailed config $ \session -> do
+          withSession config $ \session -> do
             (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
             check session originalUpdate lm
   in [ testGroup "Full integration tests on multiple projects"
@@ -3781,7 +3745,7 @@ show3errors errs =
 
 restartRun :: [String] -> ExitCode -> Assertion
 restartRun code exitCode =
-      withConfiguredSession defOpts $ \session -> do
+      withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateModule "M.hs" . BSLC.pack . unlines $
                      code)
@@ -3794,7 +3758,7 @@ restartRun code exitCode =
         -- Start a new server
         threadDelay 100000
         serverBefore <- getGhcServer session
-        restartSession session
+        restartSession session Nothing
 
         -- Compile the code on the new server
         updateSessionD session upd 1
@@ -3817,7 +3781,7 @@ restartRun code exitCode =
 
 testBufferMode :: RunBufferMode -> Assertion
 testBufferMode bufferMode =
-  withConfiguredSession defOpts $ \session -> do
+  withSession defaultSessionConfig $ \session -> do
     let upd = (updateCodeGeneration True)
            <> (updateStdoutBufferMode bufferMode)
            <> (updateStderrBufferMode bufferMode)

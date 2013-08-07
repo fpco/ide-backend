@@ -108,6 +108,8 @@ module IdeSession (
     -- ** Starting and stopping
   , IdeSession -- Abstract
   , initSession
+  , SessionInitParams(..)
+  , defaultSessionInitParams
   , shutdownSession
   , restartSession
     -- ** Session updates

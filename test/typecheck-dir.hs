@@ -70,7 +70,7 @@ check opts what configDir = do
                         , configStaticOpts = opts
                      -- , configInProcess  = True
                         }
-  session     <- initSession sessionConfig
+  session     <- initSession defaultSessionInitParams sessionConfig
   isFile      <- doesFileExist      what
   isDirectory <- doesDirectoryExist what
 

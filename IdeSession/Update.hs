@@ -5,6 +5,8 @@
 module IdeSession.Update (
     -- * Starting and stopping
     initSession
+  , SessionInitParams(..)
+  , defaultSessionInitParams
   , shutdownSession
   , restartSession
     -- * Session updates
@@ -44,6 +46,7 @@ import Data.Accessor.Monad.MTL.State (get, modify, set)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString.Char8 as BSS
 import Data.Maybe (fromMaybe)
+import Data.Foldable (forM_)
 import qualified System.Directory as Dir
 import System.FilePath (takeDirectory, makeRelative, (</>))
 import System.Posix.Files (setFileTimes)
@@ -74,12 +77,27 @@ import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_, withMVar)
   Starting and stopping
 ------------------------------------------------------------------------------}
 
+-- | How should the session be initialized?
+--
+-- Client code should use 'defaultSessionInitParams' to protect itself against
+-- future extensions of this record.
+data SessionInitParams = SessionInitParams {
+    -- | Previously computed cabal macros,
+    -- or 'Nothing' to compute them on startup
+    sessionInitCabalMacros :: Maybe BSL.ByteString
+  }
+
+defaultSessionInitParams :: SessionInitParams
+defaultSessionInitParams = SessionInitParams {
+    sessionInitCabalMacros = Nothing
+  }
+
 -- | Create a fresh session, using some initial configuration.
 --
 -- Throws an exception if the configuration is invalid, or if GHC_PACKAGE_PATH
 -- is set.
-initSession :: SessionConfig -> IO IdeSession
-initSession ideConfig@SessionConfig{..} = do
+initSession :: SessionInitParams -> SessionConfig -> IO IdeSession
+initSession initParams ideConfig@SessionConfig{..} = do
   verifyConfig ideConfig
 
   -- TODO: Don't hardcode ghc version
@@ -120,11 +138,16 @@ initSession ideConfig@SessionConfig{..} = do
   let ideStaticInfo = IdeStaticInfo{..}
   let session = IdeSession{..}
 
-  -- TODO: for now, this location is safe, but when the user
-  -- is allowed to overwrite .h files, we need to create an extra dir.
-  writeMacros ideConfig ideSourcesDir configCabalMacros
+  execInitParams ideStaticInfo initParams
 
   return session
+
+-- | Set up the initial state of the session according to the given parameters
+execInitParams :: IdeStaticInfo -> SessionInitParams -> IO ()
+execInitParams staticInfo SessionInitParams{..} = do
+  -- TODO: for now, this location is safe, but when the user
+  -- is allowed to overwrite .h files, we need to create an extra dir.
+  writeMacros staticInfo sessionInitCabalMacros
 
 -- | Verify configuration, and throw an exception if configuration is invalid
 verifyConfig :: SessionConfig -> IO ()
@@ -158,8 +181,11 @@ checkPackageDbEnvVar = do
     catchIO = Ex.catch
 
 -- | Write per-package CPP macros.
-writeMacros :: SessionConfig -> FilePath -> Maybe BSL.ByteString -> IO ()
-writeMacros SessionConfig{configPackageDBStack} ideSourcesDir configCabalMacros = do
+writeMacros :: IdeStaticInfo -> Maybe BSL.ByteString -> IO ()
+writeMacros IdeStaticInfo{ ideConfig = SessionConfig {..}
+                         , ideSourcesDir
+                         }
+            configCabalMacros = do
   macros <- case configCabalMacros of
               Nothing     -> generateMacros configPackageDBStack
               Just macros -> return (BSL.unpack macros)
@@ -214,8 +240,15 @@ shutdownSession IdeSession{ideState, ideStaticInfo} = do
 --
 -- (We don't automatically recompile the code using the new session, because
 -- what would we do with the progress messages?)
-restartSession :: IdeSession -> IO ()
-restartSession IdeSession{ideStaticInfo, ideState} = do
+--
+-- If the environment changed, you should pass in new 'SessionInitParams';
+-- otherwise, pass 'Nothing'.
+restartSession :: IdeSession -> Maybe SessionInitParams -> IO ()
+restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
+    -- Reflect changes in the environment, if any
+    forM_ mInitParams (execInitParams ideStaticInfo)
+
+    -- Restart the session
     modifyMVar_ ideState $ \state ->
       case state of
         IdeSessionIdle idleState ->
@@ -344,7 +377,7 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
         Ex.throwIO (userError "Session already shut down.")
 
     when shouldRestart $ do
-      restartSession session
+      restartSession session Nothing
       updateSession session update callback
   where
     mkRelative :: ExplicitSharingCache -> ExplicitSharingCache
