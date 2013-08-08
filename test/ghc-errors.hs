@@ -3050,14 +3050,18 @@ syntheticTests =
         assertSourceErrors' session [expected]
         deletePackage "test/simple-lib17"
     )
-  , ( "Register a package, restart session, see the package"
-    , withSession (withOpts []) $ \session -> do
+  , ( "Register a package, restart session, see the package and check for cabal macros"
+    , withSession (withOpts ["-XCPP"]) $ \session -> do
         deletePackage "test/simple-lib17"
         restartSession session (Just defaultSessionInitParams)
         let upd = updateModule "Main.hs" . BSLC.pack . unlines $
                     [ "module Main where"
                     , "import SimpleLib (simpleLib)"
+                    , "#if MIN_VERSION_simple_lib17(0,1,0)"
                     , "main = print simpleLib"
+                    , "#else"
+                    , "terrible error"
+                    , "#endif"
                     ]
         installPackage "test/simple-lib17"
         restartSession session (Just defaultSessionInitParams) -- only now the package accessible
