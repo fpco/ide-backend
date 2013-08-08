@@ -40,6 +40,9 @@ Changelog
 
  *  Version 0.6.0.3
     
+    NOTE. This release includes a number of small API changes and behavioural
+    changes since 0.6.0.2.
+
      * Report server crashes as SourceErrors, and implicitly restart the session
        on the _next_ call to updateSession (#107). Note that if the server is
        in dead state (i.e., after the serve crash and before the next call to
@@ -47,6 +50,35 @@ Changelog
        you call runStmt when no code is compiled at all). It is the 
        responsibility of the client code to check for source errors
        (using getSourceErrors) before calling runStmt.
+
+     * It is now possible to reuse previously generated cabal macros, in order
+       to improve performance (#109). The type of initSession has changed to
+      
+           initSession :: SessionInitParams -> SessionConfig -> IO IdeSession
+
+       where
+           
+           data SessionInitParams = SessionInitParams {
+               sessionInitCabalMacros :: Maybe BSL.ByteString
+             }
+     
+       Similarly, restartSession now has type (#113)
+
+           restartSession :: IdeSession -> Maybe SessionInitParams -> IO ()
+
+       When passed Nothing it will leave the cabal macros unchanged, but when
+       passed a SessionInitParams it will regenerate them or use a previously
+       regenerated cabal macros file. 
+
+       The generated cabal macros can be accessed using
+
+           getCabalMacros :: Query BSL.ByteString
+
+     * Extended the Progress data type (#112) to contain the number of steps as
+       well as a progress message. See the comments in the ticket and in the
+       Haddock for Progress for some limitations, however (briefly, during
+       compilation, we get non-contiguous and possibly out of order progress
+       updates from ghc: [4/13], [8/13], done).
 
  *  Version 0.6.0.2
 
