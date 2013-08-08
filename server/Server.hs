@@ -20,7 +20,6 @@ import Data.Function (on)
 import qualified Data.Attoparsec.Text as Att
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
-import System.FilePath ((</>))
 import System.IO (Handle, hFlush)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
@@ -307,7 +306,8 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
           rtsOpts = ["-package ide-backend-rts"]
           -- Include cabal_macros.h.
           cppOpts = [ "-optP-include"
-                    , "-optP" ++ configSourcesDir </> cppHeaderName ]
+                    , "-optP" ++ cabalMacrosLocation configSourcesDir
+                    ]
       in userOpts <> optsToDynFlags (rtsOpts ++ cppOpts)
 
     -- Let GHC API print "compiling M ... done." for each module.
