@@ -13,6 +13,10 @@ import IdeSession.GHC.Client (InProcess)
 data SessionConfig = SessionConfig {
     -- | The directory to use for all session files.
     configDir        :: FilePath
+    -- | Extra directories in which to look for programs, including ghc
+    -- and other tools. Note that the @$PATH@ is still searched /first/, these
+    -- directories are extra.
+  , configExtraPathDirs :: [FilePath]
     -- | GHC static options. Can also contain default dynamic options,
     -- that are overridden via session update.
   , configStaticOpts :: [String]
@@ -50,6 +54,7 @@ data SessionConfig = SessionConfig {
 defaultSessionConfig :: SessionConfig
 defaultSessionConfig = SessionConfig {
     configDir             = "."
+  , configExtraPathDirs   = []
   , configStaticOpts      = []
   , configInProcess       = False
   , configGenerateModInfo = True

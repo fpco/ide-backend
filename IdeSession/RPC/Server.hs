@@ -30,7 +30,7 @@ import System.Process
   , proc
   , ProcessHandle
   , waitForProcess
-  , CreateProcess(cwd)
+  , CreateProcess(cwd, env)
   , getProcessExitCode
   )
 import System.Exit (ExitCode)
@@ -244,8 +244,9 @@ data RpcClientSideState =
 forkRpcServer :: FilePath        -- ^ Filename of the executable
               -> [String]        -- ^ Arguments
               -> Maybe FilePath  -- ^ Working directory
+              -> Maybe [(String, String)] -- ^ Environment
               -> IO RpcServer
-forkRpcServer path args workingDir = do
+forkRpcServer path args workingDir menv = do
   (requestR,  requestW)  <- createPipe
   (responseR, responseW) <- createPipe
   (errorsR,   errorsW)   <- createPipe
@@ -262,7 +263,8 @@ forkRpcServer path args workingDir = do
 
   fullPath <- pathToExecutable path
   (Nothing, Nothing, Nothing, ph) <- createProcess (proc fullPath args') {
-                                         cwd = workingDir
+                                         cwd = workingDir,
+                                         env = menv
                                        }
 
   -- Close the ends of the pipes that we're not using, and convert the rest

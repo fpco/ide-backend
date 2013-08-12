@@ -56,8 +56,9 @@ type InProcess = Bool
 data GhcServer = OutProcess RpcServer
                | InProcess RpcConversation ThreadId
 
-forkGhcServer :: Bool -> [String] -> Maybe String -> InProcess -> IO GhcServer
-forkGhcServer configGenerateModInfo opts workingDir False = do
+forkGhcServer :: Bool -> [String] -> Maybe String -> Maybe [(String, String)]
+              -> InProcess -> IO GhcServer
+forkGhcServer configGenerateModInfo opts workingDir menv False = do
   bindir <- getBinDir
   let prog = bindir </> "ide-backend-server"
 
@@ -72,8 +73,9 @@ forkGhcServer configGenerateModInfo opts workingDir False = do
                                    , show ideBackendApiVersion
                                    ])
                           workingDir
+                          menv
   return (OutProcess server)
-forkGhcServer _ _ _ True =
+forkGhcServer _ _ _ _ True =
   fail "In-process ghc server not currently supported"
 {- TODO: Reenable in-process
 forkGhcServer configGenerateModInfo opts workingDir True = do

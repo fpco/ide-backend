@@ -180,8 +180,8 @@ externalDeps pkgs =
         return $ Just $ Package.Dependency packageN (thisVersion version)
   in liftM catMaybes $ mapM depOfName pkgs
 
-mkConfFlags :: FilePath -> Bool -> PackageDBStack -> Setup.ConfigFlags
-mkConfFlags ideDistDir dynlink packageDbStack =
+mkConfFlags :: FilePath -> Bool -> PackageDBStack -> [FilePath] -> Setup.ConfigFlags
+mkConfFlags ideDistDir dynlink packageDbStack progPathExtra =
   (Setup.defaultConfigFlags defaultProgramConfiguration)
     { Setup.configDistPref = Setup.Flag ideDistDir
     , Setup.configUserInstall = Setup.Flag False
@@ -190,14 +190,16 @@ mkConfFlags ideDistDir dynlink packageDbStack =
     , Setup.configDynExe = Setup.Flag dynlink
       -- @Nothing@ wipes out default, initial DBs.
     , Setup.configPackageDBs = Nothing : map Just packageDbStack
+    , Setup.configProgramPathExtra = progPathExtra
     }
 
-configureAndBuild :: FilePath -> FilePath -> [String] -> Bool
+configureAndBuild :: FilePath -> FilePath -> [FilePath]
+                  -> [String] -> Bool
                   -> PackageDBStack -> [PackageId]
                   -> [ModuleName] -> (Progress -> IO ())
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
-configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
+configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
                   packageDbStack pkgs loadedMs callback ms = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
@@ -231,7 +233,7 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = mkConfFlags ideDistDir dynlink packageDbStack
+      confFlags = mkConfFlags ideDistDir dynlink packageDbStack progPathExtra
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
                      { Setup.buildDistPref = Setup.Flag ideDistDir
@@ -263,11 +265,12 @@ configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
   -- as they are emitted, similarly as log_action in GHC API,
   -- or filter stdout and display progress on each good line.
 
-configureAndHaddock :: FilePath -> FilePath -> [String] -> Bool
+configureAndHaddock :: FilePath -> FilePath -> [FilePath]
+                    -> [String] -> Bool
                     -> PackageDBStack -> [PackageId]
                     -> [ModuleName] -> (Progress -> IO ())
                     -> IO ExitCode
-configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
+configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
                     packageDbStack pkgs loadedMs callback = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
@@ -290,7 +293,7 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = mkConfFlags ideDistDir dynlink packageDbStack
+      confFlags = mkConfFlags ideDistDir dynlink packageDbStack progPathExtra
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       haddockFlags = Setup.defaultHaddockFlags
@@ -318,23 +321,27 @@ configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
   -- as they are emitted, similarly as log_action in GHC API,
   -- or filter stdout and display progress on each good line.
 
-buildExecutable :: FilePath -> FilePath -> [String] -> Bool -> PackageDBStack
+buildExecutable :: FilePath -> FilePath -> [FilePath]
+                -> [String] -> Bool -> PackageDBStack
                 -> Strict Maybe Computed -> (Progress -> IO ())
                 -> [(ModuleName, FilePath)]
                 -> IO ExitCode
-buildExecutable ideSourcesDir ideDistDir ghcOpts dynlink packageDbStack
+buildExecutable ideSourcesDir ideDistDir progPathExtra
+                ghcOpts dynlink packageDbStack
                 mcomputed callback ms = do
   (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndBuild ideSourcesDir ideDistDir ghcOpts dynlink
+  configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
                     packageDbStack pkgs loadedMs callback ms
 
-buildHaddock :: FilePath -> FilePath -> [String] -> Bool -> PackageDBStack
+buildHaddock :: FilePath -> FilePath -> [FilePath]
+             -> [String] -> Bool -> PackageDBStack
              -> Strict Maybe Computed -> (Progress -> IO ())
              -> IO ExitCode
-buildHaddock ideSourcesDir ideDistDir ghcOpts dynlink packageDbStack
+buildHaddock ideSourcesDir ideDistDir progPathExtra
+             ghcOpts dynlink packageDbStack
              mcomputed callback = do
   (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndHaddock ideSourcesDir ideDistDir ghcOpts dynlink
+  configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
                       packageDbStack pkgs loadedMs callback
 
 lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]

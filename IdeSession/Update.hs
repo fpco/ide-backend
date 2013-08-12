@@ -39,7 +39,7 @@ import Control.Monad (when, void, forM, unless)
 import Control.Monad.State (MonadState, StateT, execStateT, lift)
 import Control.Monad.IO.Class (liftIO)
 import qualified Control.Exception as Ex
-import Data.List (delete, elemIndices)
+import Data.List (delete, elemIndices, intercalate)
 import Data.Monoid (Monoid(..))
 import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
@@ -48,11 +48,12 @@ import qualified Data.ByteString.Char8 as BSS
 import Data.Maybe (fromMaybe)
 import Data.Foldable (forM_)
 import qualified System.Directory as Dir
-import System.FilePath (takeDirectory, makeRelative, (</>))
+import System.FilePath (takeDirectory, makeRelative, (</>),
+                        splitSearchPath, searchPathSeparator)
 import System.Posix.Files (setFileTimes)
 import System.IO.Temp (createTempDirectory)
 import qualified Data.Text as Text
-import System.Environment (getEnv)
+import System.Environment (getEnv, getEnvironment)
 import Data.Version (Version(..))
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
@@ -108,7 +109,9 @@ initSession initParams ideConfig@SessionConfig{..} = do
   ideSourcesDir  <- createTempDirectory configDirCanon "src."
   ideDataDir     <- createTempDirectory configDirCanon "data."
   ideDistDir     <- createTempDirectory configDirCanon "dist."
-  _ideGhcServer  <- forkGhcServer configGenerateModInfo ghcOpts (Just ideDataDir) configInProcess
+  env            <- envWithPathOverride configExtraPathDirs
+  _ideGhcServer  <- forkGhcServer configGenerateModInfo ghcOpts
+                                  (Just ideDataDir) env configInProcess
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
   -- a workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
@@ -179,6 +182,16 @@ checkPackageDbEnvVar = do
 
     catchIO :: IO a -> (IOError -> IO a) -> IO a
     catchIO = Ex.catch
+
+envWithPathOverride :: [FilePath] -> IO (Maybe [(String, String)])
+envWithPathOverride []            = return Nothing
+envWithPathOverride extraPathDirs = do
+    env <- getEnvironment
+    let path  = fromMaybe "" (lookup "PATH" env)
+        path' = intercalate [searchPathSeparator]
+                  (splitSearchPath path ++ extraPathDirs)
+        env'  = ("PATH", path') : filter (\(var, _) -> var /= "PATH") env
+    return (Just env')
 
 -- | Write per-package CPP macros.
 writeMacros :: IdeStaticInfo -> Maybe BSL.ByteString -> IO ()
@@ -264,9 +277,10 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
     restart :: IdeIdleState -> IO IdeSessionState
     restart idleState = do
       forceShutdownGhcServer $ _ideGhcServer idleState
+      env    <- envWithPathOverride configExtraPathDirs
       server <-
         forkGhcServer
-          configGenerateModInfo configStaticOpts workingDir configInProcess
+          configGenerateModInfo configStaticOpts workingDir env configInProcess
       return . IdeSessionIdle
              . (ideComputed    ^= Maybe.nothing)
              . (ideUpdatedEnv  ^= True)
@@ -594,7 +608,8 @@ buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     let SessionConfig{ configDynLink
                      , configPackageDBStack
                      , configGenerateModInfo
-                     , configStaticOpts } = ideConfig
+                     , configStaticOpts
+                     , configExtraPathDirs } = ideConfig
         -- Note that these do not contain the @packageDbArgs@ options.
         ghcOpts = fromMaybe configStaticOpts ghcNewOpts
     when (not configGenerateModInfo) $
@@ -604,8 +619,8 @@ buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
-                  buildExecutable ideSourcesDir ideDistDir ghcOpts
-                                  configDynLink configPackageDBStack
+                  buildExecutable ideSourcesDir ideDistDir configExtraPathDirs
+                                  ghcOpts configDynLink configPackageDBStack
                                   mcomputed callback ms)
     set ideBuildExeStatus (Just exitCode)
 
@@ -623,7 +638,8 @@ buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     let SessionConfig{ configDynLink
                      , configPackageDBStack
                      , configGenerateModInfo
-                     , configStaticOpts } = ideConfig
+                     , configStaticOpts
+                     , configExtraPathDirs } = ideConfig
         ghcOpts = fromMaybe configStaticOpts ghcNewOpts
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
@@ -632,8 +648,8 @@ buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
-                  buildHaddock ideSourcesDir ideDistDir ghcOpts
-                               configDynLink configPackageDBStack
+                  buildHaddock ideSourcesDir ideDistDir configExtraPathDirs
+                               ghcOpts configDynLink configPackageDBStack
                                mcomputed callback)
     set ideBuildDocStatus (Just exitCode)
 
