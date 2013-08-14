@@ -29,7 +29,7 @@ import TestTools
 forkTestServer :: String -> IO RpcServer
 forkTestServer test = do
   prog <- getExecutablePath
-  forkRpcServer prog ["--server", test] Nothing
+  forkRpcServer prog ["--server", test] Nothing Nothing
 
 -- | Do an RPC call and verify the result
 assertRpcEqual :: (Binary req, Binary resp, Show req, Show resp, Eq resp)
