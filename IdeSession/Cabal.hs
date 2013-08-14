@@ -44,7 +44,7 @@ import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo (..)
 import Distribution.Simple.PackageIndex ( lookupSourcePackageId )
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
-import Distribution.Simple.Program (defaultProgramConfiguration)
+import qualified Distribution.Simple.Program as Cabal.Program
 import Distribution.Simple.Program.Db (configureAllKnownPrograms, requireProgram)
 import Distribution.Simple.Program.Builtin (ghcPkgProgram)
 import qualified Distribution.Simple.Program.HcPkg as HcPkg
@@ -182,7 +182,7 @@ externalDeps pkgs =
 
 mkConfFlags :: FilePath -> Bool -> PackageDBStack -> [FilePath] -> Setup.ConfigFlags
 mkConfFlags ideDistDir dynlink packageDbStack progPathExtra =
-  (Setup.defaultConfigFlags defaultProgramConfiguration)
+  (Setup.defaultConfigFlags (defaultProgramConfiguration progPathExtra))
     { Setup.configDistPref = Setup.Flag ideDistDir
     , Setup.configUserInstall = Setup.Flag False
     , Setup.configVerbosity = Setup.Flag minBound
@@ -357,10 +357,11 @@ lFieldDescrs =
      (\(_, _, t3) -> fromMaybe "???" t3) (\a (t1, t2, _) -> (t1, t2, Just a))
  ]
 
-buildLicenseCatenation :: FilePath -> FilePath -> PackageDBStack -> [String]
+buildLicenseCatenation :: FilePath -> FilePath -> [FilePath] -> PackageDBStack -> [String]
                        -> Strict Maybe Computed -> (Progress -> IO ())
                        -> IO ExitCode
-buildLicenseCatenation cabalsDir ideDistDir packageDbStack configLicenseExc
+buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
+                       packageDbStack configLicenseExc
                        mcomputed callback = do
   (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
   let stdoutLog  = ideDistDir </> "licenses.stdout"  -- warnings
@@ -414,7 +415,7 @@ buildLicenseCatenation cabalsDir ideDistDir packageDbStack configLicenseExc
             ParseOk _warns (_, Just lf, _) -> do
               -- outputWarns warns  -- false positives
               programDB <- configureAllKnownPrograms  -- won't die
-                             minBound defaultProgramConfiguration
+                             minBound (defaultProgramConfiguration extraPathDirs)
               pkgIndex <- getInstalledPackages minBound packageDbStack programDB
               let pkgId = Package.PackageIdentifier
                             { pkgName = Package.PackageName nameString
@@ -456,6 +457,7 @@ buildLicenseCatenation cabalsDir ideDistDir packageDbStack configLicenseExc
                                   ++ " nor " ++ osxLocation
                 _ -> fail $ "Package " ++ nameString
                              ++ " not properly installed."
+                             ++ "\n" ++ show pkgInfos
             ParseOk _warns (l, Nothing, mauthor) -> do
               -- outputWarns warns  -- false positives
               when (isNothing l) $ do
@@ -568,11 +570,19 @@ packageDbArgs (Version ver _) dbstack = case dbstack of
       | otherwise
       = "package-db"
 
-generateMacros :: PackageDBStack -> IO String
-generateMacros packageDbStack = do
+generateMacros :: PackageDBStack -> [FilePath] -> IO String
+generateMacros packageDbStack extraPathDirs = do
   let verbosity = silent
-  (ghcPkg, _) <- requireProgram verbosity ghcPkgProgram defaultProgramConfiguration
+  (ghcPkg, _) <- requireProgram verbosity ghcPkgProgram
+                                (defaultProgramConfiguration extraPathDirs)
   pkgidss <- mapM (HcPkg.list verbosity ghcPkg) packageDbStack
   let newestPkgs = map last . groupBy ((==) `on` Package.packageName) . sort . concat $ pkgidss
   return $ generatePackageVersionMacros newestPkgs
+
+defaultProgramConfiguration :: [FilePath] -> Cabal.Program.ProgramConfiguration
+defaultProgramConfiguration extraPathDirs =
+  Cabal.Program.setProgramSearchPath
+    ( Cabal.Program.ProgramSearchPathDefault
+    : map Cabal.Program.ProgramSearchPathDir extraPathDirs )
+  Cabal.Program.defaultProgramConfiguration
 

@@ -200,7 +200,7 @@ writeMacros IdeStaticInfo{ ideConfig = SessionConfig {..}
                          }
             configCabalMacros = do
   macros <- case configCabalMacros of
-              Nothing     -> generateMacros configPackageDBStack
+              Nothing     -> generateMacros configPackageDBStack configExtraPathDirs
               Just macros -> return (BSL.unpack macros)
   writeFile (cabalMacrosLocation ideSourcesDir) macros
 
@@ -662,14 +662,16 @@ buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 buildLicenses :: FilePath -> IdeSessionUpdate
 buildLicenses cabalsDir = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     mcomputed <- get ideComputed
-    let SessionConfig{ configPackageDBStack
+    let SessionConfig{ configExtraPathDirs
+                     , configPackageDBStack
                      , configGenerateModInfo
                      , configLicenseExc } = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
     exitCode <-
-      lift $ buildLicenseCatenation cabalsDir ideDistDir configPackageDBStack
+      lift $ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs 
+                                    configPackageDBStack
                                     configLicenseExc mcomputed callback
     set ideBuildLicensesStatus (Just exitCode)
 
