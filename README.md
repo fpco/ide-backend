@@ -38,8 +38,8 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
- *  Version 0.6.0.3
-    
+ *  Version 0.7.0.0
+
     NOTE. This release includes a number of small API changes and behavioural
     changes since 0.6.0.2.
 
@@ -79,6 +79,21 @@ Changelog
        Haddock for Progress for some limitations, however (briefly, during
        compilation, we get non-contiguous and possibly out of order progress
        updates from ghc: [4/13], [8/13], done).
+
+     * It is now possible to specify additional program search directories in
+       *addition* to the normal `$PATH` when creating a session (#99).
+
+           data SessionConfig = SessionConfig {
+               configExtraPathDirs :: [FilePath]
+               ...
+
+       This allows different sessions within the same process (that share the
+       same `$PATH` env var) to have different program search paths. In
+       particular this can be used to select the instance of ghc by controlling
+       which ghc binary is found.
+
+       Note that the `configExtraPathDirs` are in addition to the `$PATH`, they
+       are searched after the `$PATH`.
 
  *  Version 0.6.0.2
 
