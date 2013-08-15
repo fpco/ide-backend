@@ -278,9 +278,11 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
     restart idleState = do
       forceShutdownGhcServer $ _ideGhcServer idleState
       env    <- envWithPathOverride configExtraPathDirs
+      let ghcOpts = configStaticOpts
+                 ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
       server <-
         forkGhcServer
-          configGenerateModInfo configStaticOpts workingDir env configInProcess
+          configGenerateModInfo ghcOpts workingDir env configInProcess
       return . IdeSessionIdle
              . (ideComputed    ^= Maybe.nothing)
              . (ideUpdatedEnv  ^= True)
