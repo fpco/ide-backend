@@ -3121,6 +3121,29 @@ syntheticTests =
           , (Nothing, expected2)
           ]]
     )
+  , ( "Make sure package DB is passed to ghc after restartSession"
+    , let packageOpts = ["-package parallel"]
+          config      = defaultSessionConfig {
+                            configGenerateModInfo = True
+                          , configPackageDBStack  = [GlobalPackageDB]
+                          , configStaticOpts      = packageOpts
+                          }
+      in withSession config $ \session -> do
+        restartSession session Nothing
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "import Control.Parallel"
+                    ])
+        -- We expect an error because 'ide-backend-rts' and/or 'parallel'
+        -- are not (usually?) installed in the global package DB.
+        let expected1 = "cannot satisfy -package ide-backend-rts"
+            expected2 = "<command line>: cannot satisfy -package parallel"
+        updateSessionD session upd 1
+        assertSourceErrors session [[
+            (Nothing, expected1)
+          , (Nothing, expected2)
+          ]]
+    )
   , ( "Consistency of IdMap/explicit sharing cache through multiple updates (#88)"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"

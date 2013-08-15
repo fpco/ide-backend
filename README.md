@@ -38,6 +38,11 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
+ *  Version 0.7.0.1
+
+     * Bugfix: make sure restartSession passes the configPackageDBStack 
+       to ghc (#114)
+
  *  Version 0.7.0.0
 
     NOTE. This release includes a number of small API changes and behavioural
