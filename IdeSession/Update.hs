@@ -52,6 +52,7 @@ import System.FilePath (takeDirectory, makeRelative, (</>),
                         splitSearchPath, searchPathSeparator)
 import System.Posix.Files (setFileTimes)
 import System.IO.Temp (createTempDirectory)
+import System.IO.Error (isDoesNotExistError)
 import qualified Data.Text as Text
 import System.Environment (getEnv, getEnvironment)
 import Data.Version (Version(..))
@@ -455,6 +456,9 @@ updateModuleFromFile p = IdeSessionUpdate $ \callback staticInfo -> do
 updateModuleDelete :: FilePath -> IdeSessionUpdate
 updateModuleDelete m = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
   liftIO $ Dir.removeFile (internalFile ideSourcesDir m)
+      `Ex.catch` \e -> if isDoesNotExistError e
+                       then return ()
+                       else Ex.throwIO e
   set (ideManagedFiles .> managedSource .> lookup' m) Nothing
   set ideUpdatedCode True
 
@@ -503,6 +507,9 @@ updateDataFileFromFile n p = IdeSessionUpdate
 updateDataFileDelete :: FilePath -> IdeSessionUpdate
 updateDataFileDelete n = IdeSessionUpdate $ \_ IdeStaticInfo{ideDataDir} -> do
   liftIO $ Dir.removeFile (ideDataDir </> n)
+      `Ex.catch` \e -> if isDoesNotExistError e
+                       then return ()
+                       else Ex.throwIO e
   modify (ideManagedFiles .> managedData) $ delete n
   set ideUpdatedCode True
 
