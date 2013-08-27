@@ -39,6 +39,7 @@ executable ide-backend-server
                       haddock              >= 2.11    && < 2.12,
                       attoparsec           >= 0.10    && < 0.11, 
                       binary               == 0.5.1.0,
+                      utf8-string,
                       template-haskell
 
   if impl(ghc >= 7.6.2)

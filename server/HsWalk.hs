@@ -27,10 +27,11 @@ import qualified Data.Text as Text
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BSSC
 import Data.Maybe (fromMaybe, fromJust)
-import Prelude hiding (id, mod, span)
+import Prelude hiding (id, mod, span, writeFile, appendFile)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+import System.IO.UTF8 (writeFile, appendFile)
 
 import IdeSession.Types.Private
 import IdeSession.Strict.Container
