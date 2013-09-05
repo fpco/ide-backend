@@ -1,0 +1,28 @@
+diff -ur orig/aeson-0.6.1.0/Data/Aeson/Generic.hs aeson-0.6.1.0/Data/Aeson/Generic.hs
+--- orig/aeson-0.6.1.0/Data/Aeson/Generic.hs	2013-03-06 13:24:41.000000000 +0000
++++ aeson-0.6.1.0/Data/Aeson/Generic.hs	2013-03-06 13:23:01.000000000 +0000
+@@ -334,21 +334,21 @@
+ -- Type extension for binary type constructors.
+ 
+ -- | Flexible type extension
+-ext2' :: (Data a, Typeable2 t)
++ext2' :: (Data a, Typeable t)
+      => c a
+      -> (forall d1 d2. (Data d1, Data d2) => c (t d1 d2))
+      -> c a
+ ext2' def ext = maybe def id (dataCast2 ext)
+ 
+ -- | Type extension of queries for type constructors
+-ext2Q' :: (Data d, Typeable2 t)
++ext2Q' :: (Data d, Typeable t)
+       => (d -> q)
+       -> (forall d1 d2. (Data d1, Data d2) => t d1 d2 -> q)
+       -> d -> q
+ ext2Q' def ext = unQ ((Q def) `ext2'` (Q ext))
+ 
+ -- | Type extension of readers for type constructors
+-ext2R' :: (Monad m, Data d, Typeable2 t)
++ext2R' :: (Monad m, Data d, Typeable t)
+       => m d
+       -> (forall d1 d2. (Data d1, Data d2) => m (t d1 d2))
+       -> m d

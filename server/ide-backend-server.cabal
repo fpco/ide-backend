@@ -30,7 +30,7 @@ executable ide-backend-server
                       pureMD5              >= 2.1     && < 2.2,
                       tagged               >= 0.4     && < 0.8,
                       fingertree           >= 0.0.1   && < 0.1,
-                      aeson                >= 0.6     && < 0.7,
+                      aeson                >= 0.6     && <= 0.6.1.0,
                       process              >= 1.1     && < 1.3,
                       transformers         >= 0.3     && < 0.4,
                       mtl                  >= 2.1     && < 2.2,
@@ -39,13 +39,9 @@ executable ide-backend-server
                       haddock              >= 2.11    && < 2.14,
                       attoparsec           >= 0.10    && < 0.11, 
                       binary               >= 0.5.1.0 && < 0.8,
+                      old-time             >= 1.1     && < 1.2,
                       utf8-string,
                       template-haskell
-
-  if impl(ghc >= 7.6.2)
-     build-depends:   time      ==1.4.*
-  else
-     build-depends:   old-time  ==1.*
 
   -- The standard macros don't give us 7.6.x granularity
   if impl(ghc == 7.6.1)
