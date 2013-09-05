@@ -1,0 +1,29 @@
+diff -Nur orig/MonadCatchIO-transformers-0.3.0.0/src/Control/Monad/CatchIO.hs MonadCatchIO-transformers-0.3.0.0/src/Control/Monad/CatchIO.hs
+--- orig/MonadCatchIO-transformers-0.3.0.0/src/Control/Monad/CatchIO.hs	2013-07-25 14:40:30.000000000 +0100
++++ MonadCatchIO-transformers-0.3.0.0/src/Control/Monad/CatchIO.hs	2013-07-25 14:41:40.000000000 +0100
+@@ -1,4 +1,5 @@
+ {-# LANGUAGE ExistentialQuantification, ScopedTypeVariables #-}
++{-# LANGUAGE MagicHash #-}
+ module Control.Monad.CatchIO
+   (
+     MonadCatchIO(..)
+@@ -37,6 +38,8 @@
+ 
+ import           Data.Monoid                                  (Monoid)
+ 
++import GHC.IO (IO(IO))
++import GHC.Base (maskAsyncExceptions#, unmaskAsyncExceptions#)
+ 
+ class MonadIO m => MonadCatchIO m where
+   -- | Generalized version of 'E.catch'
+@@ -51,8 +54,8 @@
+ 
+ instance MonadCatchIO IO where
+   catch   = E.catch
+-  block   = E.block
+-  unblock = E.unblock
++  block   = \(IO io) -> IO $ maskAsyncExceptions# io 
++  unblock = \(IO io) -> IO $ unmaskAsyncExceptions# io
+ 
+ -- | Warning: this instance is somewhat contentious.
+ -- 
