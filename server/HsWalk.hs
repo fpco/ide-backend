@@ -8,8 +8,9 @@
 -- any modules from the ghc package and the modules should not be reexported
 -- anywhere else, with the exception of @IdeSession.GHC.Server@.
 module HsWalk
-  ( -- extractIdsPlugin
-    extractSourceSpan
+  ( extractIdsQQ
+  , extractIdsFrontEnd
+  , extractSourceSpan
   , idInfoForName
   , constructExplicitSharingCache
   , moduleNameToId
@@ -63,6 +64,10 @@ import NameEnv (nameEnvUniqueElts)
 import DataCon (dataConRepType)
 import Pretty (showDocWith, Mode(OneLineMode))
 import PprTyThing (pprTypeForUser)
+import HscMain (Hsc, hscFileFrontEnd')
+import DriverPhases (HscSource(ExtCoreFile))
+import DynFlags (getDynFlags)
+import IOEnv (getEnv)
 
 import Conv
 import Haddock
@@ -154,22 +159,23 @@ data PluginResult = PluginResult {
   , pluginPkgDeps :: !(Strict [] PackageId)
   }
 
-{-
-extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult) -> HscPlugin
-extractIdsPlugin symbolRef = HscPlugin {..}
+extractIdsQQ :: HsQuasiQuote Name -> RnM (HsQuasiQuote Name)
+extractIdsQQ = \qq -> do
+    env <- getEnv
+    runHscQQ env qq
   where
     runHscQQ :: forall m. MonadIO m => Env TcGblEnv TcLclEnv
                                     -> HsQuasiQuote Name
                                     -> m (HsQuasiQuote Name)
     runHscQQ env qq@(HsQuasiQuote quoter _span _str) = liftIO $ do
-#if DEBUG
-      appendFile "/tmp/ghc.qq" $ showSDoc (ppr qq)
-#endif
-
       let dflags  =               hsc_dflags  (env_top env)
           rdrEnv  =               tcg_rdr_env (env_gbl env)
           current =               tcg_mod     (env_gbl env)
           pkgDeps = imp_dep_pkgs (tcg_imports (env_gbl env))
+
+#if DEBUG
+      appendFile "/tmp/ghc.qq" $ showSDoc dflags (ppr qq)
+#endif
 
       idInfo           <- readIORef qqRef
       ProperSpan span' <- extractSourceSpan $ tcl_loc (env_lcl env)
@@ -187,6 +193,16 @@ extractIdsPlugin symbolRef = HscPlugin {..}
       writeIORef qqRef idInfo'
       return qq
 
+extractIdsFrontEnd :: StrictIORef (Strict (Map ModuleName) PluginResult) -> ModSummary -> Hsc TcGblEnv
+extractIdsFrontEnd symbolRef mod_summary
+  | ExtCoreFile <- ms_hsc_src mod_summary =
+      panic "GHC does not currently support reading External Core files"
+  | otherwise = do
+      dflags <- getDynFlags
+      -- Make sure we keep the renamed tree
+      tcg_env <- hscFileFrontEnd' True mod_summary
+      runHscPlugin dflags tcg_env
+  where
     runHscPlugin :: forall m. MonadIO m => DynFlags -> TcGblEnv -> m TcGblEnv
     runHscPlugin dynFlags env = do
       let processedModule = tcg_mod env
@@ -234,6 +250,11 @@ extractIdsPlugin symbolRef = HscPlugin {..}
 #endif
       liftIO $ modifyIORef symbolRef (Map.insert processedName pluginResult)
       return env
+
+{-
+extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult) -> HscPlugin
+extractIdsPlugin symbolRef = HscPlugin {..}
+
 -}
 
 extractTypesFromTypeEnv :: forall m. MonadIO m => TypeEnv -> ExtractIdsT m ()

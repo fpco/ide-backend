@@ -45,6 +45,12 @@ import HsWalk
 import Haddock (pkgDepsFromModSummary, updatePkgDepsFor)
 import Debug
 
+-- For hooks
+import DynFlags (DynFlags(hooks))
+import Hooks (insertHook)
+import TcSplice (RunQuasiQuoteHook(..))
+import HscMain (HscFrontendHook(..))
+
 --------------------------------------------------------------------------------
 -- Server-side operations                                                     --
 --------------------------------------------------------------------------------
@@ -95,12 +101,12 @@ ghcServerEngine configGenerateModInfo
     -- of @updateGhcOptions@, because they nullify and replace cabal commands.
     initialDynFlags <- getSessionDynFlags
     (flags, _, _) <- parseDynamicFlags initialDynFlags dOpts
-    -- TODO: reenable
-    let dynFlags = flags
-    -- let dynFlags | configGenerateModInfo = flags {
-    --       sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins flags
-    --     }
-    --              | otherwise = flags
+    let dynFlags | configGenerateModInfo = flags {
+          hooks = insertHook RunQuasiQuoteHook extractIdsQQ
+                $ insertHook HscFrontendHook   (extractIdsFrontEnd pluginRef)
+                $ hooks flags
+        }
+                 | otherwise = flags
     void $ setSessionDynFlags dynFlags
 
     -- Start handling RPC calls

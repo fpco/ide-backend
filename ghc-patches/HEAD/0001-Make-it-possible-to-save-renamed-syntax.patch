@@ -1,0 +1,41 @@
+From 78471244173e626f020635f7e8e12e7e92101285 Mon Sep 17 00:00:00 2001
+From: Edsko de Vries <edsko@well-typed.com>
+Date: Thu, 5 Sep 2013 16:11:35 +0100
+Subject: [PATCH] Make it possible to save renamed syntax
+
+---
+ compiler/main/HscMain.hs | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/compiler/main/HscMain.hs b/compiler/main/HscMain.hs
+index d81fa72..91434db 100644
+--- a/compiler/main/HscMain.hs
++++ b/compiler/main/HscMain.hs
+@@ -76,7 +76,7 @@ module HscMain
+     , Hsc(..), runHsc, hscSimplify', hscDesugar'
+     , hscSimpleIface', hscNormalIface'
+     , oneShotMsg
+-    , hscFileFrontEnd, genericHscFrontend, dumpIfaceStats
++    , hscFileFrontEnd, hscFileFrontEnd', genericHscFrontend, dumpIfaceStats
+     , HscFrontendHook(..)
+     , HscCompileOneShotHook(..)
+     ) where
+@@ -760,10 +760,13 @@ batchMsg hsc_env mod_index recomp mod_summary =
+ --------------------------------------------------------------
+ 
+ hscFileFrontEnd :: ModSummary -> Hsc TcGblEnv
+-hscFileFrontEnd mod_summary = do
++hscFileFrontEnd = hscFileFrontEnd' False
++
++hscFileFrontEnd' :: Bool -> ModSummary -> Hsc TcGblEnv
++hscFileFrontEnd' saveRenamedSyntax mod_summary = do
+     hpm <- hscParse' mod_summary
+     hsc_env <- getHscEnv
+-    tcg_env <- tcRnModule' hsc_env mod_summary False hpm
++    tcg_env <- tcRnModule' hsc_env mod_summary saveRenamedSyntax hpm
+     return tcg_env
+ 
+ --------------------------------------------------------------
+-- 
+1.7.12.4 (Apple Git-37)
+
