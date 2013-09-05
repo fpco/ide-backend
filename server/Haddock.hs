@@ -98,14 +98,14 @@ haddockInterfaceFilePath dflags pkg = do
   case GHC.lookupPackage pkgIdMap pkg of
     Nothing ->
       Left $ "Package configuration for "
-          ++ showSDoc (ppr pkg)
+          ++ showSDoc dflags (ppr pkg)
           ++ " not found"
     Just cfg | null (GHC.haddockInterfaces cfg) -> do
       Left $ "No haddock interfaces found for package "
-          ++ showSDoc (ppr pkg)
+          ++ showSDoc dflags (ppr pkg)
     Just cfg | length (GHC.haddockInterfaces cfg) > 1 -> do
       Left $ "Too many haddock interfaces found for package "
-          ++ showSDoc (ppr pkg)
+          ++ showSDoc dflags (ppr pkg)
     Just cfg ->
       Right . head . GHC.haddockInterfaces $ cfg
 
@@ -138,9 +138,6 @@ haddockInterfaceFor dflags cache pkg = do
 ------------------------------------------------------------------------------}
 
 type LinkEnv = Strict (Map (GHC.Module, GHC.OccName)) GHC.Module
-
-_showLinkEnv :: LinkEnv -> String
-_showLinkEnv = unlines . map (showSDoc . ppr) . StrictMap.toList
 
 mkLinkEnv :: Map GHC.Name GHC.Module -> LinkEnv
 mkLinkEnv m = foldr (.) (\x -> x) (map aux (LazyMap.toList m)) StrictMap.empty

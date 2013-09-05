@@ -26,7 +26,7 @@ module Run
   , DynamicOpts
   , submitStaticOpts
   , optsToDynFlags
-  , DynFlags(sourcePlugins)
+  --, DynFlags(sourcePlugins)
   , defaultDynFlags
   , getSessionDynFlags
   , setSessionDynFlags
@@ -70,7 +70,6 @@ import ErrUtils   ( Message )
 import GHC hiding (flags, ModuleName, RunResult(..))
 import GhcMonad (modifySession)
 import HscTypes (HscEnv(hsc_mod_graph))
-import System.Time
 import RnNames (rnImports)
 import TcRnMonad (initTc)
 import TcRnTypes (RnM)
@@ -241,7 +240,11 @@ compileInGhc configSourcesDir dynOpts
 importList :: ModSummary -> Ghc (Strict [] Import)
 importList summary = do
     dflags  <- getSessionDynFlags
-    let goImp :: Located (ImportDecl RdrName) -> Import
+
+    let unLIE :: LIE RdrName -> Text
+        unLIE (L _ name) = Text.pack $ GHC.showSDoc dflags (GHC.ppr name)
+
+        goImp :: Located (ImportDecl RdrName) -> Import
         goImp (L _ decl) = Import {
             importModule    = moduleNameToId dflags (ideclPkgQual decl) (unLoc (ideclName decl))
           , importPackage   = force $ ((Text.pack . unpackFS) <$> ideclPkgQual decl)
@@ -251,17 +254,13 @@ importList summary = do
           , importEntities  = mkImportEntities (ideclHiding decl)
           }
 
+        mkImportEntities :: Maybe (Bool, [LIE RdrName]) -> ImportEntities
+        mkImportEntities Nothing               = ImportAll
+        mkImportEntities (Just (True, names))  = ImportHiding (force $ map unLIE names)
+        mkImportEntities (Just (False, names)) = ImportOnly   (force $ map unLIE names)
+
     return . force $ map goImp (ms_srcimps summary)
                   ++ map goImp (ms_textual_imps summary)
-  where
-    mkImportEntities :: Maybe (Bool, [LIE RdrName]) -> ImportEntities
-    mkImportEntities Nothing               = ImportAll
-    mkImportEntities (Just (True, names))  = ImportHiding (force $ map unLIE names)
-    mkImportEntities (Just (False, names)) = ImportOnly   (force $ map unLIE names)
-
-    -- TODO: This is lossy. We might want a more accurate data type.
-    unLIE :: LIE RdrName -> Text
-    unLIE (L _ name) = Text.pack $ GHC.showSDoc (GHC.ppr name)
 
 autocompletion :: ModSummary -> Ghc (Strict [] IdInfo)
 autocompletion summary = do
@@ -333,7 +332,9 @@ runInGhc (m, fun) outBMode errBMode tidMVar = do
 --    _debugPpContext flags "context after setContext"
 --    liftIO $ writeFile "/Users/fpco/fpco/ide-backend/RunStmt.hs" expr
     handleErrors $ do
-      runRes <- runStmt expr RunToCompletion tidMVar
+      -- TODO: disable tidMVar for now. This means we will not be able to
+      -- interrupt snippets
+      runRes <- runStmt expr RunToCompletion -- tidMVar
       case runRes of
         GHC.RunOk [name] ->
           -- TODO: ignore @name@; this was only useful for debug

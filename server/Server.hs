@@ -23,7 +23,7 @@ import Data.Accessor.Monad.MTL.State (set)
 import System.IO (Handle, hFlush)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
-import System.Time (ClockTime)
+import Data.Time (UTCTime)
 import System.Environment (withArgs)
 
 import IdeSession.GHC.API
@@ -95,10 +95,12 @@ ghcServerEngine configGenerateModInfo
     -- of @updateGhcOptions@, because they nullify and replace cabal commands.
     initialDynFlags <- getSessionDynFlags
     (flags, _, _) <- parseDynamicFlags initialDynFlags dOpts
-    let dynFlags | configGenerateModInfo = flags {
-          sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins flags
-        }
-                 | otherwise = flags
+    -- TODO: reenable
+    let dynFlags = flags
+    -- let dynFlags | configGenerateModInfo = flags {
+    --       sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins flags
+    --     }
+    --              | otherwise = flags
     void $ setSessionDynFlags dynFlags
 
     -- Start handling RPC calls
@@ -134,7 +136,7 @@ data ModSummary = ModSummary {
     modImports   :: !(Strict [] Import)
     -- | We cache the file stamp to see if the file has changed at all, and
     -- hence whether we need to recompute the import list
-  , modTimestamp :: !ClockTime
+  , modTimestamp :: !UTCTime
     -- | We cache whether this module was reported as "loaded" before so that
     -- we can see which modules got unloaded
   , modIsLoaded :: !Bool

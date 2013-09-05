@@ -39,7 +39,7 @@ executable ide-backend-server
                       haddock              >= 2.11    && < 2.14,
                       attoparsec           >= 0.10    && < 0.11, 
                       binary-ide-backend   >= 0.7.1.0 && < 0.8,
-                      old-time             >= 1.1     && < 1.2,
+                      time                 >= 1.4     && < 1.5,
                       utf8-string,
                       template-haskell
 

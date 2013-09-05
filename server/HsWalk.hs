@@ -8,8 +8,8 @@
 -- any modules from the ghc package and the modules should not be reexported
 -- anywhere else, with the exception of @IdeSession.GHC.Server@.
 module HsWalk
-  ( extractIdsPlugin
-  , extractSourceSpan
+  ( -- extractIdsPlugin
+    extractSourceSpan
   , idInfoForName
   , constructExplicitSharingCache
   , moduleNameToId
@@ -46,7 +46,7 @@ import DataCon (dataConName)
 import FastString (FastString, unpackFS)
 import GHC hiding (PackageId, idType, moduleName, ModuleName)
 import qualified GHC
-import HscPlugin
+-- import HscPlugin
 import qualified Module
 import MonadUtils (MonadIO (..))
 import qualified Name
@@ -54,7 +54,7 @@ import OccName
 import Outputable
 import qualified RdrName
 import TcRnTypes
-import TcType (tidyOpenType)
+import TypeRep (tidyOpenType)
 import Var hiding (idInfo)
 import VarEnv (TidyEnv, emptyTidyEnv)
 import Unique (Unique, Uniquable, getUnique, getKey)
@@ -154,6 +154,7 @@ data PluginResult = PluginResult {
   , pluginPkgDeps :: !(Strict [] PackageId)
   }
 
+{-
 extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult) -> HscPlugin
 extractIdsPlugin symbolRef = HscPlugin {..}
   where
@@ -233,13 +234,15 @@ extractIdsPlugin symbolRef = HscPlugin {..}
 #endif
       liftIO $ modifyIORef symbolRef (Map.insert processedName pluginResult)
       return env
+-}
 
 extractTypesFromTypeEnv :: forall m. MonadIO m => TypeEnv -> ExtractIdsT m ()
 extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
   where
     go :: (Unique, TyThing) -> ExtractIdsT m ()
-    go (uniq, ADataCon dataCon) =
-      recordType ("ADataCon: " ++ showSDoc (ppr dataCon)) uniq (dataConRepType dataCon)
+    go (uniq, ADataCon dataCon) = do
+      pprDataCon <- pretty False dataCon
+      recordType ("ADataCon: " ++ pprDataCon) uniq (dataConRepType dataCon)
     go _ =
       return ()
 
@@ -415,17 +418,20 @@ class (Uniquable id, OutputableBndr id) => Record id where
   record :: MonadIO m => SrcSpan -> IsBinder -> id -> ExtractIdsT m ()
 
 instance Record Id where
-  record _span _idIsBinder id = recordType (showSDocDebug (ppr id)) (getUnique id) (Var.varType id)
+  record _span _idIsBinder id = do
+    pprId <- pretty True id
+    recordType pprId (getUnique id) (Var.varType id)
 
 recordType :: MonadIO m => String -> Unique -> Type -> ExtractIdsT m ()
 recordType _header uniq typ = do
   typ' <- tidyType typ
   -- We don't want line breaks in the types
   pprStyle <- asks eIdsPprStyle
+  dynFlags <- asks eIdsDynFlags
   let noForalls = False
       typStr    = showDocWith OneLineMode
                    (runSDoc (pprTypeForUser noForalls typ')
-                   (initSDocContext pprStyle))
+                   (initSDocContext dynFlags pprStyle))
 #if DEBUG
   liftIO $ appendFile "/tmp/ghc.log" $ _header ++ ": recording " ++ typStr ++ " for unique " ++ show (getKey uniq) ++ "\n"
 #endif
@@ -511,7 +517,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       isLocal _             = False
 
       missingModule :: a
-      missingModule = error $ "No module for " ++ showSDocDebug (ppr name)
+      missingModule = error $ "No module for " ++ showSDocDebug dflags (ppr name)
 
 extractSourceSpan :: MonadIO m => SrcSpan -> m EitherSpan
 extractSourceSpan (RealSrcSpan srcspan) = liftIO $ do
@@ -522,22 +528,6 @@ extractSourceSpan (RealSrcSpan srcspan) = liftIO $ do
     (srcSpanEndLine srcspan)   (srcSpanEndCol   srcspan)
 extractSourceSpan (UnhelpfulSpan s) =
   return . TextSpan $ fsToText s
-
-_showName :: Name -> String
-_showName n = "Name { n_sort = " ++ showNameSort ++ "\n"
-          ++ "     , n_occ  = " ++ s (Name.nameOccName n) ++ "\n"
-          ++ "     , n_uniq = " ++ s (Name.nameUnique n) ++ "\n"
-          ++ "     , n_loc  = " ++ s (Name.nameSrcSpan n) ++ "\n"
-          ++ "     }"
-  where
-    s :: forall a. Outputable a => a -> String
-    s = showSDocDebug . ppr
-
-    showNameSort
-      | Name.isWiredInName  n = "WiredIn " ++ s (Name.nameModule n) ++ " <TyThing> <Syntax>"
-      | Name.isExternalName n = "External " ++ s (Name.nameModule n)
-      | Name.isSystemName   n = "System"
-      | otherwise             = "Internal"
 
 instance Record Name where
   record span idIsBinder name = do
@@ -712,20 +702,24 @@ instance Record id => ExtractIds (LHsTyVarBndrs id) where
 #endif
 
 instance Record id => ExtractIds (LHsTyVarBndr id) where
+#if __GLASGOW_HASKELL__ >= 707
+  -- TODO
+  extractIds _ = return ()
+#else
 #if __GLASGOW_HASKELL__ >= 706
   extractIds (L span (UserTyVar name)) = ast (Just span) "UserTyVar" $ do
-#else
-  extractIds (L span (UserTyVar name _postTcKind)) = ast (Just span) "UserTyVar" $ do
-#endif
     record span True name
-
-#if __GLASGOW_HASKELL__ >= 706
   extractIds (L span (KindedTyVar name kind)) = ast (Just span) "KindedTyVar" $ do
-#else
-  extractIds (L span (KindedTyVar name kind _postTcKind)) = ast (Just span) "KindedTyVar" $ do
-#endif
     record span True name
     extractIds kind
+#else
+  extractIds (L span (UserTyVar name _postTcKind)) = ast (Just span) "UserTyVar" $ do
+    record span True name
+  extractIds (L span (KindedTyVar name kind _postTcKind)) = ast (Just span) "KindedTyVar" $ do
+    record span True name
+    extractIds kind
+#endif
+#endif
 
 instance Record id => ExtractIds (LHsContext id) where
   extractIds (L span typs) = ast (Just span) "LHsContext" $
@@ -945,8 +939,14 @@ instance Record id => ExtractIds (ArithSeqInfo id) where
     extractIds [frm, thn, to]
 
 instance Record id => ExtractIds (LHsCmdTop id) where
+#if __GLASGOW_HASKELL__ >= 707
+  extractIds _ =
+    -- TODO
+    return ()
+#else
   extractIds (L span (HsCmdTop cmd _postTcTypeInp _postTcTypeRet _syntaxTable)) = ast (Just span) "HsCmdTop" $
     extractIds cmd
+#endif
 
 instance Record id => ExtractIds (HsBracket id) where
   extractIds (ExpBr expr) = ast Nothing "ExpBr" $
@@ -1051,7 +1051,11 @@ instance Record id => ExtractIds (LPat id) where
     extractIds pat
   extractIds (L span (SigPatIn pat typ)) = ast (Just span) "SigPatIn" $ do
     extractIds pat
+#if __GLASGOW_HASKELL__ >= 707
+    -- TODO
+#else
     extractIds typ
+#endif
   extractIds (L span (SigPatOut pat _typ)) = ast (Just span) "SigPatOut" $ do
     -- _typ is not located
     extractIds pat
@@ -1071,6 +1075,20 @@ instance (ExtractIds arg, ExtractIds rec) => ExtractIds (HsConDetails arg rec) w
     extractIds [a, b]
 
 instance Record id => ExtractIds (LTyClDecl id) where
+#if __GLASGOW_HASKELL__ >= 707
+  extractIds (L span _decl@(SynDecl {}))     = unsupported (Just span) "TySynonym"
+  extractIds (L span _decl@(FamDecl {}))     = unsupported (Just span) "TyFamily"
+  extractIds (L span _decl@(DataDecl {}))    = unsupported (Just span) "DataDecl"
+#else
+  extractIds (L span decl@(TySynonym {})) = ast (Just span) "TySynonym" $ do
+    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    extractIds (tcdTyVars decl)
+    extractIds (tcdTyPats decl)
+    extractIds (tcdSynRhs decl)
+  extractIds (L span decl@(TyFamily {})) = ast (Just span) "TyFamily" $  do
+    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    extractIds (tcdTyVars decl)
+    extractIds (tcdKind decl)
   extractIds (L span decl@(TyData {})) = ast (Just span) "TyData" $ do
     extractIds (tcdCtxt decl)
     record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
@@ -1089,21 +1107,6 @@ instance Record id => ExtractIds (LTyClDecl id) where
     extractIds (tcdATs decl)
     extractIds (tcdATDefs decl)
     extractIds (tcdDocs decl)
-
-#if __GLASGOW_HASKELL__ >= 707
-  extractIds (L span _decl@(SynDecl {}))     = unsupported (Just span) "TySynonym"
-  extractIds (L span _decl@(FamDecl {}))     = unsupported (Just span) "TyFamily"
-  extractIds (L span _decl@(DataDecl {}))    = unsupported (Just span) "DataDecl"
-#else
-  extractIds (L span decl@(TySynonym {})) = ast (Just span) "TySynonym" $ do
-    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
-    extractIds (tcdTyVars decl)
-    extractIds (tcdTyPats decl)
-    extractIds (tcdSynRhs decl)
-  extractIds (L span decl@(TyFamily {})) = ast (Just span) "TyFamily" $  do
-    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
-    extractIds (tcdTyVars decl)
-    extractIds (tcdKind decl)
 #endif
 
   extractIds (L span _decl@(ForeignType {})) = unsupported (Just span) "ForeignType"
@@ -1114,13 +1117,22 @@ instance Record id => ExtractIds (LConDecl id) where
     extractIds (con_qvars decl)
     extractIds (con_cxt decl)
     extractIds (con_details decl)
+#if __GLASGOW_HASKELL__ >= 707
+    -- TODO
+#else
     extractIds (con_res decl)
+#endif
 
 instance Record id => ExtractIds (ResType id) where
   extractIds ResTyH98 = ast Nothing "ResTyH98" $ do
     return () -- Nothing to do
   extractIds (ResTyGADT typ) = ast Nothing "ResTyGADT" $ do
+#if __GLASGOW_HASKELL__ >= 707
+    -- TODO
+    return ()
+#else
     extractIds typ
+#endif
 
 instance Record id => ExtractIds (ConDeclField id) where
   extractIds (ConDeclField name typ _doc) = do
@@ -1128,11 +1140,17 @@ instance Record id => ExtractIds (ConDeclField id) where
     extractIds typ
 
 instance Record id => ExtractIds (LInstDecl id) where
+#if __GLASGOW_HASKELL__ >= 707
+  extractIds _ =
+    -- TODO
+    return ()
+#else
   extractIds (L span (InstDecl typ binds sigs accTypes)) = ast (Just span) "LInstDecl" $ do
     extractIds typ
     extractIds binds
     extractIds sigs
     extractIds accTypes
+#endif
 
 instance Record id => ExtractIds (LDerivDecl id) where
   extractIds (L span (DerivDecl deriv_type)) = ast (Just span) "LDerivDecl" $ do
