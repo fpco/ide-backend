@@ -3523,6 +3523,37 @@ syntheticTests =
         -- but this is what we get instead (see #95):
         assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at <no location info> (home MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO) (imported from MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:48)"
     )
+  , ("Issue #119"
+    , withSession defaultSessionConfig $ \sess -> do
+        distDir <- getDistDir sess
+
+        let cb = \_ -> return ()
+            update = flip (updateSession sess) cb
+
+        update $ updateCodeGeneration True
+        update $ updateStdoutBufferMode (RunLineBuffering Nothing)
+        update $ updateStderrBufferMode (RunLineBuffering Nothing)
+
+        -- Compile code and execute
+
+        update $ updateModule "src/Main.hs" . BSLC.pack $
+            "main = putStrLn \"Version 1\""
+        assertNoErrors sess
+
+        update $ buildExe [(Text.pack "Main", "src/Main.hs")]
+        out1 <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
+        assertEqual "" "Version 1\n" out1
+
+        -- Update the code and execute again
+
+        update $ updateModule "src/Main.hs" . BSLC.pack $
+            "main = putStrLn \"Version 2\""
+        assertNoErrors sess
+
+        update $ buildExe [(Text.pack "Main", "src/Main.hs")]
+        out2 <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
+        assertEqual "" "Version 2\n" out2
+    )
   ]
 
 deletePackage :: FilePath -> IO ()
