@@ -48,6 +48,7 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newMVar)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString.Lazy.Internal as BSL
+import qualified Data.ByteString as BSS
 import Data.IORef (IORef, writeIORef, readIORef, newIORef)
 import Control.Concurrent.Async (async)
 import Data.Binary (Binary, encode, decode)
@@ -99,14 +100,15 @@ instance Binary IncBS where
                                     Binary.put b
                                     Binary.put (IncBS bs)
 
-  get = do
-    header <- Binary.getWord8
-    case header of
-      0 -> return $ IncBS BSL.Empty
-      1 -> do b        <- Binary.get
-              IncBS bs <- Binary.get
-              return (IncBS (BSL.Chunk b bs))
-      _ -> fail "IncBS.get: invalid header"
+  get = go []
+    where
+      go :: [BSS.ByteString] -> Binary.Get IncBS
+      go acc = do
+        header <- Binary.getWord8
+        case header of
+          0 -> return . IncBS . BSL.fromChunks . reverse $ acc
+          1 -> do b <- Binary.get ; go (b : acc)
+          _ -> fail "IncBS.get: invalid header"
 
 instance Show IncBS where
   show = show . unIncBS

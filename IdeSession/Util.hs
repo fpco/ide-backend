@@ -22,19 +22,26 @@ import Control.Monad (void, forM_)
 import Data.Typeable (typeOf)
 import qualified Control.Exception as Ex
 import Data.Accessor (Accessor, accessor)
-import qualified Data.ByteString as BSS
-import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString        as BSS
+import qualified Data.ByteString.Unsafe as BSS
+import qualified Data.ByteString.Lazy   as BSL
 import Data.Tagged (Tagged, untag)
 import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
-import Data.Binary (Binary(..), getWord8, putWord8)
+import Data.Binary (Binary(..))
+import qualified Data.Binary                  as Bin
+import qualified Data.Binary.Get              as Bin
+import qualified Data.Binary.Put              as Bin
+import qualified Data.Binary.Builder.Internal as Bin
+import Foreign.Ptr (castPtr)
 import Control.Applicative ((<$>))
 import Crypto.Types (BitLength)
 import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
 import System.FilePath (splitFileName, (<.>))
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
 import System.IO (Handle, hClose, openBinaryTempFile, hFlush, stdout, stderr)
+import System.IO.Unsafe (unsafeDupablePerformIO)
 import Data.Text (Text)
-import qualified Data.Text.Encoding as Text
+import qualified Data.Text.Foreign as Text
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import qualified System.Posix.Files as Files
@@ -127,8 +134,16 @@ makeBlocks n = go . BSL.toChunks
             (bs':bss') -> go (BSS.append bs bs' : bss')
 
 instance Binary Text where
-  put = put . Text.encodeUtf8
-  get = Text.decodeUtf8 <$> get
+  get   = do units <- Bin.get
+             bytes <- Bin.getByteString (units * 2)
+             return $! unsafeDupablePerformIO $
+               BSS.unsafeUseAsCString bytes $ \ptr ->
+                 Text.fromPtr (castPtr ptr) (fromIntegral units)
+
+  put t = do put (Text.lengthWord16 t)
+             Bin.putBuilder $
+               Bin.writeN (Text.lengthWord16 t * 2)
+                          (\p -> Text.unsafeCopyToPtr t (castPtr p))
 
 setupEnv :: [(String, Maybe String)] -> IO ()
 setupEnv env = forM_ env $ \(var, mVal) ->
@@ -143,16 +158,16 @@ data Diff a = Keep | Remove | Insert a
   deriving (Show, Functor)
 
 instance Binary a => Binary (Diff a) where
-  put Keep       = putWord8 0
-  put Remove     = putWord8 1
-  put (Insert a) = putWord8 2 >> put a
+  put Keep       = Bin.putWord8 0
+  put Remove     = Bin.putWord8 1
+  put (Insert a) = Bin.putWord8 2 >> Bin.put a
 
   get = do
-    header <- getWord8
+    header <- Bin.getWord8
     case header of
       0 -> return Keep
       1 -> return Remove
-      2 -> Insert <$> get
+      2 -> Insert <$> Bin.get
       _ -> fail "Diff.get: invalid header"
 
 applyMapDiff :: forall k v. Ord k
