@@ -29,7 +29,7 @@ import Control.Applicative ((<$>), (<*>))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Binary (Binary(..), getWord8, putWord8)
-import Data.Aeson.TH (deriveJSON)
+import Data.Aeson.TH (deriveJSON, defaultOptions)
 
 import IdeSession.Util () -- Binary instance for Text
 
@@ -365,19 +365,19 @@ instance Binary IdInfo where
   internally.
 ------------------------------------------------------------------------------}
 
-$(deriveJSON id ''IdNameSpace)
-$(deriveJSON id ''SourceErrorKind)
-$(deriveJSON id ''ImportEntities)
-$(deriveJSON id ''Import)
-$(deriveJSON id ''SourceError)
-$(deriveJSON id ''IdProp)
-$(deriveJSON id ''IdScope)
-$(deriveJSON id ''SourceSpan)
-$(deriveJSON id ''EitherSpan)
-$(deriveJSON id ''ModuleId)
-$(deriveJSON id ''PackageId)
-$(deriveJSON id ''IdInfo)
-$(deriveJSON id ''SpanInfo)
+$(deriveJSON defaultOptions ''IdNameSpace)
+$(deriveJSON defaultOptions ''SourceErrorKind)
+$(deriveJSON defaultOptions ''ImportEntities)
+$(deriveJSON defaultOptions ''Import)
+$(deriveJSON defaultOptions ''SourceError)
+$(deriveJSON defaultOptions ''IdProp)
+$(deriveJSON defaultOptions ''IdScope)
+$(deriveJSON defaultOptions ''SourceSpan)
+$(deriveJSON defaultOptions ''EitherSpan)
+$(deriveJSON defaultOptions ''ModuleId)
+$(deriveJSON defaultOptions ''PackageId)
+$(deriveJSON defaultOptions ''IdInfo)
+$(deriveJSON defaultOptions ''SpanInfo)
 
 {------------------------------------------------------------------------------
   Util

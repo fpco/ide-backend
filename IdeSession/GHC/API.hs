@@ -20,7 +20,7 @@ module IdeSession.GHC.API (
 import Data.Binary
 import Data.ByteString (ByteString)
 import Control.Applicative ((<$>), (<*>))
-import Data.Aeson.TH (deriveJSON)
+import Data.Aeson.TH (deriveJSON, defaultOptions)
 import System.FilePath ((</>))
 
 import IdeSession.Types.Private
@@ -240,8 +240,8 @@ instance Binary RunBufferMode where
   JSON instances (for the convenience of client code)
 ------------------------------------------------------------------------------}
 
-$(deriveJSON id ''RunResult)
-$(deriveJSON id ''RunBufferMode)
+$(deriveJSON defaultOptions ''RunResult)
+$(deriveJSON defaultOptions ''RunBufferMode)
 
 {------------------------------------------------------------------------------
   Configuration
