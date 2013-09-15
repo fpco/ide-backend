@@ -26,7 +26,7 @@ executable ide-backend-server
                       text                 >= 0.11    && < 0.12,
                       directory            >= 1.1     && < 1.3,
                       filepath             >= 1.3     && < 1.4,
-                      crypto-api           >= 0.11    && < 0.13,
+                      crypto-api           >= 0.12    && < 0.13,
                       pureMD5              >= 2.1     && < 2.2,
                       tagged               >= 0.4     && < 0.8,
                       fingertree           >= 0.0.1   && < 0.1,
