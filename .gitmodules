@@ -1,3 +1,6 @@
 [submodule "vendor/cabal"]
 	path = vendor/cabal
 	url = git@github.com:fpco/cabal
+[submodule "vendor/binary"]
+	path = vendor/binary
+	url = git@github.com:fpco/binary
