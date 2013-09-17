@@ -26,6 +26,7 @@ import System.Process (readProcess)
 import qualified System.Process as Process
 import System.Random (randomRIO)
 import Text.Regex (mkRegex, subRegex)
+import Debug.Trace (traceEventIO)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -3629,14 +3630,18 @@ tests =
                          }
         testCase caseName $ do
           debug dVerbosity $ featureName ++ " / " ++ caseName ++ ":"
+          traceEventIO ("TEST " ++ featureName ++ " / " ++ caseName)
           withSession config $ \session -> do
             (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
             check session originalUpdate lm
   in [ testGroup "Full integration tests on multiple projects"
        $ map (groupProject False) $ zip multipleTests [1 :: Int ..]
      , testGroup "Synthetic integration tests"
-       $ map (uncurry testCase) syntheticTests
+       $ map (uncurry testCase) (traceTests syntheticTests)
      ]
+
+traceTests :: [(String, Assertion)] -> [(String, Assertion)]
+traceTests = map $ \(label, test) -> (label, do traceEventIO ("TEST " ++ label) ; test)
 
 main :: IO ()
 main = defaultMain tests
