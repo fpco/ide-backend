@@ -43,7 +43,7 @@ import Data.Typeable (Typeable)
 import Control.Applicative ((<$>))
 import Control.Monad (void, forever, unless)
 import qualified Control.Exception as Ex
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (MVar, newMVar)
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -54,6 +54,7 @@ import Control.Concurrent.Async (async)
 import Data.Binary (Binary, encode, decode)
 import qualified Data.Binary as Binary
 import qualified Data.Binary.Get as Binary
+import System.IO.Unsafe (unsafeInterleaveIO)
 
 import IdeSession.BlockingOps (putMVar, takeMVar, readChan, waitAnyCatchCancel, waitCatch)
 
@@ -461,11 +462,33 @@ ignoreIOExceptions = Ex.handle ignore
 data Stream a where
   Stream :: Binary a => IORef BSL.ByteString -> Stream a
 
+data StreamState = Empty | Chunk BSS.ByteString | Error Ex.SomeException
+
 newStream :: Binary a => Handle -> IO (Stream a)
 newStream h = do
-  streamSource    <- BSL.hGetContents h
-  streamRemainder <- newIORef streamSource
-  return (Stream streamRemainder)
+  mvar <- newChan
+
+  let readHandle = do
+        mbs <- Ex.try $ BSS.hGetSome h BSL.defaultChunkSize
+        case mbs of
+          Left ex                -> writeChan mvar (Error ex)
+          Right bs | BSS.null bs -> writeChan mvar Empty
+                   | otherwise   -> do writeChan mvar (Chunk bs)
+                                       readHandle
+
+  let readLBS = unsafeInterleaveIO $ do
+        state <- $readChan mvar
+        case state of
+          Empty    -> return BSL.Empty
+          Error ex -> return (Ex.throw ex)
+          Chunk bs -> do lbs <- readLBS
+                         return (BSL.Chunk bs lbs)
+
+  _tid   <- forkIO readHandle
+  lbs    <- readLBS
+  stream <- newIORef lbs
+
+  return (Stream stream)
 
 nextInStream :: Stream a -> IO a
 nextInStream (Stream streamRemainder) = do
