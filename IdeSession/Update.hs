@@ -672,7 +672,7 @@ buildLicenses cabalsDir = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
     exitCode <-
-      lift $ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs 
+      lift $ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
                                     configPackageDBStack
                                     configLicenseExc mcomputed callback
     set ideBuildLicensesStatus (Just exitCode)
