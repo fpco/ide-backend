@@ -67,7 +67,7 @@ import PprTyThing (pprTypeForUser)
 import Conv
 import Haddock
 
-#define DEBUG 1
+#define DEBUG 0
 
 {------------------------------------------------------------------------------
   Caching
