@@ -7,7 +7,7 @@ import qualified Control.Exception as Ex
 import Control.Monad (forM_, forever)
 import Control.Applicative ((<$>), (<*>))
 import Data.Function (on)
-import Data.List (isPrefixOf, isInfixOf)
+import Data.List (isInfixOf)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
 import System.Posix.Signals (sigKILL)
@@ -250,7 +250,7 @@ testConversation server = do
   where
     typeError :: ExternalException -> Bool
     typeError ExternalException{externalStdErr} =
-      "too few bytes" `isPrefixOf` externalStdErr
+      "not enough bytes" `isInfixOf` externalStdErr
 
 testConversationServer :: RpcConversation -> IO ()
 testConversationServer RpcConversation{..} = forever $ do
@@ -406,7 +406,7 @@ testInvalidReqType server =
     assertRaises "" (isServerIOException parseEx) $
       assertRpcEqual server () "ping"
   where
-    parseEx = "too few bytes"
+    parseEx = "not enough bytes"
 
 {- DISABLED: We cannot detect this reliably anymore, since we don't
   encode type information anymore since the move to Binary
