@@ -22,16 +22,15 @@ import Control.Monad (void, forM_)
 import Data.Typeable (typeOf)
 import qualified Control.Exception as Ex
 import Data.Accessor (Accessor, accessor)
-import qualified Data.ByteString        as BSS
-import qualified Data.ByteString.Unsafe as BSS
-import qualified Data.ByteString.Lazy   as BSL
+import qualified Data.ByteString      as BSS
+import qualified Data.ByteString.Lazy as BSL
 import Data.Tagged (Tagged, untag)
 import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
 import Data.Binary (Binary(..))
 import qualified Data.Binary                  as Bin
-import qualified Data.Binary.Get              as Bin
-import qualified Data.Binary.Put              as Bin
-import qualified Data.Binary.Builder.Internal as Bin
+import qualified Data.Binary.Get.Internal     as Bin (readNWith)
+import qualified Data.Binary.Put              as Bin (putBuilder)
+import qualified Data.Binary.Builder.Internal as Bin (writeN)
 import Foreign.Ptr (castPtr)
 import Control.Applicative ((<$>))
 import Crypto.Types (BitLength)
@@ -39,7 +38,6 @@ import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
 import System.FilePath (splitFileName, (<.>))
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
 import System.IO (Handle, hClose, openBinaryTempFile, hFlush, stdout, stderr)
-import System.IO.Unsafe (unsafeDupablePerformIO)
 import Data.Text (Text)
 import qualified Data.Text.Foreign as Text
 import System.Posix (Fd)
@@ -135,10 +133,8 @@ makeBlocks n = go . BSL.toChunks
 
 instance Binary Text where
   get   = do units <- Bin.get
-             bytes <- Bin.getByteString (units * 2)
-             return $! unsafeDupablePerformIO $
-               BSS.unsafeUseAsCString bytes $ \ptr ->
-                 Text.fromPtr (castPtr ptr) (fromIntegral units)
+             Bin.readNWith (units * 2) $ \ptr ->
+               Text.fromPtr (castPtr ptr) (fromIntegral units)
 
   put t = do put (Text.lengthWord16 t)
              Bin.putBuilder $
