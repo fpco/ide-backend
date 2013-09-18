@@ -38,6 +38,23 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
+ *  Version 0.7.0.2
+
+     * Use System.IO.UTF8 to avoid character encoding issues (fpco/fpco#2232)
+
+     * (Removing non-existent files should not throw an exception)
+
+     * Relaxed bounds on process, directory, tagged, and use crypto-api 0.12
+       and aeson 0.6.2
+
+     * Use binary 0.7 (as binary-ide-backend); improved Binary instance for
+       Text that avoids lots of small chunks, and use the incremental API
+       from binary 0.7 to avoid the use of lazy I/O
+
+     * Clear the build directory in buildExe (temporary fix for #119)
+
+     * Avoid stack overflow in Binary instance for lazy bytestrings (#121)
+
  *  Version 0.7.0.1
 
      * Bugfix: make sure restartSession passes the configPackageDBStack 
