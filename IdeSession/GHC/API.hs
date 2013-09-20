@@ -19,8 +19,9 @@ module IdeSession.GHC.API (
 
 import Data.Binary
 import Data.ByteString (ByteString)
-import Control.Applicative ((<$>), (<*>))
+import Data.Text (Text)
 import Data.Aeson.TH (deriveJSON, defaultOptions)
+import Control.Applicative ((<$>), (<*>))
 import System.FilePath ((</>))
 
 import IdeSession.Types.Private
@@ -33,7 +34,7 @@ import IdeSession.Util (Diff)
 -- We use a Unix timestamp for this so that these API versions have some
 -- semantics (http://www.epochconverter.com/, GMT).
 ideBackendApiVersion :: Int
-ideBackendApiVersion = 1379506119
+ideBackendApiVersion = 1379671522
 
 {------------------------------------------------------------------------------
   Requests
@@ -102,6 +103,7 @@ data GhcCompileResponse =
       , ghcCompileImports  :: Strict (Map ModuleName) (Diff (Strict [] Import))
       , ghcCompileAuto     :: Strict (Map ModuleName) (Diff (Strict [] IdInfo))
       , ghcCompileSpanInfo :: Strict (Map ModuleName) (Diff IdList)
+      , ghcCompileExpTypes :: Strict (Map ModuleName) (Diff [(SourceSpan, Text)])
       , ghcCompilePkgDeps  :: Strict (Map ModuleName) (Diff (Strict [] PackageId))
       , ghcCompileCache    :: ExplicitSharingCache
       }
@@ -169,6 +171,7 @@ instance Binary GhcCompileResponse where
     put ghcCompileImports
     put ghcCompileAuto
     put ghcCompileSpanInfo
+    put ghcCompileExpTypes
     put ghcCompilePkgDeps
     put ghcCompileCache
 
@@ -178,7 +181,7 @@ instance Binary GhcCompileResponse where
       0 -> GhcCompileProgress <$> get
       1 -> GhcCompileDone     <$> get <*> get <*> get
                               <*> get <*> get <*> get
-                              <*> get
+                              <*> get <*> get
       _ -> fail "GhcCompileRespone.get: invalid header"
 
 instance Binary GhcRunResponse where

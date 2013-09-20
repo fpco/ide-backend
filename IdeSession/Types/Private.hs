@@ -18,13 +18,15 @@ module IdeSession.Types.Private (
   , PackageId(..)
   , IdList
   , IdMap(..)
+  , ExpMap(..)
   , SpanInfo(..)
   , ImportEntities(..)
   , Import(..)
     -- * Cache
   , ExplicitSharingCache(..)
     -- * Util
-  , idListToMap
+  , mkIdMap
+  , mkExpMap
   , dominators
   ) where
 
@@ -125,6 +127,9 @@ data SpanInfo =
  deriving Show
 
 newtype IdMap = IdMap { idMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) SpanInfo }
+  deriving Show
+
+newtype ExpMap = ExpMap { expMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) Text }
   deriving Show
 
 data ImportEntities =
@@ -291,13 +296,16 @@ instance Binary SpanInfo where
   Util
 ------------------------------------------------------------------------------}
 
-idListToMap :: IdList -> IdMap
-idListToMap = IdMap . IntervalMap.fromList . map (first spanToInterval)
+mkIdMap :: IdList -> IdMap
+mkIdMap = IdMap . IntervalMap.fromList . map (first spanToInterval)
 
-dominators :: SourceSpan -> IdMap -> [(SourceSpan, SpanInfo)]
-dominators span (IdMap idMap) =
+mkExpMap :: [(SourceSpan, Text)] -> ExpMap
+mkExpMap = ExpMap . IntervalMap.fromList . map (first spanToInterval)
+
+dominators :: SourceSpan -> StrictIntervalMap (FilePathPtr, Int, Int) a -> [(SourceSpan, a)]
+dominators span ivalmap =
     map (\(ival, idInfo) -> (intervalToSpan ival, idInfo))
-        (IntervalMap.dominators (spanToInterval span) idMap)
+        (IntervalMap.dominators (spanToInterval span) ivalmap)
 
 spanToInterval :: SourceSpan -> Interval (FilePathPtr, Int, Int)
 spanToInterval SourceSpan{..} =

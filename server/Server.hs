@@ -176,6 +176,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
           , ghcCompileAuto     = StrictMap.empty
           , ghcCompilePkgDeps  = StrictMap.empty
           , ghcCompileSpanInfo = StrictMap.empty
+          , ghcCompileExpTypes = StrictMap.empty
           }
 
     response <- if not configGenerateModInfo
@@ -281,6 +282,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
             sendPluginResult = mapM_ $ \(m, result) -> do
               set (spanInfoFor m) (Insert (pluginIdList result))
               set (pkgDepsFor m)  (Insert (pluginPkgDeps result))
+              set (expTypesFor m) (Insert (pluginExpTypes result))
 
         (newSummaries, finalResponse) <- flip runStateT initialResponse $ do
           sendPluginResult (StrictMap.toList pluginIdMaps)
@@ -334,11 +336,13 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
     allAuto     = accessor ghcCompileAuto     (\as st -> st { ghcCompileAuto     = as })
     allSpanInfo = accessor ghcCompileSpanInfo (\ss st -> st { ghcCompileSpanInfo = ss })
     allPkgDeps  = accessor ghcCompilePkgDeps  (\ds st -> st { ghcCompilePkgDeps  = ds })
+    allExpTypes = accessor ghcCompileExpTypes (\ts st -> st { ghcCompileExpTypes = ts })
 
     importsFor  m = allImports  .> StrictMap.accessorDefault Keep m
     autoFor     m = allAuto     .> StrictMap.accessorDefault Keep m
     spanInfoFor m = allSpanInfo .> StrictMap.accessorDefault Keep m
     pkgDepsFor  m = allPkgDeps  .> StrictMap.accessorDefault Keep m
+    expTypesFor m = allExpTypes .> StrictMap.accessorDefault Keep m
 
 parseProgressMessage :: Text -> Either String (Int, Int, Text)
 parseProgressMessage = Att.parseOnly parser

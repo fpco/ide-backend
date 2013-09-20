@@ -348,6 +348,7 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
              , diffImports
              , diffAuto
              , diffIdList
+             , diffExpTypes
              , diffPkgDeps
              , cache ) <- rpcCompile (idleState' ^. ideGhcServer)
                                      (idleState' ^. ideNewOpts)
@@ -362,7 +363,8 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
                                  $ Maybe.maybe Map.empty f
                                  $ idleState' ^. ideComputed
 
-            let diffSpan = Map.map (fmap idListToMap) diffIdList
+            let diffSpan  = Map.map (fmap mkIdMap)  diffIdList
+                diffTypes = Map.map (fmap mkExpMap) diffExpTypes
 
             return $ Maybe.just Computed {
                 computedErrors        = errs
@@ -370,6 +372,7 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
               , computedImports       = diffImports `applyDiff` computedImports
               , computedAutoMap       = diffAuto    `applyDiff` computedAutoMap
               , computedSpanInfo      = diffSpan    `applyDiff` computedSpanInfo
+              , computedExpTypes      = diffTypes   `applyDiff` computedExpTypes
               , computedPkgDeps       = diffPkgDeps `applyDiff` computedPkgDeps
               , computedCache         = mkRelative cache
               }

@@ -30,6 +30,7 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.MVar (newMVar)
 import qualified Control.Exception as Ex
+import Data.Text (Text)
 import qualified Data.Text as Text
 import System.Exit (ExitCode)
 
@@ -171,6 +172,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
                  , Strict (Map ModuleName) (Diff (Strict [] Import))
                  , Strict (Map ModuleName) (Diff (Strict Trie (Strict [] IdInfo)))
                  , Strict (Map ModuleName) (Diff IdList)
+                 , Strict (Map ModuleName) (Diff [(SourceSpan, Text)])
                  , Strict (Map ModuleName) (Diff (Strict [] PackageId))
                  , ExplicitSharingCache
                  )
@@ -182,12 +184,13 @@ rpcCompile server opts dir genCode callback =
                 case response of
                   GhcCompileProgress pcounter ->
                     callback pcounter >> go
-                  GhcCompileDone errs loaded imports auto spanInfo deps cache ->
+                  GhcCompileDone errs loaded imports auto spanInfo expTypes deps cache ->
                     return ( errs
                            , loaded
                            , imports
                            , StrictMap.map (fmap (constructAuto cache)) auto
                            , spanInfo
+                           , expTypes
                            , deps
                            , cache
                            )

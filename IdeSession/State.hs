@@ -51,9 +51,10 @@ data Computed = Computed {
     computedErrors :: !(Strict [] SourceError)
     -- | Modules that got loaded okay
   , computedLoadedModules :: !(Strict [] ModuleName)
-    -- | Information about identifiers/quasi-quotes/subexpressions
-    -- (TODO: subexpressions not yet supported)
+    -- | Information about identifiers/quasi-quotes
   , computedSpanInfo :: !(Strict (Map ModuleName) IdMap)
+    -- | Type information about subexpressions
+  , computedExpTypes :: !(Strict (Map ModuleName) ExpMap)
     -- | Import information. This is (usually) available even for modules
     -- with parsing or type errors
   , computedImports :: !(Strict (Map ModuleName) (Strict [] Import))

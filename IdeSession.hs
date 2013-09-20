@@ -163,6 +163,7 @@ module IdeSession (
   , getBuildDocStatus
   , getBuildLicensesStatus
   , getSpanInfo
+  , getExpTypes
   , getImports
   , getAutocompletion
   , getPkgDeps

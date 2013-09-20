@@ -3559,6 +3559,58 @@ syntheticTests =
         out2 <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
         assertEqual "" "Version 2\n" out2
     )
+  , ( "Subexpression types"
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                      -- Single type var inst
+                      --       123456789012
+                    , {- 2 -} "t1 = id True"
+                      -- Double type var inst, double evidence app
+                      --       1234567890123456789012345678901234567
+                    , {- 3 -} "t2 = (fromIntegral :: Int -> Float) 1"
+                      -- Lambda
+                      --       1234567890123
+                    , {- 4 -} "t3 = \\x -> x"
+                      -- Let
+                      --       1234567890123456789012345678901
+                    , {- 5 -} "t4 = let foo x = () in foo True"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        -- TODO: the order of these "dominators" seems rather random!
+        expTypes <- getExpTypes session
+        assertExpTypes expTypes "A" (2,  6, 2,  6) [
+            (2,  1, 2, 13, "Bool")
+          , (2,  6, 2,  8, "Bool -> Bool")
+          , (2,  6, 2,  8, "a -> a")
+          , (2,  6, 2, 13, "Bool")
+          ]
+        assertExpTypes expTypes "A" (3,  7, 3,  7) [
+            (3,  1, 3, 38, "Float")
+          , (3,  6, 3, 38, "Float")
+          , (3,  7, 3, 19, "Int -> Float")
+          , (3,  7, 3, 19, "(Integral a, Num b) => a -> b")
+          ]
+        assertExpTypes expTypes "A" (3, 37, 3, 37) [
+            (3,  1, 3, 38, "Float")
+          , (3,  6, 3, 38, "Float")
+          , (3, 37, 3, 38, "Int")
+          ]
+        assertExpTypes expTypes "A" (4,  7, 4,  7) [
+            (4,  1, 4, 13, "t -> t")
+          , (4,  6, 4, 13, "t -> t")
+          , (4,  7, 4,  8, "t")
+          ]
+        assertExpTypes expTypes "A" (5, 25, 5, 25) [
+            (5,  1, 5, 32, "()")
+          , (5,  6, 5, 32, "()")
+          , (5, 24, 5, 27, "Bool -> ()")
+          , (5, 24, 5, 27, "t -> ()")
+          , (5, 24, 5, 32, "()")
+          ]
+    )
   ]
 
 deletePackage :: FilePath -> IO ()
@@ -3722,7 +3774,7 @@ loadModule file contents =
                       []              -> Nothing
                       (_ : haystack') -> substr needle haystack'
 
-assertIdInfo :: (Text -> SourceSpan -> [(SourceSpan, SpanInfo)])
+assertIdInfo :: (ModuleName -> SourceSpan -> [(SourceSpan, SpanInfo)])
              -> String
              -> (Int, Int, Int, Int)
              -> String
@@ -3739,6 +3791,29 @@ assertIdInfo idInfo mod (frLine, frCol, toLine, toCol) expected =
     actual = case idInfo (Text.pack mod) span of
       [] -> ""
       hd : _ -> show $ snd hd
+
+    span = SourceSpan { spanFilePath   = mod ++ ".hs"
+                      , spanFromLine   = frLine
+                      , spanFromColumn = frCol
+                      , spanToLine     = toLine
+                      , spanToColumn   = toCol
+                      }
+
+assertExpTypes :: (ModuleName -> SourceSpan -> [(SourceSpan, Text)])
+               -> String
+               -> (Int, Int, Int, Int)
+               -> [(Int, Int, Int, Int, String)]
+               -> Assertion
+assertExpTypes expTypes mod (frLine, frCol, toLine, toCol) expected =
+    assertEqual "" expected actual
+  where
+    actual = flip map (expTypes (Text.pack mod) span) $ \(span', typ) ->
+      ( spanFromLine span'
+      , spanFromColumn span'
+      , spanToLine span'
+      , spanToColumn span'
+      , Text.unpack typ
+      )
 
     span = SourceSpan { spanFilePath   = mod ++ ".hs"
                       , spanFromLine   = frLine

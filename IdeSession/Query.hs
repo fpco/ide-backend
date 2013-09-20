@@ -28,6 +28,7 @@ module IdeSession.Query (
   , getSourceErrors
   , getLoadedModules
   , getSpanInfo
+  , getExpTypes
   , getImports
   , getAutocompletion
   , getPkgDeps
@@ -44,6 +45,7 @@ import qualified Data.ByteString.Char8 as BSSC
 import System.Exit (ExitCode)
 import System.FilePath ((</>))
 import Control.Monad (forM_)
+import Data.Text (Text)
 import qualified Data.Text as Text (pack, unpack)
 
 import IdeSession.Config
@@ -198,7 +200,7 @@ getSpanInfo = computedQuery $ \Computed{..} mod span ->
   let mSpan  = introduceExplicitSharing computedCache span
       mIdMap = StrictMap.lookup mod computedSpanInfo
   in case (mSpan, mIdMap) of
-    (Just span', Just idMap) ->
+    (Just span', Just (Private.IdMap idMap)) ->
       let aux (a, b) = ( removeExplicitSharing computedCache a
                        , removeExplicitSharing computedCache b
                        )
@@ -225,6 +227,22 @@ getSpanInfo = computedQuery $ \Computed{..} mod span ->
   where
     isQQ (_, SpanQQ _) = True
     isQQ _             = False
+
+-- | Get information the type of a subexpressions and the subexpressions
+-- around it
+getExpTypes :: Query (ModuleName -> SourceSpan -> [(SourceSpan, Text)])
+getExpTypes = computedQuery $ \Computed{..} mod span ->
+  let mSpan   = introduceExplicitSharing computedCache span
+      mExpMap = StrictMap.lookup mod computedExpTypes
+  in case (mSpan, mExpMap) of
+    (Just span', Just (Private.ExpMap expMap)) ->
+      let aux (a, b) = ( removeExplicitSharing computedCache a
+                       , b
+                       )
+          doms = map aux $ Private.dominators span' expMap
+      in doms
+    _ ->
+      []
 
 -- | Get import information
 --
@@ -310,6 +328,7 @@ withIdleState IdeSession{ideState} f =
         computedErrors        = StrictList.nil
       , computedLoadedModules = StrictList.nil
       , computedSpanInfo      = StrictMap.empty
+      , computedExpTypes      = StrictMap.empty
       , computedImports       = StrictMap.empty
       , computedAutoMap       = StrictMap.empty
       , computedPkgDeps       = StrictMap.empty
