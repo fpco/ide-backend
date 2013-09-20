@@ -42,7 +42,7 @@ Changelog
 
      * Use System.IO.UTF8 to avoid character encoding issues (fpco/fpco#2232)
 
-     * (Removing non-existent files should not throw an exception)
+     * Removing non-existent files should not throw an exception
 
      * Relaxed bounds on process, directory, tagged, and use crypto-api 0.12
        and aeson 0.6.2
