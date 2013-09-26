@@ -354,7 +354,7 @@ recordExpType span (Just typ) = do
   eitherSpan <- extractSourceSpan span
   case eitherSpan of
     ProperSpan properSpan -> do
-      prettyTyp <- showTypeForUser typ
+      prettyTyp <- tidyType typ >>= showTypeForUser
       modify $ \st -> st {
           eIdsExpTypes = (properSpan, prettyTyp) : eIdsExpTypes st
         }
