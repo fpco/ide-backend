@@ -3560,43 +3560,75 @@ syntheticTests =
         assertEqual "" "Version 2\n" out2
     )
   , ( "Subexpression types"
-    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
+    , ifIdeBackendHaddockTestsEnabled (withOpts ["-XNoMonomorphismRestriction"]) $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
-                      -- Single type var inst
-                      --       123456789012
-                    , {- 2 -} "t1 = id True"
-                      -- Double type var inst, double evidence app
-                      --       1234567890123456789012345678901234567
-                    , {- 3 -} "t2 = (fromIntegral :: Int -> Float) 1"
+                      -- Single type var inst, boolean literal
+                      --        123456789012
+                    , {-  2 -} "t2 = id True"
+                      -- Double type var inst, double evidence app, overloaded lit
+                      --        1234567890123456789012345678901234567
+                    , {-  3 -} "t3 = (fromIntegral :: Int -> Float) 1"
                       -- Lambda
-                      --       1234567890123
-                    , {- 4 -} "t3 = \\x -> x"
+                      --        12345 6789012
+                    , {-  4 -} "t4 = \\x -> x"
                       -- Let
-                      --       1234567890123456789012345678901
-                    , {- 5 -} "t4 = let foo x = () in foo True"
+                      --        1234567890123456789012345678901
+                    , {-  5 -} "t5 = let foo x = () in foo True"
                       -- Type variables
-                      --       123456789012
-                    , {- 6 -} "t5 x y z = x"
-                    , {- 7 -} "t6 x y z = y"
-                    , {- 8 -} "t7 x y z = z"
+                      --        123456789012
+                    , {-  6 -} "t6 x y z = x"
+                    , {-  7 -} "t7 x y z = y"
+                    , {-  8 -} "t8 x y z = z"
                       -- Brackets, tuples, operators
-                      --      0         1         2         3         4
-                      --       1234567890123456789012345678901234567890123456789
-                    , {- 9 -} "t8 f g x y z = (x `f` (y `g` z), (x `f` y) `g` z)"
+                      --       0         1         2         3         4
+                      --        1234567890123456789012345678901234567890123456789
+                    , {-  9 -} "t9 f g x y z = (x `f` (y `g` z), (x `f` y) `g` z)"
+                      -- Literals
+                      --        123456789012 3456 78
+                    , {- 10 -} "t10 = ('a', \"foo\")"
+                      -- Do expression
+                      --       0         1         2         3         4
+                      --        12345678901234567890123456789012345678901234567
+                    , {- 11 -} "t11 = do line <- getLine ; return (length line)"
+                      -- Lists
+                      --        1234567890123456789
+                    , {- 12 -} "t12 = [True, False]"
+                    , {- 13 -} "t13 = [1, 2]"
+                      -- Records
+                    , "data MyRecord = MyRecordCon {"
+                    , "    a :: Bool"
+                    , "  , b :: Int"
+                    , "  }"
+                      --       0         1         2         3         4
+                      --        1234567890123456789012345678901234567
+                    , {- 18 -} "t18 = MyRecordCon { a = True, b = 5 }"
+                      -- Record update
+                    , {- 19 -} "t19 = t18 { b = 6 }"
+                      -- Polymorphic records
+                    , "data MyPolyRecord a = MyPolyRecordCon { c :: a }"
+                      --       0         1         2         3
+                      --        123456789012345678901234567890123
+                    , {- 21 -} "t21 = MyPolyRecordCon { c = 'a' }"
+                    , {- 22 -} "t22 = t21 { c = 'b' }"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
 
         -- TODO: the order of these "dominators" seems rather random!
         expTypes <- getExpTypes session
-        assertExpTypes expTypes "A" (2,  6, 2,  6) [
+        assertExpTypes expTypes "A" (2, 6, 2, 6) [
             (2,  1, 2, 13, "Bool")
           , (2,  6, 2,  8, "Bool -> Bool")
           , (2,  6, 2,  8, "a -> a")
           , (2,  6, 2, 13, "Bool")
           ]
-        assertExpTypes expTypes "A" (3,  7, 3,  7) [
+        assertExpTypes expTypes "A" (2, 9, 2, 13) [
+            (2, 1, 2, 13, "Bool")
+          , (2, 6, 2, 13, "Bool")
+          , (2, 9, 2, 13, "Bool")
+          ]
+        assertExpTypes expTypes "A" (3, 7, 3, 7) [
             (3,  1, 3, 38, "Float")
           , (3,  6, 3, 38, "Float")
           , (3,  7, 3, 19, "Int -> Float")
@@ -3607,7 +3639,7 @@ syntheticTests =
           , (3,  6, 3, 38, "Float")
           , (3, 37, 3, 38, "Int")
           ]
-        assertExpTypes expTypes "A" (4,  7, 4,  7) [
+        assertExpTypes expTypes "A" (4, 7, 4, 7) [
             (4,  1, 4, 13, "t -> t")
           , (4,  6, 4, 13, "t -> t")
           , (4,  7, 4,  8, "t")
@@ -3644,6 +3676,75 @@ syntheticTests =
           , (9, 34, 9, 49, "t")
           , (9, 35, 9, 36, "t1")
           , (9, 35, 9, 42, "t")
+          ]
+        assertExpTypes expTypes "A" (10, 8, 10, 11) [
+            (10, 1, 10, 19, "(Char, [Char])")
+          , (10, 7, 10, 19, "(Char, [Char])")
+          , (10, 8, 10, 11, "Char")
+          ]
+        assertExpTypes expTypes "A" (10, 13, 10, 18) [
+            (10,  1, 10, 19, "(Char, [Char])")
+          , (10,  7, 10, 19, "(Char, [Char])")
+          , (10, 13, 10, 18, "[Char]")
+          ]
+        assertExpTypes expTypes "A" (11, 10, 11, 14) [
+            (11,  1, 11, 48, "IO Int")
+          , (11,  7, 11, 48, "IO Int")
+          , (11, 10, 11, 14, "String")
+          ]
+        assertExpTypes expTypes "A" (11, 36, 11, 42) [
+            (11,  1, 11, 48, "IO Int")
+          , (11,  7, 11, 48, "IO Int")
+          , (11, 28, 11, 48, "IO Int")
+          , (11, 36, 11, 42, "[Char] -> Int")
+          , (11, 36, 11, 42, "[a] -> Int")
+          , (11, 36, 11, 47, "Int")
+          ]
+        assertExpTypes expTypes "A" (12, 8, 12, 12) [
+            (12, 1, 12, 20, "[Bool]")
+          , (12, 7, 12, 20, "[Bool]")
+          , (12, 8, 12, 12, "Bool")
+          ]
+        assertExpTypes expTypes "A" (13, 8, 13, 9) [
+            (13, 1, 13, 13, "Num t => [t]")
+          , (13, 7, 13, 13, "[t]")
+          , (13, 8, 13,  9, "t")
+          ]
+        assertExpTypes expTypes "A" (18, 7, 18, 18) [
+            (18, 1, 18, 38, "MyRecord")
+          , (18, 7, 18, 18, "Bool -> Int -> MyRecord")
+          , (18, 7, 18, 38, "MyRecord")
+          ]
+        assertExpTypes expTypes "A" (18, 21, 18, 22) [
+            (18,  1, 18, 38, "MyRecord")
+          , (18,  7, 18, 38, "MyRecord")
+          , (18, 21, 18, 22, "Bool")
+          ]
+        assertExpTypes expTypes "A" (18, 35, 18, 36) [
+            (18,  1, 18, 38, "MyRecord")
+          , (18,  7, 18, 38, "MyRecord")
+          , (18, 35, 18, 36, "Int")
+          ]
+        assertExpTypes expTypes "A" (19, 13, 19, 14) [
+            (19,  1, 19, 20, "MyRecord")
+          , (19,  7, 19, 20, "MyRecord")
+          , (19, 13, 19, 14, "Int")
+          ]
+        assertExpTypes expTypes "A" (21, 29, 21, 32) [
+            (21,  1, 21, 34, "MyPolyRecord Char")
+          , (21,  7, 21, 34, "MyPolyRecord Char")
+          , (21, 29, 21, 32, "Char")
+          ]
+        assertExpTypes expTypes "A" (21, 7, 21, 22) [
+            (21,  1, 21, 34, "MyPolyRecord Char")
+          , (21,  7, 21, 22, "Char -> MyPolyRecord Char")
+          , (21,  7, 21, 22, "a -> MyPolyRecord a")
+          , (21,  7, 21, 34, "MyPolyRecord Char")
+          ]
+        assertExpTypes expTypes "A" (22, 13, 22, 14) [
+            (22,  1, 22, 22, "MyPolyRecord Char")
+          , (22,  7, 22, 22, "MyPolyRecord Char")
+          , (22, 13, 22, 14, "Char")
           ]
     )
   ]

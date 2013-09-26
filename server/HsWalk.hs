@@ -72,8 +72,9 @@ import Pretty (showDocWith, Mode(OneLineMode))
 import PprTyThing (pprTypeForUser)
 import TcEvidence (HsWrapper(..))
 import Type
-import TysWiredIn (mkTupleTy)
+import TysWiredIn (mkTupleTy, mkListTy)
 import BasicTypes (boxityNormalTupleSort)
+import TcHsSyn (hsLitType)
 
 import Conv
 import Haddock
@@ -887,32 +888,39 @@ instance Record id => ExtractIds (LHsExpr id) where
     funTy  <- extractIds fun
     _argTy <- extractIds arg
     recordExpType span (funRes1 <$> funTy)
-  extractIds (L _span (HsLit _)) =
+  extractIds (L span (HsLit lit)) =
     -- Intentional omission of the "ast" debugging call here.
     -- The syntax "assert" is replaced by GHC by "assertError <span>", where
     -- both "assertError" and the "<span>" are assigned the source span of
     -- the original "assert". This means that the <span> (represented as an
     -- HsLit) might override "assertError" in the IdMap.
-    return Nothing
+    recordExpType span (ifPostTc (undefined :: id) (hsLitType lit))
   extractIds (L span (HsLam matches@(MatchGroup _ postTcType))) = ast (Just span) "HsLam" $ do
     extractIds matches
     recordExpType span (ifPostTc (undefined :: id) postTcType)
-  extractIds (L span (HsDo _ctxt stmts _postTcType)) = ast (Just span) "HsDo" $
+  extractIds (L span (HsDo _ctxt stmts postTcType)) = ast (Just span) "HsDo" $ do
     -- ctxt indicates what kind of statement it is; AFAICT there is no
     -- useful information in it for us
-    -- postTcType is not located
     extractIds stmts
+    recordExpType span (ifPostTc (undefined :: id) postTcType)
 #if __GLASGOW_HASKELL__ >= 707
   -- Middle argument is something to do with OverloadedLists
   extractIds (L span (ExplicitList _postTcType _ exprs)) = ast (Just span) "ExplicitList" $
     extractIds exprs
 #else
-  extractIds (L span (ExplicitList _postTcType exprs)) = ast (Just span) "ExplicitList" $
+  extractIds (L span (ExplicitList postTcType exprs)) = ast (Just span) "ExplicitList" $ do
     extractIds exprs
+    recordExpType span (mkListTy <$> ifPostTc (undefined :: id) postTcType)
 #endif
-  extractIds (L span (RecordCon con _postTcType recordBinds)) = ast (Just span) "RecordCon" $ do
-    record (getLoc con) False (unLoc con)
+  extractIds (L span (RecordCon con mPostTcExpr recordBinds)) = ast (Just span) "RecordCon" $ do
     extractIds recordBinds
+    case ifPostTc (undefined :: id) mPostTcExpr of
+      Nothing -> do
+        record (getLoc con) False (unLoc con)
+        return Nothing
+      Just postTcExpr -> do
+        conTy <- extractIds (L (getLoc con) postTcExpr)
+        recordExpType span (funResN <$> conTy)
   extractIds (L span (HsCase expr matches)) = ast (Just span) "HsCase" $ do
     extractIds expr
     extractIds matches
@@ -936,8 +944,9 @@ instance Record id => ExtractIds (LHsExpr id) where
     -- TODO: should we traverse pendingSplices?
     extractIds th
   extractIds (L span (RecordUpd expr binds _dataCons _postTcTypeInp _postTcTypeOutp)) = ast (Just span) "RecordUpd" $ do
-    extractIds expr
+    recordTy <- extractIds expr
     extractIds binds
+    recordExpType span recordTy -- The type doesn't change
   extractIds (L span (HsProc pat body)) = ast (Just span) "HsProc" $ do
     extractIds pat
     extractIds body
@@ -1286,9 +1295,13 @@ applyWrapper _                 _ = error "unsupported wrapper"
 funRes1 :: Type -> Type
 funRes1 = snd . splitFunTy
 
--- | Given @a -> b -> c@, return @c@
+-- | Given @a1 -> a2 -> b@, return @b@
 funRes2 :: Type -> Type
 funRes2 = funRes1 . funRes1
+
+-- | Given @a1 -> a2 -> ... -> b@, return @b@
+funResN :: Type -> Type
+funResN = snd . splitFunTys
 
 {------------------------------------------------------------------------------
   Auxiliary
