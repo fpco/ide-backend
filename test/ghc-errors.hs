@@ -3575,6 +3575,15 @@ syntheticTests =
                       -- Let
                       --       1234567890123456789012345678901
                     , {- 5 -} "t4 = let foo x = () in foo True"
+                      -- Type variables
+                      --       123456789012
+                    , {- 6 -} "t5 x y z = x"
+                    , {- 7 -} "t6 x y z = y"
+                    , {- 8 -} "t7 x y z = z"
+                      -- Brackets, tuples, operators
+                      --      0         1         2         3         4
+                      --       1234567890123456789012345678901234567890123456789
+                    , {- 9 -} "t8 f g x y z = (x `f` (y `g` z), (x `f` y) `g` z)"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
@@ -3609,6 +3618,27 @@ syntheticTests =
           , (5, 24, 5, 27, "Bool -> ()")
           , (5, 24, 5, 27, "t -> ()")
           , (5, 24, 5, 32, "()")
+          ]
+        assertExpTypes expTypes "A" (6, 12, 6, 13) [
+            (6,  1, 6, 13, "t -> t1 -> t2 -> t")
+          , (6, 12, 6, 13, "t")
+          ]
+        assertExpTypes expTypes "A" (7, 12, 7, 13) [
+            (7,  1, 7, 13, "t -> t1 -> t2 -> t1")
+          , (7, 12, 7, 13, "t1")
+          ]
+        assertExpTypes expTypes "A" (8, 12, 8, 13) [
+            (7,  1, 7, 13, "t -> t1 -> t2 -> t1")
+          , (7, 12, 7, 13, "t2")
+          ]
+        assertExpTypes expTypes "A" (9, 30, 9, 31) [
+            (9,  1, 9, 50, "(t1 -> t -> t) -> (t -> t2 -> t) -> t1 -> t -> t2 -> (t, t)")
+          , (9, 16, 9, 50, "(t, t)")
+          , (9, 17, 9, 32, "t")
+          , (9, 24, 9, 31, "t")
+          , (9, 30, 9, 31, "t")
+          ]
+        assertExpTypes expTypes "A" (6, 35, 6, 36) [
           ]
     )
   ]

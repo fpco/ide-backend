@@ -25,6 +25,7 @@ import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State.Class (MonadState(..))
 import Control.Monad.Trans.Class (MonadTrans, lift)
 import Control.Exception (evaluate)
+import Control.Applicative ((<$>))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.ByteString (ByteString)
@@ -71,6 +72,8 @@ import Pretty (showDocWith, Mode(OneLineMode))
 import PprTyThing (pprTypeForUser)
 import TcEvidence (HsWrapper(..))
 import Type
+import TysWiredIn (mkTupleTy)
+import BasicTypes (boxityNormalTupleSort)
 
 import Conv
 import Haddock
@@ -346,8 +349,8 @@ lookupRdrEnv rdrEnv name =
                    [elt] -> Just elt
                    _     -> error "ghc invariant violated"
 
-recordExpType :: MonadIO m => SrcSpan -> Type -> ExtractIdsT m (Maybe Type)
-recordExpType span typ = do
+recordExpType :: MonadIO m => SrcSpan -> Maybe Type -> ExtractIdsT m (Maybe Type)
+recordExpType span (Just typ) = do
   eitherSpan <- extractSourceSpan span
   case eitherSpan of
     ProperSpan properSpan -> do
@@ -358,6 +361,7 @@ recordExpType span typ = do
     TextSpan _ ->
       return () -- Ignore
   return (Just typ)
+recordExpType _ Nothing = return Nothing
 
 #if DEBUG
 -- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
@@ -447,15 +451,15 @@ type IsBinder = Bool
 class (Uniquable id, OutputableBndr id) => Record id where
   record :: MonadIO m => SrcSpan -> IsBinder -> id -> ExtractIdsT m (Maybe Type)
 
-  ifPostTc :: Monad m => id -> m (Maybe b) -> m (Maybe b)
+  ifPostTc :: id -> a -> Maybe a
 
 instance Record Id where
   record span _idIsBinder id = do
     let typ = Var.varType id
     recordType (showSDocDebug (ppr id)) (getUnique id) typ
-    recordExpType span typ
+    recordExpType span (Just typ)
 
-  ifPostTc = \_ act -> act
+  ifPostTc = \_ -> Just
 
 showTypeForUser :: Monad m => Type -> ExtractIdsT m Text
 showTypeForUser typ = do
@@ -611,7 +615,7 @@ instance Record Name where
         debugPP "Name without source span" name
     return Nothing
 
-  ifPostTc = \_ _ -> return Nothing
+  ifPostTc = \_ -> const Nothing
 
 {------------------------------------------------------------------------------
   ExtractIds
@@ -856,12 +860,6 @@ _showTree x = let ys = gmapQ _showTree x in
               if null ys then showConstr (toConstr x)
                          else "(" ++ showConstr (toConstr x) ++ " " ++ unwords ys ++ ")"
 
-applyWrapper :: HsWrapper -> Type -> Type
-applyWrapper (WpTyApp t')      t = applyTy t t'
-applyWrapper (WpEvApp _)       t = snd (splitFunTy t)
-applyWrapper (WpCompose w1 w2) t = applyWrapper w1 . applyWrapper w2 $ t
-applyWrapper _                 _ = error "unsupported wrapper"
-
 instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsPar expr)) = ast (Just span) "HsPar" $
     extractIds expr
@@ -870,28 +868,25 @@ instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (ExprWithTySigOut expr _type)) = ast (Just span) "ExprWithTySigOut" $
     extractIds expr
   extractIds (L span (HsOverLit (OverLit{ol_type}))) = ast (Just span) "HsOverLit" $ do
-    ifPostTc (undefined :: id) $ recordExpType span ol_type
-  extractIds (L span (OpApp left op _fix right)) = ast (Just span) "OpApp" $
-    extractIds [left, op, right]
+    recordExpType span (ifPostTc (undefined :: id) ol_type)
+  extractIds (L span (OpApp left op _fix right)) = ast (Just span) "OpApp" $ do
+    _leftTy  <- extractIds left
+    opTy     <- extractIds op
+    _rightTy <- extractIds right
+    recordExpType span (funRes2 <$> opTy)
   extractIds (L span (HsVar id)) = ast (Just span) "HsVar" $
     record span False id
   extractIds (L span (HsWrap wrapper expr)) = ast (Just span) "HsWrap" $ do
-    mSubtyp <- extractIds (L span expr)
-    case mSubtyp of
-      Just subtyp -> recordExpType span (applyWrapper wrapper subtyp)
-      Nothing     -> return Nothing
+    ty <- extractIds (L span expr)
+    recordExpType span (applyWrapper wrapper <$> ty)
   extractIds (L span (HsLet binds expr)) = ast (Just span) "HsLet" $ do
     extractIds binds
-    mExprTy <- extractIds expr
-    case mExprTy of
-      Just exprTy -> recordExpType span exprTy
-      Nothing     -> return Nothing
+    ty <- extractIds expr
+    recordExpType span ty -- Re-record this with the span of the whole let
   extractIds (L span (HsApp fun arg)) = ast (Just span) "HsApp" $ do
-    mFunTy  <- extractIds fun
-    _mArgTy <- extractIds arg
-    case mFunTy of
-      Just funTy -> recordExpType span (snd (splitFunTy funTy))
-      Nothing    -> return Nothing
+    funTy  <- extractIds fun
+    _argTy <- extractIds arg
+    recordExpType span (funRes1 <$> funTy)
   extractIds (L _span (HsLit _)) =
     -- Intentional omission of the "ast" debugging call here.
     -- The syntax "assert" is replaced by GHC by "assertError <span>", where
@@ -901,7 +896,7 @@ instance Record id => ExtractIds (LHsExpr id) where
     return Nothing
   extractIds (L span (HsLam matches@(MatchGroup _ postTcType))) = ast (Just span) "HsLam" $ do
     extractIds matches
-    ifPostTc (undefined :: id) $ recordExpType span postTcType
+    recordExpType span (ifPostTc (undefined :: id) postTcType)
   extractIds (L span (HsDo _ctxt stmts _postTcType)) = ast (Just span) "HsDo" $
     -- ctxt indicates what kind of statement it is; AFAICT there is no
     -- useful information in it for us
@@ -921,8 +916,9 @@ instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsCase expr matches)) = ast (Just span) "HsCase" $ do
     extractIds expr
     extractIds matches
-  extractIds (L span (ExplicitTuple args _boxity)) = ast (Just span) "ExplicitTuple" $
-    extractIds args
+  extractIds (L span (ExplicitTuple args boxity)) = ast (Just span) "ExplicitTuple" $ do
+    argTys <- mapM extractIds args
+    recordExpType span (mkTupleTy (boxityNormalTupleSort boxity) <$> sequence argTys)
   extractIds (L span (HsIf _rebind cond true false)) = ast (Just span) "HsIf" $
     extractIds [cond, true, false]
   extractIds (L span (SectionL arg op)) = ast (Just span) "SectionL" $
@@ -1277,8 +1273,28 @@ instance Record id => ExtractIds (LHsDecl id) where
     extractIds (L span quasiQuoteD)
 
 {------------------------------------------------------------------------------
+  Operations on types
+------------------------------------------------------------------------------}
+
+applyWrapper :: HsWrapper -> Type -> Type
+applyWrapper (WpTyApp t')      t = applyTy t t'
+applyWrapper (WpEvApp _)       t = funRes1 t
+applyWrapper (WpCompose w1 w2) t = applyWrapper w1 . applyWrapper w2 $ t
+applyWrapper _                 _ = error "unsupported wrapper"
+
+-- | Given @a -> b@, return @b@
+funRes1 :: Type -> Type
+funRes1 = snd . splitFunTy
+
+-- | Given @a -> b -> c@, return @c@
+funRes2 :: Type -> Type
+funRes2 = funRes1 . funRes1
+
+{------------------------------------------------------------------------------
   Auxiliary
 ------------------------------------------------------------------------------}
 
 fsToText :: FastString -> Text
 fsToText = Text.pack . unpackFS
+
+
