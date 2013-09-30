@@ -75,11 +75,13 @@ import Type
 import TysWiredIn (mkTupleTy, mkListTy)
 import BasicTypes (boxityNormalTupleSort)
 import TcHsSyn (hsLitType)
+import SrcLoc (mkGeneralSrcSpan)
+import FastString (fsLit)
 
 import Conv
 import Haddock
 
-import Data.Data
+import Data.Data (Data, gmapQ, showConstr, toConstr)
 
 {------------------------------------------------------------------------------
   Caching
@@ -355,6 +357,7 @@ recordExpType span (Just typ) = do
   eitherSpan <- extractSourceSpan span
   case eitherSpan of
     ProperSpan properSpan -> do
+      logIndented $ "Recording " ++ showSDoc (ppr typ) ++ " at location " ++ showSDoc (ppr span)
       prettyTyp <- tidyType typ >>= showTypeForUser
       modify $ \st -> st {
           eIdsExpTypes = (properSpan, prettyTyp) : eIdsExpTypes st
@@ -403,34 +406,33 @@ debugPP _ _ = return ()
 ast :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m a -> ExtractIdsT m a
 ast _mspan _info cont = do
 #if DEBUG
-  indent <- liftIO $ do
-    logIndented _info
-    indent <- readIORef astIndent
-    writeIORef astIndent (indent + 2)
-    return indent
+  logIndented _info
+  indent $ do
 #endif
-
-  -- Restore the tideEnv after cont
-  stBefore <- get
-  r        <- cont
-  stAfter  <- get
-  put $ stAfter { eIdsTidyEnv = eIdsTidyEnv stBefore }
-
-#if DEBUG
-  liftIO $ writeIORef astIndent indent
-#endif
-
-  return r
+    -- Restore the tideEnv after cont
+    stBefore <- get
+    r        <- cont
+    stAfter  <- get
+    put $ stAfter { eIdsTidyEnv = eIdsTidyEnv stBefore }
+    return r
 
 #if DEBUG
 astIndent :: StrictIORef Int
 {-# NOINLINE astIndent #-}
 astIndent = unsafePerformIO $ newIORef 0
 
+indent :: MonadIO m => ExtractIdsT m a -> ExtractIdsT m a
+indent act = do
+  oldIndentation <- liftIO $ readIORef astIndent
+  liftIO $ writeIORef astIndent (oldIndentation + 2)
+  result <- act
+  liftIO $ writeIORef astIndent oldIndentation
+  return result
+
 logIndented :: MonadIO m => String -> m ()
 logIndented msg = liftIO $ do
-  indent <- readIORef astIndent
-  appendFile "/tmp/ghc.log" $ replicate indent ' ' ++ msg ++ "\n"
+  indentation <- readIORef astIndent
+  appendFile "/tmp/ghc.log" $ replicate indentation ' ' ++ msg ++ "\n"
 #endif
 
 unsupported :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m (Maybe Type)
@@ -745,7 +747,8 @@ instance Record id => ExtractIds (LHsType id) where
 #endif
 
 instance Record id => ExtractIds (Located (HsSplice id)) where
-  extractIds (L span (HsSplice _id expr)) = ast (Just span) "HsSplice" $
+  extractIds (L span (HsSplice _id expr)) = ast (Just span) "HsSplice" $ do
+    logIndented $ "HsSplice with locations " ++ showSDoc (ppr (span, getLoc expr))
     extractIds expr
 
 instance Record id => ExtractIds (Located (HsQuasiQuote id)) where
@@ -795,8 +798,10 @@ instance Record id => ExtractIds (LHsBind id) where
     -- written code. The ghc comments says "located 'only for consistency'"
     return Nothing
   extractIds (L span bind@(AbsBinds {})) = ast (Just span) "AbsBinds" $ do
-    forM_ (abs_exports bind) $ \abs_export ->
-      record span True (abe_poly abs_export)
+    logIndented "AbsBinds"
+    indent $ forM_ (abs_exports bind) $ \abs_export ->
+      record typecheckOnly True (abe_poly abs_export)
+    logIndented "/AbsBinds"
     extractIds (abs_binds bind)
 
 #if __GLASGOW_HASKELL__ >= 707
@@ -875,7 +880,8 @@ instance Record id => ExtractIds (LHsExpr id) where
     opTy     <- extractIds op
     _rightTy <- extractIds right
     recordExpType span (funRes2 <$> opTy)
-  extractIds (L span (HsVar id)) = ast (Just span) "HsVar" $
+  extractIds (L span (HsVar id)) = ast (Just span) "HsVar" $ do
+    logIndented $ "HsVar at location " ++ showSDoc (ppr span)
     record span False id
   extractIds (L span (HsWrap wrapper expr)) = ast (Just span) "HsWrap" $ do
     ty <- extractIds (L span expr)
@@ -885,6 +891,7 @@ instance Record id => ExtractIds (LHsExpr id) where
     ty <- extractIds expr
     recordExpType span ty -- Re-record this with the span of the whole let
   extractIds (L span (HsApp fun arg)) = ast (Just span) "HsApp" $ do
+    logIndented $ "HsApp at location " ++ showSDoc (ppr span)
     funTy  <- extractIds fun
     _argTy <- extractIds arg
     recordExpType span (funRes1 <$> funTy)
@@ -921,27 +928,56 @@ instance Record id => ExtractIds (LHsExpr id) where
       Just postTcExpr -> do
         conTy <- extractIds (L (getLoc con) postTcExpr)
         recordExpType span (funResN <$> conTy)
-  extractIds (L span (HsCase expr matches)) = ast (Just span) "HsCase" $ do
+  extractIds (L span (HsCase expr matches@(MatchGroup _ postTcType))) = ast (Just span) "HsCase" $ do
     extractIds expr
     extractIds matches
+    recordExpType span (funRes1 <$> ifPostTc (undefined :: id) postTcType)
   extractIds (L span (ExplicitTuple args boxity)) = ast (Just span) "ExplicitTuple" $ do
     argTys <- mapM extractIds args
     recordExpType span (mkTupleTy (boxityNormalTupleSort boxity) <$> sequence argTys)
-  extractIds (L span (HsIf _rebind cond true false)) = ast (Just span) "HsIf" $
-    extractIds [cond, true, false]
-  extractIds (L span (SectionL arg op)) = ast (Just span) "SectionL" $
-    extractIds [arg, op]
-  extractIds (L span (SectionR op arg)) = ast (Just span) "SectionR" $
-    extractIds [op, arg]
+  extractIds (L span (HsIf _rebind cond true false)) = ast (Just span) "HsIf" $ do
+    _condTy <- extractIds cond
+    _trueTy <- extractIds true
+    falseTy <- extractIds false
+    recordExpType span falseTy
+  extractIds (L span (SectionL arg op)) = ast (Just span) "SectionL" $ do
+    _argTy <- extractIds arg
+    opTy   <- extractIds op
+    recordExpType span (mkSectionLTy <$> opTy)
+   where
+      mkSectionLTy ty = let ([_arg1, arg2], res) = splitFunTys ty
+                        in mkFunTy arg2 res
+  extractIds (L span (SectionR op arg)) = ast (Just span) "SectionR" $ do
+    opTy   <- extractIds op
+    _argTy <- extractIds arg
+    recordExpType span (mkSectionRTy <$> opTy)
+   where
+      mkSectionRTy ty = let ([arg1, _arg2], res) = splitFunTys ty
+                        in mkFunTy arg1 res
   extractIds (L span (HsIPVar _name)) = ast (Just span) "HsIPVar" $
     -- _name is not located :(
     return Nothing
-  extractIds (L span (NegApp expr _rebind)) = ast (Just span) "NegApp" $
-    extractIds expr
+  extractIds (L span (NegApp expr _rebind)) = ast (Just span) "NegApp" $ do
+    ty <- extractIds expr
+    recordExpType span ty
   extractIds (L span (HsBracket th)) = ast (Just span) "HsBracket" $
     extractIds th
-  extractIds (L span (HsBracketOut th _pendingSplices)) = ast (Just span) "HsBracketOut" $
-    -- TODO: should we traverse pendingSplices?
+  extractIds (L span (HsBracketOut th pendingSplices)) = ast (Just span) "HsBracketOut" $ do
+    -- Given something like
+    --
+    -- > \x xs -> [| x : xs |]
+    --
+    -- @pendingSplices@ contains
+    --
+    -- > [ "x",  "Language.Haskell.TH.Syntax.lift x"
+    -- > , "xs", "Language.Haskell.TH.Syntax.lift xs"
+    -- > ]
+    --
+    -- Sadly, however, ghc attaches <no location info> to these splices.
+    -- Moreover, we don't get any type information about the whole bracket
+    -- expression either :(
+    forM_ pendingSplices $ \(_name, splice) ->
+      extractIds splice
     extractIds th
   extractIds (L span (RecordUpd expr binds _dataCons _postTcTypeInp _postTcTypeOutp)) = ast (Just span) "RecordUpd" $ do
     recordTy <- extractIds expr
@@ -966,6 +1002,7 @@ instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsCoreAnn _string expr)) = ast (Just span) "HsCoreAnn" $ do
     extractIds expr
   extractIds (L span (HsSpliceE splice)) = ast (Just span) "HsSpliceE" $ do
+    logIndented $ "SpliceE with loc " ++ showSDoc (ppr span)
     extractIds (L span splice) -- reuse span
   extractIds (L span (HsQuasiQuoteE qquote)) = ast (Just span) "HsQuasiQuoteE" $ do
     extractIds (L span qquote) -- reuse span
@@ -992,8 +1029,11 @@ instance Record id => ExtractIds (LHsExpr id) where
   -- Second argument is something to do with OverloadedLists
   extractIds (L span (ArithSeq _ _ _))      = unsupported (Just span) "ArithSeq"
 #else
-  extractIds (L span (ArithSeq _postTcExpr seqInfo)) = ast (Just span) "ArithSeq" $ do
+  extractIds (L span (ArithSeq mPostTcExpr seqInfo)) = ast (Just span) "ArithSeq" $ do
     extractIds seqInfo
+    case ifPostTc (undefined :: id) mPostTcExpr of
+      Just postTcExpr -> extractIds (L span postTcExpr)
+      Nothing         -> return Nothing
 #endif
 
 #if __GLASGOW_HASKELL__ >= 706
@@ -1004,6 +1044,9 @@ instance Record id => ExtractIds (LHsExpr id) where
 #if __GLASGOW_HASKELL__ >= 707
   extractIds (L span (HsUnboundVar _))      = unsupported (Just span) "HsUnboundVar"
 #endif
+
+typecheckOnly :: SrcSpan
+typecheckOnly = mkGeneralSrcSpan (fsLit "<typecheck only>")
 
 instance Record id => ExtractIds (ArithSeqInfo id) where
   extractIds (From expr) = ast Nothing "From" $
@@ -1080,8 +1123,8 @@ instance Record id => ExtractIds (LStmt id) where
 #endif
 
 instance Record id => ExtractIds (LPat id) where
-  extractIds (L span (WildPat _postTcType)) = ast (Just span) "WildPat" $
-    return Nothing
+  extractIds (L span (WildPat postTcType)) = ast (Just span) "WildPat" $
+    recordExpType span (ifPostTc (undefined :: id) postTcType)
   extractIds (L span (VarPat id)) = ast (Just span) "VarPat" $
     record span True id
   extractIds (L span (LazyPat pat)) = ast (Just span) "LazyPat" $

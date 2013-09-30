@@ -3559,7 +3559,7 @@ syntheticTests =
         out2 <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
         assertEqual "" "Version 2\n" out2
     )
-  , ( "Subexpression types"
+  , ( "Subexpression types 1: Simple expressions"
     , ifIdeBackendHaddockTestsEnabled (withOpts ["-XNoMonomorphismRestriction"]) $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
@@ -3611,6 +3611,24 @@ syntheticTests =
                       --        123456789012345678901234567890123
                     , {- 21 -} "t21 = MyPolyRecordCon { c = 'a' }"
                     , {- 22 -} "t22 = t21 { c = 'b' }"
+                      -- Case statements, underscore
+                      --       0         1         2         3         4
+                      --        1234567890123456789012345678901234567890
+                    , {- 23 -} "t23 = case t18 of MyRecordCon a b -> b"
+                    , {- 24 -} "t24 = case t21 of MyPolyRecordCon c -> c"
+                    , {- 25 -} "t25 x = case x of Left _  -> Nothing"
+                    , {- 26 -} "                  Right y -> Just y"
+                      -- If statement
+                      --       0         1         2         3
+                      --        123456789012345678901234567890
+                    , {- 27 -} "t27 x y z = if x then y else z"
+                      -- Sections, arithmetic sequences
+                      --        1234567890123456
+                    , {- 28 -} "t28 = ([1..] !!)"
+                    , {- 29 -} "t29 = (!! 0)"
+                      -- Negation
+                      --        12345678901
+                    , {- 30 -} "t30 x = - x"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
@@ -3618,133 +3636,196 @@ syntheticTests =
         -- TODO: the order of these "dominators" seems rather random!
         expTypes <- getExpTypes session
         assertExpTypes expTypes "A" (2, 6, 2, 6) [
-            (2,  1, 2, 13, "Bool")
-          , (2,  6, 2,  8, "Bool -> Bool")
+            (2,  6, 2,  8, "Bool -> Bool")
           , (2,  6, 2,  8, "a -> a")
           , (2,  6, 2, 13, "Bool")
           ]
         assertExpTypes expTypes "A" (2, 9, 2, 13) [
-            (2, 1, 2, 13, "Bool")
-          , (2, 6, 2, 13, "Bool")
+            (2, 6, 2, 13, "Bool")
           , (2, 9, 2, 13, "Bool")
           ]
         assertExpTypes expTypes "A" (3, 7, 3, 7) [
-            (3,  1, 3, 38, "Float")
-          , (3,  6, 3, 38, "Float")
+            (3,  6, 3, 38, "Float")
           , (3,  7, 3, 19, "Int -> Float")
           , (3,  7, 3, 19, "(Integral a, Num b) => a -> b")
           ]
         assertExpTypes expTypes "A" (3, 37, 3, 37) [
-            (3,  1, 3, 38, "Float")
-          , (3,  6, 3, 38, "Float")
+            (3,  6, 3, 38, "Float")
           , (3, 37, 3, 38, "Int")
           ]
         assertExpTypes expTypes "A" (4, 7, 4, 7) [
-            (4,  1, 4, 13, "t -> t")
-          , (4,  6, 4, 13, "t -> t")
+            (4,  6, 4, 13, "t -> t")
           , (4,  7, 4,  8, "t")
           ]
         assertExpTypes expTypes "A" (5, 25, 5, 25) [
-            (5,  1, 5, 32, "()")
-          , (5,  6, 5, 32, "()")
+            (5,  6, 5, 32, "()")
           , (5, 24, 5, 27, "Bool -> ()")
           , (5, 24, 5, 27, "t -> ()")
           , (5, 24, 5, 32, "()")
           ]
         assertExpTypes expTypes "A" (6, 12, 6, 13) [
-            (6,  1, 6, 13, "t -> t1 -> t2 -> t")
-          , (6, 12, 6, 13, "t")
+            (6, 12, 6, 13, "t")
           ]
         assertExpTypes expTypes "A" (7, 12, 7, 13) [
-            (7,  1, 7, 13, "t -> t1 -> t2 -> t1")
-          , (7, 12, 7, 13, "t1")
+            (7, 12, 7, 13, "t1")
           ]
         assertExpTypes expTypes "A" (8, 12, 8, 13) [
-            (8,  1, 8, 13, "t -> t1 -> t2 -> t2")
-          , (8, 12, 8, 13, "t2")
+            (8, 12, 8, 13, "t2")
           ]
         assertExpTypes expTypes "A" (9, 30, 9, 31) [
-            (9,  1, 9, 50, "(t1 -> t -> t) -> (t -> t2 -> t) -> t1 -> t -> t2 -> (t, t)")
-          , (9, 16, 9, 50, "(t, t)")
+            (9, 16, 9, 50, "(t, t)")
           , (9, 17, 9, 32, "t")
           , (9, 24, 9, 31, "t")
           , (9, 30, 9, 31, "t2")
           ]
         assertExpTypes expTypes "A" (9, 35, 9, 36) [
-            (9,  1, 9, 50, "(t1 -> t -> t) -> (t -> t2 -> t) -> t1 -> t -> t2 -> (t, t)")
-          , (9, 16, 9, 50, "(t, t)")
+            (9, 16, 9, 50, "(t, t)")
           , (9, 34, 9, 49, "t")
           , (9, 35, 9, 36, "t1")
           , (9, 35, 9, 42, "t")
           ]
         assertExpTypes expTypes "A" (10, 8, 10, 11) [
-            (10, 1, 10, 19, "(Char, [Char])")
-          , (10, 7, 10, 19, "(Char, [Char])")
+            (10, 7, 10, 19, "(Char, [Char])")
           , (10, 8, 10, 11, "Char")
           ]
         assertExpTypes expTypes "A" (10, 13, 10, 18) [
-            (10,  1, 10, 19, "(Char, [Char])")
-          , (10,  7, 10, 19, "(Char, [Char])")
+            (10,  7, 10, 19, "(Char, [Char])")
           , (10, 13, 10, 18, "[Char]")
           ]
         assertExpTypes expTypes "A" (11, 10, 11, 14) [
-            (11,  1, 11, 48, "IO Int")
-          , (11,  7, 11, 48, "IO Int")
+            (11,  7, 11, 48, "IO Int")
           , (11, 10, 11, 14, "String")
           ]
         assertExpTypes expTypes "A" (11, 36, 11, 42) [
-            (11,  1, 11, 48, "IO Int")
-          , (11,  7, 11, 48, "IO Int")
+            (11,  7, 11, 48, "IO Int")
           , (11, 28, 11, 48, "IO Int")
           , (11, 36, 11, 42, "[Char] -> Int")
           , (11, 36, 11, 42, "[a] -> Int")
           , (11, 36, 11, 47, "Int")
           ]
         assertExpTypes expTypes "A" (12, 8, 12, 12) [
-            (12, 1, 12, 20, "[Bool]")
-          , (12, 7, 12, 20, "[Bool]")
+            (12, 7, 12, 20, "[Bool]")
           , (12, 8, 12, 12, "Bool")
           ]
         assertExpTypes expTypes "A" (13, 8, 13, 9) [
-            (13, 1, 13, 13, "Num t => [t]")
-          , (13, 7, 13, 13, "[t]")
+            (13, 7, 13, 13, "[t]")
           , (13, 8, 13,  9, "t")
           ]
         assertExpTypes expTypes "A" (18, 7, 18, 18) [
-            (18, 1, 18, 38, "MyRecord")
-          , (18, 7, 18, 18, "Bool -> Int -> MyRecord")
+            (18, 7, 18, 18, "Bool -> Int -> MyRecord")
           , (18, 7, 18, 38, "MyRecord")
           ]
         assertExpTypes expTypes "A" (18, 21, 18, 22) [
-            (18,  1, 18, 38, "MyRecord")
-          , (18,  7, 18, 38, "MyRecord")
+            (18,  7, 18, 38, "MyRecord")
           , (18, 21, 18, 22, "Bool")
           ]
         assertExpTypes expTypes "A" (18, 35, 18, 36) [
-            (18,  1, 18, 38, "MyRecord")
-          , (18,  7, 18, 38, "MyRecord")
+            (18,  7, 18, 38, "MyRecord")
           , (18, 35, 18, 36, "Int")
           ]
         assertExpTypes expTypes "A" (19, 13, 19, 14) [
-            (19,  1, 19, 20, "MyRecord")
-          , (19,  7, 19, 20, "MyRecord")
+            (19,  7, 19, 20, "MyRecord")
           , (19, 13, 19, 14, "Int")
           ]
         assertExpTypes expTypes "A" (21, 29, 21, 32) [
-            (21,  1, 21, 34, "MyPolyRecord Char")
-          , (21,  7, 21, 34, "MyPolyRecord Char")
+            (21,  7, 21, 34, "MyPolyRecord Char")
           , (21, 29, 21, 32, "Char")
           ]
         assertExpTypes expTypes "A" (21, 7, 21, 22) [
-            (21,  1, 21, 34, "MyPolyRecord Char")
-          , (21,  7, 21, 22, "Char -> MyPolyRecord Char")
+            (21,  7, 21, 22, "Char -> MyPolyRecord Char")
           , (21,  7, 21, 22, "a -> MyPolyRecord a")
           , (21,  7, 21, 34, "MyPolyRecord Char")
           ]
         assertExpTypes expTypes "A" (22, 13, 22, 14) [
-            (22,  1, 22, 22, "MyPolyRecord Char")
-          , (22,  7, 22, 22, "MyPolyRecord Char")
+            (22,  7, 22, 22, "MyPolyRecord Char")
           , (22, 13, 22, 14, "Char")
+          ]
+        -- the "MyRecordCon" apparently is not really recorded as such in the
+        -- AST, we don't get type information about it
+        assertExpTypes expTypes "A" (23, 19, 23, 30) [
+            (23, 7, 23, 39, "Int")
+          ]
+        assertExpTypes expTypes "A" (24, 35, 24, 36) [
+            (24,  7, 24, 41, "Char")
+          , (24, 35, 24, 36, "Char")
+          ]
+        assertExpTypes expTypes "A" (25, 24, 25, 25) [
+            (25,  9, 26, 36, "Maybe a")
+          , (25, 24, 25, 25, "t")
+          ]
+        -- Why both the Maybe a and Maybe a1 (see also second section example)
+        -- (and how is 30..37 even a dom of 25..26?)
+        assertExpTypes expTypes "A" (26, 25, 25, 26) [
+            (25,  9, 26, 36, "Maybe a")
+          , (25, 30, 25, 37, "Maybe a")
+          , (25, 30, 25, 37, "Maybe a1")
+          , (26, 25, 26, 26, "a")
+          ]
+        assertExpTypes expTypes "A" (27, 23, 27, 24) [
+            (27, 13, 27, 31, "t")
+          , (27, 23, 27, 24, "t")
+          ]
+        assertExpTypes expTypes "A" (28, 8, 28, 13) [
+            (28, 8, 28, 13, "a -> [a]")
+          , (28, 8, 28, 13, "Enum a1 => a1 -> [a1]")
+          , (28, 8, 28, 16, "Int -> a")
+          ]
+        assertExpTypes expTypes "A" (29, 8, 29, 10) [
+            (29, 8, 29, 10, "[a] -> Int -> a")
+          , (29, 8, 29, 10, "[a1] -> Int -> a1")
+          , (29, 8, 29, 12, "[a] -> a")
+          ]
+        -- The 'negation' isn't a proper operator and therefore doesn't get its
+        -- own type
+        assertExpTypes expTypes "A" (30, 9, 30, 10) [
+            (30, 9, 30, 12, "a")
+          ]
+    )
+  , ( "Subexpression types 2: TH and QQ"
+    , ifIdeBackendHaddockTestsEnabled (withOpts ["-XNoMonomorphismRestriction", "-XTemplateHaskell"]) $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+                    [ {-  1 -} "module A where"
+                    , {-  2 -} "import Language.Haskell.TH.Syntax"
+                      -- Quotations (expressions, types)
+                      --        1234567890123456789
+                    , {-  3 -} "qTrue = [|  True |]"
+                    , {-  4 -} "qBool = [t| Bool |]"
+                      --        1234567890123456789012345
+                    , {-  5 -} "qComp x xs = [| x : xs |]"
+                    ])
+               <> (updateModule "B.hs" . BSLC.pack . unlines $
+                    [ {-  1 -} "module B where"
+                    , {-  2 -} "import A"
+                      -- Splices (expressions, types)
+                      --        123456789012345678901
+                    , {-  3 -} "t1 = $qTrue :: $qBool"
+                      --        12345678901234567 890 12
+                    , {-  4 -} "t2 = $(qComp 'a' \"bc\")"
+                    ])
+               <> (updateCodeGeneration True)
+
+        updateSessionD session upd 2
+        assertNoErrors session
+
+        expTypes <- getExpTypes session
+        -- The AST doesn't really give us a means to extract the type of
+        -- a bracket expression :( And we get no info about the lifted vars
+        assertExpTypes expTypes "A" (3, 9, 3, 20) []
+        assertExpTypes expTypes "A" (4, 9, 4, 20) []
+        assertExpTypes expTypes "A" (5, 17, 5, 18) []
+        -- We don't return types for types, so check the expr splice only
+        assertExpTypes expTypes "B" (3, 6, 3, 12) [
+            (3, 6, 3, 12, "Bool")
+          ]
+        -- The typechecked tree contains the expanded splice, but the location
+        -- of every term in the splice is set to the location of the entire
+        -- splice
+        assertExpTypes expTypes "B" (4, 8, 4, 13) [
+            (4, 8, 4, 22, "[Char]")
+          , (4, 8, 4, 22, "[Char]")
+          , (4, 8, 4, 22, "Char -> [Char] -> [Char]")
+          , (4, 8, 4, 22, "a -> [a] -> [a]")
+          , (4, 8, 4, 22, "Char")
           ]
     )
   ]
