@@ -23,7 +23,7 @@ import System.Directory (
   , removeDirectoryRecursive
   )
 import System.IO.Temp (createTempDirectory)
-import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr)
+import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr, hPutStrLn)
 import System.IO.Error (isDoesNotExistError)
 
 import Distribution.InstalledPackageInfo
@@ -426,7 +426,7 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
           -- is faster and does not care about most parsing errors
           -- the .cabal file may (appear to) have.
           case parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS of
-            ParseFailed err -> fail $ snd $ locatedErrorMsg err
+            ParseFailed err -> hPutStrLn licensesFile $ snd $ locatedErrorMsg err
             ParseOk _warns (_, Just lf, _) -> do
               -- outputWarns warns  -- false positives
               programDB <- configureAllKnownPrograms  -- won't die
@@ -465,12 +465,12 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
                       if bosx then do
                         bs <- BSL.readFile osxLocation
                         BSL.hPut licensesFile bs
-                      else fail $ "Package " ++ nameString
+                      else hPutStrLn licensesFile $ "Package " ++ nameString
                                   ++ " has no license file in path "
                                   ++ stdLocation
                                   ++ " nor " ++ treeLocation
                                   ++ " nor " ++ osxLocation
-                _ -> fail $ "Package " ++ nameString
+                _ -> hPutStrLn licensesFile $ "Package " ++ nameString
                              ++ " not properly installed."
                              ++ "\n" ++ show pkgInfos
             ParseOk _warns (l, Nothing, mauthor) -> do
@@ -484,7 +484,7 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
                   author = fromMaybe "???" mauthor
               ms <- licenseText license author
               case ms of
-                Nothing -> fail $ "No license text can be found for package "
+                Nothing -> hPutStrLn licensesFile $ "No license text can be found for package "
                                   ++ nameString ++ "."
                 Just s -> do
                   hPutStr licensesFile s
@@ -501,7 +501,8 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
                   appendFile stdoutLog warnMsg
         else
           unless (nameString `elem` configLicenseExc) $
-            fail $ "No .cabal file provided for package "
+            hPutStrLn licensesFile
+                 $ "No .cabal file provided for package "
                    ++ nameString ++ " so no license can be found."
         callback $ Progress step numSteps (Just packageName) (Just packageName)
 
