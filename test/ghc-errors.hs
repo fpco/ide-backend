@@ -3560,7 +3560,7 @@ syntheticTests =
         assertEqual "" "Version 2\n" out2
     )
   , ( "Subexpression types 1: Simple expressions"
-    , ifIdeBackendHaddockTestsEnabled (withOpts ["-XNoMonomorphismRestriction"]) $ \session -> do
+    , withSession (withOpts ["-XNoMonomorphismRestriction"]) $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                       -- Single type var inst, boolean literal
@@ -3753,12 +3753,8 @@ syntheticTests =
             (25,  9, 26, 36, "Maybe a")
           , (25, 24, 25, 25, "t")
           ]
-        -- Why both the Maybe a and Maybe a1 (see also second section example)
-        -- (and how is 30..37 even a dom of 25..26?)
-        assertExpTypes expTypes "A" (26, 25, 25, 26) [
+        assertExpTypes expTypes "A" (26, 25, 26, 26) [
             (25,  9, 26, 36, "Maybe a")
-          , (25, 30, 25, 37, "Maybe a")
-          , (25, 30, 25, 37, "Maybe a1")
           , (26, 25, 26, 26, "a")
           ]
         assertExpTypes expTypes "A" (27, 23, 27, 24) [
@@ -3770,6 +3766,8 @@ syntheticTests =
           , (28, 8, 28, 13, "Enum a1 => a1 -> [a1]")
           , (28, 8, 28, 16, "Int -> a")
           ]
+        -- [a1] -> Int -> [a1] is the polymorphic type of (!!),
+        -- [a] -> Int -> [a] is the "monomorphic" instance (with type vars)
         assertExpTypes expTypes "A" (29, 8, 29, 10) [
             (29, 8, 29, 10, "[a] -> Int -> a")
           , (29, 8, 29, 10, "[a1] -> Int -> a1")
@@ -3782,7 +3780,7 @@ syntheticTests =
           ]
     )
   , ( "Subexpression types 2: TH and QQ"
-    , ifIdeBackendHaddockTestsEnabled (withOpts ["-XNoMonomorphismRestriction", "-XTemplateHaskell"]) $ \session -> do
+    , withSession (withOpts ["-XNoMonomorphismRestriction", "-XTemplateHaskell"]) $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
                     [ {-  1 -} "module A where"
                     , {-  2 -} "import Language.Haskell.TH.Syntax"
@@ -3826,6 +3824,37 @@ syntheticTests =
           , (4, 8, 4, 22, "Char -> [Char] -> [Char]")
           , (4, 8, 4, 22, "a -> [a] -> [a]")
           , (4, 8, 4, 22, "Char")
+          ]
+    )
+  , ( "Subexpression types 3: Type families (fpco #2609)"
+    , withSession (withOpts ["-XTypeFamilies"]) $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                       {- 1 -} "module A where"
+                     , {- 2 -} "type family TestTypeFamily a"
+                     -- Monomorphic instance
+                     , {- 3 -} "type instance TestTypeFamily () = Bool"
+                     , {- 4 -} "t1 :: TestTypeFamily ()"
+                       --       123456789
+                     , {- 5 -} "t1 = True"
+                     -- Polymorphic instance
+                     , {- 6 -} "type instance TestTypeFamily [a] = Maybe a"
+                     , {- 7 -} "t2 :: TestTypeFamily [a]"
+                       --       123456789012
+                     , {- 8 -} "t2 = Nothing"
+                     ])
+
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        expTypes <- getExpTypes session
+        assertExpTypes expTypes "A" (5, 6, 5, 10) [
+            (5, 6, 5, 10, "TestTypeFamily ()")
+          , (5, 6, 5, 10, "Bool")
+          ]
+        assertExpTypes expTypes "A" (8, 6, 8, 13) [
+            (8, 6, 8, 13, "TestTypeFamily [a]")
+          , (8, 6, 8, 13, "Maybe a")
+          , (8, 6, 8, 13, "Maybe a1")
           ]
     )
   ]

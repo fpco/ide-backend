@@ -70,7 +70,8 @@ import NameEnv (nameEnvUniqueElts)
 import DataCon (dataConRepType)
 import Pretty (showDocWith, Mode(OneLineMode))
 import PprTyThing (pprTypeForUser)
-import TcEvidence (HsWrapper(..))
+import TcEvidence (HsWrapper(..), tcCoercionKind)
+import Pair (Pair(..))
 import Type
 import TysWiredIn (mkTupleTy, mkListTy)
 import BasicTypes (boxityNormalTupleSort)
@@ -1332,7 +1333,15 @@ applyWrapper :: HsWrapper -> Type -> Type
 applyWrapper (WpTyApp t')      t = applyTy t t'
 applyWrapper (WpEvApp _)       t = funRes1 t
 applyWrapper (WpCompose w1 w2) t = applyWrapper w1 . applyWrapper w2 $ t
+applyWrapper (WpCast coercion) _ = let Pair _ t = tcCoercionKind coercion in t
 applyWrapper _                 _ = error "unsupported wrapper"
+
+_supportedWrapper :: HsWrapper -> Bool
+_supportedWrapper (WpTyApp _)     = True
+_supportedWrapper (WpEvApp _)     = True
+_supportedWrapper (WpCompose _ _) = True
+_supportedWrapper (WpCast _)      = True
+_supportedWrapper _               = False
 
 -- | Given @a -> b@, return @b@
 funRes1 :: Type -> Type
