@@ -386,9 +386,11 @@ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
                        configPackageDBStack configLicenseExc
                        mcomputed callback = do
   (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
-  let stdoutLog  = ideDistDir </> "licenses.stdout"  -- warnings
-      stderrLog  = ideDistDir </> "licenses.stderr"  -- errors
-      licensesFN = ideDistDir </> "licenses.txt"     -- result
+  let stdoutLogFN = ideDistDir </> "licenses.stdout"  -- warnings
+      stderrLogFN = ideDistDir </> "licenses.stderr"  -- errors
+      licensesFN  = ideDistDir </> "licenses.txt"     -- result
+  stdoutLog <- openBinaryFile stdoutLogFN WriteMode
+  stderrLog <- openBinaryFile stderrLogFN WriteMode
   licensesFile <- openBinaryFile licensesFN WriteMode
   -- The file containing concatenated licenses for core components.
   let bsCore = BSL8.pack $(runIO (BSL.readFile "CoreLicenses.txt") >>= lift . BSL8.unpack)
@@ -410,11 +412,10 @@ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
             _outputWarns warns = do
               let warnMsg = "Parse warnings for " ++ packageFile ++ ":\n"
                             ++ unlines (map (showPWarning packageFile) warns)
-                            ++ "\n"
-              appendFile stdoutLog warnMsg
+              hPutStrLn stdoutLog warnMsg
         b <- doesFileExist packageFile
         if b then do
-          hPutStr licensesFile $ "\nLicense for " ++ nameString ++ ":\n\n"
+          hPutStrLn licensesFile $ "\nLicense for " ++ nameString ++ ":\n"
           pkgS <- readFile packageFile
           -- We can't use @parsePackageDescription@, because it defaults to
           -- AllRightsReserved and we default to BSD3. It's very hard
@@ -425,7 +426,9 @@ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
           -- is faster and does not care about most parsing errors
           -- the .cabal file may (appear to) have.
           case parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS of
-            ParseFailed err -> hPutStrLn licensesFile $ snd $ locatedErrorMsg err
+            ParseFailed err -> do
+              hPutStrLn licensesFile $ snd $ locatedErrorMsg err
+              hPutStrLn stderrLog $ snd $ locatedErrorMsg err
             ParseOk _warns (_, Just lf, _) -> do
               -- outputWarns warns  -- false positives
               programDB <- configureAllKnownPrograms  -- won't die
@@ -458,29 +461,38 @@ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
                           bs <- BSL.readFile loc
                           BSL.hPut licensesFile bs
                         else tryPaths ps
-                      tryPaths [] = hPutStrLn licensesFile
-                        $ "Package " ++ nameString
-                          ++ " has no license file in path "
-                          ++ concat (intersperse " nor " candidatePaths)
-                          ++ ". Haddock interfaces path (from, e.g., --haddockdir or --docdir) is "
-                          ++ hIn ++ "."
+                      tryPaths [] = do
+                        let errorMsg =
+                              "Package " ++ nameString
+                              ++ " has no license file in path "
+                              ++ concat (intersperse " nor " candidatePaths)
+                              ++ ". Haddock interfaces path (from, e.g., --haddockdir or --docdir) is "
+                              ++ hIn ++ "."
+                        hPutStrLn licensesFile errorMsg
+                        hPutStrLn stderrLog errorMsg
                   tryPaths candidatePaths
-                _ -> hPutStrLn licensesFile $ "Package " ++ nameString
-                             ++ " not properly installed."
-                             ++ "\n" ++ show pkgInfos
+                _ -> do
+                  let errorMsg = "Package " ++ nameString
+                                 ++ " not properly installed."
+                                 ++ "\n" ++ show pkgInfos
+                  hPutStrLn licensesFile errorMsg
+                  hPutStrLn stderrLog errorMsg
             ParseOk _warns (l, Nothing, mauthor) -> do
               -- outputWarns warns  -- false positives
               when (isNothing l) $ do
                 let warnMsg =
                       "WARNING: Package " ++ packageFile
-                      ++ " has no license nor license file specified.\n"
-                appendFile stdoutLog warnMsg
+                      ++ " has no license nor license file specified."
+                hPutStrLn stdoutLog warnMsg
               let license = fromMaybe BSD3 l
                   author = fromMaybe "???" mauthor
               ms <- licenseText license author
               case ms of
-                Nothing -> hPutStrLn licensesFile $ "No license text can be found for package "
-                                  ++ nameString ++ "."
+                Nothing -> do
+                  let errorMsg = "No license text can be found for package "
+                                 ++ nameString ++ "."
+                  hPutStrLn licensesFile errorMsg
+                  hPutStrLn stderrLog errorMsg
                 Just s -> do
                   hPutStr licensesFile s
                   let assumed = if isNothing l
@@ -492,22 +504,25 @@ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
                         ++ assumed
                         ++ " license is "
                         ++ show license
-                        ++ ". Reproducing standard license text.\n"
-                  appendFile stdoutLog warnMsg
+                        ++ ". Reproducing standard license text."
+                  hPutStrLn stdoutLog warnMsg
         else
-          unless (nameString `elem` configLicenseExc) $
-            hPutStrLn licensesFile
-                 $ "No .cabal file provided for package "
-                   ++ nameString ++ " so no license can be found."
+          unless (nameString `elem` configLicenseExc) $ do
+            let errorMsg = "No .cabal file provided for package "
+                           ++ nameString ++ " so no license can be found."
+            hPutStrLn licensesFile errorMsg
+            hPutStrLn stderrLog errorMsg
         callback $ Progress step numSteps (Just packageName) (Just packageName)
 
   res <- Ex.try $ mapM_ f (zip pkgs [1..])
+  hClose stdoutLog
+  hClose stderrLog
   hClose licensesFile
   let handler :: Ex.IOException -> IO ExitCode
       handler e = do
         let msg = "Licenses concatenation failed. The exception is:\n"
                   ++ show e
-        writeFile stderrLog msg
+        hPutStrLn stderrLog msg
         return $ ExitFailure 1
   either handler (const $ return ExitSuccess) res
 

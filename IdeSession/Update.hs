@@ -612,6 +612,10 @@ runStmt IdeSession{ideState} m fun = do
 -- module names. The build directory does not overlap with any of the other
 -- used directories and its path.
 --
+-- Logs from the building process are saved in files
+-- build/ide-backend-exe.stdout and build/ide-backend-exe.stderr
+-- in the @getDistDir@ directory.
+--
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
 buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
@@ -641,6 +645,10 @@ buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 -- it needs the project modules to be already loaded within the session
 -- and the generated docs can be found in the @doc@ subdirectory
 -- of @getDistDir@.
+--
+-- Logs from the documentation building process are saved in files
+-- doc/ide-backend-doc.stdout and doc/ide-backend-doc.stderr
+-- in the @getDistDir@ directory.
 --
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildDoc :: IdeSessionUpdate
@@ -682,6 +690,10 @@ buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 -- properly, the haddock interfaces path should be set manually. E.g.,
 -- "cabal configure --docdir=X --htmldir=X", is reported to work,
 -- because the haddock interfaces path is by default based on docdir.
+--
+-- Logs from the license search and catenation process are saved in files
+-- licenses.stdout and licenses.stderr
+-- in the @getDistDir@ directory.
 --
 -- Note: currently @configGenerateModInfo@ needs to be set
 -- for this function to work (see #86).

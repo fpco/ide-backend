@@ -611,18 +611,18 @@ syntheticTests =
         let upd = buildLicenses "test/Puns/cabals/parse_error"
         updateSessionD session upd 99
         status <- getBuildLicensesStatus session
-        assertEqual "after license parse_error" (Just $ ExitFailure 1) status
+        assertEqual "after license parse_error" (Just ExitSuccess) status
         distDir <- getDistDir session
         licensesErr <- readFile $ distDir </> "licenses.stderr"
         assertEqual "licenses parse_error msgs" licensesErr
-          "Licenses concatenation failed. The exception is:\nuser error (Parse of field 'license' failed.)"
+          "Parse of field 'license' failed.\nNo .cabal file provided for package transformers so no license can be found.\n"
         let upd2 = buildLicenses "test/Puns/cabals/no_text_error"
         updateSessionD session upd2 99
         status2 <- getBuildLicensesStatus session
-        assertEqual "after license no_text_error" (Just $ ExitFailure 1) status2
+        assertEqual "after license no_text_error" (Just ExitSuccess) status2
         licensesErr2 <- readFile $ distDir </> "licenses.stderr"
         assertEqual "licenses no_text_error msgs" licensesErr2
-          "Licenses concatenation failed. The exception is:\nuser error (No license text can be found for package mtl.)"
+          "No license text can be found for package mtl.\nNo .cabal file provided for package transformers so no license can be found.\n"
     )
   , ( "Test CWD by reading a data file"
     , withSession defaultSessionConfig $ \session -> do
@@ -1781,14 +1781,12 @@ syntheticTests =
         let upd = buildLicenses "test/MainModule/cabals"
         updateSessionD session upd 6
         distDir <- getDistDir session
-        errExists <- doesFileExist $ distDir </> "licenses.stderr"
-        when errExists $ do
-          licensesErr <- readFile $ distDir </> "licenses.stderr"
-          assertEqual "license errors" "" licensesErr
+        licensesErrs <- readFile $ distDir </> "licenses.stderr"
+        assertEqual "licensesErrs length" 0 (length licensesErrs)
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
-        licensesWarnExists <- doesFileExist $ distDir </> "licenses.stdout"
-        assertBool "licenses no warnings" $ not licensesWarnExists
+        licensesWarns <- readFile $ distDir </> "licenses.stdout"
+        assertEqual "licensesWarns length" 0 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertEqual "licenses length" 21409 (length licenses)
     )
