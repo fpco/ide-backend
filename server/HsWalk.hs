@@ -61,7 +61,7 @@ import OccName
 import Outputable
 import qualified RdrName
 import TcRnTypes
-import TcType (tidyOpenType)
+import TcType (tidyOpenType, evVarPred)
 import Var hiding (idInfo)
 import VarEnv (TidyEnv, emptyTidyEnv)
 import Unique (Unique, Uniquable, getUnique, getKey)
@@ -1330,18 +1330,14 @@ instance Record id => ExtractIds (LHsDecl id) where
 ------------------------------------------------------------------------------}
 
 applyWrapper :: HsWrapper -> Type -> Type
+applyWrapper WpHole            t = t -- identity
 applyWrapper (WpTyApp t')      t = applyTy t t'
 applyWrapper (WpEvApp _)       t = funRes1 t
 applyWrapper (WpCompose w1 w2) t = applyWrapper w1 . applyWrapper w2 $ t
 applyWrapper (WpCast coercion) _ = let Pair _ t = tcCoercionKind coercion in t
-applyWrapper _                 _ = error "unsupported wrapper"
-
-_supportedWrapper :: HsWrapper -> Bool
-_supportedWrapper (WpTyApp _)     = True
-_supportedWrapper (WpEvApp _)     = True
-_supportedWrapper (WpCompose _ _) = True
-_supportedWrapper (WpCast _)      = True
-_supportedWrapper _               = False
+applyWrapper (WpTyLam v)       t = mkForAllTy v t
+applyWrapper (WpEvLam v)       t = mkFunTy (evVarPred v) t
+applyWrapper (WpLet _)         t = t -- we don't care about evidence _terms_
 
 -- | Given @a -> b@, return @b@
 funRes1 :: Type -> Type

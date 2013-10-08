@@ -3857,6 +3857,30 @@ syntheticTests =
           , (8, 6, 8, 13, "Maybe a1")
           ]
     )
+  , ( "Subexpression types 4: Higher rank types (fpco #2635)"
+    , withSession (withOpts ["-XRank2Types"]) $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                       {- 1 -} "module A where"
+                     , {- 2 -} "newtype T = MkT (forall a. Ord a => a -> a -> Bool)"
+                       --       12345678901234
+                     , {- 3 -} "teq = MkT (==)"
+                     ])
+
+        -- Note: intentionally using (==) in this test rather than (<=) so that
+        -- the "definition type" is different from the "usage type"
+        -- (forall a. Eq a => a -> a -> Bool) vs (forall a. Ord a => a -> a -> Bool)
+
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        expTypes <- getExpTypes session
+        assertExpTypes expTypes "A" (3, 12, 3, 14) [
+            (3,  7, 3, 15, "T")
+          , (3, 11, 3, 15, "Ord a => a -> a -> Bool")
+          , (3, 11, 3, 15, "a -> a -> Bool")
+          , (3, 11, 3, 15, "Eq a => a -> a -> Bool")
+          ]
+    )
   ]
 
 deletePackage :: FilePath -> IO ()
