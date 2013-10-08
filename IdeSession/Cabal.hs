@@ -187,7 +187,7 @@ externalDeps pkgs =
   in liftM catMaybes $ mapM depOfName pkgs
 
 mkConfFlags :: FilePath -> Bool -> PackageDBStack -> [FilePath] -> Setup.ConfigFlags
-mkConfFlags ideDistDir dynlink packageDbStack progPathExtra =
+mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra =
   (Setup.defaultConfigFlags (defaultProgramConfiguration progPathExtra))
     { Setup.configDistPref = Setup.Flag ideDistDir
     , Setup.configUserInstall = Setup.Flag False
@@ -195,7 +195,7 @@ mkConfFlags ideDistDir dynlink packageDbStack progPathExtra =
     , Setup.configSharedLib = Setup.Flag dynlink
     , Setup.configDynExe = Setup.Flag dynlink
       -- @Nothing@ wipes out default, initial DBs.
-    , Setup.configPackageDBs = Nothing : map Just packageDbStack
+    , Setup.configPackageDBs = Nothing : map Just configPackageDBStack
     , Setup.configProgramPathExtra = progPathExtra
     }
 
@@ -206,7 +206,7 @@ configureAndBuild :: FilePath -> FilePath -> [FilePath]
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
 configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
-                  packageDbStack pkgs loadedMs callback ms = do
+                  configPackageDBStack pkgs loadedMs callback ms = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
   callback $ Progress 1 4 Nothing Nothing
@@ -239,7 +239,7 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = mkConfFlags ideDistDir dynlink packageDbStack progPathExtra
+      confFlags = mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
                      { Setup.buildDistPref = Setup.Flag ideDistDir
@@ -287,7 +287,7 @@ configureAndHaddock :: FilePath -> FilePath -> [FilePath]
                     -> [ModuleName] -> (Progress -> IO ())
                     -> IO ExitCode
 configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
-                    packageDbStack pkgs loadedMs callback = do
+                    configPackageDBStack pkgs loadedMs callback = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
   callback $ Progress 1 4 Nothing Nothing
@@ -309,7 +309,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = mkConfFlags ideDistDir dynlink packageDbStack progPathExtra
+      confFlags = mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       haddockFlags = Setup.defaultHaddockFlags
@@ -343,22 +343,22 @@ buildExecutable :: FilePath -> FilePath -> [FilePath]
                 -> [(ModuleName, FilePath)]
                 -> IO ExitCode
 buildExecutable ideSourcesDir ideDistDir progPathExtra
-                ghcOpts dynlink packageDbStack
+                ghcOpts dynlink configPackageDBStack
                 mcomputed callback ms = do
   (loadedMs, pkgs) <- buildDeps mcomputed
   configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
-                    packageDbStack pkgs loadedMs callback ms
+                    configPackageDBStack pkgs loadedMs callback ms
 
 buildHaddock :: FilePath -> FilePath -> [FilePath]
              -> [String] -> Bool -> PackageDBStack
              -> Strict Maybe Computed -> (Progress -> IO ())
              -> IO ExitCode
 buildHaddock ideSourcesDir ideDistDir progPathExtra
-             ghcOpts dynlink packageDbStack
+             ghcOpts dynlink configPackageDBStack
              mcomputed callback = do
   (loadedMs, pkgs) <- buildDeps mcomputed
   configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
-                      packageDbStack pkgs loadedMs callback
+                      configPackageDBStack pkgs loadedMs callback
 
 lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
 lFieldDescrs =
@@ -373,11 +373,17 @@ lFieldDescrs =
      (\(_, _, t3) -> fromMaybe "???" t3) (\a (t1, t2, _) -> (t1, t2, Just a))
  ]
 
-buildLicenseCatenation :: FilePath -> FilePath -> [FilePath] -> PackageDBStack -> [String]
-                       -> Strict Maybe Computed -> (Progress -> IO ())
+-- | Build the concatenation of all licence files. See 'buildLicenses'.
+buildLicenseCatenation :: FilePath               -- ^ the directory with all the .cabal files
+                       -> FilePath               -- ^ the working directory; the resulting file is written there
+                       -> [FilePath]             -- ^ see 'configExtraPathDirs'
+                       -> PackageDBStack         -- ^ see 'configPackageDBStack'
+                       -> [String]               -- ^ see 'configLicenseExc'
+                       -> Strict Maybe Computed  -- ^ compilation state
+                       -> (Progress -> IO ())    -- ^ progress callback
                        -> IO ExitCode
-buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
-                       packageDbStack configLicenseExc
+buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
+                       configPackageDBStack configLicenseExc
                        mcomputed callback = do
   (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
   let stdoutLog  = ideDistDir </> "licenses.stdout"  -- warnings
@@ -385,7 +391,6 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
       licensesFN = ideDistDir </> "licenses.txt"     -- result
   licensesFile <- openBinaryFile licensesFN WriteMode
   -- The file containing concatenated licenses for core components.
-  -- If not present in @cabalsDir@, taken from the default location.
   let bsCore = BSL8.pack $(runIO (BSL.readFile "CoreLicenses.txt") >>= lift . BSL8.unpack)
   BSL.hPut licensesFile bsCore
 
@@ -424,21 +429,25 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
             ParseOk _warns (_, Just lf, _) -> do
               -- outputWarns warns  -- false positives
               programDB <- configureAllKnownPrograms  -- won't die
-                             minBound (defaultProgramConfiguration extraPathDirs)
-              pkgIndex <- getInstalledPackages minBound packageDbStack programDB
+                             minBound (defaultProgramConfiguration configExtraPathDirs)
+              pkgIndex <- getInstalledPackages minBound configPackageDBStack programDB
               let pkgId = Package.PackageIdentifier
                             { pkgName = Package.PackageName nameString
                             , pkgVersion = version }
                   pkgInfos = lookupSourcePackageId pkgIndex pkgId
               case pkgInfos of
                 InstalledPackageInfo{haddockInterfaces = hIn : _} : _ -> do
+                  -- Since the licence file path can't be specified
+                  -- in InstalledPackageInfo, we can only guess what it is
+                  -- and we do that on the basis of the haddock interfaces path.
+                  -- If it fails, we try two more possible locations below.
                   let ps = splitPath hIn
                       prefix = joinPath $ take (length ps - 2) ps
                       -- The directory of the licence file is ignored
                       -- in installed packages, hence @takeFileName@.
                       stdLocation = prefix </> takeFileName lf
                   bstd <- doesFileExist stdLocation
-                  if bstd then do
+                  if bstd then do  -- covers cabal default case where htmldir = $docdir/html
                     bs <- BSL.readFile stdLocation
                     BSL.hPut licensesFile bs
                   else do
@@ -452,18 +461,20 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
                       BSL.hPut licensesFile bs
                     else do
                       -- Assume the package is not installed, but in a GHC tree
-                      -- with an alternative layout (OSX?).
-                      let osxPrefix = joinPath $ take (length ps - 1) ps
-                          osxLocation = osxPrefix </> takeFileName lf
-                      bosx <- doesFileExist osxLocation
-                      if bosx then do
-                        bs <- BSL.readFile osxLocation
+                      -- with an alternative layout.
+                      let altPrefix = joinPath $ take (length ps - 1) ps
+                          altLocation = altPrefix </> takeFileName lf
+                      balt <- doesFileExist altLocation
+                      if balt then do  -- covers case where htmldir = docdir
+                        bs <- BSL.readFile altLocation
                         BSL.hPut licensesFile bs
-                      else hPutStrLn licensesFile $ "Package " ++ nameString
-                                  ++ " has no license file in path "
-                                  ++ stdLocation
-                                  ++ " nor " ++ treeLocation
-                                  ++ " nor " ++ osxLocation
+                      else hPutStrLn licensesFile
+                           $ "Package " ++ nameString
+                             ++ " has no license file in path " ++ stdLocation
+                             ++ " nor " ++ treeLocation
+                             ++ " nor " ++ altLocation
+                             ++ " (haddockInterfaces (e.g., from --docdir) is "
+                             ++ hIn ++ ")."
                 _ -> hPutStrLn licensesFile $ "Package " ++ nameString
                              ++ " not properly installed."
                              ++ "\n" ++ show pkgInfos
@@ -581,18 +592,17 @@ packageDbArgs (Version ver _) dbstack = case dbstack of
       = "package-db"
 
 generateMacros :: PackageDBStack -> [FilePath] -> IO String
-generateMacros packageDbStack extraPathDirs = do
+generateMacros configPackageDBStack configExtraPathDirs = do
   let verbosity = silent
   (ghcPkg, _) <- requireProgram verbosity ghcPkgProgram
-                                (defaultProgramConfiguration extraPathDirs)
-  pkgidss <- mapM (HcPkg.list verbosity ghcPkg) packageDbStack
+                                (defaultProgramConfiguration configExtraPathDirs)
+  pkgidss <- mapM (HcPkg.list verbosity ghcPkg) configPackageDBStack
   let newestPkgs = map last . groupBy ((==) `on` Package.packageName) . sort . concat $ pkgidss
   return $ generatePackageVersionMacros newestPkgs
 
 defaultProgramConfiguration :: [FilePath] -> Cabal.Program.ProgramConfiguration
-defaultProgramConfiguration extraPathDirs =
+defaultProgramConfiguration configExtraPathDirs =
   Cabal.Program.setProgramSearchPath
     ( Cabal.Program.ProgramSearchPathDefault
-    : map Cabal.Program.ProgramSearchPathDir extraPathDirs )
+    : map Cabal.Program.ProgramSearchPathDir configExtraPathDirs )
   Cabal.Program.defaultProgramConfiguration
-

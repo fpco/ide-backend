@@ -666,11 +666,25 @@ buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
--- Similarly to 'buildExe', it needs the project modules to be already
--- loaded within the session and the concatenated licences can be found
+-- Similarly to 'buildExe', the function needs the project modules to be
+-- already loaded within the session. The concatenated licenses can be found
 -- in the @licenses.txt@ file of @getDistDir@.
 --
--- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
+-- The function expects .cabal files of all used packages,
+-- except those mentioned in 'configLicenseExc',
+-- to be gathered in the directory given as the first argument.
+-- The code then expects to find those packages installed and their
+-- license files installed in the usual place that Cabal puts them
+-- (or the packages should be embedded in the GHC tree).
+--
+-- We guess the installed location of the license file on the basis
+-- of the haddock interfaces path. If the default setting does not work
+-- properly, the haddock interfaces path should be set manually. E.g.,
+-- "cabal configure --docdir=X --htmldir=X", is reported to work,
+-- because the haddock interfaces path is by default based on docdir.
+--
+-- Note: currently @configGenerateModInfo@ needs to be set
+-- for this function to work (see #86).
 buildLicenses :: FilePath -> IdeSessionUpdate
 buildLicenses cabalsDir = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     mcomputed <- get ideComputed
