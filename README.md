@@ -1,21 +1,6 @@
 ide-backend
 ===========
 
-Compile and test with
-
-    cabal install --enable-tests
-
-
-The API is in IdeSession.hs. It can be formatted nicely for viewing with
-
-    cabal haddock
-
-A sample program using the ide-backend library can be invoked as follows
-
-    dist/build/typecheck-dir/typecheck-dir
-
-Feel free to file issues on the github tracker.
-
 Versions and releases
 ---------------------
 
@@ -57,7 +42,7 @@ Changelog
 
  *  Version 0.7.0.1
 
-     * Bugfix: make sure restartSession passes the configPackageDBStack 
+     * Bugfix: make sure restartSession passes the configPackageDBStack
        to ghc (#114)
 
  *  Version 0.7.0.0
@@ -69,28 +54,28 @@ Changelog
        on the _next_ call to updateSession (#107). Note that if the server is
        in dead state (i.e., after the serve crash and before the next call to
        updateSession) a call to runStmt will throw an exception (just like when
-       you call runStmt when no code is compiled at all). It is the 
+       you call runStmt when no code is compiled at all). It is the
        responsibility of the client code to check for source errors
        (using getSourceErrors) before calling runStmt.
 
      * It is now possible to reuse previously generated cabal macros, in order
        to improve performance (#109). The type of initSession has changed to
-      
+
            initSession :: SessionInitParams -> SessionConfig -> IO IdeSession
 
        where
-           
+
            data SessionInitParams = SessionInitParams {
                sessionInitCabalMacros :: Maybe BSL.ByteString
              }
-     
+
        Similarly, restartSession now has type (#113)
 
            restartSession :: IdeSession -> Maybe SessionInitParams -> IO ()
 
        When passed Nothing it will leave the cabal macros unchanged, but when
        passed a SessionInitParams it will regenerate them or use a previously
-       regenerated cabal macros file. 
+       regenerated cabal macros file.
 
        The generated cabal macros can be accessed using
 
@@ -119,7 +104,7 @@ Changelog
 
  *  Version 0.6.0.2
 
-     * Fix problem with cabal_macros in package databases with multiple 
+     * Fix problem with cabal_macros in package databases with multiple
        versions of the same package.
 
      * Merge pull request from fpco/looger (#105)
