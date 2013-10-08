@@ -10,7 +10,7 @@ import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.Function (on)
-import Data.List (delete, sort, groupBy, nub)
+import Data.List (delete, sort, groupBy, nub, intersperse)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
@@ -18,7 +18,7 @@ import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
-import System.FilePath ((</>), takeFileName, splitPath, joinPath)
+import System.FilePath ((</>), takeFileName, takeDirectory)
 import System.Directory (
     doesFileExist
   , createDirectoryIfMissing
@@ -440,41 +440,31 @@ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
                   -- Since the licence file path can't be specified
                   -- in InstalledPackageInfo, we can only guess what it is
                   -- and we do that on the basis of the haddock interfaces path.
-                  -- If it fails, we try two more possible locations below.
-                  let ps = splitPath hIn
-                      prefix = joinPath $ take (length ps - 2) ps
-                      -- The directory of the licence file is ignored
-                      -- in installed packages, hence @takeFileName@.
-                      stdLocation = prefix </> takeFileName lf
-                  bstd <- doesFileExist stdLocation
-                  if bstd then do  -- covers cabal default case where htmldir = $docdir/html
-                    bs <- BSL.readFile stdLocation
-                    BSL.hPut licensesFile bs
-                  else do
-                    -- Assume the package is not installed, but in a GHC tree.
-                    let treePs = splitPath prefix
-                        treePrefix = joinPath $ take (length treePs - 3) treePs
-                        treeLocation = treePrefix </> takeFileName lf
-                    btree <- doesFileExist treeLocation
-                    if btree then do
-                      bs <- BSL.readFile treeLocation
-                      BSL.hPut licensesFile bs
-                    else do
-                      -- Assume the package is not installed, but in a GHC tree
-                      -- with an alternative layout.
-                      let altPrefix = joinPath $ take (length ps - 1) ps
-                          altLocation = altPrefix </> takeFileName lf
-                      balt <- doesFileExist altLocation
-                      if balt then do  -- covers case where htmldir = docdir
-                        bs <- BSL.readFile altLocation
-                        BSL.hPut licensesFile bs
-                      else hPutStrLn licensesFile
-                           $ "Package " ++ nameString
-                             ++ " has no license file in path " ++ stdLocation
-                             ++ " nor " ++ treeLocation
-                             ++ " nor " ++ altLocation
-                             ++ " (haddockInterfaces (e.g., from --docdir) is "
-                             ++ hIn ++ ")."
+                  -- TODO: on next rewrite (and re-testing), base it on htmldir
+                  let candidatePaths =
+                        [ iterate takeDirectory hIn !! 2
+                            -- covers cabal default case: htmldir = docdir/html
+                        , takeDirectory hIn
+                            -- covers case where htmldir = docdir, for in-place
+                        , iterate takeDirectory hIn !! 5
+                            -- covers another case for in-place packages
+                        ]
+                      tryPaths (p : ps) = do
+                        -- The directory of the licence file is ignored
+                        -- in installed packages, hence @takeFileName@.
+                        let loc = p </> takeFileName lf
+                        exists <- doesFileExist loc
+                        if exists then do
+                          bs <- BSL.readFile loc
+                          BSL.hPut licensesFile bs
+                        else tryPaths ps
+                      tryPaths [] = hPutStrLn licensesFile
+                        $ "Package " ++ nameString
+                          ++ " has no license file in path "
+                          ++ concat (intersperse " nor " candidatePaths)
+                          ++ ". Haddock interfaces path (from, e.g., --haddockdir or --docdir) is "
+                          ++ hIn ++ "."
+                  tryPaths candidatePaths
                 _ -> hPutStrLn licensesFile $ "Package " ++ nameString
                              ++ " not properly installed."
                              ++ "\n" ++ show pkgInfos
