@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell     #-}
 module IdeSession.Cabal (
     buildExecutable, buildHaddock, buildLicenseCatenation
   , packageDbArgs, generateMacros
@@ -7,6 +8,7 @@ module IdeSession.Cabal (
 import qualified Control.Exception as Ex
 import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.Function (on)
 import Data.List (delete, sort, groupBy, nub)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
@@ -57,6 +59,7 @@ import qualified Distribution.Text
 import Distribution.Version (anyVersion, thisVersion)
 import Distribution.Verbosity (silent)
 import Language.Haskell.Extension (Language (Haskell2010))
+import Language.Haskell.TH.Syntax (lift, runIO)
 
 import IdeSession.Licenses ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
 import IdeSession.State
@@ -67,8 +70,6 @@ import IdeSession.Types.Translation
 import qualified IdeSession.Strict.List as StrictList
 import qualified IdeSession.Strict.Map  as StrictMap
 import IdeSession.Util
-
-import qualified Paths_ide_backend as Self
 
 -- TODO: factor out common parts of exe building and haddock generation
 -- after Cabal and the code that calls it are improved not to require
@@ -385,14 +386,7 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
   licensesFile <- openBinaryFile licensesFN WriteMode
   -- The file containing concatenated licenses for core components.
   -- If not present in @cabalsDir@, taken from the default location.
-  let cabalCoreFN = cabalsDir </> "CoreLicenses.txt"
-  defaultCoreFN <- Self.getDataFileName "CoreLicenses.txt"
-  cabalCoreExists <- doesFileExist cabalCoreFN
-  defaultCoreExists <- doesFileExist defaultCoreFN
-  let coreFN | cabalCoreExists = cabalCoreFN
-             | defaultCoreExists = defaultCoreFN
-             | otherwise = "CoreLicenses.txt"  -- in-place, for testing mostly
-  bsCore <- BSL.readFile coreFN
+  let bsCore = BSL8.pack $(runIO (BSL.readFile "CoreLicenses.txt") >>= lift . BSL8.unpack)
   BSL.hPut licensesFile bsCore
 
   let numSteps        = length pkgs
