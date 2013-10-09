@@ -608,13 +608,13 @@ runStmt IdeSession{ideState} m fun = do
 -- build the exe).
 --
 -- The executable files are placed in the filesystem inside the @build@
--- subdirectory of @getDistDir@, in subdirectories corresponding to the given
+-- subdirectory of 'Query.getDistDir', in subdirectories corresponding to the given
 -- module names. The build directory does not overlap with any of the other
 -- used directories and its path.
 --
 -- Logs from the building process are saved in files
--- build/ide-backend-exe.stdout and build/ide-backend-exe.stderr
--- in the @getDistDir@ directory.
+-- @build\/ide-backend-exe.stdout@ and @build\/ide-backend-exe.stderr@
+-- in the 'Query.getDistDir' directory.
 --
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
@@ -644,11 +644,11 @@ buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 -- the ide-backend updateModule* mechanism. Similarly to 'buildExe',
 -- it needs the project modules to be already loaded within the session
 -- and the generated docs can be found in the @doc@ subdirectory
--- of @getDistDir@.
+-- of 'Query.getDistDir'.
 --
 -- Logs from the documentation building process are saved in files
--- doc/ide-backend-doc.stdout and doc/ide-backend-doc.stderr
--- in the @getDistDir@ directory.
+-- @doc\/ide-backend-doc.stdout@ and @doc\/ide-backend-doc.stderr@
+-- in the 'Query.getDistDir' directory.
 --
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildDoc :: IdeSessionUpdate
@@ -676,26 +676,27 @@ buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 -- | Build a file containing licenses of all used packages.
 -- Similarly to 'buildExe', the function needs the project modules to be
 -- already loaded within the session. The concatenated licenses can be found
--- in the @licenses.txt@ file of @getDistDir@.
+-- in file @licenses.txt@ inside the 'Query.getDistDir' directory.
 --
 -- The function expects .cabal files of all used packages,
 -- except those mentioned in 'configLicenseExc',
 -- to be gathered in the directory given as the first argument.
 -- The code then expects to find those packages installed and their
--- license files installed in the usual place that Cabal puts them
--- (or the packages should be embedded in the GHC tree).
+-- license files in the usual place that Cabal puts them
+-- (or the in-place packages should be correctly embedded in the GHC tree).
 --
--- We guess the installed location of the license file on the basis
+-- We guess the installed locations of the license files on the basis
 -- of the haddock interfaces path. If the default setting does not work
 -- properly, the haddock interfaces path should be set manually. E.g.,
--- "cabal configure --docdir=X --htmldir=X", is reported to work,
--- because the haddock interfaces path is by default based on docdir.
+-- @cabal configure --docdir=the_same_path --htmldir=the_same_path@
+-- affects the haddock interfaces path (because it is by default based
+-- on htmldir) and is reported to work for some values of @the_same_path@.
 --
 -- Logs from the license search and catenation process are saved in files
--- licenses.stdout and licenses.stderr
--- in the @getDistDir@ directory.
+-- @licenses.stdout@ and @licenses.stderr@
+-- in the 'Query.getDistDir' directory.
 --
--- Note: currently @configGenerateModInfo@ needs to be set
+-- Note: currently 'configGenerateModInfo' needs to be set
 -- for this function to work (see #86).
 buildLicenses :: FilePath -> IdeSessionUpdate
 buildLicenses cabalsDir = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
