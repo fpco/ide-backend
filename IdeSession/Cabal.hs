@@ -385,7 +385,7 @@ buildLicenseCatenation :: FilePath               -- ^ the directory with all the
 buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
                        configPackageDBStack configLicenseExc
                        mcomputed callback = do
-  (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
+  (_, pkgs) <- buildDeps mcomputed
   let stdoutLogFN = ideDistDir </> "licenses.stdout"  -- warnings
       stderrLogFN = ideDistDir </> "licenses.stderr"  -- errors
       licensesFN  = ideDistDir </> "licenses.txt"     -- result

@@ -23,6 +23,14 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
+ *  Version ???
+
+     * Move license catenation (#72) documentation to haddocks,
+       flesh it out, make code more readable, improve error output,
+       fix a recently broken test.
+
+     *
+
  *  Version 0.7.0.2
 
      * Use System.IO.UTF8 to avoid character encoding issues (fpco/fpco#2232)
