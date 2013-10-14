@@ -946,14 +946,14 @@ instance Record id => ExtractIds (LHsExpr id) where
     opTy   <- extractIds op
     recordExpType span (mkSectionLTy <$> opTy)
    where
-      mkSectionLTy ty = let ([_arg1, arg2], res) = splitFunTys ty
+      mkSectionLTy ty = let (arg1, arg2, res) = splitFunTy2 ty
                         in mkFunTy arg2 res
   extractIds (L span (SectionR op arg)) = ast (Just span) "SectionR" $ do
     opTy   <- extractIds op
     _argTy <- extractIds arg
     recordExpType span (mkSectionRTy <$> opTy)
    where
-      mkSectionRTy ty = let ([arg1, _arg2], res) = splitFunTys ty
+      mkSectionRTy ty = let (arg1, arg2, res) = splitFunTy2 ty
                         in mkFunTy arg1 res
   extractIds (L span (HsIPVar _name)) = ast (Just span) "HsIPVar" $
     -- _name is not located :(
@@ -1350,6 +1350,12 @@ funRes2 = funRes1 . funRes1
 -- | Given @a1 -> a2 -> ... -> b@, return @b@
 funResN :: Type -> Type
 funResN = snd . splitFunTys
+
+-- | Given @a -> b -> c@, return @(a, b, c)@
+splitFunTy2 :: Type -> (Type, Type, Type)
+splitFunTy2 ty0 = let (arg1, ty1) = splitFunTy ty0
+                      (arg2, ty2) = splitFunTy ty1
+                  in (arg1, arg2, ty2)
 
 {------------------------------------------------------------------------------
   Auxiliary

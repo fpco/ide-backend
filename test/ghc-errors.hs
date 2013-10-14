@@ -3886,11 +3886,35 @@ syntheticTests =
           , (3, 11, 3, 15, "Eq a => a -> a -> Bool")
           ]
     )
+  , ( "Subexpression types 5: Sections of functions with 3 or more args"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                       {- 1 -} "module A where"
+                     , {- 2 -} "f :: Int -> Bool -> Char -> ()"
+                     , {- 3 -} "f = undefined"
+                       --       1234567890123456789
+                     , {- 4 -} "test1 = (`f` True)"
+                     , {- 5 -} "test2 = (1 `f`)"
+                     ])
+
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        expTypes <- getExpTypes session
+        assertExpTypes expTypes "A" (4, 11, 4, 12) [
+            (4, 10, 4, 13, "Int -> Bool -> Char -> ()")
+          , (4, 10, 4, 18, "Int -> Char -> ()")
+          ]
+        assertExpTypes expTypes "A" (5, 13, 5, 14) [
+            (5, 10, 5, 15, "Bool -> Char -> ()")
+          , (5, 12, 5, 15, "Int -> Bool -> Char -> ()")
+          ]
+    )
   , ( "Issue #125: Hang when snippet calls createProcess with close_fds set to True"
     , withSession defaultSessionConfig $ \sess -> do
         let cb     = \_ -> return ()
             update = flip (updateSession sess) cb
-        
+
         update $ updateCodeGeneration True
         update $ updateStdoutBufferMode (RunLineBuffering Nothing)
         update $ updateStderrBufferMode (RunLineBuffering Nothing)
@@ -3927,7 +3951,7 @@ syntheticTests =
               Just (output, RunOk _) -> assertEqual "" (BSLC.pack "123\n") output
 	      Nothing -> assertFailure "Timeout in runWaitAll"
               _       -> assertFailure "Unexpected run result"
-	  Nothing -> 
+	  Nothing ->
 	    assertFailure "Timeout in runStmt"
     )
   ]
