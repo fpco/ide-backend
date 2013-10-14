@@ -27,6 +27,7 @@ import qualified System.Process as Process
 import System.Random (randomRIO)
 import Text.Regex (mkRegex, subRegex)
 import Debug.Trace (traceEventIO)
+import System.Timeout (timeout)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -86,7 +87,13 @@ withSession' initParams config io = do
                           then tempDir
                           else configDir config
           }
-    Ex.bracket (initSession initParams config') shutdownSession io
+    Ex.bracket (initSession initParams config') tryShutdownSession io
+  where
+    tryShutdownSession session = do
+      mDidShutdown <- timeout 2000000 $ shutdownSession session
+      case mDidShutdown of
+        Just () -> return ()
+	Nothing -> putStrLn "WARNING: Failed to shutdown session (timeout)"
 
 withOpts :: [String] -> SessionConfig
 withOpts opts =
@@ -3878,6 +3885,50 @@ syntheticTests =
           , (3, 11, 3, 15, "a -> a -> Bool")
           , (3, 11, 3, 15, "Eq a => a -> a -> Bool")
           ]
+    )
+  , ( "Issue #125: Hang when snippet calls createProcess with close_fds set to True"
+    , withSession defaultSessionConfig $ \sess -> do
+        let cb     = \_ -> return ()
+            update = flip (updateSession sess) cb
+        
+        update $ updateCodeGeneration True
+        update $ updateStdoutBufferMode (RunLineBuffering Nothing)
+        update $ updateStderrBufferMode (RunLineBuffering Nothing)
+        update $ updateGhcOptions $ Just ["-Wall", "-Werror"]
+
+        update $ updateModule "src/Main.hs" $ BSLC.pack $ unlines [
+            "module Main where"
+
+          , "import System.Process"
+	  , "import System.IO"
+
+          , "main :: IO ()"
+          , "main = do"
+          , "    (_,Just maybeOut,_,pr) <- createProcess $ CreateProcess"
+          , "        { cmdspec      = ShellCommand \"echo 123\""
+          , "        , cwd          = Nothing"
+          , "        , env          = Nothing"
+          , "        , std_in       = CreatePipe"
+          , "        , std_out      = CreatePipe"
+          , "        , std_err      = CreatePipe"
+          , "        , close_fds    = True"
+          , "        , create_group = False"
+          , "        }"
+          , "    putStr =<< hGetContents maybeOut"
+          , "    terminateProcess pr"
+          ]
+
+        assertNoErrors sess
+        mRunActions <- timeout 2000000 $ runStmt sess "Main" "main"
+	case mRunActions of
+	  Just runActions -> do
+            mRunResult <- timeout 2000000 $ runWaitAll runActions
+            case mRunResult of
+              Just (output, RunOk _) -> assertEqual "" (BSLC.pack "123\n") output
+	      Nothing -> assertFailure "Timeout in runWaitAll"
+              _       -> assertFailure "Unexpected run result"
+	  Nothing -> 
+	    assertFailure "Timeout in runStmt"
     )
   ]
 
