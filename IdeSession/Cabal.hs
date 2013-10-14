@@ -11,7 +11,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.Function (on)
 import Data.List (delete, sort, groupBy, nub, intersperse)
-import Data.Maybe (catMaybes, fromMaybe, isNothing)
+import Data.Maybe (catMaybes, fromMaybe, isNothing, isJust)
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
 import Data.Version (Version (..), parseVersion)
@@ -379,11 +379,15 @@ buildLicenseCatenation :: FilePath               -- ^ the directory with all the
                        -> [FilePath]             -- ^ see 'configExtraPathDirs'
                        -> PackageDBStack         -- ^ see 'configPackageDBStack'
                        -> [String]               -- ^ see 'configLicenseExc'
+                       -> [( String
+                           , (Maybe License, Maybe FilePath, Maybe String)
+                           )]                    -- ^ see 'configLicenseFixed'
                        -> Strict Maybe Computed  -- ^ compilation state
                        -> (Progress -> IO ())    -- ^ progress callback
                        -> IO ExitCode
 buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
-                       configPackageDBStack configLicenseExc
+                       configPackageDBStack
+                       configLicenseExc configLicenseFixed
                        mcomputed callback = do
   (_, pkgs) <- buildDeps mcomputed
   let stdoutLogFN = ideDistDir </> "licenses.stdout"  -- warnings
@@ -413,10 +417,20 @@ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
               let warnMsg = "Parse warnings for " ++ packageFile ++ ":\n"
                             ++ unlines (map (showPWarning packageFile) warns)
               hPutStrLn stdoutLog warnMsg
-        b <- doesFileExist packageFile
-        if b then do
+        cabalFileExists <- doesFileExist packageFile
+        let mfixedLicence = lookup nameString configLicenseFixed
+        if cabalFileExists || isJust mfixedLicence then do
           hPutStrLn licensesFile $ "\nLicense for " ++ nameString ++ ":\n"
-          pkgS <- readFile packageFile
+          parseResult <-
+            if cabalFileExists
+            then do
+              pkgS <- readFile packageFile
+              return $
+                parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS
+            else
+              return $ maybe (error "buildLicenseCatenation: parseResult")
+                             (ParseOk undefined)
+                             mfixedLicence
           -- We can't use @parsePackageDescription@, because it defaults to
           -- AllRightsReserved and we default to BSD3. It's very hard
           -- to use the machinery from the inside of @parsePackageDescription@,
@@ -425,7 +439,7 @@ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
           -- against .cabal format changes. The upside is @parseFields@
           -- is faster and does not care about most parsing errors
           -- the .cabal file may (appear to) have.
-          case parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS of
+          case parseResult of
             ParseFailed err -> do
               hPutStrLn licensesFile $ snd $ locatedErrorMsg err
               hPutStrLn stderrLog $ snd $ locatedErrorMsg err
