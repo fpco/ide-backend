@@ -11,7 +11,7 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.Function (on)
 import Data.List (delete, sort, groupBy, nub, intersperse)
-import Data.Maybe (catMaybes, fromMaybe, isNothing, isJust)
+import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
 import Data.Version (Version (..), parseVersion)
@@ -418,19 +418,29 @@ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
                             ++ unlines (map (showPWarning packageFile) warns)
               hPutStrLn stdoutLog warnMsg
         cabalFileExists <- doesFileExist packageFile
-        let mfixedLicence = lookup nameString configLicenseFixed
-        if cabalFileExists || isJust mfixedLicence then do
+        if cabalFileExists then do
           hPutStrLn licensesFile $ "\nLicense for " ++ nameString ++ ":\n"
-          parseResult <-
-            if cabalFileExists
-            then do
-              pkgS <- readFile packageFile
-              return $
+          pkgS <- readFile packageFile
+          let parseResult =
                 parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS
-            else
-              return $ maybe (error "buildLicenseCatenation: parseResult")
-                             (ParseOk undefined)
-                             mfixedLicence
+          findLicense parseResult nameString version packageFile
+        else case lookup nameString configLicenseFixed of
+          Just fixedLicence -> do
+            hPutStrLn licensesFile $ "\nLicense for " ++ nameString ++ ":\n"
+            let fakeParseResult = ParseOk undefined fixedLicence
+            findLicense fakeParseResult nameString version packageFile
+          Nothing ->
+            unless (nameString `elem` configLicenseExc) $ do
+              let errorMsg = "No .cabal file provided for package "
+                             ++ nameString ++ " so no license can be found."
+              hPutStrLn licensesFile errorMsg
+              hPutStrLn stderrLog errorMsg
+        callback $ Progress step numSteps (Just packageName) (Just packageName)
+
+      findLicense :: ParseResult (Maybe License, Maybe FilePath, Maybe String)
+                  -> String -> Version -> FilePath
+                  -> IO ()
+      findLicense parseResult nameString version packageFile =
           -- We can't use @parsePackageDescription@, because it defaults to
           -- AllRightsReserved and we default to BSD3. It's very hard
           -- to use the machinery from the inside of @parsePackageDescription@,
@@ -520,13 +530,6 @@ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
                         ++ show license
                         ++ ". Reproducing standard license text."
                   hPutStrLn stdoutLog warnMsg
-        else
-          unless (nameString `elem` configLicenseExc) $ do
-            let errorMsg = "No .cabal file provided for package "
-                           ++ nameString ++ " so no license can be found."
-            hPutStrLn licensesFile errorMsg
-            hPutStrLn stderrLog errorMsg
-        callback $ Progress step numSteps (Just packageName) (Just packageName)
 
   res <- Ex.try $ mapM_ f (zip pkgs [1..])
   hClose stdoutLog
