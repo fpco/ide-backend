@@ -27,7 +27,12 @@ Changelog
 
      * Move license catenation (#72) documentation to haddocks,
        flesh it out, make code more readable, improve error output,
-       fix a recently broken test.
+       fix a recently broken test
+
+     * Add configLicenseFixed to hard-code packages with hidden
+       .cabal files (#72)
+
+     * Optimize license catenation and add some benchmark tests (#72)
 
      *
 
