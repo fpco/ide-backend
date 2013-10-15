@@ -1797,22 +1797,24 @@ syntheticTests =
         licenses <- readFile $ distDir </> "licenses.txt"
         assertEqual "licenses length" 21409 (length licenses)
     )
-  -- , ( "Build licenses from Cabal"
-  --   , let packageOpts = []
-  --     in withConfiguredSession packageOpts $ \session -> do
-  --       setCurrentDirectory "test/Cabal"
-  --       loadModulesFrom session "."
-  --       setCurrentDirectory "../../"
-  --       let upd = buildLicenses "test/MainModule/cabals"
-  --       updateSessionD session upd 99
-  --       status <- getBuildLicensesStatus session
-  --       assertEqual "after license build" (Just ExitSuccess) status
-  --       distDir <- getDistDir session
-  --       licensesWarnExists <- doesFileExist $ distDir </> "licenses.stdout"
-  --       assertBool "licenses no warnings" $ not licensesWarnExists
-  --       licenses <- readFile $ distDir </> "licenses.txt"
-  --       assertEqual "licenses length" 4933 (length licenses)
-  --   )
+  , ( "Build licenses from Cabal"
+    , withSession (withOpts []) $ \session -> do
+        setCurrentDirectory "test/Cabal"
+        loadModulesFrom session "."
+        assertNoErrors session
+        setCurrentDirectory "../../"
+        let upd = buildLicenses "test/Puns/cabals"  -- 7 packages missing
+        updateSessionD session upd 99
+        distDir <- getDistDir session
+        licensesErrs <- readFile $ distDir </> "licenses.stderr"
+        assertEqual "licensesErrs length" 507 (length licensesErrs)
+        status <- getBuildLicensesStatus session
+        assertEqual "after license build" (Just ExitSuccess) status
+        licensesWarns <- readFile $ distDir </> "licenses.stdout"
+        assertEqual "licensesWarns length" 138 (length licensesWarns)
+        licenses <- readFile $ distDir </> "licenses.txt"
+        assertEqual "licenses length" 21423 (length licenses)
+    )
   , ( "Type information 1: Local identifiers and Prelude"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
