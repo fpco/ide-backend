@@ -3,6 +3,7 @@
 module IdeSession.Cabal (
     buildExecutable, buildHaddock, buildLicenseCatenation
   , packageDbArgs, generateMacros
+  , buildLicsFromPkgs  -- for testing only
   ) where
 
 import qualified Control.Exception as Ex
@@ -374,7 +375,8 @@ lFieldDescrs =
  ]
 
 -- | Build the concatenation of all licence files. See 'buildLicenses'.
-buildLicenseCatenation :: FilePath               -- ^ the directory with all the .cabal files
+buildLicenseCatenation :: Strict Maybe Computed  -- ^ compilation state
+                       -> FilePath               -- ^ the directory with all the .cabal files
                        -> FilePath               -- ^ the working directory; the resulting file is written there
                        -> [FilePath]             -- ^ see 'configExtraPathDirs'
                        -> PackageDBStack         -- ^ see 'configPackageDBStack'
@@ -382,14 +384,37 @@ buildLicenseCatenation :: FilePath               -- ^ the directory with all the
                        -> [( String
                            , (Maybe License, Maybe FilePath, Maybe String)
                            )]                    -- ^ see 'configLicenseFixed'
-                       -> Strict Maybe Computed  -- ^ compilation state
                        -> (Progress -> IO ())    -- ^ progress callback
                        -> IO ExitCode
-buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
+buildLicenseCatenation mcomputed
+                       cabalsDir ideDistDir configExtraPathDirs
                        configPackageDBStack
                        configLicenseExc configLicenseFixed
-                       mcomputed callback = do
+                       callback = do
   (_, pkgs) <- buildDeps mcomputed
+  buildLicsFromPkgs pkgs
+                    cabalsDir ideDistDir configExtraPathDirs
+                    configPackageDBStack
+                    configLicenseExc configLicenseFixed
+                    callback
+
+-- | Build the concatenation of all licence files from a given list
+-- of packages.
+buildLicsFromPkgs :: [PackageId]           -- ^ the list of packages to process
+                  -> FilePath              -- ^ the directory with all the .cabal files
+                  -> FilePath               -- ^ the working directory; the resulting file is written there
+                  -> [FilePath]             -- ^ see 'configExtraPathDirs'
+                  -> PackageDBStack         -- ^ see 'configPackageDBStack'
+                  -> [String]               -- ^ see 'configLicenseExc'
+                  -> [( String
+                      , (Maybe License, Maybe FilePath, Maybe String)
+                      )]                    -- ^ see 'configLicenseFixed'
+                  -> (Progress -> IO ())    -- ^ progress callback
+                  -> IO ExitCode
+buildLicsFromPkgs pkgs cabalsDir ideDistDir configExtraPathDirs
+                  configPackageDBStack
+                  configLicenseExc configLicenseFixed
+                  callback = do
   let stdoutLogFN = ideDistDir </> "licenses.stdout"  -- warnings
       stderrLogFN = ideDistDir </> "licenses.stderr"  -- errors
       licensesFN  = ideDistDir </> "licenses.txt"     -- result

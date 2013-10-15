@@ -201,6 +201,7 @@ module IdeSession (
   , crashGhcServer
   , hsExtensions
   , ideBackendApiVersion
+  , buildLicsFromPkgs
 ) where
 
 import IdeSession.Config

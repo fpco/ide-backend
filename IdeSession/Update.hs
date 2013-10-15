@@ -32,6 +32,7 @@ module IdeSession.Update (
     -- * Debugging
   , forceRecompile
   , crashGhcServer
+  , buildLicsFromPkgs
   )
   where
 
@@ -706,10 +707,11 @@ buildLicenses cabalsDir = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
     exitCode <-
-      lift $ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
+      lift $ buildLicenseCatenation mcomputed
+                                    cabalsDir ideDistDir configExtraPathDirs
                                     configPackageDBStack
                                     configLicenseExc configLicenseFixed
-                                    mcomputed callback
+                                    callback
     set ideBuildLicensesStatus (Just exitCode)
 
 {------------------------------------------------------------------------------

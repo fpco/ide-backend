@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 module Main (main) where
 
 import Control.Applicative ((<$>))
@@ -15,6 +15,8 @@ import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Debug.Trace (traceEventIO)
+import Distribution.License (License (..))
 import Prelude hiding (mod, span)
 import System.Directory
 import qualified System.Environment as System.Environment
@@ -25,9 +27,8 @@ import System.IO.Temp (withTempDirectory)
 import System.Process (readProcess)
 import qualified System.Process as Process
 import System.Random (randomRIO)
-import Text.Regex (mkRegex, subRegex)
-import Debug.Trace (traceEventIO)
 import System.Timeout (timeout)
+import Text.Regex (mkRegex, subRegex)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -1814,6 +1815,30 @@ syntheticTests =
         assertEqual "licensesWarns length" 138 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertEqual "licenses length" 21423 (length licenses)
+    )
+  , ( "Build licenses from 1000 packages fixed in config with no license file"
+    , withSession (withOpts []) $ \session -> do
+        distDir <- getDistDir session
+        let licenseFixedConfig
+              :: Int -> [( String
+                         , (Maybe License, Maybe FilePath, Maybe String)
+                         )]
+            licenseFixedConfig 0 = []
+            licenseFixedConfig n =
+              ("p" ++ show n, (Just BSD3, Nothing, Nothing))
+              : licenseFixedConfig (n - 1)
+            lics = licenseFixedConfig 1000
+            pkgs = map (\(name, _) ->
+                         PackageId{ packageName = Text.pack name
+                                  , packageVersion = Just $ Text.pack "1.0" }
+                       ) lics
+        status <- buildLicsFromPkgs
+                    pkgs "test" distDir [] [] [] lics (\_ -> return ())
+        assertEqual "after license build" ExitSuccess status
+        licensesErrs <- readFile $ distDir </> "licenses.stderr"
+        assertEqual "licensesErrs length" 0 (length licensesErrs)
+        licenses <- readFile $ distDir </> "licenses.txt"
+        assertEqual "licenses length" 1527726 (length licenses)
     )
   , ( "Type information 1: Local identifiers and Prelude"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
