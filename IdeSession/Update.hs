@@ -365,11 +365,12 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
             return $ Maybe.just Computed {
                 computedErrors        = ghcCompileErrors
               , computedLoadedModules = ghcCompileLoaded
-              , computedImports       = ghcCompileImports `applyDiff` computedImports
-              , computedAutoMap       = diffAuto          `applyDiff` computedAutoMap
-              , computedSpanInfo      = diffSpan          `applyDiff` computedSpanInfo
-              , computedExpTypes      = diffTypes         `applyDiff` computedExpTypes
-              , computedPkgDeps       = ghcCompilePkgDeps `applyDiff` computedPkgDeps
+              , computedImports       = ghcCompileImports  `applyDiff` computedImports
+              , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
+              , computedSpanInfo      = diffSpan           `applyDiff` computedSpanInfo
+              , computedExpTypes      = diffTypes          `applyDiff` computedExpTypes
+              , computedUseSites      = ghcCompileUseSites `applyDiff` computedUseSites
+              , computedPkgDeps       = ghcCompilePkgDeps  `applyDiff` computedPkgDeps
               , computedCache         = mkRelative ghcCompileCache
               }
           else return $ idleState' ^. ideComputed

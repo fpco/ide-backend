@@ -65,6 +65,8 @@ data Computed = Computed {
   , computedSpanInfo :: !(Strict (Map ModuleName) IdMap)
     -- | Type information about subexpressions
   , computedExpTypes :: !(Strict (Map ModuleName) ExpMap)
+    -- | Use sites
+  , computedUseSites :: !(Strict (Map ModuleName) UseSites)
     -- | (Transitive) package dependencies
   , computedPkgDeps :: !(Strict (Map ModuleName) (Strict [] PackageId))
     -- | We access IdProps indirectly through this cache

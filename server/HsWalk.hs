@@ -21,6 +21,7 @@ module HsWalk
 #define DEBUG 1
 
 import Data.Foldable (forM_)
+import Control.Monad (unless)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State.Class (MonadState(..))
 import Control.Monad.Trans.Class (MonadTrans, lift)
@@ -169,6 +170,7 @@ data PluginResult = PluginResult {
     pluginIdList   :: !IdList
   , pluginExpTypes :: ![(SourceSpan, Text)]
   , pluginPkgDeps  :: !(Strict [] PackageId)
+  , pluginUseSites :: !UseSites
   }
 
 extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult) -> HscPlugin
@@ -281,6 +283,7 @@ data ExtractIdsState = ExtractIdsState {
   , eIdsIdList   :: !IdList
     -- TODO: introduce explicit sharing for the types?
   , eIdsExpTypes :: [(SourceSpan, Text)]
+  , eIdsUseSites :: !UseSites
   }
 
 newtype ExtractIdsT m a = ExtractIdsT (
@@ -317,12 +320,14 @@ execExtractIdsT dynFlags env idList current (ExtractIdsT m) = do
                     eIdsTidyEnv  = emptyTidyEnv
                   , eIdsIdList   = idList
                   , eIdsExpTypes = []
+                  , eIdsUseSites = Map.empty
                   }
   eIdsSt' <- execStateT (runReaderT m eIdsEnv) eIdsSt
   return PluginResult {
       pluginIdList   = eIdsIdList   eIdsSt'
     , pluginExpTypes = eIdsExpTypes eIdsSt'
     , pluginPkgDeps  = force $ map (fillVersion dynFlags) pkgDeps
+    , pluginUseSites = eIdsUseSites eIdsSt'
     }
 
 instance MonadTrans ExtractIdsT where
@@ -332,9 +337,14 @@ instance MonadTrans ExtractIdsT where
 instance MonadIO m => MonadIO (ExtractIdsT m) where
   liftIO = lift . liftIO
 
-extendIdMap :: MonadIO m => SourceSpan -> SpanInfo -> ExtractIdsT m ()
+extendIdMap :: Monad m => SourceSpan -> SpanInfo -> ExtractIdsT m ()
 extendIdMap span info = modify $ \st -> st {
     eIdsIdList = (span, info) : eIdsIdList st
+  }
+
+recordUseSite :: Monad m => IdPropPtr -> SourceSpan -> ExtractIdsT m ()
+recordUseSite ptr span = modify $ \st -> st {
+    eIdsUseSites = Map.adjust (span :) ptr (eIdsUseSites st)
   }
 
 tidyType :: Monad m => Type -> ExtractIdsT m Type
@@ -609,6 +619,7 @@ instance Record Name where
         case info of
           (idProp, Just idScope) -> do
             extendIdMap sourceSpan $ SpanId IdInfo{..}
+            unless idIsBinder $ recordUseSite idProp sourceSpan
           _ ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from

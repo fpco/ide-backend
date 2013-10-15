@@ -101,12 +101,16 @@ data GhcCompileResponse =
 data GhcCompileResult = GhcCompileResult {
     ghcCompileErrors   :: Strict [] SourceError
   , ghcCompileLoaded   :: Strict [] ModuleName
+  , ghcCompileCache    :: ExplicitSharingCache
+  -- Computed from the GhcSummary (independent of the plugin, and hence
+  -- available even when the plugin does not run)
   , ghcCompileImports  :: Strict (Map ModuleName) (Diff (Strict [] Import))
   , ghcCompileAuto     :: Strict (Map ModuleName) (Diff (Strict [] IdInfo))
+  -- Computed by the plugin
   , ghcCompileSpanInfo :: Strict (Map ModuleName) (Diff IdList)
-  , ghcCompileExpTypes :: Strict (Map ModuleName) (Diff [(SourceSpan, Text)])
   , ghcCompilePkgDeps  :: Strict (Map ModuleName) (Diff (Strict [] PackageId))
-  , ghcCompileCache    :: ExplicitSharingCache
+  , ghcCompileExpTypes :: Strict (Map ModuleName) (Diff [(SourceSpan, Text)])
+  , ghcCompileUseSites :: Strict (Map ModuleName) (Diff UseSites)
   }
 
 data GhcRunResponse =
@@ -176,16 +180,17 @@ instance Binary GhcCompileResult where
   put GhcCompileResult{..} = do
     put ghcCompileErrors
     put ghcCompileLoaded
+    put ghcCompileCache
     put ghcCompileImports
     put ghcCompileAuto
     put ghcCompileSpanInfo
-    put ghcCompileExpTypes
     put ghcCompilePkgDeps
-    put ghcCompileCache
+    put ghcCompileExpTypes
+    put ghcCompileUseSites
 
   get = GhcCompileResult <$> get <*> get <*> get
                          <*> get <*> get <*> get
-                         <*> get <*> get
+                         <*> get <*> get <*> get
 
 instance Binary GhcRunResponse where
   put (GhcRunOutp bs) = putWord8 0 >> put bs
