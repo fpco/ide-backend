@@ -1832,13 +1832,39 @@ syntheticTests =
                          PackageId{ packageName = Text.pack name
                                   , packageVersion = Just $ Text.pack "1.0" }
                        ) lics
+        let dbStack = configPackageDBStack defaultSessionConfig
         status <- buildLicsFromPkgs
-                    pkgs "test" distDir [] [] [] lics (\_ -> return ())
+                    pkgs "test" distDir [] dbStack [] lics (\_ -> return ())
         assertEqual "after license build" ExitSuccess status
         licensesErrs <- readFile $ distDir </> "licenses.stderr"
         assertEqual "licensesErrs length" 0 (length licensesErrs)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertEqual "licenses length" 1527726 (length licenses)
+    )
+  , ( "Build licenses from 1000 packages fixed in config with no useful info"
+    , withSession (withOpts []) $ \session -> do
+        distDir <- getDistDir session
+        let licenseFixedConfig
+              :: Int -> [( String
+                         , (Maybe License, Maybe FilePath, Maybe String)
+                         )]
+            licenseFixedConfig 0 = []
+            licenseFixedConfig n =
+              ("p" ++ show n, (Just BSD3, Just "test/BSD_TEST", Nothing))
+              : licenseFixedConfig (n - 1)
+            lics = licenseFixedConfig 1000
+            pkgs = map (\(name, _) ->
+                         PackageId{ packageName = Text.pack name
+                                  , packageVersion = Just $ Text.pack "1.0" }
+                       ) lics
+        let dbStack = configPackageDBStack defaultSessionConfig
+        status <- buildLicsFromPkgs
+                    pkgs "test" distDir [] dbStack [] lics (\_ -> return ())
+        assertEqual "after license build" ExitSuccess status
+        licensesWarns <- readFile $ distDir </> "licenses.stdout"
+        assertEqual "licensesWarns length" 0 (length licensesWarns)
+        licenses <- readFile $ distDir </> "licenses.txt"
+        assertEqual "licenses length" 63619 (length licenses)
     )
   , ( "Type information 1: Local identifiers and Prelude"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
