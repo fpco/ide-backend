@@ -93,7 +93,7 @@ withSession' initParams config io = do
       mDidShutdown <- timeout 2000000 $ shutdownSession session
       case mDidShutdown of
         Just () -> return ()
-	Nothing -> putStrLn "WARNING: Failed to shutdown session (timeout)"
+        Nothing -> putStrLn "WARNING: Failed to shutdown session (timeout)"
 
 withOpts :: [String] -> SessionConfig
 withOpts opts =
@@ -3926,7 +3926,7 @@ syntheticTests =
             "module Main where"
 
           , "import System.Process"
-	  , "import System.IO"
+          , "import System.IO"
 
           , "main :: IO ()"
           , "main = do"
@@ -3946,15 +3946,15 @@ syntheticTests =
 
         assertNoErrors sess
         mRunActions <- timeout 2000000 $ runStmt sess "Main" "main"
-	case mRunActions of
-	  Just runActions -> do
+        case mRunActions of
+          Just runActions -> do
             mRunResult <- timeout 2000000 $ runWaitAll runActions
             case mRunResult of
               Just (output, RunOk _) -> assertEqual "" (BSLC.pack "123\n") output
-	      Nothing -> assertFailure "Timeout in runWaitAll"
+              Nothing -> assertFailure "Timeout in runWaitAll"
               _       -> assertFailure "Unexpected run result"
-	  Nothing ->
-	    assertFailure "Timeout in runStmt"
+          Nothing ->
+            assertFailure "Timeout in runStmt"
     )
   ]
 
