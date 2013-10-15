@@ -4007,6 +4007,54 @@ syntheticTests =
           Nothing ->
             assertFailure "Timeout in runStmt"
     )
+  , ( "Use sites"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                       {- 1 -} "module A where"
+                             -- 123456789012345
+                     , {- 2 -} "f :: Int -> Int"
+                     , {- 3 -} "f = (+ 1)"
+                     , {- 4 -} "g :: Int -> Int"
+                     , {- 5 -} "g = f . f"
+                     ])
+               <> (updateModule "B.hs" . BSLC.pack . unlines $ [
+                       {- 1 -} "module B where"
+                     , {- 2 -} "import A"
+                     , {- 3 -} "h :: Int -> Int"
+                     , {- 4 -} "h = (+ 1) . g"
+                     ])
+
+        -- TODO: use sites for types?
+
+        updateSessionD session upd 2
+        assertNoErrors session
+
+        useSites <- getUseSites session
+        assertUseSites useSites "A" (3,  1, 3,  2) [ -- "f"
+            "A.hs@2:1-2:2"
+          , "A.hs@5:9-5:10"
+          , "A.hs@5:5-5:6"
+          ]
+        assertUseSites useSites "A" (3,  6, 3,  7) [ -- "+"
+            "A.hs@3:6-3:7"
+          , "B.hs@4:6-4:7"
+          ]
+        assertUseSites useSites "A" (5,  1, 5,  2) [ -- "g"
+            "A.hs@4:1-4:2"
+          , "B.hs@4:13-4:14"
+          ]
+        assertUseSites useSites "B" (4,  1, 4,  2) [ -- "h"
+            "B.hs@3:1-3:2"
+          ]
+        assertUseSites useSites "B" (4,  6, 4,  7) [ -- "+"
+            "A.hs@3:6-3:7"
+          , "B.hs@4:6-4:7"
+          ]
+        assertUseSites useSites "B" (4, 13, 4, 14) [ -- "g"
+            "A.hs@4:1-4:2"
+          , "B.hs@4:13-4:14"
+          ]
+    )
   ]
 
 deletePackage :: FilePath -> IO ()
@@ -4217,6 +4265,22 @@ assertExpTypes expTypes mod (frLine, frCol, toLine, toCol) expected =
                       , spanToLine     = toLine
                       , spanToColumn   = toCol
                       }
+
+assertUseSites :: (ModuleName -> SourceSpan -> [SourceSpan])
+               -> String
+               -> (Int, Int, Int, Int)
+               -> [String]
+               -> Assertion
+assertUseSites useSites mod (frLine, frCol, toLine, toCol) expected =
+    assertEqual "" expected actual
+  where
+    actual = map show (useSites (Text.pack mod) span)
+    span   = SourceSpan { spanFilePath   = mod ++ ".hs"
+                        , spanFromLine   = frLine
+                        , spanFromColumn = frCol
+                        , spanToLine     = toLine
+                        , spanToColumn   = toCol
+                        }
 
 assertSourceErrors' :: IdeSession -> [String] -> Assertion
 assertSourceErrors' session = assertSourceErrors session . map

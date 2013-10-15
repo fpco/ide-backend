@@ -344,8 +344,11 @@ extendIdMap span info = modify $ \st -> st {
 
 recordUseSite :: Monad m => IdPropPtr -> SourceSpan -> ExtractIdsT m ()
 recordUseSite ptr span = modify $ \st -> st {
-    eIdsUseSites = Map.adjust (span :) ptr (eIdsUseSites st)
-  }
+      eIdsUseSites = Map.alter insertSpan ptr (eIdsUseSites st)
+    }
+  where
+    insertSpan Nothing   = Just [span]
+    insertSpan (Just ss) = Just (span : ss)
 
 tidyType :: Monad m => Type -> ExtractIdsT m Type
 tidyType typ = do

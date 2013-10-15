@@ -164,6 +164,7 @@ module IdeSession (
   , getBuildLicensesStatus
   , getSpanInfo
   , getExpTypes
+  , getUseSites
   , getImports
   , getAutocompletion
   , getPkgDeps

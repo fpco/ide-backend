@@ -275,16 +275,18 @@ getPkgDeps = computedQuery $ \Computed{..} mod ->
 -- Use sites are only reported in modules that get compiled successfully.
 getUseSites :: Query (ModuleName -> SourceSpan -> [SourceSpan])
 getUseSites = computedQuery $ \computed@Computed{..} mod span ->
-  let mUseSites = do
-        (_, spanId)        <- internalGetSpanInfo computed mod span
-        Private.IdInfo{..} <- case spanId of
-                                Private.SpanId idInfo -> return idInfo
-                                Private.SpanQQ _      -> Nothing
-        useSitesForModule  <- StrictMap.lookup mod computedUseSites
-        StrictMap.lookup idProp useSitesForModule
-  in case mUseSites of
-    Just useSites -> map (removeExplicitSharing computedCache) useSites
-    Nothing       -> []
+  maybeListToList $ do
+    (_, spanId)        <- internalGetSpanInfo computed mod span
+    Private.IdInfo{..} <- case spanId of
+                            Private.SpanId idInfo -> return idInfo
+                            Private.SpanQQ _      -> Nothing
+    return $ map (removeExplicitSharing computedCache)
+           . concatMap (maybeListToList . StrictMap.lookup idProp)
+           $ StrictMap.elems computedUseSites
+  where
+    maybeListToList :: Maybe [a] -> [a]
+    maybeListToList (Just xs) = xs
+    maybeListToList Nothing   = []
 
 {------------------------------------------------------------------------------
   Debugging
