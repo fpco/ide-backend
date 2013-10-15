@@ -946,14 +946,14 @@ instance Record id => ExtractIds (LHsExpr id) where
     opTy   <- extractIds op
     recordExpType span (mkSectionLTy <$> opTy)
    where
-      mkSectionLTy ty = let (arg1, arg2, res) = splitFunTy2 ty
+      mkSectionLTy ty = let (_arg1, arg2, res) = splitFunTy2 ty
                         in mkFunTy arg2 res
   extractIds (L span (SectionR op arg)) = ast (Just span) "SectionR" $ do
     opTy   <- extractIds op
     _argTy <- extractIds arg
     recordExpType span (mkSectionRTy <$> opTy)
    where
-      mkSectionRTy ty = let (arg1, arg2, res) = splitFunTy2 ty
+      mkSectionRTy ty = let (arg1, _arg2, res) = splitFunTy2 ty
                         in mkFunTy arg1 res
   extractIds (L span (HsIPVar _name)) = ast (Just span) "HsIPVar" $
     -- _name is not located :(

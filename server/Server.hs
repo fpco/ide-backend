@@ -167,7 +167,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
                                        (\_ -> return ()) -- TODO: log?
 
 
-    let initialResponse = GhcCompileDone {
+    let initialResponse = GhcCompileResult {
             ghcCompileErrors   = errs
           , ghcCompileLoaded   = force $ loadedModules
           , ghcCompileCache    = error "ghcCompileCache set last"
@@ -198,14 +198,14 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
             gotRecompiled imp =
               moduleName (importModule imp) `elem` recompiledModules
 
-            removeOldModule :: ModuleName -> StateT GhcCompileResponse Ghc ()
+            removeOldModule :: ModuleName -> StateT GhcCompileResult Ghc ()
             removeOldModule m = do
               set (importsFor m)  Remove
               set (autoFor m)     Remove
               set (spanInfoFor m) Remove
 
             addNewModule :: (ModuleName, GHC.ModSummary)
-                         -> StateT GhcCompileResponse Ghc (ModuleName, ModSummary)
+                         -> StateT GhcCompileResult Ghc (ModuleName, ModSummary)
             addNewModule (m, ghcSummary) = do
               imports <- lift $ importList     ghcSummary
               auto    <- lift $ autocompletion ghcSummary
@@ -222,7 +222,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
               return (m, newSummary)
 
             updateModule :: ModuleName -> ModSummary -> GHC.ModSummary
-                         -> StateT GhcCompileResponse Ghc (ModuleName, ModSummary)
+                         -> StateT GhcCompileResult Ghc (ModuleName, ModSummary)
             updateModule m oldSummary ghcSummary = do
               (imports, importsChanged) <-
                 -- We recompute imports when the file changed, rather than when
@@ -262,7 +262,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
 
         let go :: [(ModuleName, ModSummary)]
                -> [(ModuleName, GHC.ModSummary)]
-               -> StateT GhcCompileResponse Ghc [(ModuleName, ModSummary)]
+               -> StateT GhcCompileResult Ghc [(ModuleName, ModSummary)]
             go ((m, oldSummary) : old) ((m', ghcSummary) : new) = do
               case compare m m' of
                 LT -> do removeOldModule m
@@ -278,7 +278,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
               mapM addNewModule new
 
         let sendPluginResult :: [(ModuleName, PluginResult)]
-                             -> StateT GhcCompileResponse Ghc ()
+                             -> StateT GhcCompileResult Ghc ()
             sendPluginResult = mapM_ $ \(m, result) -> do
               set (spanInfoFor m) (Insert (pluginIdList result))
               set (pkgDepsFor m)  (Insert (pluginPkgDeps result))
@@ -299,7 +299,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
 
     cache <- liftIO $ constructExplicitSharingCache
     -- Should we call clearLinkEnvCache here?
-    liftIO . put $ response { ghcCompileCache = cache }
+    liftIO . put . GhcCompileDone $ response { ghcCompileCache = cache }
   where
     dynOpts :: DynamicOpts
     dynOpts =

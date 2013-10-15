@@ -51,10 +51,6 @@ data Computed = Computed {
     computedErrors :: !(Strict [] SourceError)
     -- | Modules that got loaded okay
   , computedLoadedModules :: !(Strict [] ModuleName)
-    -- | Information about identifiers/quasi-quotes
-  , computedSpanInfo :: !(Strict (Map ModuleName) IdMap)
-    -- | Type information about subexpressions
-  , computedExpTypes :: !(Strict (Map ModuleName) ExpMap)
     -- | Import information. This is (usually) available even for modules
     -- with parsing or type errors
   , computedImports :: !(Strict (Map ModuleName) (Strict [] Import))
@@ -65,6 +61,10 @@ data Computed = Computed {
     -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
     -- was imported qualified as @M@).
   , computedAutoMap :: !(Strict (Map ModuleName) (Strict Trie (Strict [] IdInfo)))
+    -- | Information about identifiers/quasi-quotes
+  , computedSpanInfo :: !(Strict (Map ModuleName) IdMap)
+    -- | Type information about subexpressions
+  , computedExpTypes :: !(Strict (Map ModuleName) ExpMap)
     -- | (Transitive) package dependencies
   , computedPkgDeps :: !(Strict (Map ModuleName) (Strict [] PackageId))
     -- | We access IdProps indirectly through this cache

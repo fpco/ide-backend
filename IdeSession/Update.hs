@@ -74,6 +74,7 @@ import qualified IdeSession.Strict.IntMap as IntMap
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
 import qualified IdeSession.Strict.List   as List
+import qualified IdeSession.Strict.Trie   as Trie
 import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_, withMVar)
 
 {------------------------------------------------------------------------------
@@ -344,18 +345,11 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
         -- Recompile
         computed <- if (idleState' ^. ideUpdatedCode)
           then do
-            (  errs
-             , loaded
-             , diffImports
-             , diffAuto
-             , diffIdList
-             , diffExpTypes
-             , diffPkgDeps
-             , cache ) <- rpcCompile (idleState' ^. ideGhcServer)
-                                     (idleState' ^. ideNewOpts)
-                                     (ideSourcesDir ideStaticInfo)
-                                     (idleState' ^. ideGenerateCode)
-                                     callback
+            GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
+                                               (idleState' ^. ideNewOpts)
+                                               (ideSourcesDir ideStaticInfo)
+                                               (idleState' ^. ideGenerateCode)
+                                               callback
 
             let applyDiff :: Strict (Map ModuleName) (Diff v)
                           -> (Computed -> Strict (Map ModuleName) v)
@@ -364,18 +358,19 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
                                  $ Maybe.maybe Map.empty f
                                  $ idleState' ^. ideComputed
 
-            let diffSpan  = Map.map (fmap mkIdMap)  diffIdList
-                diffTypes = Map.map (fmap mkExpMap) diffExpTypes
+            let diffSpan  = Map.map (fmap mkIdMap)  ghcCompileSpanInfo
+                diffTypes = Map.map (fmap mkExpMap) ghcCompileExpTypes
+                diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
 
             return $ Maybe.just Computed {
-                computedErrors        = errs
-              , computedLoadedModules = loaded
-              , computedImports       = diffImports `applyDiff` computedImports
-              , computedAutoMap       = diffAuto    `applyDiff` computedAutoMap
-              , computedSpanInfo      = diffSpan    `applyDiff` computedSpanInfo
-              , computedExpTypes      = diffTypes   `applyDiff` computedExpTypes
-              , computedPkgDeps       = diffPkgDeps `applyDiff` computedPkgDeps
-              , computedCache         = mkRelative cache
+                computedErrors        = ghcCompileErrors
+              , computedLoadedModules = ghcCompileLoaded
+              , computedImports       = ghcCompileImports `applyDiff` computedImports
+              , computedAutoMap       = diffAuto          `applyDiff` computedAutoMap
+              , computedSpanInfo      = diffSpan          `applyDiff` computedSpanInfo
+              , computedExpTypes      = diffTypes         `applyDiff` computedExpTypes
+              , computedPkgDeps       = ghcCompilePkgDeps `applyDiff` computedPkgDeps
+              , computedCache         = mkRelative ghcCompileCache
               }
           else return $ idleState' ^. ideComputed
 
@@ -412,6 +407,21 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
 
     handleExternal :: IdeIdleState -> ExternalException -> IO (IdeSessionState, Bool)
     handleExternal idleState e = return (IdeSessionServerDied e idleState, False)
+
+    constructAuto :: ExplicitSharingCache -> Strict [] IdInfo
+                  -> Strict Trie (Strict [] IdInfo)
+    constructAuto cache lk =
+        Trie.fromListWith (List.++) $ map aux (toLazyList lk)
+      where
+        aux :: IdInfo -> (BSS.ByteString, Strict [] IdInfo)
+        aux idInfo@IdInfo{idProp = k} =
+          let idProp = IntMap.findWithDefault
+                         (error "constructAuto: could not resolve idPropPtr")
+                         (idPropPtr k)
+                         (idPropCache cache)
+          in ( BSS.pack . Text.unpack . idName $ idProp
+             , List.singleton idInfo
+             )
 
 -- | A session update that changes a source module by giving a new value for
 -- the module source. This can be used to add a new module or update an
