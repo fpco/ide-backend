@@ -415,6 +415,12 @@ buildLicsFromPkgs pkgs cabalsDir ideDistDir configExtraPathDirs
                   configPackageDBStack
                   configLicenseExc configLicenseFixed
                   callback = do
+  -- The following computations are very expensive, so should be done once,
+  -- instead of at each invocation of @findLicense@ that needs to perform
+  -- @lookupSourcePackageId@.
+  programDB <- configureAllKnownPrograms  -- won't die
+                 minBound (defaultProgramConfiguration configExtraPathDirs)
+  pkgIndex <- getInstalledPackages minBound configPackageDBStack programDB
   let stdoutLogFN = ideDistDir </> "licenses.stdout"  -- warnings
       stderrLogFN = ideDistDir </> "licenses.stderr"  -- errors
       licensesFN  = ideDistDir </> "licenses.txt"     -- result
@@ -480,9 +486,6 @@ buildLicsFromPkgs pkgs cabalsDir ideDistDir configExtraPathDirs
               hPutStrLn stderrLog $ snd $ locatedErrorMsg err
             ParseOk _warns (_, Just lf, _) -> do
               -- outputWarns warns  -- false positives
-              programDB <- configureAllKnownPrograms  -- won't die
-                             minBound (defaultProgramConfiguration configExtraPathDirs)
-              pkgIndex <- getInstalledPackages minBound configPackageDBStack programDB
               let pkgId = Package.PackageIdentifier
                             { pkgName = Package.PackageName nameString
                             , pkgVersion = version }
@@ -564,7 +567,7 @@ buildLicsFromPkgs pkgs cabalsDir ideDistDir configExtraPathDirs
       handler e = do
         let msg = "Licenses concatenation failed. The exception is:\n"
                   ++ show e
-        hPutStrLn stderrLog msg
+        writeFile stderrLogFN msg
         return $ ExitFailure 1
   either handler (const $ return ExitSuccess) res
 
