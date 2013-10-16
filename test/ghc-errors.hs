@@ -4226,6 +4226,47 @@ syntheticTests =
            assertUseSites useSites "B" (3, 18, 3, 19) "G"   uses_G2
            assertUseSites useSites "B" (3, 20, 3, 21) "F"   uses_F3
     )
+  , ( "Use sites 3: Local variables"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd1 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module A where"
+                              -- 123456789012345
+                      , {- 2 -} "test = (+ 1) . f . g"
+                      , {- 3 -} "  where"
+                      , {- 4 -} "     f :: Int -> Int"
+                      , {- 5 -} "     f = (+ 1)"
+                      , {- 6 -} "     g :: Int -> Int"
+                      , {- 7 -} "     g = f . f"
+                      ])
+
+        updateSessionD session upd1 2
+        assertNoErrors session
+
+        -- TODO: not sure why we have the double entries for the
+        -- type declaration
+
+        let uses_f = [
+                "A.hs@4:6-4:7"
+              , "A.hs@4:6-4:7"
+              , "A.hs@7:14-7:15"
+              , "A.hs@7:10-7:11"
+              , "A.hs@2:16-2:17"
+              ]
+            uses_add = [ -- "+"
+                "A.hs@5:11-5:12"
+              , "A.hs@2:9-2:10"
+              ]
+            uses_g = [
+                "A.hs@6:6-6:7"
+              , "A.hs@6:6-6:7"
+              , "A.hs@2:20-2:21"
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (5,  6, 5,  7) "f" uses_f
+           assertUseSites useSites "A" (5, 11, 5, 12) "+" uses_add
+           assertUseSites useSites "A" (7,  6, 7,  7) "g" uses_g
+    )
   ]
 
 deletePackage :: FilePath -> IO ()
