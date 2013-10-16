@@ -52,7 +52,6 @@ import Exception (ghandle)
 import FastString ( unpackFS )
 import qualified GHC
 import GhcMonad (liftIO)
-import MonadUtils (MonadIO (..))
 import qualified HscTypes
 import Outputable ( PprStyle, qualName, qualModule )
 import qualified Outputable as GHC
@@ -99,6 +98,7 @@ import HsWalk (extractSourceSpan, idInfoForName, IsBinder(..))
 import Haddock
 import Debug
 import Conv
+import FilePathCaching
 
 type DynamicOpts = [Located String]
 
@@ -436,7 +436,7 @@ collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
 -- our control (and so, e.g., not relative to the project root).
 -- But at least the IDE could point somewhere in the code.
 -- | Convert GHC's SourceError type into ours.
-fromHscSourceError :: MonadIO m => HscTypes.SourceError -> m SourceError
+fromHscSourceError :: MonadFilePathCaching m => HscTypes.SourceError -> m SourceError
 fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
     [errMsg] -> case ErrUtils.errMsgSpans errMsg of
       [real@RealSrcSpan{}] -> do

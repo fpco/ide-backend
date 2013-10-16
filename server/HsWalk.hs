@@ -24,8 +24,6 @@ module HsWalk
 import Data.Foldable (forM_)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State.Class (MonadState(..))
-import Control.Monad.Trans.Class (MonadTrans, lift)
-import Control.Exception (evaluate)
 import Control.Applicative ((<$>))
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -82,6 +80,8 @@ import FastString (fsLit)
 
 import Conv
 import Haddock
+import FilePathCaching
+import IdPropCaching
 
 import Data.Data (Data, gmapQ, showConstr, toConstr)
 
@@ -91,39 +91,6 @@ import Data.Data (Data, gmapQ, showConstr, toConstr)
   We use explicit sharing so that we can maintain sharing through the JSON
   serialization.
 ------------------------------------------------------------------------------}
-
-idPropCacheRef :: StrictIORef (Strict IntMap IdProp)
-{-# NOINLINE idPropCacheRef #-}
-idPropCacheRef = unsafePerformIO $ newIORef IntMap.empty
-
-filePathCacheRef :: StrictIORef (HashMap FilePath Int, Int)
-{-# NOINLINE filePathCacheRef #-}
-filePathCacheRef = unsafePerformIO $ newIORef (HashMap.empty, 0)
-
-modifyIdPropCache :: MonadIO m => IdPropPtr -> (IdProp -> IdProp) -> m ()
-modifyIdPropCache ptr f = liftIO $ do
-  cache <- readIORef idPropCacheRef
-  let uniq = idPropPtr ptr
-  writeIORef idPropCacheRef $ IntMap.adjust f uniq cache
-
-extendIdPropCache :: MonadIO m => IdPropPtr -> IdProp -> m ()
-extendIdPropCache ptr prop = liftIO $ do
-  cache <- readIORef idPropCacheRef
-  -- Don't overwrite existing entries, because we might lose type information
-  -- that we gleaned earlier
-  let uniq = idPropPtr ptr
-  writeIORef idPropCacheRef $ IntMap.insertWith (\_new old -> old) uniq prop cache
-
-mkFilePathPtr :: FilePath -> IO FilePathPtr
-mkFilePathPtr path = do
-  (hash, next) <- readIORef filePathCacheRef
-  case HashMap.lookup path hash of
-    Nothing -> do
-      next' <- evaluate $ next + 1
-      writeIORef filePathCacheRef (HashMap.insert path next' hash, next')
-      return $ FilePathPtr next'
-    Just key ->
-      return $ FilePathPtr key
 
 -- | Construct the explicit sharing cache
 --
@@ -135,8 +102,8 @@ constructExplicitSharingCache :: IO ExplicitSharingCache
 constructExplicitSharingCache = do
     -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
     -- for long-running sessions with many added and removed definitions.
-    idPropCache       <- readIORef idPropCacheRef
-    (filePathHash, _) <- readIORef filePathCacheRef
+    idPropCache       <- getIdPropCache
+    (filePathHash, _) <- getFilePathCache
 
     let filePathCache = IntMap.fromList . map convert $ HashMap.toList filePathHash
     return ExplicitSharingCache {..}
@@ -253,10 +220,10 @@ extractIdsPlugin symbolRef = HscPlugin {..}
       liftIO $ modifyIORef symbolRef (Map.insert processedName pluginResult)
       return env
 
-extractTypesFromTypeEnv :: forall m. MonadIO m => TypeEnv -> ExtractIdsT m ()
+extractTypesFromTypeEnv :: TypeEnv -> ExtractIdsM ()
 extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
   where
-    go :: (Unique, TyThing) -> ExtractIdsT m ()
+    go :: (Unique, TyThing) -> ExtractIdsM ()
     go (uniq, ADataCon dataCon) =
       recordType ("ADataCon: " ++ showSDoc (ppr dataCon)) uniq (dataConRepType dataCon)
     go _ =
@@ -279,33 +246,45 @@ data ExtractIdsEnv = ExtractIdsEnv {
   }
 
 data ExtractIdsState = ExtractIdsState {
-    eIdsTidyEnv  :: !TidyEnv
-  , eIdsIdList   :: !IdList
-    -- TODO: introduce explicit sharing for the types?
-  , eIdsExpTypes :: [(SourceSpan, Text)]
-  , eIdsUseSites :: !UseSites
+    eIdsTidyEnv       :: !TidyEnv
+  , eIdsIdList        :: !IdList
+  , eIdsExpTypes      :: [(SourceSpan, Text)] -- TODO: explicit sharing?
+  , eIdsUseSites      :: !UseSites
+  , eIdsFilePathCache :: (HashMap FilePath Int, Int)
+  , eIdsIdPropCache   :: Strict IntMap IdProp
   }
 
-newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT ExtractIdsEnv (StrictStateT ExtractIdsState m) a
+newtype ExtractIdsM a = ExtractIdsM (
+      ReaderT ExtractIdsEnv (StrictState ExtractIdsState) a
     )
   deriving
     (Functor, Monad, MonadState ExtractIdsState, MonadReader ExtractIdsEnv)
+
+instance MonadFilePathCaching ExtractIdsM where
+  getFilePathCache = eIdsFilePathCache <$> get
+  putFilePathCache = \cache -> modify $ \st -> st { eIdsFilePathCache = cache }
+
+instance MonadIdPropCaching ExtractIdsM where
+  getIdPropCache = eIdsIdPropCache <$> get
+  putIdPropCache = \cache -> modify $ \st -> st { eIdsIdPropCache = cache }
 
 execExtractIdsT :: MonadIO m
                 => DynFlags
                 -> TcGblEnv
                 -> IdList
                 -> Module.Module
-                -> ExtractIdsT m ()
+                -> ExtractIdsM ()
                 -> m PluginResult
-execExtractIdsT dynFlags env idList current (ExtractIdsT m) = do
+execExtractIdsT dynFlags env idList current (ExtractIdsM m) = do
   -- Construct LinkEnv for finding home modules
   -- The order of the package dependencies is important! (See comment for
   -- linkEnvFor.) We assume that ghc gives us the package dependencies in the
   -- right order.
   let pkgDeps = (imp_dep_pkgs (tcg_imports env))
   linkEnv <- liftIO $ linkEnvFor dynFlags pkgDeps
+
+  filePathCache <- liftIO $ getFilePathCache
+  idPropCache   <- liftIO $ getIdPropCache
 
   let rdrEnv  = tcg_rdr_env env
       qual    = mkPrintUnqualified dynFlags rdrEnv
@@ -317,12 +296,18 @@ execExtractIdsT dynFlags env idList current (ExtractIdsT m) = do
                   , eIdsLinkEnv  = linkEnv
                   }
       eIdsSt  = ExtractIdsState {
-                    eIdsTidyEnv  = emptyTidyEnv
-                  , eIdsIdList   = idList
-                  , eIdsExpTypes = []
-                  , eIdsUseSites = Map.empty
+                    eIdsTidyEnv       = emptyTidyEnv
+                  , eIdsIdList        = idList
+                  , eIdsExpTypes      = []
+                  , eIdsUseSites      = Map.empty
+                  , eIdsFilePathCache = filePathCache
+                  , eIdsIdPropCache   = idPropCache
                   }
-  eIdsSt' <- execStateT (runReaderT m eIdsEnv) eIdsSt
+      eIdsSt' = execState (runReaderT m eIdsEnv) eIdsSt
+
+  liftIO $ putFilePathCache (eIdsFilePathCache eIdsSt')
+  liftIO $ putIdPropCache   (eIdsIdPropCache   eIdsSt')
+
   return PluginResult {
       pluginIdList   = eIdsIdList   eIdsSt'
     , pluginExpTypes = eIdsExpTypes eIdsSt'
@@ -330,19 +315,12 @@ execExtractIdsT dynFlags env idList current (ExtractIdsT m) = do
     , pluginUseSites = eIdsUseSites eIdsSt'
     }
 
-instance MonadTrans ExtractIdsT where
-  lift = ExtractIdsT . lift . lift
-
--- This is not the standard MonadIO, but the MonadIO from GHC!
-instance MonadIO m => MonadIO (ExtractIdsT m) where
-  liftIO = lift . liftIO
-
-extendIdMap :: Monad m => SourceSpan -> SpanInfo -> ExtractIdsT m ()
+extendIdMap :: SourceSpan -> SpanInfo -> ExtractIdsM ()
 extendIdMap span info = modify $ \st -> st {
     eIdsIdList = (span, info) : eIdsIdList st
   }
 
-recordUseSite :: Monad m => IdPropPtr -> SourceSpan -> ExtractIdsT m ()
+recordUseSite :: IdPropPtr -> SourceSpan -> ExtractIdsM ()
 recordUseSite ptr span = modify $ \st -> st {
       eIdsUseSites = Map.alter insertSpan ptr (eIdsUseSites st)
     }
@@ -350,7 +328,7 @@ recordUseSite ptr span = modify $ \st -> st {
     insertSpan Nothing   = Just [span]
     insertSpan (Just ss) = Just (span : ss)
 
-tidyType :: Monad m => Type -> ExtractIdsT m Type
+tidyType :: Type -> ExtractIdsM Type
 tidyType typ = do
   st <- get
   let (tidyEnv', typ') = tidyOpenType (eIdsTidyEnv st) typ
@@ -366,7 +344,7 @@ lookupRdrEnv rdrEnv name =
                    [elt] -> Just elt
                    _     -> error "ghc invariant violated"
 
-recordExpType :: MonadIO m => SrcSpan -> Maybe Type -> ExtractIdsT m (Maybe Type)
+recordExpType :: SrcSpan -> Maybe Type -> ExtractIdsM (Maybe Type)
 recordExpType span (Just typ) = do
   eitherSpan <- extractSourceSpan span
   case eitherSpan of
@@ -383,7 +361,7 @@ recordExpType _ Nothing = return Nothing
 #if DEBUG
 -- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
 -- it does
-pretty :: (Monad m, Outputable a) => Bool -> a -> ExtractIdsT m String
+pretty :: (Outputable a) => Bool -> a -> ExtractIdsM String
 pretty debugShow val = do
   _dynFlags <- asks eIdsDynFlags
 #if __GLASGOW_HASKELL__ >= 706
@@ -393,7 +371,7 @@ pretty debugShow val = do
 #endif
 #endif
 
-debugPP :: (MonadIO m, Outputable a) => String -> a -> ExtractIdsT m ()
+debugPP :: (Outputable a) => String -> a -> ExtractIdsM ()
 #if DEBUG
 debugPP header val = do
   val' <- pretty True val
@@ -416,7 +394,7 @@ debugPP _ _ = return ()
 --
 -- TODO: This assumes that the structure of the AST follows Haskell scoping
 -- rules.  If this is not the case, this will break.
-ast :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m a -> ExtractIdsT m a
+ast :: Maybe SrcSpan -> String -> ExtractIdsM a -> ExtractIdsM a
 ast _mspan _info cont = do
 #if DEBUG
   logIndented _info
@@ -434,7 +412,7 @@ astIndent :: StrictIORef Int
 {-# NOINLINE astIndent #-}
 astIndent = unsafePerformIO $ newIORef 0
 
-indent :: MonadIO m => ExtractIdsT m a -> ExtractIdsT m a
+indent :: ExtractIdsM a -> ExtractIdsM a
 indent act = do
   oldIndentation <- liftIO $ readIORef astIndent
   liftIO $ writeIORef astIndent (oldIndentation + 2)
@@ -448,7 +426,7 @@ logIndented msg = liftIO $ do
   appendFile "/tmp/ghc.log" $ replicate indentation ' ' ++ msg ++ "\n"
 #endif
 
-unsupported :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m (Maybe Type)
+unsupported :: Maybe SrcSpan -> String -> ExtractIdsM (Maybe Type)
 #if DEBUG
 unsupported mspan c = ast mspan c $ do
   prettySpan <- pretty False mspan
@@ -469,7 +447,7 @@ data IsBinder =
   | SigSite   -- ^ @f :: ..@ or fixity declaration
 
 class (Uniquable id, OutputableBndr id) => Record id where
-  record :: MonadIO m => SrcSpan -> IsBinder -> id -> ExtractIdsT m (Maybe Type)
+  record :: SrcSpan -> IsBinder -> id -> ExtractIdsM (Maybe Type)
 
   ifPostTc :: id -> a -> Maybe a
 
@@ -481,7 +459,7 @@ instance Record Id where
 
   ifPostTc = \_ -> Just
 
-showTypeForUser :: Monad m => Type -> ExtractIdsT m Text
+showTypeForUser :: Type -> ExtractIdsM Text
 showTypeForUser typ = do
   pprStyle <- asks eIdsPprStyle
   -- We don't want line breaks in the types
@@ -491,7 +469,7 @@ showTypeForUser typ = do
                                (initSDocContext pprStyle))
   return $ Text.pack typStr
 
-recordType :: MonadIO m => String -> Unique -> Type -> ExtractIdsT m ()
+recordType :: String -> Unique -> Type -> ExtractIdsM ()
 recordType _header uniq typ = do
   typStr <- tidyType typ >>= showTypeForUser
   let idPropPtr = IdPropPtr $ getKey uniq
@@ -503,7 +481,7 @@ recordType _header uniq typ = do
 -- uniquely determined by the @Name@ and the @DynFlags@ do not change
 -- in a bad way.
 idInfoForName
-  :: MonadIO m
+  :: forall m. (MonadFilePathCaching m, MonadIdPropCaching m)
   => DynFlags                         -- ^ The usual dynflags
   -> Name                             -- ^ The name in question
   -> IsBinder                         -- ^ Is this a binding occurrence?
@@ -531,7 +509,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
       idType  = Maybe.nothing  -- after renamer but before typechecker
 
-      constructScope :: MonadIO m => m (Maybe IdScope)
+      constructScope :: m (Maybe IdScope)
       constructScope
         | DefSite <- idIsBinder    = return $ Just Binder
         | Name.isWiredInName  name = return $ Just WiredIn
@@ -545,7 +523,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       -- part of the ImpDeclSpec (listed as a TODO in the ghc sources).
       -- For now we pass 'Nothing' as the PackageQualifier. It *might* be
       -- possible to recover the package qualifier using 'impSpan'.
-      scopeFromProv :: MonadIO m => RdrName.Provenance -> m IdScope
+      scopeFromProv :: RdrName.Provenance -> m IdScope
       scopeFromProv RdrName.LocalDef = do
         return Local
       scopeFromProv (RdrName.Imported spec) = do
@@ -556,7 +534,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
           , idImportQual   = Text.pack $ impQual
           }
 
-      extractImportInfo :: MonadIO m => [RdrName.ImportSpec] -> m (GHC.ModuleName, EitherSpan, String)
+      extractImportInfo :: [RdrName.ImportSpec] -> m (GHC.ModuleName, EitherSpan, String)
       extractImportInfo (RdrName.ImpSpec decl item:_) = do
         span <- case item of
                   RdrName.ImpAll -> extractSourceSpan (RdrName.is_dloc decl)
@@ -578,8 +556,8 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       missingModule :: a
       missingModule = error $ "No module for " ++ showSDocDebug (ppr name)
 
-extractSourceSpan :: MonadIO m => SrcSpan -> m EitherSpan
-extractSourceSpan (RealSrcSpan srcspan) = liftIO $ do
+extractSourceSpan :: MonadFilePathCaching m => SrcSpan -> m EitherSpan
+extractSourceSpan (RealSrcSpan srcspan) = do
   key <- mkFilePathPtr $ unpackFS (srcSpanFile srcspan)
   return . ProperSpan $ SourceSpan
     key
@@ -645,7 +623,7 @@ instance Record Name where
 ------------------------------------------------------------------------------}
 
 class ExtractIds a where
-  extractIds :: MonadIO m => a -> ExtractIdsT m (Maybe Type)
+  extractIds :: a -> ExtractIdsM (Maybe Type)
 
 instance ExtractIds a => ExtractIds [a] where
   extractIds xs = do mapM_ extractIds xs ; return Nothing
