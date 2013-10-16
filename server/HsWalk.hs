@@ -19,7 +19,7 @@ module HsWalk
   , IsBinder(..)
   ) where
 
-#define DEBUG 1
+#define DEBUG 0
 
 import Data.Foldable (forM_)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
@@ -371,7 +371,6 @@ recordExpType span (Just typ) = do
   eitherSpan <- extractSourceSpan span
   case eitherSpan of
     ProperSpan properSpan -> do
-      logIndented $ "Recording " ++ showSDoc (ppr typ) ++ " at location " ++ showSDoc (ppr span)
       prettyTyp <- tidyType typ >>= showTypeForUser
       modify $ \st -> st {
           eIdsExpTypes = (properSpan, prettyTyp) : eIdsExpTypes st
@@ -769,7 +768,6 @@ instance Record id => ExtractIds (LHsType id) where
 
 instance Record id => ExtractIds (Located (HsSplice id)) where
   extractIds (L span (HsSplice _id expr)) = ast (Just span) "HsSplice" $ do
-    logIndented $ "HsSplice with locations " ++ showSDoc (ppr (span, getLoc expr))
     extractIds expr
 
 instance Record id => ExtractIds (Located (HsQuasiQuote id)) where
@@ -819,10 +817,8 @@ instance Record id => ExtractIds (LHsBind id) where
     -- written code. The ghc comments says "located 'only for consistency'"
     return Nothing
   extractIds (L span bind@(AbsBinds {})) = ast (Just span) "AbsBinds" $ do
-    logIndented "AbsBinds"
-    indent $ forM_ (abs_exports bind) $ \abs_export ->
+    forM_ (abs_exports bind) $ \abs_export ->
       record typecheckOnly DefSite (abe_poly abs_export)
-    logIndented "/AbsBinds"
     extractIds (abs_binds bind)
 
 #if __GLASGOW_HASKELL__ >= 707
@@ -902,7 +898,6 @@ instance Record id => ExtractIds (LHsExpr id) where
     _rightTy <- extractIds right
     recordExpType span (funRes2 <$> opTy)
   extractIds (L span (HsVar id)) = ast (Just span) "HsVar" $ do
-    logIndented $ "HsVar at location " ++ showSDoc (ppr span)
     record span UseSite id
   extractIds (L span (HsWrap wrapper expr)) = ast (Just span) "HsWrap" $ do
     ty <- extractIds (L span expr)
@@ -912,7 +907,6 @@ instance Record id => ExtractIds (LHsExpr id) where
     ty <- extractIds expr
     recordExpType span ty -- Re-record this with the span of the whole let
   extractIds (L span (HsApp fun arg)) = ast (Just span) "HsApp" $ do
-    logIndented $ "HsApp at location " ++ showSDoc (ppr span)
     funTy  <- extractIds fun
     _argTy <- extractIds arg
     recordExpType span (funRes1 <$> funTy)
@@ -1023,7 +1017,6 @@ instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsCoreAnn _string expr)) = ast (Just span) "HsCoreAnn" $ do
     extractIds expr
   extractIds (L span (HsSpliceE splice)) = ast (Just span) "HsSpliceE" $ do
-    logIndented $ "SpliceE with loc " ++ showSDoc (ppr span)
     extractIds (L span splice) -- reuse span
   extractIds (L span (HsQuasiQuoteE qquote)) = ast (Just span) "HsQuasiQuoteE" $ do
     extractIds (L span qquote) -- reuse span
