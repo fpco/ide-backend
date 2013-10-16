@@ -4028,8 +4028,7 @@ syntheticTests =
         assertNoErrors session
 
         let uses_f = [
-                "A.hs@2:1-2:2"
-              , "A.hs@5:9-5:10"
+                "A.hs@5:9-5:10"
               , "A.hs@5:5-5:6"
               , "B.hs@4:13-4:14"
               ]
@@ -4038,11 +4037,9 @@ syntheticTests =
               , "B.hs@4:6-4:7"
               ]
             uses_g = [
-                "A.hs@4:1-4:2"
-              , "B.hs@4:17-4:18"
+                "B.hs@4:17-4:18"
               ]
             uses_h = [
-                "B.hs@3:1-3:2"
               ]
 
         do useSites <- getUseSites session
@@ -4067,14 +4064,12 @@ syntheticTests =
         assertNoErrors session
 
         let uses_f2 = [
-                "A.hs@2:1-2:2"
-              , "A.hs@5:9-5:10"
+                "A.hs@5:9-5:10"
               , "A.hs@5:5-5:6"
               , "B.hs@4:17-4:18"
               ]
             uses_g2 = [
-                "A.hs@4:1-4:2"
-              , "B.hs@4:13-4:14"
+                "B.hs@4:13-4:14"
               ]
 
         do useSites <- getUseSites session
@@ -4101,8 +4096,7 @@ syntheticTests =
         assertNoErrors session
 
         let uses_f3 = [
-                "A.hs@2:1-2:2"
-              , "A.hs@5:13-5:14"
+                "A.hs@5:13-5:14"
               , "B.hs@4:17-4:18"
               ]
             uses_add3 = [ -- "+"
@@ -4242,13 +4236,8 @@ syntheticTests =
         updateSessionD session upd1 2
         assertNoErrors session
 
-        -- TODO: not sure why we have the double entries for the
-        -- type declaration
-
         let uses_f = [
-                "A.hs@4:6-4:7"
-              , "A.hs@4:6-4:7"
-              , "A.hs@7:14-7:15"
+                "A.hs@7:14-7:15"
               , "A.hs@7:10-7:11"
               , "A.hs@2:16-2:17"
               ]
@@ -4257,9 +4246,7 @@ syntheticTests =
               , "A.hs@2:9-2:10"
               ]
             uses_g = [
-                "A.hs@6:6-6:7"
-              , "A.hs@6:6-6:7"
-              , "A.hs@2:20-2:21"
+                "A.hs@2:20-2:21"
               ]
 
         do useSites <- getUseSites session

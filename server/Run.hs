@@ -95,7 +95,7 @@ import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
 import qualified IdeSession.Strict.List  as StrictList
 
-import HsWalk (extractSourceSpan, idInfoForName)
+import HsWalk (extractSourceSpan, idInfoForName, IsBinder(..))
 import Haddock
 import Debug
 import Conv
@@ -274,11 +274,10 @@ autocompletion summary = do
   let eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
       eltsToAutocompleteMap elt = do
         let name          = gre_name elt
-            isBinder      = False
             currentModule = Nothing -- Must be imported (TH stage restriction)
         (idProp, Just idScope) <- idInfoForName dflags
                                                 name
-                                                isBinder
+                                                UseSite
                                                 (Just elt)
                                                 currentModule
                                                 (homeModuleFor dflags linkEnv)

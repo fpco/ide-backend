@@ -16,12 +16,12 @@ module HsWalk
   , moduleNameToId
   , PluginResult(..)
   , moduleToPackageId
+  , IsBinder(..)
   ) where
 
 #define DEBUG 1
 
 import Data.Foldable (forM_)
-import Control.Monad (unless)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State.Class (MonadState(..))
 import Control.Monad.Trans.Class (MonadTrans, lift)
@@ -195,7 +195,7 @@ extractIdsPlugin symbolRef = HscPlugin {..}
 
       (idProp, Just idScope) <- idInfoForName dflags
                                               quoter
-                                              False
+                                              UseSite
                                               (lookupRdrEnv rdrEnv quoter)
                                               (Just current)
                                               (homeModuleFor dflags linkEnv)
@@ -463,7 +463,11 @@ unsupported _ _ = return Nothing
   Record
 ------------------------------------------------------------------------------}
 
-type IsBinder = Bool
+-- | Is this a binding occurrence of @f@?
+data IsBinder =
+    DefSite   -- ^ @f = ..@
+  | UseSite   -- ^ @g = f ..@
+  | SigSite   -- ^ @f :: ..@ or fixity declaration
 
 class (Uniquable id, OutputableBndr id) => Record id where
   record :: MonadIO m => SrcSpan -> IsBinder -> id -> ExtractIdsT m (Maybe Type)
@@ -503,7 +507,7 @@ idInfoForName
   :: MonadIO m
   => DynFlags                         -- ^ The usual dynflags
   -> Name                             -- ^ The name in question
-  -> Bool                             -- ^ Is this a binding occurrence?
+  -> IsBinder                         -- ^ Is this a binding occurrence?
   -> Maybe RdrName.GlobalRdrElt       -- ^ GlobalRdrElt for imported names
   -> Maybe Module.Module              -- ^ Current module for local names
   -> (Name -> Strict Maybe ModuleId)  -- ^ Home modules
@@ -530,7 +534,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
 
       constructScope :: MonadIO m => m (Maybe IdScope)
       constructScope
-        | idIsBinder               = return $ Just Binder
+        | DefSite <- idIsBinder    = return $ Just Binder
         | Name.isWiredInName  name = return $ Just WiredIn
         | Name.isInternalName name = return $ Just Local
         | otherwise = case mElt of
@@ -622,7 +626,9 @@ instance Record Name where
         case info of
           (idProp, Just idScope) -> do
             extendIdMap sourceSpan $ SpanId IdInfo{..}
-            unless idIsBinder $ recordUseSite idProp sourceSpan
+            case idIsBinder of
+              UseSite -> recordUseSite idProp sourceSpan
+              _       -> return ()
           _ ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from
@@ -684,10 +690,10 @@ instance Record id => ExtractIds (HsValBinds id) where
 
 instance Record id => ExtractIds (LSig id) where
   extractIds (L span (TypeSig names tp)) = ast (Just span) "TypeSig" $ do
-    forM_ names $ \name -> record (getLoc name) False (unLoc name)
+    forM_ names $ \name -> record (getLoc name) SigSite (unLoc name)
     extractIds tp
   extractIds (L span (GenericSig names tp)) = ast (Just span) "GenericSig" $ do
-    forM_ names $ \name -> record (getLoc name) False (unLoc name)
+    forM_ names $ \name -> record (getLoc name) SigSite (unLoc name)
     extractIds tp
 
   -- Only in generated code
@@ -708,7 +714,7 @@ instance Record id => ExtractIds (LHsType id) where
   extractIds (L span (HsFunTy arg res)) = ast (Just span) "HsFunTy" $
     extractIds [arg, res]
   extractIds (L span (HsTyVar name)) = ast (Just span) "HsTyVar" $
-    record span False name
+    record span UseSite name
   extractIds (L span (HsForAllTy _explicitFlag tyVars ctxt body)) = ast (Just span) "hsForAllTy" $ do
     extractIds tyVars
     extractIds ctxt
@@ -740,7 +746,7 @@ instance Record id => ExtractIds (LHsType id) where
     extractIds typ
   extractIds (L span (HsOpTy left (_wrapper, op) right)) = ast (Just span) "HsOpTy" $ do
     extractIds [left, right]
-    record (getLoc op) False (unLoc op)
+    record (getLoc op) UseSite (unLoc op)
   extractIds (L span (HsIParamTy _var typ)) = ast (Just span) "HsIParamTy" $
     -- _var is not located
     extractIds typ
@@ -784,14 +790,14 @@ instance Record id => ExtractIds (LHsTyVarBndr id) where
 #else
   extractIds (L span (UserTyVar name _postTcKind)) = ast (Just span) "UserTyVar" $ do
 #endif
-    record span True name
+    record span DefSite name
 
 #if __GLASGOW_HASKELL__ >= 706
   extractIds (L span (KindedTyVar name kind)) = ast (Just span) "KindedTyVar" $ do
 #else
   extractIds (L span (KindedTyVar name kind _postTcKind)) = ast (Just span) "KindedTyVar" $ do
 #endif
-    record span True name
+    record span DefSite name
     extractIds kind
 
 instance Record id => ExtractIds (LHsContext id) where
@@ -803,7 +809,7 @@ instance Record id => ExtractIds (LHsBinds id) where
 
 instance Record id => ExtractIds (LHsBind id) where
   extractIds (L span bind@(FunBind {})) = ast (Just span) "FunBind" $ do
-    record (getLoc (fun_id bind)) True (unLoc (fun_id bind))
+    record (getLoc (fun_id bind)) DefSite (unLoc (fun_id bind))
     extractIds (fun_matches bind)
   extractIds (L span bind@(PatBind {})) = ast (Just span) "PatBind" $ do
     extractIds (pat_lhs bind)
@@ -815,7 +821,7 @@ instance Record id => ExtractIds (LHsBind id) where
   extractIds (L span bind@(AbsBinds {})) = ast (Just span) "AbsBinds" $ do
     logIndented "AbsBinds"
     indent $ forM_ (abs_exports bind) $ \abs_export ->
-      record typecheckOnly True (abe_poly abs_export)
+      record typecheckOnly DefSite (abe_poly abs_export)
     logIndented "/AbsBinds"
     extractIds (abs_binds bind)
 
@@ -897,7 +903,7 @@ instance Record id => ExtractIds (LHsExpr id) where
     recordExpType span (funRes2 <$> opTy)
   extractIds (L span (HsVar id)) = ast (Just span) "HsVar" $ do
     logIndented $ "HsVar at location " ++ showSDoc (ppr span)
-    record span False id
+    record span UseSite id
   extractIds (L span (HsWrap wrapper expr)) = ast (Just span) "HsWrap" $ do
     ty <- extractIds (L span expr)
     recordExpType span (applyWrapper wrapper <$> ty)
@@ -938,7 +944,7 @@ instance Record id => ExtractIds (LHsExpr id) where
     extractIds recordBinds
     case ifPostTc (undefined :: id) mPostTcExpr of
       Nothing -> do
-        record (getLoc con) False (unLoc con)
+        record (getLoc con) UseSite (unLoc con)
         return Nothing
       Just postTcExpr -> do
         conTy <- extractIds (L (getLoc con) postTcExpr)
@@ -1104,7 +1110,7 @@ instance (ExtractIds a, Record id) => ExtractIds (HsRecFields id a) where
 
 instance (ExtractIds a, Record id) => ExtractIds (HsRecField id a) where
   extractIds (HsRecField id arg _pun) = ast Nothing "HsRecField" $ do
-    record (getLoc id) False (unLoc id)
+    record (getLoc id) UseSite (unLoc id)
     extractIds arg
 
 -- The meaning of the constructors of LStmt isn't so obvious; see various
@@ -1141,11 +1147,11 @@ instance Record id => ExtractIds (LPat id) where
   extractIds (L span (WildPat postTcType)) = ast (Just span) "WildPat" $
     recordExpType span (ifPostTc (undefined :: id) postTcType)
   extractIds (L span (VarPat id)) = ast (Just span) "VarPat" $
-    record span True id
+    record span DefSite id
   extractIds (L span (LazyPat pat)) = ast (Just span) "LazyPat" $
     extractIds pat
   extractIds (L span (AsPat id pat)) = ast (Just span) "AsPat" $ do
-    record (getLoc id) True (unLoc id)
+    record (getLoc id) DefSite (unLoc id)
     extractIds pat
   extractIds (L span (ParPat pat)) = ast (Just span) "ParPat" $
     extractIds pat
@@ -1164,17 +1170,17 @@ instance Record id => ExtractIds (LPat id) where
     extractIds pats
   extractIds (L span (ConPatIn con details)) = ast (Just span) "ConPatIn" $ do
     -- Unlike ValBindsIn and HsValBindsIn, we *do* get ConPatIn
-    record (getLoc con) False (unLoc con) -- the constructor name is non-binding
+    record (getLoc con) UseSite (unLoc con) -- the constructor name is non-binding
     extractIds details
   extractIds (L span (ConPatOut {pat_con, pat_args})) = ast (Just span) "ConPatOut" $ do
-    record (getLoc pat_con) False (dataConName (unLoc pat_con))
+    record (getLoc pat_con) UseSite (dataConName (unLoc pat_con))
     extractIds pat_args
   extractIds (L span (LitPat _)) = ast (Just span) "LitPat" $
     return Nothing
   extractIds (L span (NPat _ _ _)) = ast (Just span) "NPat" $
     return Nothing
   extractIds (L span (NPlusKPat id _lit _rebind1 _rebind2)) = ast (Just span) "NPlusKPat" $ do
-    record (getLoc id) True (unLoc id)
+    record (getLoc id) DefSite (unLoc id)
   extractIds (L span (ViewPat expr pat _postTcType)) = ast (Just span) "ViewPat" $ do
     extractIds expr
     extractIds pat
@@ -1202,7 +1208,7 @@ instance (ExtractIds arg, ExtractIds rec) => ExtractIds (HsConDetails arg rec) w
 instance Record id => ExtractIds (LTyClDecl id) where
   extractIds (L span decl@(TyData {})) = ast (Just span) "TyData" $ do
     extractIds (tcdCtxt decl)
-    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    record (getLoc (tcdLName decl)) DefSite (unLoc (tcdLName decl))
     extractIds (tcdTyVars decl)
     extractIds (tcdTyPats decl)
     extractIds (tcdKindSig decl)
@@ -1210,7 +1216,7 @@ instance Record id => ExtractIds (LTyClDecl id) where
     extractIds (tcdDerivs decl)
   extractIds (L span decl@(ClassDecl {})) = ast (Just span) "ClassDecl" $ do
     extractIds (tcdCtxt decl)
-    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    record (getLoc (tcdLName decl)) DefSite (unLoc (tcdLName decl))
     extractIds (tcdTyVars decl)
     -- Sadly, we don't get location info for the functional dependencies
     extractIds (tcdSigs decl)
@@ -1225,12 +1231,12 @@ instance Record id => ExtractIds (LTyClDecl id) where
   extractIds (L span _decl@(DataDecl {}))    = unsupported (Just span) "DataDecl"
 #else
   extractIds (L span decl@(TySynonym {})) = ast (Just span) "TySynonym" $ do
-    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    record (getLoc (tcdLName decl)) DefSite (unLoc (tcdLName decl))
     extractIds (tcdTyVars decl)
     extractIds (tcdTyPats decl)
     extractIds (tcdSynRhs decl)
   extractIds (L span decl@(TyFamily {})) = ast (Just span) "TyFamily" $  do
-    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    record (getLoc (tcdLName decl)) DefSite (unLoc (tcdLName decl))
     extractIds (tcdTyVars decl)
     extractIds (tcdKind decl)
 #endif
@@ -1239,7 +1245,7 @@ instance Record id => ExtractIds (LTyClDecl id) where
 
 instance Record id => ExtractIds (LConDecl id) where
   extractIds (L span decl@(ConDecl {})) = ast (Just span) "ConDecl" $ do
-    record (getLoc (con_name decl)) True (unLoc (con_name decl))
+    record (getLoc (con_name decl)) DefSite (unLoc (con_name decl))
     extractIds (con_qvars decl)
     extractIds (con_cxt decl)
     extractIds (con_details decl)
@@ -1253,7 +1259,7 @@ instance Record id => ExtractIds (ResType id) where
 
 instance Record id => ExtractIds (ConDeclField id) where
   extractIds (ConDeclField name typ _doc) = do
-    record (getLoc name) True (unLoc name)
+    record (getLoc name) DefSite (unLoc name)
     extractIds typ
 
 instance Record id => ExtractIds (LInstDecl id) where
@@ -1269,7 +1275,7 @@ instance Record id => ExtractIds (LDerivDecl id) where
 
 instance Record id => ExtractIds (LFixitySig id) where
   extractIds (L span (FixitySig name _fixity)) = ast (Just span) "LFixitySig" $ do
-    record (getLoc name) False (unLoc name)
+    record (getLoc name) SigSite (unLoc name)
 
 instance Record id => ExtractIds (LDefaultDecl id) where
   extractIds (L span (DefaultDecl typs)) = ast (Just span) "LDefaultDecl" $ do
@@ -1277,16 +1283,16 @@ instance Record id => ExtractIds (LDefaultDecl id) where
 
 instance Record id => ExtractIds (LForeignDecl id) where
   extractIds (L span (ForeignImport name sig _coercion _import)) = ast (Just span) "ForeignImport" $ do
-    record (getLoc name) True (unLoc name)
+    record (getLoc name) DefSite (unLoc name)
     extractIds sig
   extractIds (L span (ForeignExport name sig _coercion _export)) = ast (Just span) "ForeignExport" $ do
-    record (getLoc name) False (unLoc name)
+    record (getLoc name) UseSite (unLoc name)
     extractIds sig
 
 instance Record id => ExtractIds (LWarnDecl id) where
   extractIds (L span (Warning name _txt)) = ast (Just span) "Warning" $ do
     -- We use the span of the entire warning because we don't get location info for name
-    record span False name
+    record span UseSite name
 
 instance Record id => ExtractIds (LAnnDecl id) where
   extractIds (L span _) = unsupported (Just span) "LAnnDecl"
