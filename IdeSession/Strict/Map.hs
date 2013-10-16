@@ -22,6 +22,7 @@ module IdeSession.Strict.Map (
   , member
   , (!)
   , keys
+  , elems
   , delete
   , accessor
   , accessorDefault
@@ -105,6 +106,9 @@ member k = Map.member k . toLazyMap
 
 keys :: Strict (Map k) a -> [k]
 keys = Map.keys . toLazyMap
+
+elems :: Strict (Map k) a -> [a]
+elems = Map.elems . toLazyMap
 
 delete :: Ord k => k -> Strict (Map k) a -> Strict (Map k) a
 delete k = StrictMap . Map.delete k . toLazyMap

@@ -1,14 +1,20 @@
 {-# LANGUAGE FlexibleInstances, MultiParamTypeClasses #-}
 -- | Version on StateT which evaluates the state strictly at every step
 module IdeSession.Strict.StateT (
+    -- * Transformer
     StrictStateT(..)
   , modify
   , evalStateT
   , execStateT
+    -- * As base monad
+  , StrictState
+  , evalState
+  , execState
   ) where
 
 import Control.Monad.State.Class
 import Control.Monad.Trans.Class
+import Data.Functor.Identity
 
 newtype StrictStateT s m a = StrictStateT { runStateT :: s -> m (a, s) }
 
@@ -36,3 +42,15 @@ evalStateT m s = do (a, _) <- runStateT m s ; return a
 
 execStateT :: Monad m => StrictStateT s m a -> s -> m s
 execStateT m s = do (_, s') <- runStateT m s ; return s'
+
+{------------------------------------------------------------------------------
+  As base monad
+------------------------------------------------------------------------------}
+
+type StrictState s = StrictStateT s Identity
+
+evalState :: StrictState s a -> s -> a
+evalState m s = runIdentity $ evalStateT m s
+
+execState :: StrictState s a -> s -> s
+execState m s = runIdentity $ execStateT m s

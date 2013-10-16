@@ -32,11 +32,13 @@ module IdeSession.Query (
   , getImports
   , getAutocompletion
   , getPkgDeps
+  , getUseSites
     -- * Debugging (internal use only)
   , dumpIdInfo
   ) where
 
 import Prelude hiding (mod, span)
+import Data.Maybe (listToMaybe, maybeToList)
 import Data.List (isInfixOf)
 import Data.Accessor ((^.), (^:), getVal)
 import qualified System.FilePath.Find as Find
@@ -196,37 +198,27 @@ getLoadedModules = computedQuery $ \Computed{..} ->
 
 -- | Get information about an identifier at a specific location
 getSpanInfo :: Query (ModuleName -> SourceSpan -> [(SourceSpan, SpanInfo)])
-getSpanInfo = computedQuery $ \Computed{..} mod span ->
-  let mSpan  = introduceExplicitSharing computedCache span
-      mIdMap = StrictMap.lookup mod computedSpanInfo
-  in case (mSpan, mIdMap) of
+getSpanInfo = computedQuery $ \computed@Computed{..} mod span ->
+  let aux (a, b) = ( removeExplicitSharing computedCache a
+                 , removeExplicitSharing computedCache b
+                 )
+  in map aux . maybeToList $ internalGetSpanInfo computed mod span
+
+internalGetSpanInfo :: Computed -> ModuleName -> SourceSpan
+                    -> Maybe (Private.SourceSpan, Private.SpanInfo)
+internalGetSpanInfo Computed{..} mod span = case (mSpan, mIdMap) of
     (Just span', Just (Private.IdMap idMap)) ->
-      let aux (a, b) = ( removeExplicitSharing computedCache a
-                       , removeExplicitSharing computedCache b
-                       )
-          doms = map aux $ Private.dominators span' idMap
-      -- TODO: HACK
-      -- As is evident in the "Type information 9' test, ghc is inconsistent
-      -- in the spans that it returns for the expansion of quasi-quotes.
-      -- For now, however, there are only two possibilities: the span has
-      -- nothing to do with a quasi-quote and will therefore be a single
-      -- SpanId, or the span is a quasi-quote, and we will have a SpanQQ
-      -- \*somewhere* in the list.
-      -- Once we report span info for subexpressions, however, this is no
-      -- longer true, and the ordering of the spaninfo becomes significant.
-      -- In that case we will need to ensure that: the order of the dominators
-      -- is correct (with larger spans later in the list, and the immediate
-      -- dominator first), and that the SpanQQ immediately follows
-      -- to "top-level" node in the AST that corresponds to the expansion
-      -- of the quasi-quote.
+      let doms = Private.dominators span' idMap
       in case filter isQQ doms of
-           [qq] -> [qq]
-           _    -> doms
-    _ ->
-      []
+           qq : _ -> Just qq
+           _      -> listToMaybe doms
+    _ -> Nothing
   where
-    isQQ (_, SpanQQ _) = True
-    isQQ _             = False
+    mSpan  = introduceExplicitSharing computedCache span
+    mIdMap = StrictMap.lookup mod computedSpanInfo
+
+    isQQ (_, Private.SpanQQ _) = True
+    isQQ _                     = False
 
 -- | Get information the type of a subexpressions and the subexpressions
 -- around it
@@ -277,6 +269,24 @@ getPkgDeps :: Query (ModuleName -> Maybe [PackageId])
 getPkgDeps = computedQuery $ \Computed{..} mod ->
   fmap (toLazyList . StrictList.map (removeExplicitSharing computedCache)) $
     StrictMap.lookup mod computedPkgDeps
+
+-- | Use sites
+--
+-- Use sites are only reported in modules that get compiled successfully.
+getUseSites :: Query (ModuleName -> SourceSpan -> [SourceSpan])
+getUseSites = computedQuery $ \computed@Computed{..} mod span ->
+  maybeListToList $ do
+    (_, spanId)        <- internalGetSpanInfo computed mod span
+    Private.IdInfo{..} <- case spanId of
+                            Private.SpanId idInfo -> return idInfo
+                            Private.SpanQQ _      -> Nothing
+    return $ map (removeExplicitSharing computedCache)
+           . concatMap (maybeListToList . StrictMap.lookup idProp)
+           $ StrictMap.elems computedUseSites
+  where
+    maybeListToList :: Maybe [a] -> [a]
+    maybeListToList (Just xs) = xs
+    maybeListToList Nothing   = []
 
 {------------------------------------------------------------------------------
   Debugging
@@ -329,6 +339,7 @@ withIdleState IdeSession{ideState} f =
       , computedLoadedModules = StrictList.nil
       , computedSpanInfo      = StrictMap.empty
       , computedExpTypes      = StrictMap.empty
+      , computedUseSites      = StrictMap.empty
       , computedImports       = StrictMap.empty
       , computedAutoMap       = StrictMap.empty
       , computedPkgDeps       = StrictMap.empty

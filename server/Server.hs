@@ -42,7 +42,6 @@ import GhcMonad(Ghc(..))
 
 import Run
 import HsWalk
-import Haddock (pkgDepsFromModSummary, updatePkgDepsFor)
 import Debug
 
 --------------------------------------------------------------------------------
@@ -167,7 +166,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
                                        (\_ -> return ()) -- TODO: log?
 
 
-    let initialResponse = GhcCompileDone {
+    let initialResponse = GhcCompileResult {
             ghcCompileErrors   = errs
           , ghcCompileLoaded   = force $ loadedModules
           , ghcCompileCache    = error "ghcCompileCache set last"
@@ -177,6 +176,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
           , ghcCompilePkgDeps  = StrictMap.empty
           , ghcCompileSpanInfo = StrictMap.empty
           , ghcCompileExpTypes = StrictMap.empty
+          , ghcCompileUseSites = StrictMap.empty
           }
 
     response <- if not configGenerateModInfo
@@ -198,20 +198,23 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
             gotRecompiled imp =
               moduleName (importModule imp) `elem` recompiledModules
 
-            removeOldModule :: ModuleName -> StateT GhcCompileResponse Ghc ()
+            removeOldModule :: ModuleName -> StateT GhcCompileResult Ghc ()
             removeOldModule m = do
               set (importsFor m)  Remove
               set (autoFor m)     Remove
               set (spanInfoFor m) Remove
+              set (expTypesFor m) Remove
+              set (useSitesFor m) Remove
+              set (pkgDepsFor m)  Remove
 
             addNewModule :: (ModuleName, GHC.ModSummary)
-                         -> StateT GhcCompileResponse Ghc (ModuleName, ModSummary)
+                         -> StateT GhcCompileResult Ghc (ModuleName, ModSummary)
             addNewModule (m, ghcSummary) = do
               imports <- lift $ importList     ghcSummary
               auto    <- lift $ autocompletion ghcSummary
               set (importsFor m) (Insert imports)
               set (autoFor m)    (Insert auto)
-              -- spaninfo is set separately
+              -- Information computed by the plugin set separately
 
               let newSummary = ModSummary {
                                    modTimestamp = ms_hs_date ghcSummary
@@ -222,7 +225,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
               return (m, newSummary)
 
             updateModule :: ModuleName -> ModSummary -> GHC.ModSummary
-                         -> StateT GhcCompileResponse Ghc (ModuleName, ModSummary)
+                         -> StateT GhcCompileResult Ghc (ModuleName, ModSummary)
             updateModule m oldSummary ghcSummary = do
               (imports, importsChanged) <-
                 -- We recompute imports when the file changed, rather than when
@@ -230,11 +233,8 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
                 -- imports even for modules with type errors
                 if modTimestamp oldSummary == ms_hs_date ghcSummary
                   then return (modImports oldSummary, False)
-                  else do dynFlags <- lift $ getSessionDynFlags
-                          imports <- lift $ importList ghcSummary
+                  else do imports <- lift $ importList ghcSummary
                           set (importsFor m) (Insert imports)
-                          let pkgDeps = pkgDepsFromModSummary dynFlags ghcSummary
-                          lift . liftIO $ updatePkgDepsFor m pkgDeps
                           return (imports, imports /= modImports oldSummary)
 
               -- We recompute autocompletion info if the imported modules have
@@ -255,14 +255,17 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
                                  , modIsLoaded  = m `elem` loadedModules
                                  }
 
-              when (not (modIsLoaded newSummary)) $
+              when (not (modIsLoaded newSummary)) $ do
                 set (spanInfoFor m) Remove
+                set (pkgDepsFor m)  Remove
+                set (expTypesFor m) Remove
+                set (useSitesFor m) Remove
 
               return (m, newSummary)
 
         let go :: [(ModuleName, ModSummary)]
                -> [(ModuleName, GHC.ModSummary)]
-               -> StateT GhcCompileResponse Ghc [(ModuleName, ModSummary)]
+               -> StateT GhcCompileResult Ghc [(ModuleName, ModSummary)]
             go ((m, oldSummary) : old) ((m', ghcSummary) : new) = do
               case compare m m' of
                 LT -> do removeOldModule m
@@ -278,11 +281,12 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
               mapM addNewModule new
 
         let sendPluginResult :: [(ModuleName, PluginResult)]
-                             -> StateT GhcCompileResponse Ghc ()
-            sendPluginResult = mapM_ $ \(m, result) -> do
-              set (spanInfoFor m) (Insert (pluginIdList result))
-              set (pkgDepsFor m)  (Insert (pluginPkgDeps result))
-              set (expTypesFor m) (Insert (pluginExpTypes result))
+                             -> StateT GhcCompileResult Ghc ()
+            sendPluginResult = mapM_ $ \(m, PluginResult{..}) -> do
+              set (spanInfoFor m) (Insert pluginIdList)
+              set (pkgDepsFor m)  (Insert pluginPkgDeps)
+              set (expTypesFor m) (Insert pluginExpTypes)
+              set (useSitesFor m) (Insert pluginUseSites)
 
         (newSummaries, finalResponse) <- flip runStateT initialResponse $ do
           sendPluginResult (StrictMap.toList pluginIdMaps)
@@ -299,7 +303,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
 
     cache <- liftIO $ constructExplicitSharingCache
     -- Should we call clearLinkEnvCache here?
-    liftIO . put $ response { ghcCompileCache = cache }
+    liftIO . put . GhcCompileDone $ response { ghcCompileCache = cache }
   where
     dynOpts :: DynamicOpts
     dynOpts =
@@ -337,12 +341,14 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
     allSpanInfo = accessor ghcCompileSpanInfo (\ss st -> st { ghcCompileSpanInfo = ss })
     allPkgDeps  = accessor ghcCompilePkgDeps  (\ds st -> st { ghcCompilePkgDeps  = ds })
     allExpTypes = accessor ghcCompileExpTypes (\ts st -> st { ghcCompileExpTypes = ts })
+    allUseSites = accessor ghcCompileUseSites (\us st -> st { ghcCompileUseSites = us })
 
     importsFor  m = allImports  .> StrictMap.accessorDefault Keep m
     autoFor     m = allAuto     .> StrictMap.accessorDefault Keep m
     spanInfoFor m = allSpanInfo .> StrictMap.accessorDefault Keep m
     pkgDepsFor  m = allPkgDeps  .> StrictMap.accessorDefault Keep m
     expTypesFor m = allExpTypes .> StrictMap.accessorDefault Keep m
+    useSitesFor m = allUseSites .> StrictMap.accessorDefault Keep m
 
 parseProgressMessage :: Text -> Either String (Int, Int, Text)
 parseProgressMessage = Att.parseOnly parser

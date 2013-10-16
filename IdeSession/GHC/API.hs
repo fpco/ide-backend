@@ -9,6 +9,7 @@ module IdeSession.GHC.API (
   , RunBufferMode(..)
     -- * Responses
   , GhcCompileResponse(..)
+  , GhcCompileResult(..)
   , GhcRunResponse(..)
   , RunResult(..)
     -- * Configuration
@@ -34,7 +35,7 @@ import IdeSession.Util (Diff)
 -- We use a Unix timestamp for this so that these API versions have some
 -- semantics (http://www.epochconverter.com/, GMT).
 ideBackendApiVersion :: Int
-ideBackendApiVersion = 1379671522
+ideBackendApiVersion = 1381839823
 
 {------------------------------------------------------------------------------
   Requests
@@ -94,19 +95,23 @@ data RunBufferMode =
 ------------------------------------------------------------------------------}
 
 data GhcCompileResponse =
-    GhcCompileProgress {
-        ghcCompileProgress :: Progress
-      }
-  | GhcCompileDone {
-        ghcCompileErrors   :: Strict [] SourceError
-      , ghcCompileLoaded   :: Strict [] ModuleName
-      , ghcCompileImports  :: Strict (Map ModuleName) (Diff (Strict [] Import))
-      , ghcCompileAuto     :: Strict (Map ModuleName) (Diff (Strict [] IdInfo))
-      , ghcCompileSpanInfo :: Strict (Map ModuleName) (Diff IdList)
-      , ghcCompileExpTypes :: Strict (Map ModuleName) (Diff [(SourceSpan, Text)])
-      , ghcCompilePkgDeps  :: Strict (Map ModuleName) (Diff (Strict [] PackageId))
-      , ghcCompileCache    :: ExplicitSharingCache
-      }
+    GhcCompileProgress Progress
+  | GhcCompileDone GhcCompileResult
+
+data GhcCompileResult = GhcCompileResult {
+    ghcCompileErrors   :: Strict [] SourceError
+  , ghcCompileLoaded   :: Strict [] ModuleName
+  , ghcCompileCache    :: ExplicitSharingCache
+  -- Computed from the GhcSummary (independent of the plugin, and hence
+  -- available even when the plugin does not run)
+  , ghcCompileImports  :: Strict (Map ModuleName) (Diff (Strict [] Import))
+  , ghcCompileAuto     :: Strict (Map ModuleName) (Diff (Strict [] IdInfo))
+  -- Computed by the plugin
+  , ghcCompileSpanInfo :: Strict (Map ModuleName) (Diff IdList)
+  , ghcCompilePkgDeps  :: Strict (Map ModuleName) (Diff (Strict [] PackageId))
+  , ghcCompileExpTypes :: Strict (Map ModuleName) (Diff [(SourceSpan, Text)])
+  , ghcCompileUseSites :: Strict (Map ModuleName) (Diff UseSites)
+  }
 
 data GhcRunResponse =
     GhcRunOutp ByteString
@@ -161,28 +166,31 @@ instance Binary GhcRequest where
       _ -> fail "GhcRequest.get: invalid header"
 
 instance Binary GhcCompileResponse where
-  put GhcCompileProgress {..} = do
-    putWord8 0
-    put ghcCompileProgress
-  put GhcCompileDone {..} = do
-    putWord8 1
-    put ghcCompileErrors
-    put ghcCompileLoaded
-    put ghcCompileImports
-    put ghcCompileAuto
-    put ghcCompileSpanInfo
-    put ghcCompileExpTypes
-    put ghcCompilePkgDeps
-    put ghcCompileCache
+  put (GhcCompileProgress progress) = putWord8 0 >> put progress
+  put (GhcCompileDone result)       = putWord8 1 >> put result
 
   get = do
     header <- getWord8
     case header of
       0 -> GhcCompileProgress <$> get
-      1 -> GhcCompileDone     <$> get <*> get <*> get
-                              <*> get <*> get <*> get
-                              <*> get <*> get
+      1 -> GhcCompileDone     <$> get
       _ -> fail "GhcCompileRespone.get: invalid header"
+
+instance Binary GhcCompileResult where
+  put GhcCompileResult{..} = do
+    put ghcCompileErrors
+    put ghcCompileLoaded
+    put ghcCompileCache
+    put ghcCompileImports
+    put ghcCompileAuto
+    put ghcCompileSpanInfo
+    put ghcCompilePkgDeps
+    put ghcCompileExpTypes
+    put ghcCompileUseSites
+
+  get = GhcCompileResult <$> get <*> get <*> get
+                         <*> get <*> get <*> get
+                         <*> get <*> get <*> get
 
 instance Binary GhcRunResponse where
   put (GhcRunOutp bs) = putWord8 0 >> put bs

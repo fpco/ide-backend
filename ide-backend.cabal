@@ -111,6 +111,7 @@ test-suite ghc-errors
                       unix, process, filemanip, temporary, filepath, directory,
                       HUnit, test-framework, test-framework-hunit, time,
                       regex-compat,
+                      Cabal-ide-backend,
 -- parallel is only needed for the code of the tests; please do not remove.
 -- Note that under cabal-dev it's still not enough and you need to install
 -- parallel by hand into a regular package DB; similarly for *-mtl.

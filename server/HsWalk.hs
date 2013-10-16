@@ -16,15 +16,14 @@ module HsWalk
   , moduleNameToId
   , PluginResult(..)
   , moduleToPackageId
+  , IsBinder(..)
   ) where
 
-#define DEBUG 1
+#define DEBUG 0
 
 import Data.Foldable (forM_)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State.Class (MonadState(..))
-import Control.Monad.Trans.Class (MonadTrans, lift)
-import Control.Exception (evaluate)
 import Control.Applicative ((<$>))
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -81,6 +80,8 @@ import FastString (fsLit)
 
 import Conv
 import Haddock
+import FilePathCaching
+import IdPropCaching
 
 import Data.Data (Data, gmapQ, showConstr, toConstr)
 
@@ -90,39 +91,6 @@ import Data.Data (Data, gmapQ, showConstr, toConstr)
   We use explicit sharing so that we can maintain sharing through the JSON
   serialization.
 ------------------------------------------------------------------------------}
-
-idPropCacheRef :: StrictIORef (Strict IntMap IdProp)
-{-# NOINLINE idPropCacheRef #-}
-idPropCacheRef = unsafePerformIO $ newIORef IntMap.empty
-
-filePathCacheRef :: StrictIORef (HashMap FilePath Int, Int)
-{-# NOINLINE filePathCacheRef #-}
-filePathCacheRef = unsafePerformIO $ newIORef (HashMap.empty, 0)
-
-modifyIdPropCache :: MonadIO m => IdPropPtr -> (IdProp -> IdProp) -> m ()
-modifyIdPropCache ptr f = liftIO $ do
-  cache <- readIORef idPropCacheRef
-  let uniq = idPropPtr ptr
-  writeIORef idPropCacheRef $ IntMap.adjust f uniq cache
-
-extendIdPropCache :: MonadIO m => IdPropPtr -> IdProp -> m ()
-extendIdPropCache ptr prop = liftIO $ do
-  cache <- readIORef idPropCacheRef
-  -- Don't overwrite existing entries, because we might lose type information
-  -- that we gleaned earlier
-  let uniq = idPropPtr ptr
-  writeIORef idPropCacheRef $ IntMap.insertWith (\_new old -> old) uniq prop cache
-
-mkFilePathPtr :: FilePath -> IO FilePathPtr
-mkFilePathPtr path = do
-  (hash, next) <- readIORef filePathCacheRef
-  case HashMap.lookup path hash of
-    Nothing -> do
-      next' <- evaluate $ next + 1
-      writeIORef filePathCacheRef (HashMap.insert path next' hash, next')
-      return $ FilePathPtr next'
-    Just key ->
-      return $ FilePathPtr key
 
 -- | Construct the explicit sharing cache
 --
@@ -134,8 +102,8 @@ constructExplicitSharingCache :: IO ExplicitSharingCache
 constructExplicitSharingCache = do
     -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
     -- for long-running sessions with many added and removed definitions.
-    idPropCache       <- readIORef idPropCacheRef
-    (filePathHash, _) <- readIORef filePathCacheRef
+    idPropCache       <- getIdPropCache
+    (filePathHash, _) <- getFilePathCache
 
     let filePathCache = IntMap.fromList . map convert $ HashMap.toList filePathHash
     return ExplicitSharingCache {..}
@@ -169,6 +137,7 @@ data PluginResult = PluginResult {
     pluginIdList   :: !IdList
   , pluginExpTypes :: ![(SourceSpan, Text)]
   , pluginPkgDeps  :: !(Strict [] PackageId)
+  , pluginUseSites :: !UseSites
   }
 
 extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult) -> HscPlugin
@@ -193,7 +162,7 @@ extractIdsPlugin symbolRef = HscPlugin {..}
 
       (idProp, Just idScope) <- idInfoForName dflags
                                               quoter
-                                              False
+                                              UseSite
                                               (lookupRdrEnv rdrEnv quoter)
                                               (Just current)
                                               (homeModuleFor dflags linkEnv)
@@ -251,10 +220,10 @@ extractIdsPlugin symbolRef = HscPlugin {..}
       liftIO $ modifyIORef symbolRef (Map.insert processedName pluginResult)
       return env
 
-extractTypesFromTypeEnv :: forall m. MonadIO m => TypeEnv -> ExtractIdsT m ()
+extractTypesFromTypeEnv :: TypeEnv -> ExtractIdsM ()
 extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
   where
-    go :: (Unique, TyThing) -> ExtractIdsT m ()
+    go :: (Unique, TyThing) -> ExtractIdsM ()
     go (uniq, ADataCon dataCon) =
       recordType ("ADataCon: " ++ showSDoc (ppr dataCon)) uniq (dataConRepType dataCon)
     go _ =
@@ -277,32 +246,45 @@ data ExtractIdsEnv = ExtractIdsEnv {
   }
 
 data ExtractIdsState = ExtractIdsState {
-    eIdsTidyEnv  :: !TidyEnv
-  , eIdsIdList   :: !IdList
-    -- TODO: introduce explicit sharing for the types?
-  , eIdsExpTypes :: [(SourceSpan, Text)]
+    eIdsTidyEnv       :: !TidyEnv
+  , eIdsIdList        :: !IdList
+  , eIdsExpTypes      :: [(SourceSpan, Text)] -- TODO: explicit sharing?
+  , eIdsUseSites      :: !UseSites
+  , eIdsFilePathCache :: (HashMap FilePath Int, Int)
+  , eIdsIdPropCache   :: Strict IntMap IdProp
   }
 
-newtype ExtractIdsT m a = ExtractIdsT (
-      ReaderT ExtractIdsEnv (StrictStateT ExtractIdsState m) a
+newtype ExtractIdsM a = ExtractIdsM (
+      ReaderT ExtractIdsEnv (StrictState ExtractIdsState) a
     )
   deriving
     (Functor, Monad, MonadState ExtractIdsState, MonadReader ExtractIdsEnv)
+
+instance MonadFilePathCaching ExtractIdsM where
+  getFilePathCache = eIdsFilePathCache <$> get
+  putFilePathCache = \cache -> modify $ \st -> st { eIdsFilePathCache = cache }
+
+instance MonadIdPropCaching ExtractIdsM where
+  getIdPropCache = eIdsIdPropCache <$> get
+  putIdPropCache = \cache -> modify $ \st -> st { eIdsIdPropCache = cache }
 
 execExtractIdsT :: MonadIO m
                 => DynFlags
                 -> TcGblEnv
                 -> IdList
                 -> Module.Module
-                -> ExtractIdsT m ()
+                -> ExtractIdsM ()
                 -> m PluginResult
-execExtractIdsT dynFlags env idList current (ExtractIdsT m) = do
+execExtractIdsT dynFlags env idList current (ExtractIdsM m) = do
   -- Construct LinkEnv for finding home modules
   -- The order of the package dependencies is important! (See comment for
   -- linkEnvFor.) We assume that ghc gives us the package dependencies in the
   -- right order.
   let pkgDeps = (imp_dep_pkgs (tcg_imports env))
   linkEnv <- liftIO $ linkEnvFor dynFlags pkgDeps
+
+  filePathCache <- liftIO $ getFilePathCache
+  idPropCache   <- liftIO $ getIdPropCache
 
   let rdrEnv  = tcg_rdr_env env
       qual    = mkPrintUnqualified dynFlags rdrEnv
@@ -314,30 +296,39 @@ execExtractIdsT dynFlags env idList current (ExtractIdsT m) = do
                   , eIdsLinkEnv  = linkEnv
                   }
       eIdsSt  = ExtractIdsState {
-                    eIdsTidyEnv  = emptyTidyEnv
-                  , eIdsIdList   = idList
-                  , eIdsExpTypes = []
+                    eIdsTidyEnv       = emptyTidyEnv
+                  , eIdsIdList        = idList
+                  , eIdsExpTypes      = []
+                  , eIdsUseSites      = Map.empty
+                  , eIdsFilePathCache = filePathCache
+                  , eIdsIdPropCache   = idPropCache
                   }
-  eIdsSt' <- execStateT (runReaderT m eIdsEnv) eIdsSt
+      eIdsSt' = execState (runReaderT m eIdsEnv) eIdsSt
+
+  liftIO $ putFilePathCache (eIdsFilePathCache eIdsSt')
+  liftIO $ putIdPropCache   (eIdsIdPropCache   eIdsSt')
+
   return PluginResult {
       pluginIdList   = eIdsIdList   eIdsSt'
     , pluginExpTypes = eIdsExpTypes eIdsSt'
     , pluginPkgDeps  = force $ map (fillVersion dynFlags) pkgDeps
+    , pluginUseSites = eIdsUseSites eIdsSt'
     }
 
-instance MonadTrans ExtractIdsT where
-  lift = ExtractIdsT . lift . lift
-
--- This is not the standard MonadIO, but the MonadIO from GHC!
-instance MonadIO m => MonadIO (ExtractIdsT m) where
-  liftIO = lift . liftIO
-
-extendIdMap :: MonadIO m => SourceSpan -> SpanInfo -> ExtractIdsT m ()
+extendIdMap :: SourceSpan -> SpanInfo -> ExtractIdsM ()
 extendIdMap span info = modify $ \st -> st {
     eIdsIdList = (span, info) : eIdsIdList st
   }
 
-tidyType :: Monad m => Type -> ExtractIdsT m Type
+recordUseSite :: IdPropPtr -> SourceSpan -> ExtractIdsM ()
+recordUseSite ptr span = modify $ \st -> st {
+      eIdsUseSites = Map.alter insertSpan ptr (eIdsUseSites st)
+    }
+  where
+    insertSpan Nothing   = Just [span]
+    insertSpan (Just ss) = Just (span : ss)
+
+tidyType :: Type -> ExtractIdsM Type
 tidyType typ = do
   st <- get
   let (tidyEnv', typ') = tidyOpenType (eIdsTidyEnv st) typ
@@ -353,12 +344,11 @@ lookupRdrEnv rdrEnv name =
                    [elt] -> Just elt
                    _     -> error "ghc invariant violated"
 
-recordExpType :: MonadIO m => SrcSpan -> Maybe Type -> ExtractIdsT m (Maybe Type)
+recordExpType :: SrcSpan -> Maybe Type -> ExtractIdsM (Maybe Type)
 recordExpType span (Just typ) = do
   eitherSpan <- extractSourceSpan span
   case eitherSpan of
     ProperSpan properSpan -> do
-      logIndented $ "Recording " ++ showSDoc (ppr typ) ++ " at location " ++ showSDoc (ppr span)
       prettyTyp <- tidyType typ >>= showTypeForUser
       modify $ \st -> st {
           eIdsExpTypes = (properSpan, prettyTyp) : eIdsExpTypes st
@@ -371,7 +361,7 @@ recordExpType _ Nothing = return Nothing
 #if DEBUG
 -- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
 -- it does
-pretty :: (Monad m, Outputable a) => Bool -> a -> ExtractIdsT m String
+pretty :: (Outputable a) => Bool -> a -> ExtractIdsM String
 pretty debugShow val = do
   _dynFlags <- asks eIdsDynFlags
 #if __GLASGOW_HASKELL__ >= 706
@@ -381,7 +371,7 @@ pretty debugShow val = do
 #endif
 #endif
 
-debugPP :: (MonadIO m, Outputable a) => String -> a -> ExtractIdsT m ()
+debugPP :: (Outputable a) => String -> a -> ExtractIdsM ()
 #if DEBUG
 debugPP header val = do
   val' <- pretty True val
@@ -404,7 +394,7 @@ debugPP _ _ = return ()
 --
 -- TODO: This assumes that the structure of the AST follows Haskell scoping
 -- rules.  If this is not the case, this will break.
-ast :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m a -> ExtractIdsT m a
+ast :: Maybe SrcSpan -> String -> ExtractIdsM a -> ExtractIdsM a
 ast _mspan _info cont = do
 #if DEBUG
   logIndented _info
@@ -422,7 +412,7 @@ astIndent :: StrictIORef Int
 {-# NOINLINE astIndent #-}
 astIndent = unsafePerformIO $ newIORef 0
 
-indent :: MonadIO m => ExtractIdsT m a -> ExtractIdsT m a
+indent :: ExtractIdsM a -> ExtractIdsM a
 indent act = do
   oldIndentation <- liftIO $ readIORef astIndent
   liftIO $ writeIORef astIndent (oldIndentation + 2)
@@ -436,7 +426,7 @@ logIndented msg = liftIO $ do
   appendFile "/tmp/ghc.log" $ replicate indentation ' ' ++ msg ++ "\n"
 #endif
 
-unsupported :: MonadIO m => Maybe SrcSpan -> String -> ExtractIdsT m (Maybe Type)
+unsupported :: Maybe SrcSpan -> String -> ExtractIdsM (Maybe Type)
 #if DEBUG
 unsupported mspan c = ast mspan c $ do
   prettySpan <- pretty False mspan
@@ -450,10 +440,14 @@ unsupported _ _ = return Nothing
   Record
 ------------------------------------------------------------------------------}
 
-type IsBinder = Bool
+-- | Is this a binding occurrence of @f@?
+data IsBinder =
+    DefSite   -- ^ @f = ..@
+  | UseSite   -- ^ @g = f ..@
+  | SigSite   -- ^ @f :: ..@ or fixity declaration
 
 class (Uniquable id, OutputableBndr id) => Record id where
-  record :: MonadIO m => SrcSpan -> IsBinder -> id -> ExtractIdsT m (Maybe Type)
+  record :: SrcSpan -> IsBinder -> id -> ExtractIdsM (Maybe Type)
 
   ifPostTc :: id -> a -> Maybe a
 
@@ -465,7 +459,7 @@ instance Record Id where
 
   ifPostTc = \_ -> Just
 
-showTypeForUser :: Monad m => Type -> ExtractIdsT m Text
+showTypeForUser :: Type -> ExtractIdsM Text
 showTypeForUser typ = do
   pprStyle <- asks eIdsPprStyle
   -- We don't want line breaks in the types
@@ -475,7 +469,7 @@ showTypeForUser typ = do
                                (initSDocContext pprStyle))
   return $ Text.pack typStr
 
-recordType :: MonadIO m => String -> Unique -> Type -> ExtractIdsT m ()
+recordType :: String -> Unique -> Type -> ExtractIdsM ()
 recordType _header uniq typ = do
   typStr <- tidyType typ >>= showTypeForUser
   let idPropPtr = IdPropPtr $ getKey uniq
@@ -487,10 +481,10 @@ recordType _header uniq typ = do
 -- uniquely determined by the @Name@ and the @DynFlags@ do not change
 -- in a bad way.
 idInfoForName
-  :: MonadIO m
+  :: forall m. (MonadFilePathCaching m, MonadIdPropCaching m)
   => DynFlags                         -- ^ The usual dynflags
   -> Name                             -- ^ The name in question
-  -> Bool                             -- ^ Is this a binding occurrence?
+  -> IsBinder                         -- ^ Is this a binding occurrence?
   -> Maybe RdrName.GlobalRdrElt       -- ^ GlobalRdrElt for imported names
   -> Maybe Module.Module              -- ^ Current module for local names
   -> (Name -> Strict Maybe ModuleId)  -- ^ Home modules
@@ -515,9 +509,9 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       idSpace = fromGhcNameSpace $ Name.occNameSpace occ
       idType  = Maybe.nothing  -- after renamer but before typechecker
 
-      constructScope :: MonadIO m => m (Maybe IdScope)
+      constructScope :: m (Maybe IdScope)
       constructScope
-        | idIsBinder               = return $ Just Binder
+        | DefSite <- idIsBinder    = return $ Just Binder
         | Name.isWiredInName  name = return $ Just WiredIn
         | Name.isInternalName name = return $ Just Local
         | otherwise = case mElt of
@@ -529,7 +523,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       -- part of the ImpDeclSpec (listed as a TODO in the ghc sources).
       -- For now we pass 'Nothing' as the PackageQualifier. It *might* be
       -- possible to recover the package qualifier using 'impSpan'.
-      scopeFromProv :: MonadIO m => RdrName.Provenance -> m IdScope
+      scopeFromProv :: RdrName.Provenance -> m IdScope
       scopeFromProv RdrName.LocalDef = do
         return Local
       scopeFromProv (RdrName.Imported spec) = do
@@ -540,7 +534,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
           , idImportQual   = Text.pack $ impQual
           }
 
-      extractImportInfo :: MonadIO m => [RdrName.ImportSpec] -> m (GHC.ModuleName, EitherSpan, String)
+      extractImportInfo :: [RdrName.ImportSpec] -> m (GHC.ModuleName, EitherSpan, String)
       extractImportInfo (RdrName.ImpSpec decl item:_) = do
         span <- case item of
                   RdrName.ImpAll -> extractSourceSpan (RdrName.is_dloc decl)
@@ -562,8 +556,8 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       missingModule :: a
       missingModule = error $ "No module for " ++ showSDocDebug (ppr name)
 
-extractSourceSpan :: MonadIO m => SrcSpan -> m EitherSpan
-extractSourceSpan (RealSrcSpan srcspan) = liftIO $ do
+extractSourceSpan :: MonadFilePathCaching m => SrcSpan -> m EitherSpan
+extractSourceSpan (RealSrcSpan srcspan) = do
   key <- mkFilePathPtr $ unpackFS (srcSpanFile srcspan)
   return . ProperSpan $ SourceSpan
     key
@@ -609,6 +603,9 @@ instance Record Name where
         case info of
           (idProp, Just idScope) -> do
             extendIdMap sourceSpan $ SpanId IdInfo{..}
+            case idIsBinder of
+              UseSite -> recordUseSite idProp sourceSpan
+              _       -> return ()
           _ ->
             -- This only happens for some special cases ('assert' being
             -- the prime example; it gets reported as 'assertError' from
@@ -626,7 +623,7 @@ instance Record Name where
 ------------------------------------------------------------------------------}
 
 class ExtractIds a where
-  extractIds :: MonadIO m => a -> ExtractIdsT m (Maybe Type)
+  extractIds :: a -> ExtractIdsM (Maybe Type)
 
 instance ExtractIds a => ExtractIds [a] where
   extractIds xs = do mapM_ extractIds xs ; return Nothing
@@ -670,10 +667,10 @@ instance Record id => ExtractIds (HsValBinds id) where
 
 instance Record id => ExtractIds (LSig id) where
   extractIds (L span (TypeSig names tp)) = ast (Just span) "TypeSig" $ do
-    forM_ names $ \name -> record (getLoc name) False (unLoc name)
+    forM_ names $ \name -> record (getLoc name) SigSite (unLoc name)
     extractIds tp
   extractIds (L span (GenericSig names tp)) = ast (Just span) "GenericSig" $ do
-    forM_ names $ \name -> record (getLoc name) False (unLoc name)
+    forM_ names $ \name -> record (getLoc name) SigSite (unLoc name)
     extractIds tp
 
   -- Only in generated code
@@ -694,7 +691,7 @@ instance Record id => ExtractIds (LHsType id) where
   extractIds (L span (HsFunTy arg res)) = ast (Just span) "HsFunTy" $
     extractIds [arg, res]
   extractIds (L span (HsTyVar name)) = ast (Just span) "HsTyVar" $
-    record span False name
+    record span UseSite name
   extractIds (L span (HsForAllTy _explicitFlag tyVars ctxt body)) = ast (Just span) "hsForAllTy" $ do
     extractIds tyVars
     extractIds ctxt
@@ -726,7 +723,7 @@ instance Record id => ExtractIds (LHsType id) where
     extractIds typ
   extractIds (L span (HsOpTy left (_wrapper, op) right)) = ast (Just span) "HsOpTy" $ do
     extractIds [left, right]
-    record (getLoc op) False (unLoc op)
+    record (getLoc op) UseSite (unLoc op)
   extractIds (L span (HsIParamTy _var typ)) = ast (Just span) "HsIParamTy" $
     -- _var is not located
     extractIds typ
@@ -749,7 +746,6 @@ instance Record id => ExtractIds (LHsType id) where
 
 instance Record id => ExtractIds (Located (HsSplice id)) where
   extractIds (L span (HsSplice _id expr)) = ast (Just span) "HsSplice" $ do
-    logIndented $ "HsSplice with locations " ++ showSDoc (ppr (span, getLoc expr))
     extractIds expr
 
 instance Record id => ExtractIds (Located (HsQuasiQuote id)) where
@@ -770,14 +766,14 @@ instance Record id => ExtractIds (LHsTyVarBndr id) where
 #else
   extractIds (L span (UserTyVar name _postTcKind)) = ast (Just span) "UserTyVar" $ do
 #endif
-    record span True name
+    record span DefSite name
 
 #if __GLASGOW_HASKELL__ >= 706
   extractIds (L span (KindedTyVar name kind)) = ast (Just span) "KindedTyVar" $ do
 #else
   extractIds (L span (KindedTyVar name kind _postTcKind)) = ast (Just span) "KindedTyVar" $ do
 #endif
-    record span True name
+    record span DefSite name
     extractIds kind
 
 instance Record id => ExtractIds (LHsContext id) where
@@ -789,7 +785,7 @@ instance Record id => ExtractIds (LHsBinds id) where
 
 instance Record id => ExtractIds (LHsBind id) where
   extractIds (L span bind@(FunBind {})) = ast (Just span) "FunBind" $ do
-    record (getLoc (fun_id bind)) True (unLoc (fun_id bind))
+    record (getLoc (fun_id bind)) DefSite (unLoc (fun_id bind))
     extractIds (fun_matches bind)
   extractIds (L span bind@(PatBind {})) = ast (Just span) "PatBind" $ do
     extractIds (pat_lhs bind)
@@ -799,10 +795,8 @@ instance Record id => ExtractIds (LHsBind id) where
     -- written code. The ghc comments says "located 'only for consistency'"
     return Nothing
   extractIds (L span bind@(AbsBinds {})) = ast (Just span) "AbsBinds" $ do
-    logIndented "AbsBinds"
-    indent $ forM_ (abs_exports bind) $ \abs_export ->
-      record typecheckOnly True (abe_poly abs_export)
-    logIndented "/AbsBinds"
+    forM_ (abs_exports bind) $ \abs_export ->
+      record typecheckOnly DefSite (abe_poly abs_export)
     extractIds (abs_binds bind)
 
 #if __GLASGOW_HASKELL__ >= 707
@@ -882,8 +876,7 @@ instance Record id => ExtractIds (LHsExpr id) where
     _rightTy <- extractIds right
     recordExpType span (funRes2 <$> opTy)
   extractIds (L span (HsVar id)) = ast (Just span) "HsVar" $ do
-    logIndented $ "HsVar at location " ++ showSDoc (ppr span)
-    record span False id
+    record span UseSite id
   extractIds (L span (HsWrap wrapper expr)) = ast (Just span) "HsWrap" $ do
     ty <- extractIds (L span expr)
     recordExpType span (applyWrapper wrapper <$> ty)
@@ -892,7 +885,6 @@ instance Record id => ExtractIds (LHsExpr id) where
     ty <- extractIds expr
     recordExpType span ty -- Re-record this with the span of the whole let
   extractIds (L span (HsApp fun arg)) = ast (Just span) "HsApp" $ do
-    logIndented $ "HsApp at location " ++ showSDoc (ppr span)
     funTy  <- extractIds fun
     _argTy <- extractIds arg
     recordExpType span (funRes1 <$> funTy)
@@ -924,7 +916,7 @@ instance Record id => ExtractIds (LHsExpr id) where
     extractIds recordBinds
     case ifPostTc (undefined :: id) mPostTcExpr of
       Nothing -> do
-        record (getLoc con) False (unLoc con)
+        record (getLoc con) UseSite (unLoc con)
         return Nothing
       Just postTcExpr -> do
         conTy <- extractIds (L (getLoc con) postTcExpr)
@@ -946,14 +938,14 @@ instance Record id => ExtractIds (LHsExpr id) where
     opTy   <- extractIds op
     recordExpType span (mkSectionLTy <$> opTy)
    where
-      mkSectionLTy ty = let ([_arg1, arg2], res) = splitFunTys ty
+      mkSectionLTy ty = let (_arg1, arg2, res) = splitFunTy2 ty
                         in mkFunTy arg2 res
   extractIds (L span (SectionR op arg)) = ast (Just span) "SectionR" $ do
     opTy   <- extractIds op
     _argTy <- extractIds arg
     recordExpType span (mkSectionRTy <$> opTy)
    where
-      mkSectionRTy ty = let ([arg1, _arg2], res) = splitFunTys ty
+      mkSectionRTy ty = let (arg1, _arg2, res) = splitFunTy2 ty
                         in mkFunTy arg1 res
   extractIds (L span (HsIPVar _name)) = ast (Just span) "HsIPVar" $
     -- _name is not located :(
@@ -1003,7 +995,6 @@ instance Record id => ExtractIds (LHsExpr id) where
   extractIds (L span (HsCoreAnn _string expr)) = ast (Just span) "HsCoreAnn" $ do
     extractIds expr
   extractIds (L span (HsSpliceE splice)) = ast (Just span) "HsSpliceE" $ do
-    logIndented $ "SpliceE with loc " ++ showSDoc (ppr span)
     extractIds (L span splice) -- reuse span
   extractIds (L span (HsQuasiQuoteE qquote)) = ast (Just span) "HsQuasiQuoteE" $ do
     extractIds (L span qquote) -- reuse span
@@ -1090,7 +1081,7 @@ instance (ExtractIds a, Record id) => ExtractIds (HsRecFields id a) where
 
 instance (ExtractIds a, Record id) => ExtractIds (HsRecField id a) where
   extractIds (HsRecField id arg _pun) = ast Nothing "HsRecField" $ do
-    record (getLoc id) False (unLoc id)
+    record (getLoc id) UseSite (unLoc id)
     extractIds arg
 
 -- The meaning of the constructors of LStmt isn't so obvious; see various
@@ -1127,11 +1118,11 @@ instance Record id => ExtractIds (LPat id) where
   extractIds (L span (WildPat postTcType)) = ast (Just span) "WildPat" $
     recordExpType span (ifPostTc (undefined :: id) postTcType)
   extractIds (L span (VarPat id)) = ast (Just span) "VarPat" $
-    record span True id
+    record span DefSite id
   extractIds (L span (LazyPat pat)) = ast (Just span) "LazyPat" $
     extractIds pat
   extractIds (L span (AsPat id pat)) = ast (Just span) "AsPat" $ do
-    record (getLoc id) True (unLoc id)
+    record (getLoc id) DefSite (unLoc id)
     extractIds pat
   extractIds (L span (ParPat pat)) = ast (Just span) "ParPat" $
     extractIds pat
@@ -1150,17 +1141,17 @@ instance Record id => ExtractIds (LPat id) where
     extractIds pats
   extractIds (L span (ConPatIn con details)) = ast (Just span) "ConPatIn" $ do
     -- Unlike ValBindsIn and HsValBindsIn, we *do* get ConPatIn
-    record (getLoc con) False (unLoc con) -- the constructor name is non-binding
+    record (getLoc con) UseSite (unLoc con) -- the constructor name is non-binding
     extractIds details
   extractIds (L span (ConPatOut {pat_con, pat_args})) = ast (Just span) "ConPatOut" $ do
-    record (getLoc pat_con) False (dataConName (unLoc pat_con))
+    record (getLoc pat_con) UseSite (dataConName (unLoc pat_con))
     extractIds pat_args
   extractIds (L span (LitPat _)) = ast (Just span) "LitPat" $
     return Nothing
   extractIds (L span (NPat _ _ _)) = ast (Just span) "NPat" $
     return Nothing
   extractIds (L span (NPlusKPat id _lit _rebind1 _rebind2)) = ast (Just span) "NPlusKPat" $ do
-    record (getLoc id) True (unLoc id)
+    record (getLoc id) DefSite (unLoc id)
   extractIds (L span (ViewPat expr pat _postTcType)) = ast (Just span) "ViewPat" $ do
     extractIds expr
     extractIds pat
@@ -1188,7 +1179,7 @@ instance (ExtractIds arg, ExtractIds rec) => ExtractIds (HsConDetails arg rec) w
 instance Record id => ExtractIds (LTyClDecl id) where
   extractIds (L span decl@(TyData {})) = ast (Just span) "TyData" $ do
     extractIds (tcdCtxt decl)
-    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    record (getLoc (tcdLName decl)) DefSite (unLoc (tcdLName decl))
     extractIds (tcdTyVars decl)
     extractIds (tcdTyPats decl)
     extractIds (tcdKindSig decl)
@@ -1196,7 +1187,7 @@ instance Record id => ExtractIds (LTyClDecl id) where
     extractIds (tcdDerivs decl)
   extractIds (L span decl@(ClassDecl {})) = ast (Just span) "ClassDecl" $ do
     extractIds (tcdCtxt decl)
-    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    record (getLoc (tcdLName decl)) DefSite (unLoc (tcdLName decl))
     extractIds (tcdTyVars decl)
     -- Sadly, we don't get location info for the functional dependencies
     extractIds (tcdSigs decl)
@@ -1211,12 +1202,12 @@ instance Record id => ExtractIds (LTyClDecl id) where
   extractIds (L span _decl@(DataDecl {}))    = unsupported (Just span) "DataDecl"
 #else
   extractIds (L span decl@(TySynonym {})) = ast (Just span) "TySynonym" $ do
-    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    record (getLoc (tcdLName decl)) DefSite (unLoc (tcdLName decl))
     extractIds (tcdTyVars decl)
     extractIds (tcdTyPats decl)
     extractIds (tcdSynRhs decl)
   extractIds (L span decl@(TyFamily {})) = ast (Just span) "TyFamily" $  do
-    record (getLoc (tcdLName decl)) True (unLoc (tcdLName decl))
+    record (getLoc (tcdLName decl)) DefSite (unLoc (tcdLName decl))
     extractIds (tcdTyVars decl)
     extractIds (tcdKind decl)
 #endif
@@ -1225,7 +1216,7 @@ instance Record id => ExtractIds (LTyClDecl id) where
 
 instance Record id => ExtractIds (LConDecl id) where
   extractIds (L span decl@(ConDecl {})) = ast (Just span) "ConDecl" $ do
-    record (getLoc (con_name decl)) True (unLoc (con_name decl))
+    record (getLoc (con_name decl)) DefSite (unLoc (con_name decl))
     extractIds (con_qvars decl)
     extractIds (con_cxt decl)
     extractIds (con_details decl)
@@ -1239,7 +1230,7 @@ instance Record id => ExtractIds (ResType id) where
 
 instance Record id => ExtractIds (ConDeclField id) where
   extractIds (ConDeclField name typ _doc) = do
-    record (getLoc name) True (unLoc name)
+    record (getLoc name) DefSite (unLoc name)
     extractIds typ
 
 instance Record id => ExtractIds (LInstDecl id) where
@@ -1255,7 +1246,7 @@ instance Record id => ExtractIds (LDerivDecl id) where
 
 instance Record id => ExtractIds (LFixitySig id) where
   extractIds (L span (FixitySig name _fixity)) = ast (Just span) "LFixitySig" $ do
-    record (getLoc name) False (unLoc name)
+    record (getLoc name) SigSite (unLoc name)
 
 instance Record id => ExtractIds (LDefaultDecl id) where
   extractIds (L span (DefaultDecl typs)) = ast (Just span) "LDefaultDecl" $ do
@@ -1263,16 +1254,16 @@ instance Record id => ExtractIds (LDefaultDecl id) where
 
 instance Record id => ExtractIds (LForeignDecl id) where
   extractIds (L span (ForeignImport name sig _coercion _import)) = ast (Just span) "ForeignImport" $ do
-    record (getLoc name) True (unLoc name)
+    record (getLoc name) DefSite (unLoc name)
     extractIds sig
   extractIds (L span (ForeignExport name sig _coercion _export)) = ast (Just span) "ForeignExport" $ do
-    record (getLoc name) False (unLoc name)
+    record (getLoc name) UseSite (unLoc name)
     extractIds sig
 
 instance Record id => ExtractIds (LWarnDecl id) where
   extractIds (L span (Warning name _txt)) = ast (Just span) "Warning" $ do
     -- We use the span of the entire warning because we don't get location info for name
-    record span False name
+    record span UseSite name
 
 instance Record id => ExtractIds (LAnnDecl id) where
   extractIds (L span _) = unsupported (Just span) "LAnnDecl"
@@ -1350,6 +1341,12 @@ funRes2 = funRes1 . funRes1
 -- | Given @a1 -> a2 -> ... -> b@, return @b@
 funResN :: Type -> Type
 funResN = snd . splitFunTys
+
+-- | Given @a -> b -> c@, return @(a, b, c)@
+splitFunTy2 :: Type -> (Type, Type, Type)
+splitFunTy2 ty0 = let (arg1, ty1) = splitFunTy ty0
+                      (arg2, ty2) = splitFunTy ty1
+                  in (arg1, arg2, ty2)
 
 {------------------------------------------------------------------------------
   Auxiliary

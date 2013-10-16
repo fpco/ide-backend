@@ -4,6 +4,7 @@ module IdeSession.Config (
   ) where
 
 import Distribution.Simple (PackageDB(..), PackageDBStack)
+import Distribution.License (License (..))
 
 import IdeSession.GHC.Client (InProcess)
 
@@ -32,6 +33,12 @@ data SessionConfig = SessionConfig {
     -- | Packages that don't need the .cabal files provided for license
     -- concatenation (e.g., because they are covered by the core license set).
   , configLicenseExc :: [String]
+    -- | Hard-coded package licence information, e.g., for the packages
+    -- that always stay installed in-place in the GHC tree, so it's
+    -- troublesome to automatically retrieve their .cabal files.
+  , configLicenseFixed :: [( String
+                           , (Maybe License, Maybe FilePath, Maybe String)
+                           )]
     -- | Function to be used for logging. Messages logged in this manner may be
     -- provided to users in a special debugging UI.
   , configLog :: String -> IO ()
@@ -50,6 +57,12 @@ data SessionConfig = SessionConfig {
 -- >   , configDynLink         = False
 -- >   , configPackageDBStack  = [GlobalPackageDB, UserPackageDB]
 -- >   , configLicenseExc      = ["rts"]
+-- >   , configLicenseFixed    =
+-- >     [ ("bin-package-db", (Just BSD3, Nothing, Nothing))
+-- >     , ("ghc", (Just BSD3, Just "../LICENSE", Just "The GHC Team"))
+-- >     , ("ghc-prim", (Just BSD3, Just "LICENSE", Nothing))
+-- >     , ("integer-gmp", (Just BSD3, Just "LICENSE", Nothing))
+-- >     ]
 -- >   }
 defaultSessionConfig :: SessionConfig
 defaultSessionConfig = SessionConfig {
@@ -63,5 +76,11 @@ defaultSessionConfig = SessionConfig {
     -- ghc-prim, integer-gmp, etc., all have their own licenses specified
     -- in their .cabal files.
   , configLicenseExc      = ["rts"]
+  , configLicenseFixed    =
+    [ ("bin-package-db", (Just BSD3, Nothing, Nothing))
+    , ("ghc", (Just BSD3, Just "../LICENSE", Just "The GHC Team"))
+    , ("ghc-prim", (Just BSD3, Just "LICENSE", Nothing))
+    , ("integer-gmp", (Just BSD3, Just "LICENSE", Nothing))
+    ]
   , configLog             = const $ return ()
   }

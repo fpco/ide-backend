@@ -3,6 +3,7 @@
 module IdeSession.Cabal (
     buildExecutable, buildHaddock, buildLicenseCatenation
   , packageDbArgs, generateMacros
+  , buildLicsFromPkgs  -- for testing only
   ) where
 
 import qualified Control.Exception as Ex
@@ -10,7 +11,7 @@ import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.Function (on)
-import Data.List (delete, sort, groupBy, nub)
+import Data.List (delete, sort, groupBy, nub, intersperse)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
@@ -18,7 +19,7 @@ import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
-import System.FilePath ((</>), takeFileName, splitPath, joinPath)
+import System.FilePath ((</>), takeFileName, takeDirectory)
 import System.Directory (
     doesFileExist
   , createDirectoryIfMissing
@@ -187,7 +188,7 @@ externalDeps pkgs =
   in liftM catMaybes $ mapM depOfName pkgs
 
 mkConfFlags :: FilePath -> Bool -> PackageDBStack -> [FilePath] -> Setup.ConfigFlags
-mkConfFlags ideDistDir dynlink packageDbStack progPathExtra =
+mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra =
   (Setup.defaultConfigFlags (defaultProgramConfiguration progPathExtra))
     { Setup.configDistPref = Setup.Flag ideDistDir
     , Setup.configUserInstall = Setup.Flag False
@@ -195,7 +196,7 @@ mkConfFlags ideDistDir dynlink packageDbStack progPathExtra =
     , Setup.configSharedLib = Setup.Flag dynlink
     , Setup.configDynExe = Setup.Flag dynlink
       -- @Nothing@ wipes out default, initial DBs.
-    , Setup.configPackageDBs = Nothing : map Just packageDbStack
+    , Setup.configPackageDBs = Nothing : map Just configPackageDBStack
     , Setup.configProgramPathExtra = progPathExtra
     }
 
@@ -206,7 +207,7 @@ configureAndBuild :: FilePath -> FilePath -> [FilePath]
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
 configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
-                  packageDbStack pkgs loadedMs callback ms = do
+                  configPackageDBStack pkgs loadedMs callback ms = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
   callback $ Progress 1 4 Nothing Nothing
@@ -239,7 +240,7 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = mkConfFlags ideDistDir dynlink packageDbStack progPathExtra
+      confFlags = mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
                      { Setup.buildDistPref = Setup.Flag ideDistDir
@@ -287,7 +288,7 @@ configureAndHaddock :: FilePath -> FilePath -> [FilePath]
                     -> [ModuleName] -> (Progress -> IO ())
                     -> IO ExitCode
 configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
-                    packageDbStack pkgs loadedMs callback = do
+                    configPackageDBStack pkgs loadedMs callback = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
   callback $ Progress 1 4 Nothing Nothing
@@ -309,7 +310,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = mkConfFlags ideDistDir dynlink packageDbStack progPathExtra
+      confFlags = mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       haddockFlags = Setup.defaultHaddockFlags
@@ -343,22 +344,22 @@ buildExecutable :: FilePath -> FilePath -> [FilePath]
                 -> [(ModuleName, FilePath)]
                 -> IO ExitCode
 buildExecutable ideSourcesDir ideDistDir progPathExtra
-                ghcOpts dynlink packageDbStack
+                ghcOpts dynlink configPackageDBStack
                 mcomputed callback ms = do
   (loadedMs, pkgs) <- buildDeps mcomputed
   configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
-                    packageDbStack pkgs loadedMs callback ms
+                    configPackageDBStack pkgs loadedMs callback ms
 
 buildHaddock :: FilePath -> FilePath -> [FilePath]
              -> [String] -> Bool -> PackageDBStack
              -> Strict Maybe Computed -> (Progress -> IO ())
              -> IO ExitCode
 buildHaddock ideSourcesDir ideDistDir progPathExtra
-             ghcOpts dynlink packageDbStack
+             ghcOpts dynlink configPackageDBStack
              mcomputed callback = do
   (loadedMs, pkgs) <- buildDeps mcomputed
   configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
-                      packageDbStack pkgs loadedMs callback
+                      configPackageDBStack pkgs loadedMs callback
 
 lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
 lFieldDescrs =
@@ -373,19 +374,60 @@ lFieldDescrs =
      (\(_, _, t3) -> fromMaybe "???" t3) (\a (t1, t2, _) -> (t1, t2, Just a))
  ]
 
-buildLicenseCatenation :: FilePath -> FilePath -> [FilePath] -> PackageDBStack -> [String]
-                       -> Strict Maybe Computed -> (Progress -> IO ())
+-- | Build the concatenation of all licence files. See 'buildLicenses'.
+buildLicenseCatenation :: Strict Maybe Computed  -- ^ compilation state
+                       -> FilePath               -- ^ the directory with all the .cabal files
+                       -> FilePath               -- ^ the working directory; the resulting file is written there
+                       -> [FilePath]             -- ^ see 'configExtraPathDirs'
+                       -> PackageDBStack         -- ^ see 'configPackageDBStack'
+                       -> [String]               -- ^ see 'configLicenseExc'
+                       -> [( String
+                           , (Maybe License, Maybe FilePath, Maybe String)
+                           )]                    -- ^ see 'configLicenseFixed'
+                       -> (Progress -> IO ())    -- ^ progress callback
                        -> IO ExitCode
-buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
-                       packageDbStack configLicenseExc
-                       mcomputed callback = do
-  (_, pkgs) <- buildDeps mcomputed  -- TODO: query transitive deps, not direct
-  let stdoutLog  = ideDistDir </> "licenses.stdout"  -- warnings
-      stderrLog  = ideDistDir </> "licenses.stderr"  -- errors
-      licensesFN = ideDistDir </> "licenses.txt"     -- result
+buildLicenseCatenation mcomputed
+                       cabalsDir ideDistDir configExtraPathDirs
+                       configPackageDBStack
+                       configLicenseExc configLicenseFixed
+                       callback = do
+  (_, pkgs) <- buildDeps mcomputed
+  buildLicsFromPkgs pkgs
+                    cabalsDir ideDistDir configExtraPathDirs
+                    configPackageDBStack
+                    configLicenseExc configLicenseFixed
+                    callback
+
+-- | Build the concatenation of all licence files from a given list
+-- of packages.
+buildLicsFromPkgs :: [PackageId]           -- ^ the list of packages to process
+                  -> FilePath              -- ^ the directory with all the .cabal files
+                  -> FilePath               -- ^ the working directory; the resulting file is written there
+                  -> [FilePath]             -- ^ see 'configExtraPathDirs'
+                  -> PackageDBStack         -- ^ see 'configPackageDBStack'
+                  -> [String]               -- ^ see 'configLicenseExc'
+                  -> [( String
+                      , (Maybe License, Maybe FilePath, Maybe String)
+                      )]                    -- ^ see 'configLicenseFixed'
+                  -> (Progress -> IO ())    -- ^ progress callback
+                  -> IO ExitCode
+buildLicsFromPkgs pkgs cabalsDir ideDistDir configExtraPathDirs
+                  configPackageDBStack
+                  configLicenseExc configLicenseFixed
+                  callback = do
+  -- The following computations are very expensive, so should be done once,
+  -- instead of at each invocation of @findLicense@ that needs to perform
+  -- @lookupSourcePackageId@.
+  programDB <- configureAllKnownPrograms  -- won't die
+                 minBound (defaultProgramConfiguration configExtraPathDirs)
+  pkgIndex <- getInstalledPackages minBound configPackageDBStack programDB
+  let stdoutLogFN = ideDistDir </> "licenses.stdout"  -- warnings
+      stderrLogFN = ideDistDir </> "licenses.stderr"  -- errors
+      licensesFN  = ideDistDir </> "licenses.txt"     -- result
+  stdoutLog <- openBinaryFile stdoutLogFN WriteMode
+  stderrLog <- openBinaryFile stderrLogFN WriteMode
   licensesFile <- openBinaryFile licensesFN WriteMode
   -- The file containing concatenated licenses for core components.
-  -- If not present in @cabalsDir@, taken from the default location.
   let bsCore = BSL8.pack $(runIO (BSL.readFile "CoreLicenses.txt") >>= lift . BSL8.unpack)
   BSL.hPut licensesFile bsCore
 
@@ -405,12 +447,31 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
             _outputWarns warns = do
               let warnMsg = "Parse warnings for " ++ packageFile ++ ":\n"
                             ++ unlines (map (showPWarning packageFile) warns)
-                            ++ "\n"
-              appendFile stdoutLog warnMsg
-        b <- doesFileExist packageFile
-        if b then do
-          hPutStr licensesFile $ "\nLicense for " ++ nameString ++ ":\n\n"
+              hPutStrLn stdoutLog warnMsg
+        cabalFileExists <- doesFileExist packageFile
+        if cabalFileExists then do
+          hPutStrLn licensesFile $ "\nLicense for " ++ nameString ++ ":\n"
           pkgS <- readFile packageFile
+          let parseResult =
+                parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS
+          findLicense parseResult nameString version packageFile
+        else case lookup nameString configLicenseFixed of
+          Just fixedLicence -> do
+            hPutStrLn licensesFile $ "\nLicense for " ++ nameString ++ ":\n"
+            let fakeParseResult = ParseOk undefined fixedLicence
+            findLicense fakeParseResult nameString version packageFile
+          Nothing ->
+            unless (nameString `elem` configLicenseExc) $ do
+              let errorMsg = "No .cabal file provided for package "
+                             ++ nameString ++ " so no license can be found."
+              hPutStrLn licensesFile errorMsg
+              hPutStrLn stderrLog errorMsg
+        callback $ Progress step numSteps (Just packageName) (Just packageName)
+
+      findLicense :: ParseResult (Maybe License, Maybe FilePath, Maybe String)
+                  -> String -> Version -> FilePath
+                  -> IO ()
+      findLicense parseResult nameString version packageFile =
           -- We can't use @parsePackageDescription@, because it defaults to
           -- AllRightsReserved and we default to BSD3. It's very hard
           -- to use the machinery from the inside of @parsePackageDescription@,
@@ -419,67 +480,71 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
           -- against .cabal format changes. The upside is @parseFields@
           -- is faster and does not care about most parsing errors
           -- the .cabal file may (appear to) have.
-          case parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS of
-            ParseFailed err -> hPutStrLn licensesFile $ snd $ locatedErrorMsg err
+          case parseResult of
+            ParseFailed err -> do
+              hPutStrLn licensesFile $ snd $ locatedErrorMsg err
+              hPutStrLn stderrLog $ snd $ locatedErrorMsg err
             ParseOk _warns (_, Just lf, _) -> do
               -- outputWarns warns  -- false positives
-              programDB <- configureAllKnownPrograms  -- won't die
-                             minBound (defaultProgramConfiguration extraPathDirs)
-              pkgIndex <- getInstalledPackages minBound packageDbStack programDB
               let pkgId = Package.PackageIdentifier
                             { pkgName = Package.PackageName nameString
                             , pkgVersion = version }
                   pkgInfos = lookupSourcePackageId pkgIndex pkgId
               case pkgInfos of
                 InstalledPackageInfo{haddockInterfaces = hIn : _} : _ -> do
-                  let ps = splitPath hIn
-                      prefix = joinPath $ take (length ps - 2) ps
-                      -- The directory of the licence file is ignored
-                      -- in installed packages, hence @takeFileName@.
-                      stdLocation = prefix </> takeFileName lf
-                  bstd <- doesFileExist stdLocation
-                  if bstd then do
-                    bs <- BSL.readFile stdLocation
-                    BSL.hPut licensesFile bs
-                  else do
-                    -- Assume the package is not installed, but in a GHC tree.
-                    let treePs = splitPath prefix
-                        treePrefix = joinPath $ take (length treePs - 3) treePs
-                        treeLocation = treePrefix </> takeFileName lf
-                    btree <- doesFileExist treeLocation
-                    if btree then do
-                      bs <- BSL.readFile treeLocation
-                      BSL.hPut licensesFile bs
-                    else do
-                      -- Assume the package is not installed, but in a GHC tree
-                      -- with an alternative layout (OSX?).
-                      let osxPrefix = joinPath $ take (length ps - 1) ps
-                          osxLocation = osxPrefix </> takeFileName lf
-                      bosx <- doesFileExist osxLocation
-                      if bosx then do
-                        bs <- BSL.readFile osxLocation
-                        BSL.hPut licensesFile bs
-                      else hPutStrLn licensesFile $ "Package " ++ nameString
-                                  ++ " has no license file in path "
-                                  ++ stdLocation
-                                  ++ " nor " ++ treeLocation
-                                  ++ " nor " ++ osxLocation
-                _ -> hPutStrLn licensesFile $ "Package " ++ nameString
-                             ++ " not properly installed."
-                             ++ "\n" ++ show pkgInfos
+                  -- Since the licence file path can't be specified
+                  -- in InstalledPackageInfo, we can only guess what it is
+                  -- and we do that on the basis of the haddock interfaces path.
+                  -- TODO: on next rewrite (and re-testing), base it on htmldir
+                  let candidatePaths =
+                        [ iterate takeDirectory hIn !! 2
+                            -- covers cabal default case: htmldir = docdir/html
+                        , takeDirectory hIn
+                            -- covers case where htmldir = docdir, for in-place
+                        , iterate takeDirectory hIn !! 5
+                            -- covers another case for in-place packages
+                        ]
+                      tryPaths (p : ps) = do
+                        -- The directory of the licence file is ignored
+                        -- in installed packages, hence @takeFileName@.
+                        let loc = p </> takeFileName lf
+                        exists <- doesFileExist loc
+                        if exists then do
+                          bs <- BSL.readFile loc
+                          BSL.hPut licensesFile bs
+                        else tryPaths ps
+                      tryPaths [] = do
+                        let errorMsg =
+                              "Package " ++ nameString
+                              ++ " has no license file in path "
+                              ++ concat (intersperse " nor " candidatePaths)
+                              ++ ". Haddock interfaces path (from, e.g., --haddockdir or --docdir) is "
+                              ++ hIn ++ "."
+                        hPutStrLn licensesFile errorMsg
+                        hPutStrLn stderrLog errorMsg
+                  tryPaths candidatePaths
+                _ -> do
+                  let errorMsg = "Package " ++ nameString
+                                 ++ " not properly installed."
+                                 ++ "\n" ++ show pkgInfos
+                  hPutStrLn licensesFile errorMsg
+                  hPutStrLn stderrLog errorMsg
             ParseOk _warns (l, Nothing, mauthor) -> do
               -- outputWarns warns  -- false positives
               when (isNothing l) $ do
                 let warnMsg =
                       "WARNING: Package " ++ packageFile
-                      ++ " has no license nor license file specified.\n"
-                appendFile stdoutLog warnMsg
+                      ++ " has no license nor license file specified."
+                hPutStrLn stdoutLog warnMsg
               let license = fromMaybe BSD3 l
                   author = fromMaybe "???" mauthor
               ms <- licenseText license author
               case ms of
-                Nothing -> hPutStrLn licensesFile $ "No license text can be found for package "
-                                  ++ nameString ++ "."
+                Nothing -> do
+                  let errorMsg = "No license text can be found for package "
+                                 ++ nameString ++ "."
+                  hPutStrLn licensesFile errorMsg
+                  hPutStrLn stderrLog errorMsg
                 Just s -> do
                   hPutStr licensesFile s
                   let assumed = if isNothing l
@@ -491,22 +556,18 @@ buildLicenseCatenation cabalsDir ideDistDir extraPathDirs
                         ++ assumed
                         ++ " license is "
                         ++ show license
-                        ++ ". Reproducing standard license text.\n"
-                  appendFile stdoutLog warnMsg
-        else
-          unless (nameString `elem` configLicenseExc) $
-            hPutStrLn licensesFile
-                 $ "No .cabal file provided for package "
-                   ++ nameString ++ " so no license can be found."
-        callback $ Progress step numSteps (Just packageName) (Just packageName)
+                        ++ ". Reproducing standard license text."
+                  hPutStrLn stdoutLog warnMsg
 
   res <- Ex.try $ mapM_ f (zip pkgs [1..])
+  hClose stdoutLog
+  hClose stderrLog
   hClose licensesFile
   let handler :: Ex.IOException -> IO ExitCode
       handler e = do
         let msg = "Licenses concatenation failed. The exception is:\n"
                   ++ show e
-        writeFile stderrLog msg
+        writeFile stderrLogFN msg
         return $ ExitFailure 1
   either handler (const $ return ExitSuccess) res
 
@@ -581,18 +642,17 @@ packageDbArgs (Version ver _) dbstack = case dbstack of
       = "package-db"
 
 generateMacros :: PackageDBStack -> [FilePath] -> IO String
-generateMacros packageDbStack extraPathDirs = do
+generateMacros configPackageDBStack configExtraPathDirs = do
   let verbosity = silent
   (ghcPkg, _) <- requireProgram verbosity ghcPkgProgram
-                                (defaultProgramConfiguration extraPathDirs)
-  pkgidss <- mapM (HcPkg.list verbosity ghcPkg) packageDbStack
+                                (defaultProgramConfiguration configExtraPathDirs)
+  pkgidss <- mapM (HcPkg.list verbosity ghcPkg) configPackageDBStack
   let newestPkgs = map last . groupBy ((==) `on` Package.packageName) . sort . concat $ pkgidss
   return $ generatePackageVersionMacros newestPkgs
 
 defaultProgramConfiguration :: [FilePath] -> Cabal.Program.ProgramConfiguration
-defaultProgramConfiguration extraPathDirs =
+defaultProgramConfiguration configExtraPathDirs =
   Cabal.Program.setProgramSearchPath
     ( Cabal.Program.ProgramSearchPathDefault
-    : map Cabal.Program.ProgramSearchPathDir extraPathDirs )
+    : map Cabal.Program.ProgramSearchPathDir configExtraPathDirs )
   Cabal.Program.defaultProgramConfiguration
-

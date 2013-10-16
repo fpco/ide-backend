@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 module Main (main) where
 
 import Control.Applicative ((<$>))
@@ -15,6 +15,8 @@ import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Debug.Trace (traceEventIO)
+import Distribution.License (License (..))
 import Prelude hiding (mod, span)
 import System.Directory
 import qualified System.Environment as System.Environment
@@ -25,12 +27,13 @@ import System.IO.Temp (withTempDirectory)
 import System.Process (readProcess)
 import qualified System.Process as Process
 import System.Random (randomRIO)
+import System.Timeout (timeout)
 import Text.Regex (mkRegex, subRegex)
-import Debug.Trace (traceEventIO)
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure, (@?=))
+import Test.HUnit.Lang (HUnitFailure(..))
 
 import Debug
 import IdeSession
@@ -86,7 +89,13 @@ withSession' initParams config io = do
                           then tempDir
                           else configDir config
           }
-    Ex.bracket (initSession initParams config') shutdownSession io
+    Ex.bracket (initSession initParams config') tryShutdownSession io
+  where
+    tryShutdownSession session = do
+      mDidShutdown <- timeout 2000000 $ shutdownSession session
+      case mDidShutdown of
+        Just () -> return ()
+        Nothing -> putStrLn "WARNING: Failed to shutdown session (timeout)"
 
 withOpts :: [String] -> SessionConfig
 withOpts opts =
@@ -611,18 +620,18 @@ syntheticTests =
         let upd = buildLicenses "test/Puns/cabals/parse_error"
         updateSessionD session upd 99
         status <- getBuildLicensesStatus session
-        assertEqual "after license parse_error" (Just $ ExitFailure 1) status
+        assertEqual "after license parse_error" (Just ExitSuccess) status
         distDir <- getDistDir session
         licensesErr <- readFile $ distDir </> "licenses.stderr"
         assertEqual "licenses parse_error msgs" licensesErr
-          "Licenses concatenation failed. The exception is:\nuser error (Parse of field 'license' failed.)"
+          "Parse of field 'license' failed.\nNo .cabal file provided for package transformers so no license can be found.\n"
         let upd2 = buildLicenses "test/Puns/cabals/no_text_error"
         updateSessionD session upd2 99
         status2 <- getBuildLicensesStatus session
-        assertEqual "after license no_text_error" (Just $ ExitFailure 1) status2
+        assertEqual "after license no_text_error" (Just ExitSuccess) status2
         licensesErr2 <- readFile $ distDir </> "licenses.stderr"
         assertEqual "licenses no_text_error msgs" licensesErr2
-          "Licenses concatenation failed. The exception is:\nuser error (No license text can be found for package mtl.)"
+          "No license text can be found for package mtl.\nNo .cabal file provided for package transformers so no license can be found.\n"
     )
   , ( "Test CWD by reading a data file"
     , withSession defaultSessionConfig $ \session -> do
@@ -1781,33 +1790,83 @@ syntheticTests =
         let upd = buildLicenses "test/MainModule/cabals"
         updateSessionD session upd 6
         distDir <- getDistDir session
-        errExists <- doesFileExist $ distDir </> "licenses.stderr"
-        when errExists $ do
-          licensesErr <- readFile $ distDir </> "licenses.stderr"
-          assertEqual "license errors" "" licensesErr
+        licensesErrs <- readFile $ distDir </> "licenses.stderr"
+        assertEqual "licensesErrs length" 0 (length licensesErrs)
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
-        licensesWarnExists <- doesFileExist $ distDir </> "licenses.stdout"
-        assertBool "licenses no warnings" $ not licensesWarnExists
+        licensesWarns <- readFile $ distDir </> "licenses.stdout"
+        assertEqual "licensesWarns length" 0 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertEqual "licenses length" 21409 (length licenses)
     )
-  -- , ( "Build licenses from Cabal"
-  --   , let packageOpts = []
-  --     in withConfiguredSession packageOpts $ \session -> do
-  --       setCurrentDirectory "test/Cabal"
-  --       loadModulesFrom session "."
-  --       setCurrentDirectory "../../"
-  --       let upd = buildLicenses "test/MainModule/cabals"
-  --       updateSessionD session upd 99
-  --       status <- getBuildLicensesStatus session
-  --       assertEqual "after license build" (Just ExitSuccess) status
-  --       distDir <- getDistDir session
-  --       licensesWarnExists <- doesFileExist $ distDir </> "licenses.stdout"
-  --       assertBool "licenses no warnings" $ not licensesWarnExists
-  --       licenses <- readFile $ distDir </> "licenses.txt"
-  --       assertEqual "licenses length" 4933 (length licenses)
-  --   )
+  , ( "Build licenses from Cabal"
+    , withSession (withOpts []) $ \session -> do
+        setCurrentDirectory "test/Cabal"
+        loadModulesFrom session "."
+        assertNoErrors session
+        setCurrentDirectory "../../"
+        let upd = buildLicenses "test/Puns/cabals"  -- 7 packages missing
+        updateSessionD session upd 99
+        distDir <- getDistDir session
+        licensesErrs <- readFile $ distDir </> "licenses.stderr"
+        assertEqual "licensesErrs length" 507 (length licensesErrs)
+        status <- getBuildLicensesStatus session
+        assertEqual "after license build" (Just ExitSuccess) status
+        licensesWarns <- readFile $ distDir </> "licenses.stdout"
+        assertEqual "licensesWarns length" 138 (length licensesWarns)
+        licenses <- readFile $ distDir </> "licenses.txt"
+        assertEqual "licenses length" 21423 (length licenses)
+    )
+  , ( "Build licenses from 1000 packages fixed in config with no license file"
+    , withSession (withOpts []) $ \session -> do
+        distDir <- getDistDir session
+        let licenseFixedConfig
+              :: Int -> [( String
+                         , (Maybe License, Maybe FilePath, Maybe String)
+                         )]
+            licenseFixedConfig 0 = []
+            licenseFixedConfig n =
+              ("p" ++ show n, (Just BSD3, Nothing, Nothing))
+              : licenseFixedConfig (n - 1)
+            lics = licenseFixedConfig 1000
+            pkgs = map (\(name, _) ->
+                         PackageId{ packageName = Text.pack name
+                                  , packageVersion = Just $ Text.pack "1.0" }
+                       ) lics
+        let dbStack = configPackageDBStack defaultSessionConfig
+        status <- buildLicsFromPkgs
+                    pkgs "test" distDir [] dbStack [] lics (\_ -> return ())
+        assertEqual "after license build" ExitSuccess status
+        licensesErrs <- readFile $ distDir </> "licenses.stderr"
+        assertEqual "licensesErrs length" 0 (length licensesErrs)
+        licenses <- readFile $ distDir </> "licenses.txt"
+        assertEqual "licenses length" 1527726 (length licenses)
+    )
+  , ( "Build licenses from 1000 packages fixed in config with no useful info"
+    , withSession (withOpts []) $ \session -> do
+        distDir <- getDistDir session
+        let licenseFixedConfig
+              :: Int -> [( String
+                         , (Maybe License, Maybe FilePath, Maybe String)
+                         )]
+            licenseFixedConfig 0 = []
+            licenseFixedConfig n =
+              ("p" ++ show n, (Just BSD3, Just "test/BSD_TEST", Nothing))
+              : licenseFixedConfig (n - 1)
+            lics = licenseFixedConfig 1000
+            pkgs = map (\(name, _) ->
+                         PackageId{ packageName = Text.pack name
+                                  , packageVersion = Just $ Text.pack "1.0" }
+                       ) lics
+        let dbStack = configPackageDBStack defaultSessionConfig
+        status <- buildLicsFromPkgs
+                    pkgs "test" distDir [] dbStack [] lics (\_ -> return ())
+        assertEqual "after license build" ExitSuccess status
+        licensesWarns <- readFile $ distDir </> "licenses.stdout"
+        assertEqual "licensesWarns length" 0 (length licensesWarns)
+        licenses <- readFile $ distDir </> "licenses.txt"
+        assertEqual "licenses length" 63619 (length licenses)
+    )
   , ( "Type information 1: Local identifiers and Prelude"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = (updateModule "A.hs" . BSLC.pack . unlines $
@@ -3881,7 +3940,379 @@ syntheticTests =
           , (3, 11, 3, 15, "Eq a => a -> a -> Bool")
           ]
     )
+  , ( "Subexpression types 5: Sections of functions with 3 or more args"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                       {- 1 -} "module A where"
+                     , {- 2 -} "f :: Int -> Bool -> Char -> ()"
+                     , {- 3 -} "f = undefined"
+                       --       1234567890123456789
+                     , {- 4 -} "test1 = (`f` True)"
+                     , {- 5 -} "test2 = (1 `f`)"
+                     ])
+
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        expTypes <- getExpTypes session
+        assertExpTypes expTypes "A" (4, 11, 4, 12) [
+            (4, 10, 4, 13, "Int -> Bool -> Char -> ()")
+          , (4, 10, 4, 18, "Int -> Char -> ()")
+          ]
+        assertExpTypes expTypes "A" (5, 13, 5, 14) [
+            (5, 10, 5, 15, "Bool -> Char -> ()")
+          , (5, 12, 5, 15, "Int -> Bool -> Char -> ()")
+          ]
+    )
+  , ( "Issue #125: Hang when snippet calls createProcess with close_fds set to True"
+    , withSession defaultSessionConfig $ \sess -> do
+        let cb     = \_ -> return ()
+            update = flip (updateSession sess) cb
+
+        update $ updateCodeGeneration True
+        update $ updateStdoutBufferMode (RunLineBuffering Nothing)
+        update $ updateStderrBufferMode (RunLineBuffering Nothing)
+        update $ updateGhcOptions $ Just ["-Wall", "-Werror"]
+
+        update $ updateModule "src/Main.hs" $ BSLC.pack $ unlines [
+            "module Main where"
+
+          , "import System.Process"
+          , "import System.IO"
+
+          , "main :: IO ()"
+          , "main = do"
+          , "    (_,Just maybeOut,_,pr) <- createProcess $ CreateProcess"
+          , "        { cmdspec      = ShellCommand \"echo 123\""
+          , "        , cwd          = Nothing"
+          , "        , env          = Nothing"
+          , "        , std_in       = CreatePipe"
+          , "        , std_out      = CreatePipe"
+          , "        , std_err      = CreatePipe"
+          , "        , close_fds    = True"
+          , "        , create_group = False"
+          , "        }"
+          , "    putStr =<< hGetContents maybeOut"
+          , "    terminateProcess pr"
+          ]
+
+        assertNoErrors sess
+        mRunActions <- timeout 2000000 $ runStmt sess "Main" "main"
+        case mRunActions of
+          Just runActions -> do
+            mRunResult <- timeout 2000000 $ runWaitAll runActions
+            case mRunResult of
+              Just (output, RunOk _) -> assertEqual "" (BSLC.pack "123\n") output
+              Nothing -> assertFailure "Timeout in runWaitAll"
+              _       -> assertFailure "Unexpected run result"
+          Nothing ->
+            assertFailure "Timeout in runStmt"
+    )
+  , ( "Use sites 1: Global values"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd1 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module A where"
+                              -- 123456789012345
+                      , {- 2 -} "f :: Int -> Int"
+                      , {- 3 -} "f = (+ 1)"
+                      , {- 4 -} "g :: Int -> Int"
+                      , {- 5 -} "g = f . f"
+                      ])
+                <> (updateModule "B.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module B where"
+                      , {- 2 -} "import A"
+                      , {- 3 -} "h :: Int -> Int"
+                      , {- 4 -} "h = (+ 1) . f . g"
+                      ])
+
+        updateSessionD session upd1 2
+        assertNoErrors session
+
+        let uses_f = [
+                "A.hs@5:9-5:10"
+              , "A.hs@5:5-5:6"
+              , "B.hs@4:13-4:14"
+              ]
+            uses_add = [ -- "+"
+                "A.hs@3:6-3:7"
+              , "B.hs@4:6-4:7"
+              ]
+            uses_g = [
+                "B.hs@4:17-4:18"
+              ]
+            uses_h = [
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (3,  1, 3,  2) "f" uses_f
+           assertUseSites useSites "A" (3,  6, 3,  7) "+" uses_add
+           assertUseSites useSites "A" (5,  1, 5,  2) "g" uses_g
+           assertUseSites useSites "B" (4,  1, 4,  2) "h" uses_h
+           assertUseSites useSites "B" (4,  6, 4,  7) "+" uses_add
+           assertUseSites useSites "B" (4, 13, 4, 14) "f" uses_f
+           assertUseSites useSites "B" (4, 17, 4, 18) "g" uses_g
+
+        -- Update B, swap positions of g and f
+
+        let upd2 = (updateModule "B.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module B where"
+                      , {- 2 -} "import A"
+                      , {- 3 -} "h :: Int -> Int"
+                      , {- 4 -} "h = (+ 1) . g . f"
+                      ])
+
+        updateSessionD session upd2 1
+        assertNoErrors session
+
+        let uses_f2 = [
+                "A.hs@5:9-5:10"
+              , "A.hs@5:5-5:6"
+              , "B.hs@4:17-4:18"
+              ]
+            uses_g2 = [
+                "B.hs@4:13-4:14"
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (3,  1, 3,  2) "f" uses_f2
+           assertUseSites useSites "A" (3,  6, 3,  7) "+" uses_add
+           assertUseSites useSites "A" (5,  1, 5,  2) "g" uses_g2
+           assertUseSites useSites "B" (4,  1, 4,  2) "h" uses_h
+           assertUseSites useSites "B" (4,  6, 4,  7) "+" uses_add
+           assertUseSites useSites "B" (4, 13, 4, 14) "g" uses_g2
+           assertUseSites useSites "B" (4, 17, 4, 18) "f" uses_f2
+
+        -- Update A, remove one internal use of f, and shift the other
+
+        let upd3 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module A where"
+                              -- 123456789012345
+                      , {- 2 -} "f :: Int -> Int"
+                      , {- 3 -} "f = (+ 1)"
+                      , {- 4 -} "g :: Int -> Int"
+                      , {- 5 -} "g = (+ 1) . f"
+                      ])
+
+        updateSessionD session upd3 2
+        assertNoErrors session
+
+        let uses_f3 = [
+                "A.hs@5:13-5:14"
+              , "B.hs@4:17-4:18"
+              ]
+            uses_add3 = [ -- "+"
+                "A.hs@5:6-5:7"
+              , "A.hs@3:6-3:7"
+              , "B.hs@4:6-4:7"
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (3,  1, 3,  2) "f" uses_f3
+           assertUseSites useSites "A" (3,  6, 3,  7) "+" uses_add3
+           assertUseSites useSites "A" (5,  1, 5,  2) "g" uses_g2
+           assertUseSites useSites "B" (4,  1, 4,  2) "h" uses_h
+           assertUseSites useSites "B" (4,  6, 4,  7) "+" uses_add3
+           assertUseSites useSites "B" (4, 13, 4, 14) "g" uses_g2
+           assertUseSites useSites "B" (4, 17, 4, 18) "f" uses_f3
+    )
+  , ( "Use sites 2: Types"
+    , withSession defaultSessionConfig $ \session -> do
+        -- This test follows the same structure as "Use sites 1", but
+        -- tests types rather than values
+
+        let upd1 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module A where"
+                              -- 1234567890123456
+                      , {- 2 -} "data F = MkF Int"
+                      , {- 3 -} "data G = MkG F F"
+                      ])
+                <> (updateModule "B.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module B where"
+                      , {- 2 -} "import A"
+                              -- 12345678901234567890
+                      , {- 3 -} "data H = MkH Int F G"
+                      ])
+
+        updateSessionD session upd1 2
+        assertNoErrors session
+
+        let uses_F = [
+                "A.hs@3:16-3:17"
+              , "A.hs@3:14-3:15"
+              , "B.hs@3:18-3:19"
+              ]
+            uses_Int = [
+                "A.hs@2:14-2:17"
+              , "B.hs@3:14-3:17"
+              ]
+            uses_G = [
+                "B.hs@3:20-3:21"
+              ]
+            uses_H = [
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (2,  6, 2,  7) "F"   uses_F
+           assertUseSites useSites "A" (2, 14, 2, 17) "Int" uses_Int
+           assertUseSites useSites "A" (3,  6, 3,  7) "G"   uses_G
+           assertUseSites useSites "B" (3,  6, 3,  7) "H"   uses_H
+           assertUseSites useSites "B" (3, 14, 3, 17) "Int" uses_Int
+           assertUseSites useSites "B" (3, 18, 3, 19) "F"   uses_F
+           assertUseSites useSites "B" (3, 20, 3, 21) "G"   uses_G
+
+        -- Update B, swap positions of g and f
+
+        let upd2 = (updateModule "B.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module B where"
+                      , {- 2 -} "import A"
+                              -- 12345678901234567890
+                      , {- 3 -} "data H = MkH Int G F"
+                      ])
+
+        updateSessionD session upd2 1
+        assertNoErrors session
+
+        let uses_F2 = [
+                "A.hs@3:16-3:17"
+              , "A.hs@3:14-3:15"
+              , "B.hs@3:20-3:21"
+              ]
+            uses_G2 = [
+                "B.hs@3:18-3:19"
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (2,  6, 2,  7) "F"   uses_F2
+           assertUseSites useSites "A" (2, 14, 2, 17) "Int" uses_Int
+           assertUseSites useSites "A" (3,  6, 3,  7) "G"   uses_G2
+           assertUseSites useSites "B" (3,  6, 3,  7) "H"   uses_H
+           assertUseSites useSites "B" (3, 14, 3, 17) "Int" uses_Int
+           assertUseSites useSites "B" (3, 18, 3, 19) "G"   uses_G2
+           assertUseSites useSites "B" (3, 20, 3, 21) "F"   uses_F2
+
+        -- Update A, remove one internal use of f, and shift the other
+
+        let upd3 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module A where"
+                              -- 123456789012345678
+                      , {- 2 -} "data F = MkF Int"
+                      , {- 3 -} "data G = MkG Int F"
+                      ])
+
+        updateSessionD session upd3 2
+        assertNoErrors session
+
+        let uses_F3 = [
+                "A.hs@3:18-3:19"
+              , "B.hs@3:20-3:21"
+              ]
+            uses_Int3 = [
+                "A.hs@3:14-3:17"
+              , "A.hs@2:14-2:17"
+              , "B.hs@3:14-3:17"
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (2,  6, 2,  7) "F"   uses_F3
+           assertUseSites useSites "A" (2, 14, 2, 17) "Int" uses_Int3
+           assertUseSites useSites "A" (3,  6, 3,  7) "G"   uses_G2
+           assertUseSites useSites "B" (3,  6, 3,  7) "H"   uses_H
+           assertUseSites useSites "B" (3, 14, 3, 17) "Int" uses_Int3
+           assertUseSites useSites "B" (3, 18, 3, 19) "G"   uses_G2
+           assertUseSites useSites "B" (3, 20, 3, 21) "F"   uses_F3
+    )
+  , ( "Use sites 3: Local identifiers"
+    , withSession (withOpts ["-XScopedTypeVariables"]) $ \session -> do
+        let upd1 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                        {-  1 -} "module A where"
+                              -- 123456789012345
+                      , {-  2 -} "test = (+ 1) . f . g"
+                      , {-  3 -} "  where"
+                      , {-  4 -} "     f :: Int -> Int"
+                      , {-  5 -} "     f = (+ 1)"
+                      , {-  6 -} "     g :: Int -> Int"
+                      , {-  7 -} "     g = f . f"
+                        -- Function args, lambda bound, let bound, case bound
+                               --          1         2         3
+                               -- 1234567890 12345678901234567
+                      , {-  8 -} "test2 f = \\x -> case f x of"
+                               -- 123456789012345678901234567890123456789
+                      , {-  9 -} "            (a, b) -> let c = a * b * b"
+                      , {- 10 -} "                      in c * c"
+                        -- Type arguments
+                               -- 1234567890123456789012
+                      , {- 11 -} "data T a b = MkT a a b"
+                        -- Implicit forall
+                               -- 1234567890123456
+                      , {- 12 -} "f :: a -> b -> a"
+                      , {- 13 -} "f x y = x"
+                        -- Explicit forall
+                               -- 1234567890123456789012345678
+                      , {- 14 -} "g :: forall a b. a -> b -> a"
+                      , {- 15 -} "g x y = x"
+                      ])
+
+        updateSessionD session upd1 2
+        assertNoErrors session
+        useSites <- getUseSites session
+
+        -- where-bound
+        do let uses_f = [
+                   "A.hs@7:14-7:15"
+                 , "A.hs@7:10-7:11"
+                 , "A.hs@2:16-2:17"
+                 ]
+               uses_add = [ -- "+"
+                   "A.hs@5:11-5:12"
+                 , "A.hs@2:9-2:10"
+                 ]
+               uses_g = [
+                   "A.hs@2:20-2:21"
+                 ]
+
+           assertUseSites useSites "A" (5,  6, 5,  7) "f" uses_f
+           assertUseSites useSites "A" (5, 11, 5, 12) "+" uses_add
+           assertUseSites useSites "A" (7,  6, 7,  7) "g" uses_g
+
+        -- function args, lambda bound, let bound, case bound
+        do let uses_f = ["A.hs@8:22-8:23"]
+               uses_x = ["A.hs@8:24-8:25"]
+               uses_a = ["A.hs@9:31-9:32"]
+               uses_b = ["A.hs@9:39-9:40","A.hs@9:35-9:36"]
+               uses_c = ["A.hs@10:30-10:31","A.hs@10:26-10:27"]
+
+           assertUseSites useSites "A" (8,  7, 8,  8) "f" uses_f
+           assertUseSites useSites "A" (8, 12, 8, 13) "x" uses_x
+           assertUseSites useSites "A" (9, 14, 9, 15) "a" uses_a
+           assertUseSites useSites "A" (9, 35, 9, 36) "b" uses_b -- using def site for variety
+           assertUseSites useSites "A" (9, 27, 9, 28) "c" uses_c
+
+        -- type args
+        do let uses_a = ["A.hs@11:20-11:21","A.hs@11:18-11:19"]
+               uses_b = ["A.hs@11:22-11:23"]
+
+           assertUseSites useSites "A" (11, 18, 11, 19) "a" uses_a
+           assertUseSites useSites "A" (11, 10, 11, 11) "b" uses_b
+
+        -- implicit forall
+        do let uses_a = ["A.hs@12:16-12:17","A.hs@12:6-12:7"]
+               uses_b = ["A.hs@12:11-12:12"]
+
+           assertUseSites useSites "A" (12,  6, 12,  7) "a" uses_a
+           assertUseSites useSites "A" (12, 11, 12, 12) "b" uses_b
+
+        -- explicit forall
+        do let uses_a = ["A.hs@14:28-14:29","A.hs@14:18-14:19"]
+               uses_b = ["A.hs@14:23-14:24"]
+
+           assertUseSites useSites "A" (14, 13, 14, 14) "a" uses_a
+           assertUseSites useSites "A" (14, 23, 14, 24) "b" uses_b
+    )
   ]
+
+_ignoreFailure :: IO () -> IO ()
+_ignoreFailure io = Ex.catch io $ \(HUnitFailure err) ->
+  putStrLn $ "WARNING: " ++ err
 
 deletePackage :: FilePath -> IO ()
 deletePackage pkgDir = do
@@ -4091,6 +4522,23 @@ assertExpTypes expTypes mod (frLine, frCol, toLine, toCol) expected =
                       , spanToLine     = toLine
                       , spanToColumn   = toCol
                       }
+
+assertUseSites :: (ModuleName -> SourceSpan -> [SourceSpan])
+               -> String
+               -> (Int, Int, Int, Int)
+               -> String
+               -> [String]
+               -> Assertion
+assertUseSites useSites mod (frLine, frCol, toLine, toCol) symbol expected =
+    assertEqual ("Use sites of `" ++ symbol ++ "` in " ++ show mod) expected actual
+  where
+    actual = map show (useSites (Text.pack mod) span)
+    span   = SourceSpan { spanFilePath   = mod ++ ".hs"
+                        , spanFromLine   = frLine
+                        , spanFromColumn = frCol
+                        , spanToLine     = toLine
+                        , spanToColumn   = toCol
+                        }
 
 assertSourceErrors' :: IdeSession -> [String] -> Assertion
 assertSourceErrors' session = assertSourceErrors session . map

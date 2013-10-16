@@ -1,8 +1,6 @@
 module Haddock (
-    -- Package dependencies cache
-    pkgDepsFor
-  , updatePkgDepsFor
-  , pkgDepsFromModSummary
+    -- Package dependencies
+    pkgDepsFromModSummary
     -- Interfacing with Haddock
   , haddockInterfaceFor
     -- Link environment
@@ -54,16 +52,6 @@ import Conv
   Package dependencies
 ------------------------------------------------------------------------------}
 
--- TODO: Not sure we actually use this anywhere
-pkgDepCache :: StrictIORef (Strict (Map ModuleName) [GHC.PackageId])
-{-# NOINLINE pkgDepCache #-}
-pkgDepCache = unsafePerformIO $ newIORef StrictMap.empty
-
-updatePkgDepsFor :: ModuleName -> [GHC.PackageId] -> IO ()
-updatePkgDepsFor m deps = do
-  cache <- readIORef pkgDepCache
-  writeIORef pkgDepCache (StrictMap.insert m deps cache)
-
 pkgDepsFromModSummary :: DynFlags
                       -> GHC.ModSummary
                       -> [GHC.PackageId]
@@ -78,13 +66,6 @@ pkgDepsFromModSummary dflags s =
     impMods :: [(PackageQualifier, GHC.ModuleName)]
     impMods = map aux (GHC.ms_srcimps      s)
            ++ map aux (GHC.ms_textual_imps s)
-
-pkgDepsFor :: ModuleName -> IO [GHC.PackageId]
-pkgDepsFor m = do
-  cache <- readIORef pkgDepCache
-  case StrictMap.lookup m cache of
-    Nothing   -> Ex.throwIO (userError "pkgDepsFor: Unknown module")
-    Just deps -> return deps
 
 {------------------------------------------------------------------------------
   Interfacing with Haddock

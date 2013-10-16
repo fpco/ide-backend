@@ -164,6 +164,7 @@ module IdeSession (
   , getBuildLicensesStatus
   , getSpanInfo
   , getExpTypes
+  , getUseSites
   , getImports
   , getAutocompletion
   , getPkgDeps
@@ -201,6 +202,7 @@ module IdeSession (
   , crashGhcServer
   , hsExtensions
   , ideBackendApiVersion
+  , buildLicsFromPkgs
 ) where
 
 import IdeSession.Config

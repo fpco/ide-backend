@@ -30,8 +30,6 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.MVar (newMVar)
 import qualified Control.Exception as Ex
-import Data.Text (Text)
-import qualified Data.Text as Text
 import System.Exit (ExitCode)
 
 import Paths_ide_backend
@@ -39,14 +37,8 @@ import Paths_ide_backend
 import IdeSession.GHC.API
 import IdeSession.BlockingOps
 import IdeSession.RPC.Server
-import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util
-import IdeSession.Strict.Container
-import qualified IdeSession.Strict.List   as StrictList
-import qualified IdeSession.Strict.IntMap as StrictIntMap
-import qualified IdeSession.Strict.Map    as StrictMap
-import qualified IdeSession.Strict.Trie   as StrictTrie
 
 {------------------------------------------------------------------------------
   Starting and stopping the server
@@ -167,48 +159,17 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> FilePath            -- ^ Source directory
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
-           -> IO ( Strict [] SourceError
-                 , Strict [] ModuleName
-                 , Strict (Map ModuleName) (Diff (Strict [] Import))
-                 , Strict (Map ModuleName) (Diff (Strict Trie (Strict [] IdInfo)))
-                 , Strict (Map ModuleName) (Diff IdList)
-                 , Strict (Map ModuleName) (Diff [(SourceSpan, Text)])
-                 , Strict (Map ModuleName) (Diff (Strict [] PackageId))
-                 , ExplicitSharingCache
-                 )
+           -> IO GhcCompileResult
 rpcCompile server opts dir genCode callback =
   conversation server $ \RpcConversation{..} -> do
     put (ReqCompile opts dir genCode)
 
     let go = do response <- get
                 case response of
-                  GhcCompileProgress pcounter ->
-                    callback pcounter >> go
-                  GhcCompileDone errs loaded imports auto spanInfo expTypes deps cache ->
-                    return ( errs
-                           , loaded
-                           , imports
-                           , StrictMap.map (fmap (constructAuto cache)) auto
-                           , spanInfo
-                           , expTypes
-                           , deps
-                           , cache
-                           )
+                  GhcCompileProgress pcounter -> callback pcounter >> go
+                  GhcCompileDone result       -> return result
+
     go
-  where
-    constructAuto :: ExplicitSharingCache -> Strict [] IdInfo
-                  -> Strict Trie (Strict [] IdInfo)
-    constructAuto cache lk =
-      StrictTrie.fromListWith (StrictList.++) $ map aux (toLazyList lk)
-      where
-        aux :: IdInfo -> (BSS.ByteString, Strict [] IdInfo)
-        aux idInfo@IdInfo{idProp = k} =
-          let idProp = StrictIntMap.findWithDefault
-                         (error "constructAuto: could not resolve idPropPtr")
-                         (idPropPtr k)
-                         (idPropCache cache)
-          in ( BSS.pack . Text.unpack . idName $ idProp
-             , StrictList.singleton idInfo )
 
 -- | Run code
 rpcRun :: GhcServer       -- ^ GHC server

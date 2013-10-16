@@ -1,9 +1,10 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, GeneralizedNewtypeDeriving #-}
 -- | The private types
 module IdeSession.Types.Private (
     -- * Types without a public counterpart
     FilePathPtr(..)
   , IdPropPtr(..)
+  , UseSites
     -- * Types with a public counterpart
   , Public.IdNameSpace(..)
   , IdInfo(..)
@@ -46,7 +47,7 @@ newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
   deriving (Eq, Ord, Show)
 
 newtype IdPropPtr = IdPropPtr { idPropPtr :: Int }
-  deriving Show
+  deriving (Eq, Ord, Show)
 
 data IdInfo = IdInfo {
     idProp  :: {-# UNPACK #-} !IdPropPtr
@@ -131,6 +132,8 @@ newtype IdMap = IdMap { idMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) 
 
 newtype ExpMap = ExpMap { expMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) Text }
   deriving Show
+
+type UseSites = Strict (Map IdPropPtr) [SourceSpan]
 
 data ImportEntities =
     ImportOnly   !(Strict [] Text)

@@ -32,6 +32,7 @@ module IdeSession.Update (
     -- * Debugging
   , forceRecompile
   , crashGhcServer
+  , buildLicsFromPkgs
   )
   where
 
@@ -73,6 +74,7 @@ import qualified IdeSession.Strict.IntMap as IntMap
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
 import qualified IdeSession.Strict.List   as List
+import qualified IdeSession.Strict.Trie   as Trie
 import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_, withMVar)
 
 {------------------------------------------------------------------------------
@@ -343,18 +345,11 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
         -- Recompile
         computed <- if (idleState' ^. ideUpdatedCode)
           then do
-            (  errs
-             , loaded
-             , diffImports
-             , diffAuto
-             , diffIdList
-             , diffExpTypes
-             , diffPkgDeps
-             , cache ) <- rpcCompile (idleState' ^. ideGhcServer)
-                                     (idleState' ^. ideNewOpts)
-                                     (ideSourcesDir ideStaticInfo)
-                                     (idleState' ^. ideGenerateCode)
-                                     callback
+            GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
+                                               (idleState' ^. ideNewOpts)
+                                               (ideSourcesDir ideStaticInfo)
+                                               (idleState' ^. ideGenerateCode)
+                                               callback
 
             let applyDiff :: Strict (Map ModuleName) (Diff v)
                           -> (Computed -> Strict (Map ModuleName) v)
@@ -363,18 +358,20 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
                                  $ Maybe.maybe Map.empty f
                                  $ idleState' ^. ideComputed
 
-            let diffSpan  = Map.map (fmap mkIdMap)  diffIdList
-                diffTypes = Map.map (fmap mkExpMap) diffExpTypes
+            let diffSpan  = Map.map (fmap mkIdMap)  ghcCompileSpanInfo
+                diffTypes = Map.map (fmap mkExpMap) ghcCompileExpTypes
+                diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
 
             return $ Maybe.just Computed {
-                computedErrors        = errs
-              , computedLoadedModules = loaded
-              , computedImports       = diffImports `applyDiff` computedImports
-              , computedAutoMap       = diffAuto    `applyDiff` computedAutoMap
-              , computedSpanInfo      = diffSpan    `applyDiff` computedSpanInfo
-              , computedExpTypes      = diffTypes   `applyDiff` computedExpTypes
-              , computedPkgDeps       = diffPkgDeps `applyDiff` computedPkgDeps
-              , computedCache         = mkRelative cache
+                computedErrors        = ghcCompileErrors
+              , computedLoadedModules = ghcCompileLoaded
+              , computedImports       = ghcCompileImports  `applyDiff` computedImports
+              , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
+              , computedSpanInfo      = diffSpan           `applyDiff` computedSpanInfo
+              , computedExpTypes      = diffTypes          `applyDiff` computedExpTypes
+              , computedUseSites      = ghcCompileUseSites `applyDiff` computedUseSites
+              , computedPkgDeps       = ghcCompilePkgDeps  `applyDiff` computedPkgDeps
+              , computedCache         = mkRelative ghcCompileCache
               }
           else return $ idleState' ^. ideComputed
 
@@ -411,6 +408,21 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
 
     handleExternal :: IdeIdleState -> ExternalException -> IO (IdeSessionState, Bool)
     handleExternal idleState e = return (IdeSessionServerDied e idleState, False)
+
+    constructAuto :: ExplicitSharingCache -> Strict [] IdInfo
+                  -> Strict Trie (Strict [] IdInfo)
+    constructAuto cache lk =
+        Trie.fromListWith (List.++) $ map aux (toLazyList lk)
+      where
+        aux :: IdInfo -> (BSS.ByteString, Strict [] IdInfo)
+        aux idInfo@IdInfo{idProp = k} =
+          let idProp = IntMap.findWithDefault
+                         (error "constructAuto: could not resolve idPropPtr")
+                         (idPropPtr k)
+                         (idPropCache cache)
+          in ( BSS.pack . Text.unpack . idName $ idProp
+             , List.singleton idInfo
+             )
 
 -- | A session update that changes a source module by giving a new value for
 -- the module source. This can be used to add a new module or update an
@@ -608,9 +620,13 @@ runStmt IdeSession{ideState} m fun = do
 -- build the exe).
 --
 -- The executable files are placed in the filesystem inside the @build@
--- subdirectory of @getDistDir@, in subdirectories corresponding to the given
+-- subdirectory of 'Query.getDistDir', in subdirectories corresponding to the given
 -- module names. The build directory does not overlap with any of the other
 -- used directories and its path.
+--
+-- Logs from the building process are saved in files
+-- @build\/ide-backend-exe.stdout@ and @build\/ide-backend-exe.stderr@
+-- in the 'Query.getDistDir' directory.
 --
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
@@ -640,7 +656,11 @@ buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 -- the ide-backend updateModule* mechanism. Similarly to 'buildExe',
 -- it needs the project modules to be already loaded within the session
 -- and the generated docs can be found in the @doc@ subdirectory
--- of @getDistDir@.
+-- of 'Query.getDistDir'.
+--
+-- Logs from the documentation building process are saved in files
+-- @doc\/ide-backend-doc.stdout@ and @doc\/ide-backend-doc.stderr@
+-- in the 'Query.getDistDir' directory.
 --
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildDoc :: IdeSessionUpdate
@@ -666,25 +686,43 @@ buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
--- Similarly to 'buildExe', it needs the project modules to be already
--- loaded within the session and the concatenated licences can be found
--- in the @licenses.txt@ file of @getDistDir@.
+-- Similarly to 'buildExe', the function needs the project modules to be
+-- already loaded within the session. The concatenated licenses can be found
+-- in file @licenses.txt@ inside the 'Query.getDistDir' directory.
 --
--- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
+-- The function expects .cabal files of all used packages,
+-- except those mentioned in 'configLicenseExc',
+-- to be gathered in the directory given as the first argument.
+-- The code then expects to find those packages installed and their
+-- license files in the usual place that Cabal puts them
+-- (or the in-place packages should be correctly embedded in the GHC tree).
+--
+-- We guess the installed locations of the license files on the basis
+-- of the haddock interfaces path. If the default setting does not work
+-- properly, the haddock interfaces path should be set manually. E.g.,
+-- @cabal configure --docdir=the_same_path --htmldir=the_same_path@
+-- affects the haddock interfaces path (because it is by default based
+-- on htmldir) and is reported to work for some values of @the_same_path@.
+--
+-- Logs from the license search and catenation process are saved in files
+-- @licenses.stdout@ and @licenses.stderr@
+-- in the 'Query.getDistDir' directory.
+--
+-- Note: currently 'configGenerateModInfo' needs to be set
+-- for this function to work (see #86).
 buildLicenses :: FilePath -> IdeSessionUpdate
 buildLicenses cabalsDir = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     mcomputed <- get ideComputed
-    let SessionConfig{ configExtraPathDirs
-                     , configPackageDBStack
-                     , configGenerateModInfo
-                     , configLicenseExc } = ideConfig
+    let SessionConfig{..} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
     exitCode <-
-      lift $ buildLicenseCatenation cabalsDir ideDistDir configExtraPathDirs
+      lift $ buildLicenseCatenation mcomputed
+                                    cabalsDir ideDistDir configExtraPathDirs
                                     configPackageDBStack
-                                    configLicenseExc mcomputed callback
+                                    configLicenseExc configLicenseFixed
+                                    callback
     set ideBuildLicensesStatus (Just exitCode)
 
 {------------------------------------------------------------------------------
