@@ -4007,53 +4007,224 @@ syntheticTests =
           Nothing ->
             assertFailure "Timeout in runStmt"
     )
-  , ( "Use sites"
+  , ( "Use sites 1: Global values"
     , withSession defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $ [
-                       {- 1 -} "module A where"
-                             -- 123456789012345
-                     , {- 2 -} "f :: Int -> Int"
-                     , {- 3 -} "f = (+ 1)"
-                     , {- 4 -} "g :: Int -> Int"
-                     , {- 5 -} "g = f . f"
-                     ])
-               <> (updateModule "B.hs" . BSLC.pack . unlines $ [
-                       {- 1 -} "module B where"
-                     , {- 2 -} "import A"
-                     , {- 3 -} "h :: Int -> Int"
-                     , {- 4 -} "h = (+ 1) . g"
-                     ])
+        let upd1 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module A where"
+                              -- 123456789012345
+                      , {- 2 -} "f :: Int -> Int"
+                      , {- 3 -} "f = (+ 1)"
+                      , {- 4 -} "g :: Int -> Int"
+                      , {- 5 -} "g = f . f"
+                      ])
+                <> (updateModule "B.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module B where"
+                      , {- 2 -} "import A"
+                      , {- 3 -} "h :: Int -> Int"
+                      , {- 4 -} "h = (+ 1) . f . g"
+                      ])
 
-        -- TODO: use sites for types?
-
-        updateSessionD session upd 2
+        updateSessionD session upd1 2
         assertNoErrors session
 
-        useSites <- getUseSites session
-        assertUseSites useSites "A" (3,  1, 3,  2) [ -- "f"
-            "A.hs@2:1-2:2"
-          , "A.hs@5:9-5:10"
-          , "A.hs@5:5-5:6"
-          ]
-        assertUseSites useSites "A" (3,  6, 3,  7) [ -- "+"
-            "A.hs@3:6-3:7"
-          , "B.hs@4:6-4:7"
-          ]
-        assertUseSites useSites "A" (5,  1, 5,  2) [ -- "g"
-            "A.hs@4:1-4:2"
-          , "B.hs@4:13-4:14"
-          ]
-        assertUseSites useSites "B" (4,  1, 4,  2) [ -- "h"
-            "B.hs@3:1-3:2"
-          ]
-        assertUseSites useSites "B" (4,  6, 4,  7) [ -- "+"
-            "A.hs@3:6-3:7"
-          , "B.hs@4:6-4:7"
-          ]
-        assertUseSites useSites "B" (4, 13, 4, 14) [ -- "g"
-            "A.hs@4:1-4:2"
-          , "B.hs@4:13-4:14"
-          ]
+        let uses_f = [
+                "A.hs@2:1-2:2"
+              , "A.hs@5:9-5:10"
+              , "A.hs@5:5-5:6"
+              , "B.hs@4:13-4:14"
+              ]
+            uses_add = [ -- "+"
+                "A.hs@3:6-3:7"
+              , "B.hs@4:6-4:7"
+              ]
+            uses_g = [
+                "A.hs@4:1-4:2"
+              , "B.hs@4:17-4:18"
+              ]
+            uses_h = [
+                "B.hs@3:1-3:2"
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (3,  1, 3,  2) "f" uses_f
+           assertUseSites useSites "A" (3,  6, 3,  7) "+" uses_add
+           assertUseSites useSites "A" (5,  1, 5,  2) "g" uses_g
+           assertUseSites useSites "B" (4,  1, 4,  2) "h" uses_h
+           assertUseSites useSites "B" (4,  6, 4,  7) "+" uses_add
+           assertUseSites useSites "B" (4, 13, 4, 14) "f" uses_f
+           assertUseSites useSites "B" (4, 17, 4, 18) "g" uses_g
+
+        -- Update B, swap positions of g and f
+
+        let upd2 = (updateModule "B.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module B where"
+                      , {- 2 -} "import A"
+                      , {- 3 -} "h :: Int -> Int"
+                      , {- 4 -} "h = (+ 1) . g . f"
+                      ])
+
+        updateSessionD session upd2 1
+        assertNoErrors session
+
+        let uses_f2 = [
+                "A.hs@2:1-2:2"
+              , "A.hs@5:9-5:10"
+              , "A.hs@5:5-5:6"
+              , "B.hs@4:17-4:18"
+              ]
+            uses_g2 = [
+                "A.hs@4:1-4:2"
+              , "B.hs@4:13-4:14"
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (3,  1, 3,  2) "f" uses_f2
+           assertUseSites useSites "A" (3,  6, 3,  7) "+" uses_add
+           assertUseSites useSites "A" (5,  1, 5,  2) "g" uses_g2
+           assertUseSites useSites "B" (4,  1, 4,  2) "h" uses_h
+           assertUseSites useSites "B" (4,  6, 4,  7) "+" uses_add
+           assertUseSites useSites "B" (4, 13, 4, 14) "g" uses_g2
+           assertUseSites useSites "B" (4, 17, 4, 18) "f" uses_f2
+
+        -- Update A, remove one internal use of f, and shift the other
+
+        let upd3 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module A where"
+                              -- 123456789012345
+                      , {- 2 -} "f :: Int -> Int"
+                      , {- 3 -} "f = (+ 1)"
+                      , {- 4 -} "g :: Int -> Int"
+                      , {- 5 -} "g = (+ 1) . f"
+                      ])
+
+        updateSessionD session upd3 2
+        assertNoErrors session
+
+        let uses_f3 = [
+                "A.hs@2:1-2:2"
+              , "A.hs@5:13-5:14"
+              , "B.hs@4:17-4:18"
+              ]
+            uses_add3 = [ -- "+"
+                "A.hs@5:6-5:7"
+              , "A.hs@3:6-3:7"
+              , "B.hs@4:6-4:7"
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (3,  1, 3,  2) "f" uses_f3
+           assertUseSites useSites "A" (3,  6, 3,  7) "+" uses_add3
+           assertUseSites useSites "A" (5,  1, 5,  2) "g" uses_g2
+           assertUseSites useSites "B" (4,  1, 4,  2) "h" uses_h
+           assertUseSites useSites "B" (4,  6, 4,  7) "+" uses_add3
+           assertUseSites useSites "B" (4, 13, 4, 14) "g" uses_g2
+           assertUseSites useSites "B" (4, 17, 4, 18) "f" uses_f3
+    )
+  , ( "Use sites 2: Types"
+    , withSession defaultSessionConfig $ \session -> do
+        -- This test follows the same structure as "Use sites 1", but
+        -- tests types rather than values
+
+        let upd1 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module A where"
+                              -- 1234567890123456
+                      , {- 2 -} "data F = MkF Int"
+                      , {- 3 -} "data G = MkG F F"
+                      ])
+                <> (updateModule "B.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module B where"
+                      , {- 2 -} "import A"
+                              -- 12345678901234567890
+                      , {- 3 -} "data H = MkH Int F G"
+                      ])
+
+        updateSessionD session upd1 2
+        assertNoErrors session
+
+        let uses_F = [
+                "A.hs@3:16-3:17"
+              , "A.hs@3:14-3:15"
+              , "B.hs@3:18-3:19"
+              ]
+            uses_Int = [
+                "A.hs@2:14-2:17"
+              , "B.hs@3:14-3:17"
+              ]
+            uses_G = [
+                "B.hs@3:20-3:21"
+              ]
+            uses_H = [
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (2,  6, 2,  7) "F"   uses_F
+           assertUseSites useSites "A" (2, 14, 2, 17) "Int" uses_Int
+           assertUseSites useSites "A" (3,  6, 3,  7) "G"   uses_G
+           assertUseSites useSites "B" (3,  6, 3,  7) "H"   uses_H
+           assertUseSites useSites "B" (3, 14, 3, 17) "Int" uses_Int
+           assertUseSites useSites "B" (3, 18, 3, 19) "F"   uses_F
+           assertUseSites useSites "B" (3, 20, 3, 21) "G"   uses_G
+
+        -- Update B, swap positions of g and f
+
+        let upd2 = (updateModule "B.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module B where"
+                      , {- 2 -} "import A"
+                              -- 12345678901234567890
+                      , {- 3 -} "data H = MkH Int G F"
+                      ])
+
+        updateSessionD session upd2 1
+        assertNoErrors session
+
+        let uses_F2 = [
+                "A.hs@3:16-3:17"
+              , "A.hs@3:14-3:15"
+              , "B.hs@3:20-3:21"
+              ]
+            uses_G2 = [
+                "B.hs@3:18-3:19"
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (2,  6, 2,  7) "F"   uses_F2
+           assertUseSites useSites "A" (2, 14, 2, 17) "Int" uses_Int
+           assertUseSites useSites "A" (3,  6, 3,  7) "G"   uses_G2
+           assertUseSites useSites "B" (3,  6, 3,  7) "H"   uses_H
+           assertUseSites useSites "B" (3, 14, 3, 17) "Int" uses_Int
+           assertUseSites useSites "B" (3, 18, 3, 19) "G"   uses_G2
+           assertUseSites useSites "B" (3, 20, 3, 21) "F"   uses_F2
+
+        -- Update A, remove one internal use of f, and shift the other
+
+        let upd3 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+                        {- 1 -} "module A where"
+                              -- 123456789012345678
+                      , {- 2 -} "data F = MkF Int"
+                      , {- 3 -} "data G = MkG Int F"
+                      ])
+
+        updateSessionD session upd3 2
+        assertNoErrors session
+
+        let uses_F3 = [
+                "A.hs@3:18-3:19"
+              , "B.hs@3:20-3:21"
+              ]
+            uses_Int3 = [
+                "A.hs@3:14-3:17"
+              , "A.hs@2:14-2:17"
+              , "B.hs@3:14-3:17"
+              ]
+
+        do useSites <- getUseSites session
+           assertUseSites useSites "A" (2,  6, 2,  7) "F"   uses_F3
+           assertUseSites useSites "A" (2, 14, 2, 17) "Int" uses_Int3
+           assertUseSites useSites "A" (3,  6, 3,  7) "G"   uses_G2
+           assertUseSites useSites "B" (3,  6, 3,  7) "H"   uses_H
+           assertUseSites useSites "B" (3, 14, 3, 17) "Int" uses_Int3
+           assertUseSites useSites "B" (3, 18, 3, 19) "G"   uses_G2
+           assertUseSites useSites "B" (3, 20, 3, 21) "F"   uses_F3
     )
   ]
 
@@ -4269,10 +4440,11 @@ assertExpTypes expTypes mod (frLine, frCol, toLine, toCol) expected =
 assertUseSites :: (ModuleName -> SourceSpan -> [SourceSpan])
                -> String
                -> (Int, Int, Int, Int)
+               -> String
                -> [String]
                -> Assertion
-assertUseSites useSites mod (frLine, frCol, toLine, toCol) expected =
-    assertEqual "" expected actual
+assertUseSites useSites mod (frLine, frCol, toLine, toCol) symbol expected =
+    assertEqual ("Use sites of `" ++ symbol ++ "` in " ++ show mod) expected actual
   where
     actual = map show (useSites (Text.pack mod) span)
     span   = SourceSpan { spanFilePath   = mod ++ ".hs"
