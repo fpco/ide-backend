@@ -33,6 +33,7 @@ import Text.Regex (mkRegex, subRegex)
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure, (@?=))
+import Test.HUnit.Lang (HUnitFailure(..))
 
 import Debug
 import IdeSession
@@ -4220,41 +4221,98 @@ syntheticTests =
            assertUseSites useSites "B" (3, 18, 3, 19) "G"   uses_G2
            assertUseSites useSites "B" (3, 20, 3, 21) "F"   uses_F3
     )
-  , ( "Use sites 3: Local variables"
-    , withSession defaultSessionConfig $ \session -> do
+  , ( "Use sites 3: Local identifiers"
+    , withSession (withOpts ["-XScopedTypeVariables"]) $ \session -> do
         let upd1 = (updateModule "A.hs" . BSLC.pack . unlines $ [
-                        {- 1 -} "module A where"
+                        {-  1 -} "module A where"
                               -- 123456789012345
-                      , {- 2 -} "test = (+ 1) . f . g"
-                      , {- 3 -} "  where"
-                      , {- 4 -} "     f :: Int -> Int"
-                      , {- 5 -} "     f = (+ 1)"
-                      , {- 6 -} "     g :: Int -> Int"
-                      , {- 7 -} "     g = f . f"
+                      , {-  2 -} "test = (+ 1) . f . g"
+                      , {-  3 -} "  where"
+                      , {-  4 -} "     f :: Int -> Int"
+                      , {-  5 -} "     f = (+ 1)"
+                      , {-  6 -} "     g :: Int -> Int"
+                      , {-  7 -} "     g = f . f"
+                        -- Function args, lambda bound, let bound, case bound
+                               --          1         2         3
+                               -- 1234567890 12345678901234567
+                      , {-  8 -} "test2 f = \\x -> case f x of"
+                               -- 123456789012345678901234567890123456789
+                      , {-  9 -} "            (a, b) -> let c = a * b * b"
+                      , {- 10 -} "                      in c * c"
+                        -- Type arguments
+                               -- 1234567890123456789012
+                      , {- 11 -} "data T a b = MkT a a b"
+                        -- Implicit forall
+                               -- 1234567890123456
+                      , {- 12 -} "f :: a -> b -> a"
+                      , {- 13 -} "f x y = x"
+                        -- Explicit forall
+                               -- 1234567890123456789012345678
+                      , {- 14 -} "g :: forall a b. a -> b -> a"
+                      , {- 15 -} "g x y = x"
                       ])
 
         updateSessionD session upd1 2
         assertNoErrors session
+        useSites <- getUseSites session
 
-        let uses_f = [
-                "A.hs@7:14-7:15"
-              , "A.hs@7:10-7:11"
-              , "A.hs@2:16-2:17"
-              ]
-            uses_add = [ -- "+"
-                "A.hs@5:11-5:12"
-              , "A.hs@2:9-2:10"
-              ]
-            uses_g = [
-                "A.hs@2:20-2:21"
-              ]
+        -- where-bound
+        do let uses_f = [
+                   "A.hs@7:14-7:15"
+                 , "A.hs@7:10-7:11"
+                 , "A.hs@2:16-2:17"
+                 ]
+               uses_add = [ -- "+"
+                   "A.hs@5:11-5:12"
+                 , "A.hs@2:9-2:10"
+                 ]
+               uses_g = [
+                   "A.hs@2:20-2:21"
+                 ]
 
-        do useSites <- getUseSites session
            assertUseSites useSites "A" (5,  6, 5,  7) "f" uses_f
            assertUseSites useSites "A" (5, 11, 5, 12) "+" uses_add
            assertUseSites useSites "A" (7,  6, 7,  7) "g" uses_g
+
+        -- function args, lambda bound, let bound, case bound
+        do let uses_f = ["A.hs@8:22-8:23"]
+               uses_x = ["A.hs@8:24-8:25"]
+               uses_a = ["A.hs@9:31-9:32"]
+               uses_b = ["A.hs@9:39-9:40","A.hs@9:35-9:36"]
+               uses_c = ["A.hs@10:30-10:31","A.hs@10:26-10:27"]
+
+           assertUseSites useSites "A" (8,  7, 8,  8) "f" uses_f
+           assertUseSites useSites "A" (8, 12, 8, 13) "x" uses_x
+           assertUseSites useSites "A" (9, 14, 9, 15) "a" uses_a
+           assertUseSites useSites "A" (9, 35, 9, 36) "b" uses_b -- using def site for variety
+           assertUseSites useSites "A" (9, 27, 9, 28) "c" uses_c
+
+        -- type args
+        do let uses_a = ["A.hs@11:20-11:21","A.hs@11:18-11:19"]
+               uses_b = ["A.hs@11:22-11:23"]
+
+           assertUseSites useSites "A" (11, 18, 11, 19) "a" uses_a
+           assertUseSites useSites "A" (11, 10, 11, 11) "b" uses_b
+
+        -- implicit forall
+        do let uses_a = ["A.hs@12:16-12:17","A.hs@12:6-12:7"]
+               uses_b = ["A.hs@12:11-12:12"]
+
+           assertUseSites useSites "A" (12,  6, 12,  7) "a" uses_a
+           assertUseSites useSites "A" (12, 11, 12, 12) "b" uses_b
+
+        -- explicit forall
+        do let uses_a = ["A.hs@14:28-14:29","A.hs@14:18-14:19"]
+               uses_b = ["A.hs@14:23-14:24"]
+
+           assertUseSites useSites "A" (14, 13, 14, 14) "a" uses_a
+           assertUseSites useSites "A" (14, 23, 14, 24) "b" uses_b
     )
   ]
+
+_ignoreFailure :: IO () -> IO ()
+_ignoreFailure io = Ex.catch io $ \(HUnitFailure err) ->
+  putStrLn $ "WARNING: " ++ err
 
 deletePackage :: FilePath -> IO ()
 deletePackage pkgDir = do
