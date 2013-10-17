@@ -355,11 +355,11 @@ parseProgressMessage = Att.parseOnly parser
   where
     parser :: Att.Parser (Int, Int, Text)
     parser = do
-      _    <- Att.char '['
-      step <- Att.decimal
-      _    <- Att.string (Text.pack " of ")
-      numS <- Att.decimal
-      _    <- Att.char ']' >> Att.space
+      _    <- Att.char '['                ; Att.skipSpace
+      step <- Att.decimal                 ; Att.skipSpace
+      _    <- Att.string (Text.pack "of") ; Att.skipSpace
+      numS <- Att.decimal                 ; Att.skipSpace
+      _    <- Att.char ']'                ; Att.skipSpace
       rest <- parseCompiling `mplus` Att.takeText
       return (step, numS, rest)
 
