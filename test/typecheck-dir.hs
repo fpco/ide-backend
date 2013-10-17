@@ -1,5 +1,6 @@
 module Main where
 
+import Control.Exception (bracket)
 import Control.Monad (liftM, unless)
 import Data.Monoid (mconcat)
 import Data.Maybe (fromJust)
@@ -72,30 +73,31 @@ check opts what configDir = do
                         , configStaticOpts = opts
                      -- , configInProcess  = True
                         }
-  session     <- initSession defaultSessionInitParams sessionConfig
-  isFile      <- doesFileExist      what
-  isDirectory <- doesDirectoryExist what
 
-  unless (isFile || isDirectory) $ fail ("invalid argument " ++ what)
+  bracket (initSession defaultSessionInitParams sessionConfig)
+          shutdownSession $ \session -> do
+    isFile      <- doesFileExist      what
+    isDirectory <- doesDirectoryExist what
 
-  modules <- if isFile
-    then return [what]
-    else find always ((`elem` hsExtensions) `liftM` extension) what
+    unless (isFile || isDirectory) $ fail ("invalid argument " ++ what)
 
-  print modules
+    modules <- if isFile
+      then return [what]
+      else find always ((`elem` hsExtensions) `liftM` extension) what
 
-  let displayCounter :: Progress -> IO ()
-      displayCounter Progress{..} =
-        putStrLn $ "["
-                ++ show progressStep
-                ++ " of "
-                ++ show progressNumSteps
-                ++ "] "
-                ++ Text.unpack (fromJust progressParsedMsg)
+    print modules
 
-      update = mconcat (map updateModuleFromFile modules)
+    let displayCounter :: Progress -> IO ()
+        displayCounter Progress{..} =
+          putStrLn $ "["
+                  ++ show progressStep
+                  ++ " of "
+                  ++ show progressNumSteps
+                  ++ "] "
+                  ++ Text.unpack (fromJust progressParsedMsg)
 
-  updateSession session update displayCounter
-  errs <- getSourceErrors session
-  putStrLn $ "\nErrors and warnings:\n" ++ unlines (map show errs)
-  shutdownSession session
+        update = mconcat (map updateModuleFromFile modules)
+
+    updateSession session update displayCounter
+    errs <- getSourceErrors session
+    putStrLn $ "\nErrors and warnings:\n" ++ unlines (map show errs)
