@@ -2,6 +2,8 @@ module Main where
 
 import Control.Monad (liftM, unless)
 import Data.Monoid (mconcat)
+import Data.Maybe (fromJust)
+import qualified Data.Text as Text
 import System.Directory
 import System.Environment
 import System.FilePath.Find (always, extension, find)
@@ -82,10 +84,14 @@ check opts what configDir = do
 
   print modules
 
-  let len = show $ length modules
-
-      displayCounter :: Progress -> IO ()
-      displayCounter n = putStrLn ("[" ++ show n ++ "/" ++ len ++ "]")
+  let displayCounter :: Progress -> IO ()
+      displayCounter Progress{..} =
+        putStrLn $ "["
+                ++ show progressStep
+                ++ " of "
+                ++ show progressNumSteps
+                ++ "] "
+                ++ Text.unpack (fromJust progressParsedMsg)
 
       update = mconcat (map updateModuleFromFile modules)
 
