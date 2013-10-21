@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, ExistentialQuantification #-}
+{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, ExistentialQuantification, DeriveDataTypeable #-}
 module Main where
 
 import Control.Concurrent (forkIO, threadDelay)
@@ -12,6 +12,7 @@ import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
 import System.Posix.Signals (sigKILL)
 import Data.Binary (Binary)
+import Data.Typeable (Typeable)
 import qualified Data.Binary as Binary
 
 import Test.Framework (Test, defaultMain, testGroup)
@@ -32,7 +33,7 @@ forkTestServer test = do
   forkRpcServer prog ["--server", test] Nothing Nothing
 
 -- | Do an RPC call and verify the result
-assertRpcEqual :: (Binary req, Binary resp, Show req, Show resp, Eq resp)
+assertRpcEqual :: (Typeable req, Typeable resp, Binary req, Binary resp, Show req, Show resp, Eq resp)
                => RpcServer -- ^ RPC server
                -> req       -- ^ Request
                -> resp      -- ^ Expected response
@@ -42,7 +43,7 @@ assertRpcEqual server req resp =
 
 -- | Like 'assertRpcEqual' but verify a number of responses, before throwing
 -- the specified exception (if any)
-assertRpcEquals :: (Binary req, Binary resp, Show req, Show resp, Eq resp)
+assertRpcEquals :: (Typeable req, Typeable resp, Binary req, Binary resp, Show req, Show resp, Eq resp)
                 => RpcServer -- ^ RPC server
                 -> req       -- ^ Request
                 -> [resp]    -- ^ Expected responses
@@ -51,8 +52,8 @@ assertRpcEquals server req resps =
   assertRpc server (Put req $ foldr Get Done resps)
 
 data Conversation =
-    forall req.  (Binary req) => Put req  Conversation
-  | forall resp. (Binary resp, Show resp, Eq resp) => Get resp Conversation
+    forall req.  (Typeable req, Binary req) => Put req  Conversation
+  | forall resp. (Typeable resp, Binary resp, Show resp, Eq resp) => Get resp Conversation
   | Done
 
 assertRpc :: RpcServer -> Conversation -> Assertion
@@ -101,8 +102,10 @@ testStateServer st RpcConversation{..} = forever $ do
     return (i + 1)
 
 -- | Test with request and response custom data types
-data CountRequest  = Increment | GetCount deriving Show
-data CountResponse = DoneCounting | Count Int deriving (Eq, Show)
+data CountRequest  = Increment | GetCount
+  deriving (Show, Typeable)
+data CountResponse = DoneCounting | Count Int
+  deriving (Eq, Show, Typeable)
 
 instance Binary CountRequest where
   put Increment = Binary.putWord8 0
@@ -194,8 +197,11 @@ testConcurrentGetPutServer RpcConversation{..} = forever $ do
 --------------------------------------------------------------------------------
 
 data StartGame  = StartGame Int Int
-data Guess      = Guess Int | GiveUp | Yay      deriving (Eq, Show)
-data GuessReply = GuessCorrect | GuessIncorrect deriving Show
+  deriving Typeable
+data Guess = Guess Int | GiveUp | Yay
+  deriving (Eq, Show, Typeable)
+data GuessReply = GuessCorrect | GuessIncorrect
+  deriving (Show, Typeable)
 
 instance Binary StartGame where
   put (StartGame i j) = Binary.put i >> Binary.put j
@@ -314,7 +320,8 @@ testKillAsyncServer RpcConversation{..} = forever $ do
   put req
 
 -- | Test crash during decoding
-data TypeWithFaultyDecoder = TypeWithFaultyDecoder deriving Show
+data TypeWithFaultyDecoder = TypeWithFaultyDecoder
+  deriving (Show, Typeable)
 
 instance Binary TypeWithFaultyDecoder where
   put _ = Binary.putWord8 0 -- >> return ()
@@ -331,7 +338,8 @@ testFaultyDecoderServer RpcConversation{..} = forever $ do
   put ()
 
 -- | Test crash during encoding
-data TypeWithFaultyEncoder = TypeWithFaultyEncoder deriving (Show, Eq)
+data TypeWithFaultyEncoder = TypeWithFaultyEncoder
+  deriving (Show, Eq, Typeable)
 
 instance Binary TypeWithFaultyEncoder where
   put _ = fail "Faulty encoder"

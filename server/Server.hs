@@ -303,7 +303,9 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
 
     cache <- liftIO $ constructExplicitSharingCache
     -- Should we call clearLinkEnvCache here?
-    liftIO . put . GhcCompileDone $ response { ghcCompileCache = cache }
+    liftIO $ put
+           . GhcCompileDone
+           $ response { ghcCompileCache = cache }
   where
     dynOpts :: DynamicOpts
     dynOpts =

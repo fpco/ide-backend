@@ -37,6 +37,7 @@ library
                       IdeSession.GHC.API,
                       IdeSession.GHC.Client,
                       IdeSession.Util,
+                      IdeSession.TraceMonad,
                       IdeSession.BlockingOps,
                       IdeSession.Strict.Container,
                       IdeSession.Strict.IntMap,

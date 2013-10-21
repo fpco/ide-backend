@@ -1,7 +1,7 @@
 -- | Types for the messages to and fro the GHC server
 --
 -- It is important that none of the types here rely on the GHC library.
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, DeriveDataTypeable #-}
 module IdeSession.GHC.API (
     -- * Requests
     GhcRequest(..)
@@ -22,6 +22,7 @@ import Data.Binary
 import Data.ByteString (ByteString)
 import Data.Text (Text)
 import Data.Aeson.TH (deriveJSON, defaultOptions)
+import Data.Typeable (Typeable)
 import Control.Applicative ((<$>), (<*>))
 import System.FilePath ((</>))
 
@@ -63,11 +64,13 @@ data GhcRequest
   | ReqCrash {
          reqCrashDelay :: Maybe Int
        }
+  deriving Typeable
 
 data GhcRunRequest =
     GhcRunInput ByteString
   | GhcRunInterrupt
   | GhcRunAckDone
+  deriving Typeable
 
 -- | Buffer modes for running code
 --
@@ -88,7 +91,7 @@ data RunBufferMode =
   | RunBlockBuffering { runBufferBlockSize :: Maybe Int
                       , runBufferTimeout   :: Maybe Int
                       }
-  deriving Show
+  deriving (Typeable, Show)
 
 {------------------------------------------------------------------------------
   Responses
@@ -97,6 +100,7 @@ data RunBufferMode =
 data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone GhcCompileResult
+  deriving Typeable
 
 data GhcCompileResult = GhcCompileResult {
     ghcCompileErrors   :: Strict [] SourceError
@@ -112,10 +116,12 @@ data GhcCompileResult = GhcCompileResult {
   , ghcCompileExpTypes :: Strict (Map ModuleName) (Diff [(SourceSpan, Text)])
   , ghcCompileUseSites :: Strict (Map ModuleName) (Diff UseSites)
   }
+  deriving Typeable
 
 data GhcRunResponse =
     GhcRunOutp ByteString
   | GhcRunDone RunResult
+  deriving Typeable
 
 -- | The outcome of running code
 data RunResult =
@@ -127,7 +133,7 @@ data RunResult =
   | RunGhcException String
     -- | The session was restarted
   | RunForceCancelled
-  deriving (Show, Eq)
+  deriving (Typeable, Show, Eq)
 
 {------------------------------------------------------------------------------
   Binary instances

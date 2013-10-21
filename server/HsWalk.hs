@@ -34,6 +34,7 @@ import Prelude hiding (id, mod, span, writeFile, appendFile)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+import qualified Debug.Trace as Debug
 
 #if DEBUG
 import System.IO.UTF8 (writeFile, appendFile)
@@ -57,7 +58,7 @@ import qualified Module
 import MonadUtils (MonadIO (..))
 import qualified Name
 import OccName
-import Outputable
+import Outputable hiding (trace)
 import qualified RdrName
 import TcRnTypes
 import TcType (tidyOpenType, evVarPred)
@@ -82,6 +83,7 @@ import Conv
 import Haddock
 import FilePathCaching
 import IdPropCaching
+import IdeSession.TraceMonad
 
 import Data.Data (Data, gmapQ, showConstr, toConstr)
 
@@ -267,6 +269,13 @@ instance MonadFilePathCaching ExtractIdsM where
 instance MonadIdPropCaching ExtractIdsM where
   getIdPropCache = eIdsIdPropCache <$> get
   putIdPropCache = \cache -> modify $ \st -> st { eIdsIdPropCache = cache }
+
+instance TraceMonad ExtractIdsM where
+  trace str = do
+    -- We are using a strict-state monad (as opposed to a strict state-monad)
+    -- so we can use the state to make sure the event gets evaluated
+    st <- get
+    put $ Debug.traceEvent str st
 
 execExtractIdsT :: MonadIO m
                 => DynFlags

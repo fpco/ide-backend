@@ -39,7 +39,7 @@ import System.Posix.IO (createPipe, closeFd, fdToHandle)
 import System.Posix.Process (exitImmediately)
 import System.Exit (ExitCode(ExitFailure))
 import System.Directory (canonicalizePath, getPermissions, executable)
-import Data.Typeable (Typeable)
+import Data.Typeable (Typeable, typeOf)
 import Control.Applicative ((<$>))
 import Control.Monad (void, forever, unless)
 import qualified Control.Exception as Ex
@@ -56,6 +56,7 @@ import qualified Data.Binary     as Binary
 import qualified Data.Binary.Get as Binary
 
 import IdeSession.BlockingOps (putMVar, takeMVar, readChan, waitAnyCatchCancel, waitCatch)
+import IdeSession.TraceMonad
 
 --------------------------------------------------------------------------------
 -- Exceptions thrown by the RPC server are retrown locally as                 --
@@ -170,8 +171,8 @@ rpcServer fds handler = do
   rpcServer' requestR' responseW' errorsW' handler
 
 data RpcConversation = RpcConversation {
-    get :: forall a. Binary a => IO a
-  , put :: forall a. Binary a => a -> IO ()
+    get :: forall a. (Typeable a, Binary a) => IO a
+  , put :: forall a. (Typeable a, Binary a) => a -> IO ()
   }
 
 -- | Start the RPC server
@@ -298,7 +299,7 @@ forkRpcServer path args workingDir menv = do
 
 -- | Specialized form of 'rpcConversation' to do single request and wait for
 -- a single response.
-rpc :: (Binary req, Binary resp) => RpcServer -> req -> IO resp
+rpc :: (Typeable req, Typeable resp, Binary req, Binary resp) => RpcServer -> req -> IO resp
 rpc server req = rpcConversation server $ \RpcConversation{..} -> put req >> get
 
 -- | Run an RPC conversation. If the handler throws an exception during
