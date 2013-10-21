@@ -36,7 +36,7 @@ import Paths_ide_backend
 
 import IdeSession.GHC.API
 import IdeSession.BlockingOps
-import IdeSession.RPC.Server
+import IdeSession.RPC.Client
 import IdeSession.Types.Progress
 import IdeSession.Util
 

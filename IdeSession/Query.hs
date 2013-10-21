@@ -57,7 +57,7 @@ import IdeSession.Types.Translation
 import IdeSession.Types.Public
 import qualified IdeSession.Types.Private as Private
 import IdeSession.GHC.Client (GhcServer)
-import IdeSession.RPC.Server (ExternalException)
+import IdeSession.RPC.Client (ExternalException)
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map    as StrictMap
 import qualified IdeSession.Strict.List   as StrictList

@@ -69,7 +69,7 @@ import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util
 import IdeSession.Strict.Container
-import IdeSession.RPC.Server (ExternalException)
+import IdeSession.RPC.Client (ExternalException)
 import qualified IdeSession.Strict.IntMap as IntMap
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe

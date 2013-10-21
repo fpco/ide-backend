@@ -20,6 +20,7 @@ import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertEqual)
 
 import IdeSession.RPC.Server
+import IdeSession.RPC.Client
 import TestTools
 
 --------------------------------------------------------------------------------

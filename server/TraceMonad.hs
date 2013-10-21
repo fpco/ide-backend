@@ -1,6 +1,9 @@
-module IdeSession.TraceMonad where
+module TraceMonad where
 
 import qualified Debug.Trace
+
+import GHC
+import MonadUtils
 
 class Monad m => TraceMonad m where
   trace :: String -> m ()
@@ -17,3 +20,6 @@ traceBlock' str act = traceBlock str $ act (traceBlock "-")
 
 instance TraceMonad IO where
   trace = Debug.Trace.traceEventIO
+
+instance TraceMonad Ghc where
+  trace = liftIO . trace

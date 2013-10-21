@@ -213,6 +213,6 @@ import IdeSession.Types.Public
 import IdeSession.Types.Progress
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
-import IdeSession.RPC.Server (ExternalException (..))
+import IdeSession.RPC.Client (ExternalException (..))
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))

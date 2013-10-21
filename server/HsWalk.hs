@@ -83,7 +83,7 @@ import Conv
 import Haddock
 import FilePathCaching
 import IdPropCaching
-import IdeSession.TraceMonad
+import TraceMonad
 
 import Data.Data (Data, gmapQ, showConstr, toConstr)
 
