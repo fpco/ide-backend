@@ -16,7 +16,6 @@ import System.Posix.Types (Fd)
 import System.Posix.IO (closeFd, fdToHandle)
 import System.Posix.Process (exitImmediately)
 import System.Exit (ExitCode(ExitFailure))
-import Data.Typeable (Typeable, typeOf)
 import Control.Monad (forever)
 import qualified Control.Exception as Ex
 import Control.Concurrent (threadDelay)
@@ -28,7 +27,6 @@ import Data.Binary (encode, decode)
 import IdeSession.BlockingOps (readChan, waitAnyCatchCancel, waitCatch)
 import IdeSession.RPC.API
 import IdeSession.RPC.Stream
-import TraceMonad
 
 --------------------------------------------------------------------------------
 -- Server-side API                                                            --
@@ -62,7 +60,7 @@ rpcServer' :: Handle                     -- ^ Input
            -> IO ()
 rpcServer' hin hout herr server = do
     requests   <- newChan :: IO (Chan BSL.ByteString)
-    responses  <- newChan :: IO (Chan (String, BSL.ByteString))
+    responses  <- newChan :: IO (Chan BSL.ByteString)
 
     setBinaryBlockBuffered [hin, hout, herr]
 
@@ -99,21 +97,20 @@ readRequests h ch = newStream h >>= go
         RequestForceShutdown -> exitImmediately (ExitFailure 1)
 
 -- | Encode messages from a channel and forward them on a handle
-writeResponses :: Chan (String, BSL.ByteString) -> Handle -> IO ()
+writeResponses :: Chan BSL.ByteString -> Handle -> IO ()
 writeResponses ch h = forever $ do
-  (label, bs) <- $readChan ch
-  traceBlock ("Encoding and sending " ++ label) $
-    hPutFlush h $ encode (Response (IncBS bs))
+  bs <- $readChan ch
+  hPutFlush h $ encode (Response (IncBS bs))
 
 -- | Run a handler repeatedly, given input and output channels
 channelHandler :: Chan BSL.ByteString
-               -> Chan (String, BSL.ByteString)
+               -> Chan BSL.ByteString
                -> (RpcConversation -> IO ())
                -> IO ()
 channelHandler requests responses server =
   server RpcConversation {
       get = $readChan requests >>= Ex.evaluate . decode
-    , put = \resp -> do writeChan responses (show (typeOf resp), encode resp)
+    , put = writeChan responses . encode
     }
 
 -- | Set all the specified handles to binary mode and block buffering
