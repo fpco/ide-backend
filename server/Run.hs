@@ -269,7 +269,7 @@ autocompletion summary = do
   session <- getSession
 
   let pkgDeps = pkgDepsFromModSummary dflags summary
-  linkEnv <- liftIO $ linkEnvFor dflags pkgDeps
+  linkEnv <- liftIO $ linkEnvForDeps dflags pkgDeps
 
   let eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
       eltsToAutocompleteMap elt = do

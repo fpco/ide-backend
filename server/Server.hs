@@ -302,7 +302,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
         return finalResponse
 
     cache <- liftIO $ constructExplicitSharingCache
-    -- Should we call clearLinkEnvCache here?
+    -- TODO: Should we clear the link env caches here?
     liftIO $ put
            . GhcCompileDone
            $ response { ghcCompileCache = cache }

@@ -7,8 +7,7 @@ module Haddock (
   , LinkEnv
   , homeModuleFor
     -- Link environment cache
-  , linkEnvFor
-  , clearLinkEnvCache
+  , linkEnvForDeps
   ) where
 
 -- Platform imports
@@ -145,31 +144,45 @@ homeModuleFor dflags linkEnv name =
 
 {------------------------------------------------------------------------------
   Link environment cache
+
+  We keep separate caches for the link env per package, and the link env per
+  set of package dependencies. This is important because the order of the
+  dependencies matters; for instance, there is an entry for 'True' in both
+  ghc-prim and base, but we want the entry in base so that we report Data.Bool
+  as the home module rather than GHC.Types.
+
+  TODO: However, we might be able to be a bit smarter about memory usage here?
 ------------------------------------------------------------------------------}
 
-linkEnvCache :: StrictIORef (Strict (Map [GHC.PackageId]) LinkEnv)
-{-# NOINLINE linkEnvCache #-}
-linkEnvCache = unsafePerformIO $ newIORef StrictMap.empty
+linkEnvPerPackageCache :: StrictIORef (Strict (Map GHC.PackageId) (Either String LinkEnv))
+{-# NOINLINE linkEnvPerPackageCache #-}
+linkEnvPerPackageCache = unsafePerformIO $ newIORef StrictMap.empty
 
-clearLinkEnvCache :: IO ()
-clearLinkEnvCache = writeIORef linkEnvCache StrictMap.empty
+linkEnvForPackage :: DynFlags -> GHC.PackageId -> IO (Either String LinkEnv)
+linkEnvForPackage dynFlags pkgId = do
+  cache <- readIORef linkEnvPerPackageCache
+  case StrictMap.lookup pkgId cache of
+    Just linkEnv -> return linkEnv
+    Nothing -> do
+      linkEnv <- haddockInterfaceFor dynFlags Hk.freshNameCache pkgId
+      let cache' = StrictMap.insert pkgId linkEnv cache
+      writeIORef linkEnvPerPackageCache cache'
+      return linkEnv
 
--- | Find the cached link environment, or construct a new one, for the
--- given set of dependencies.
---
--- Note that the order of the dependencies is important!  For instance, there
--- is an entry for 'True' in both ghc-prim and base, but we want the entry in
--- base so that we report Data.Bool as the home module rather than GHC.Types.
-linkEnvFor :: DynFlags -> [GHC.PackageId] -> IO LinkEnv
-linkEnvFor dynFlags deps = do
-  cache <- readIORef linkEnvCache
+linkEnvPerDepsCache :: StrictIORef (Strict (Map [GHC.PackageId]) LinkEnv)
+{-# NOINLINE linkEnvPerDepsCache #-}
+linkEnvPerDepsCache = unsafePerformIO $ newIORef StrictMap.empty
+
+linkEnvForDeps :: DynFlags -> [GHC.PackageId] -> IO LinkEnv
+linkEnvForDeps dynFlags deps = do
+  cache <- readIORef linkEnvPerDepsCache
   case StrictMap.lookup deps cache of
     Just linkEnv -> return linkEnv
     Nothing -> do
-      linkEnvs <- liftIO $ mapM (haddockInterfaceFor dynFlags Hk.freshNameCache)
-                                deps
-
+      linkEnvs <- mapM (linkEnvForPackage dynFlags) deps
+      -- See comment above about ordering of dependencies for a justification
+      -- of 'unions' (which is biased)
       let linkEnv = StrictMap.unions (rights linkEnvs)
-
-      writeIORef linkEnvCache (StrictMap.insert deps linkEnv cache)
+          cache'  = StrictMap.insert deps linkEnv cache
+      writeIORef linkEnvPerDepsCache cache'
       return linkEnv

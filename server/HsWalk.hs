@@ -160,7 +160,7 @@ extractIdsPlugin symbolRef = HscPlugin {..}
 
       idInfo           <- readIORef qqRef
       ProperSpan span' <- extractSourceSpan $ tcl_loc (env_lcl env)
-      linkEnv          <- liftIO $ linkEnvFor dflags pkgDeps
+      linkEnv          <- liftIO $ linkEnvForDeps dflags pkgDeps
 
       (idProp, Just idScope) <- idInfoForName dflags
                                               quoter
@@ -290,7 +290,7 @@ execExtractIdsT dynFlags env idList current (ExtractIdsM m) = do
   -- linkEnvFor.) We assume that ghc gives us the package dependencies in the
   -- right order.
   let pkgDeps = (imp_dep_pkgs (tcg_imports env))
-  linkEnv <- liftIO $ linkEnvFor dynFlags pkgDeps
+  linkEnv <- liftIO $ linkEnvForDeps dynFlags pkgDeps
 
   filePathCache <- liftIO $ getFilePathCache
   idPropCache   <- liftIO $ getIdPropCache
