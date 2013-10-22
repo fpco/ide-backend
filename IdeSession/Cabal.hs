@@ -90,10 +90,13 @@ pkgIdent = Package.PackageIdentifier
   , pkgVersion = pkgVersionMain
   }
 
-pkgDesc :: PackageDescription
-pkgDesc = PackageDescription
+pkgDescFromName :: String -> PackageDescription
+pkgDescFromName pkgName = PackageDescription
   { -- the following are required by all packages:
-    package        = pkgIdent
+    package        = Package.PackageIdentifier
+                       { pkgName    = Package.PackageName pkgName
+                       , pkgVersion = pkgVersionMain
+                       }
   , license        = AllRightsReserved  -- dummy
   , licenseFile    = ""
   , copyright      = ""
@@ -122,6 +125,9 @@ pkgDesc = PackageDescription
   , extraSrcFiles  = []
   , extraTmpFiles  = []
   }
+
+pkgDesc :: PackageDescription
+pkgDesc = pkgDescFromName "main"
 
 bInfo :: FilePath -> [String] -> BuildInfo
 bInfo sourceDir ghcOpts =
@@ -342,7 +348,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   -- or filter stdout and display progress on each good line.
 
 buildDotCabal :: FilePath -> [String] -> Computed
-              -> IO BSL.ByteString
+              -> IO (String -> BSL.ByteString)
 buildDotCabal ideSourcesDir ghcOpts computed = do
   (loadedMs, pkgs) <- buildDeps $ just computed
   libDeps <- externalDeps pkgs
@@ -357,15 +363,16 @@ buildDotCabal ideSourcesDir ghcOpts computed = do
   let soundMs = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
       library = libDesc ideSourcesDir ghcOpts projectMs
-      gpDesc = GenericPackageDescription
-        { packageDescription = pkgDesc
+      gpDesc libName = GenericPackageDescription
+        { packageDescription = pkgDescFromName libName
         , genPackageFlags    = []  -- seem unused
         , condLibrary        = Just $ CondNode library libDeps []
         , condExecutables    = []
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-  return $ BSL8.pack $ showGenericPackageDescription gpDesc
+  return $ \libName ->
+    BSL8.pack $ showGenericPackageDescription $ gpDesc libName
 
 buildExecutable :: FilePath -> FilePath -> [FilePath]
                 -> [String] -> Bool -> PackageDBStack

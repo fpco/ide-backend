@@ -302,7 +302,7 @@ getUseSites = computedQuery $ \computed@Computed{..} mod span ->
 -- Warning: all modules named @Main@ (even in subdirectories
 -- or files with different names) are ignored so that they
 -- don't get in the way when we build an executable using the library.
-getDotCabal :: Query (BSL.ByteString)
+getDotCabal :: Query (String -> BSL.ByteString)
 getDotCabal session = withComputedState session
                       $ \idleState computed@Computed{..} -> do
   let sourcesDir = ideSourcesDir $ ideStaticInfo session
