@@ -36,6 +36,7 @@ import System.IO.Unsafe (unsafePerformIO)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import qualified Debug.Trace as Debug
+import Control.Exception (evaluate)
 
 #if DEBUG
 import System.IO.UTF8 (writeFile, appendFile)
@@ -314,7 +315,8 @@ execExtractIdsT dynFlags env idList current (ExtractIdsM m) = do
                   , eIdsFilePathCache = filePathCache
                   , eIdsIdPropCache   = idPropCache
                   }
-      eIdsSt' = execState (runReaderT m eIdsEnv) eIdsSt
+
+  eIdsSt' <- liftIO $ evaluate $ execState (runReaderT m eIdsEnv) eIdsSt
 
   liftIO $ putFilePathCache (eIdsFilePathCache eIdsSt')
   liftIO $ putIdPropCache   (eIdsIdPropCache   eIdsSt')
