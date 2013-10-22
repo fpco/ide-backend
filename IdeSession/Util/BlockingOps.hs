@@ -27,7 +27,7 @@
 -- NOTE: The type of the exception changes when using DEBUGGING mode -- in order
 -- to be able to add the line number, all exceptions are turned into
 -- IOExceptions.
-module IdeSession.BlockingOps (
+module IdeSession.Util.BlockingOps (
     -- * Generic debugging utilities
     lineNumber
   , traceOnException

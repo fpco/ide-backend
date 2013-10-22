@@ -36,7 +36,7 @@ import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Binary (Binary, encode, decode)
 import Data.IORef (writeIORef, readIORef, newIORef)
 
-import IdeSession.BlockingOps (putMVar, takeMVar)
+import IdeSession.Util.BlockingOps (putMVar, takeMVar)
 import IdeSession.RPC.API
 import IdeSession.RPC.Stream
 

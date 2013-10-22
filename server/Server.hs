@@ -31,7 +31,7 @@ import IdeSession.RPC.Server
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util
-import IdeSession.BlockingOps (withMVar, wait)
+import IdeSession.Util.BlockingOps (withMVar, wait)
 import IdeSession.Strict.IORef
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map  as StrictMap

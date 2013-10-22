@@ -24,7 +24,7 @@ import qualified Data.ByteString.Lazy.Char8 as BSL
 import Control.Concurrent.Async (async)
 import Data.Binary (encode, decode)
 
-import IdeSession.BlockingOps (readChan, waitAnyCatchCancel, waitCatch)
+import IdeSession.Util.BlockingOps (readChan, waitAnyCatchCancel, waitCatch)
 import IdeSession.RPC.API
 import IdeSession.RPC.Stream
 
