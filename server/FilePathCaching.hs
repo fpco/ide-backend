@@ -3,20 +3,22 @@ module FilePathCaching (
   , mkFilePathPtr
   ) where
 
+import Control.Monad (liftM)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import System.IO.Unsafe (unsafePerformIO)
 
 import IdeSession.Types.Private (FilePathPtr(..))
 import IdeSession.Strict.IORef
+import IdeSession.Strict.Pair
 
 class Monad m => MonadFilePathCaching m where
-  getFilePathCache :: m (HashMap FilePath Int, Int)
-  putFilePathCache :: (HashMap FilePath Int, Int) -> m ()
+  getFilePathCache :: m (StrictPair (HashMap FilePath Int) Int)
+  putFilePathCache :: StrictPair (HashMap FilePath Int) Int -> m ()
 
-filePathCacheRef :: StrictIORef (HashMap FilePath Int, Int)
+filePathCacheRef :: StrictIORef (StrictPair (HashMap FilePath Int) Int)
 {-# NOINLINE filePathCacheRef #-}
-filePathCacheRef = unsafePerformIO $ newIORef (HashMap.empty, 0)
+filePathCacheRef = unsafePerformIO $ newIORef $ fromLazyPair (HashMap.empty, 0)
 
 instance MonadFilePathCaching IO where
   getFilePathCache = readIORef  filePathCacheRef
@@ -24,11 +26,11 @@ instance MonadFilePathCaching IO where
 
 mkFilePathPtr :: MonadFilePathCaching m => FilePath -> m FilePathPtr
 mkFilePathPtr path = do
-  (hash, next) <- getFilePathCache
+  (hash, next) <- toLazyPair `liftM` getFilePathCache
   case HashMap.lookup path hash of
     Nothing -> do
       let next' = next + 1
-      putFilePathCache (HashMap.insert path next' hash, next')
+      putFilePathCache $ fromLazyPair (HashMap.insert path next' hash, next')
       return $ FilePathPtr next'
     Just key ->
        return $ FilePathPtr key

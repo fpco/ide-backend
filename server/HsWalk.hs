@@ -22,6 +22,7 @@ module HsWalk
 #define DEBUG 0
 
 import Data.Foldable (forM_)
+import Control.Monad (liftM)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State.Class (MonadState(..))
 import Control.Applicative ((<$>))
@@ -47,6 +48,7 @@ import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
 import IdeSession.Strict.IORef
 import IdeSession.Strict.StateT
+import IdeSession.Strict.Pair
 
 import Bag
 import DataCon (dataConName)
@@ -105,7 +107,7 @@ constructExplicitSharingCache = do
     -- TODO: keep two refs and wipe on that for local ids, to avoid blowup
     -- for long-running sessions with many added and removed definitions.
     idPropCache       <- getIdPropCache
-    (filePathHash, _) <- getFilePathCache
+    (filePathHash, _) <- toLazyPair `liftM` getFilePathCache
 
     let filePathCache = IntMap.fromList . map convert $ HashMap.toList filePathHash
     return ExplicitSharingCache {..}
@@ -252,8 +254,8 @@ data ExtractIdsState = ExtractIdsState {
   , eIdsIdList        :: !IdList
   , eIdsExpTypes      :: [(SourceSpan, Text)] -- TODO: explicit sharing?
   , eIdsUseSites      :: !UseSites
-  , eIdsFilePathCache :: (HashMap FilePath Int, Int)
-  , eIdsIdPropCache   :: Strict IntMap IdProp
+  , eIdsFilePathCache :: !(StrictPair (HashMap FilePath Int) Int)
+  , eIdsIdPropCache   :: !(Strict IntMap IdProp)
   }
 
 newtype ExtractIdsM a = ExtractIdsM (
