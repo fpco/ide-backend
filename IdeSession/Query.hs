@@ -33,6 +33,7 @@ module IdeSession.Query (
   , getAutocompletion
   , getPkgDeps
   , getUseSites
+  , getDotCabal
     -- * Debugging (internal use only)
   , dumpIdInfo
   ) where
@@ -44,12 +45,14 @@ import Data.Accessor ((^.), (^:), getVal)
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
+import Data.Maybe (fromMaybe)
 import System.Exit (ExitCode)
 import System.FilePath ((</>))
 import Control.Monad (forM_)
 import Data.Text (Text)
 import qualified Data.Text as Text (pack, unpack)
 
+import IdeSession.Cabal
 import IdeSession.Config
 import IdeSession.State
 import IdeSession.GHC.API (cabalMacrosLocation)
@@ -290,6 +293,22 @@ getUseSites = computedQuery $ \computed@Computed{..} mod span ->
     maybeListToList :: Maybe [a] -> [a]
     maybeListToList (Just xs) = xs
     maybeListToList Nothing   = []
+
+-- | Minimal .cabal file for the loaded modules seen as a library.
+--
+-- The library is called \'main\'.
+-- All transitive package dependencies are included.
+-- Only modules that get compiled successfully are included.
+-- Warning: all modules named @Main@ (even in subdirectories
+-- or files with different names) are ignored so that they
+-- don't get in the way when we build an executable using the library.
+getDotCabal :: Query (BSL.ByteString)
+getDotCabal session = withComputedState session
+                      $ \idleState computed@Computed{..} -> do
+  let sourcesDir = ideSourcesDir $ ideStaticInfo session
+      SessionConfig{configStaticOpts} = ideConfig $ ideStaticInfo session
+      ghcOpts = fromMaybe configStaticOpts $ _ideNewOpts idleState
+  buildDotCabal sourcesDir ghcOpts computed
 
 {------------------------------------------------------------------------------
   Debugging

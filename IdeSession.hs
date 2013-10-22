@@ -165,6 +165,7 @@ module IdeSession (
   , getSpanInfo
   , getExpTypes
   , getUseSites
+  , getDotCabal
   , getImports
   , getAutocompletion
   , getPkgDeps

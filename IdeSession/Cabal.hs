@@ -2,7 +2,7 @@
 {-# LANGUAGE TemplateHaskell     #-}
 module IdeSession.Cabal (
     buildExecutable, buildHaddock, buildLicenseCatenation
-  , packageDbArgs, generateMacros
+  , packageDbArgs, generateMacros, buildDotCabal
   , buildLicsFromPkgs  -- for testing only
   ) where
 
@@ -35,6 +35,7 @@ import Distribution.InstalledPackageInfo
 import Distribution.License (License (..))
 import qualified Distribution.ModuleName
 import Distribution.PackageDescription
+import Distribution.PackageDescription.PrettyPrint (showGenericPackageDescription)
 import qualified Distribution.Package as Package
 import Distribution.ParseUtils ( parseFields, simpleField, ParseResult (..)
                                , FieldDescr, parseLicenseQ, parseFilePathQ
@@ -65,6 +66,7 @@ import Language.Haskell.TH.Syntax (lift, runIO)
 import IdeSession.Licenses ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
 import IdeSession.State
 import IdeSession.Strict.Container
+import IdeSession.Strict.Maybe (just)
 import IdeSession.Types.Progress
 import IdeSession.Types.Public
 import IdeSession.Types.Translation
@@ -220,14 +222,15 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
       condExecutables = map condExe executables
   hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
   lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
-  -- Cabal can't find the code of @Main@ in subdirectories or in @Foo.hs@.
-  -- TODO: this should be discussed and fixed when we generate .cabal files,
-  -- because if another module depends on such a @Main@, we're in trouble
-  -- (but if the @Main@ is only an executable, we are fine).
+  -- Cabal can't find the code of @Main@, to be used as the main executable
+  -- module, in subdirectories or in @Foo.hs@. We need a @Main@ to build
+  -- an executable, so any other @Main@ modules have to be ignored.
+  -- So, if another module depends on such a @Main@,
+  -- we're in trouble, but if the @Main@ is only an executable, we are fine.
   -- Michael said in https://github.com/fpco/fpco/issues/1049
   -- "We'll be handling the disambiguation of Main modules ourselves before
   -- passing the files to you, so that shouldn't be an ide-backend concern.",
-  -- so perhaps there is a plan for that.
+  -- so perhaps there won't be any problems.
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
@@ -337,6 +340,32 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API,
   -- or filter stdout and display progress on each good line.
+
+buildDotCabal :: FilePath -> [String] -> Computed
+              -> IO BSL.ByteString
+buildDotCabal ideSourcesDir ghcOpts computed = do
+  (loadedMs, pkgs) <- buildDeps $ just computed
+  libDeps <- externalDeps pkgs
+  -- We ignore any @Main@ modules (even in subdirectories or in @Foo.hs@)
+  -- so that they don't get in the way when we build an executable
+  -- using the library. So, if another module depends on such a @Main@,
+  -- we're in trouble, but if the @Main@ is only an executable, we are fine.
+  -- Michael said in https://github.com/fpco/fpco/issues/1049
+  -- "We'll be handling the disambiguation of Main modules ourselves before
+  -- passing the files to you, so that shouldn't be an ide-backend concern.",
+  -- so perhaps there won't be any problems.
+  let soundMs = delete (Text.pack "Main") loadedMs
+      projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
+      library = libDesc ideSourcesDir ghcOpts projectMs
+      gpDesc = GenericPackageDescription
+        { packageDescription = pkgDesc
+        , genPackageFlags    = []  -- seem unused
+        , condLibrary        = Just $ CondNode library libDeps []
+        , condExecutables    = []
+        , condTestSuites     = []
+        , condBenchmarks     = []
+        }
+  return $ BSL8.pack $ showGenericPackageDescription gpDesc
 
 buildExecutable :: FilePath -> FilePath -> [FilePath]
                 -> [String] -> Bool -> PackageDBStack

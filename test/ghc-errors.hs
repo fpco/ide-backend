@@ -5,8 +5,8 @@ import Control.Applicative ((<$>))
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad
-import qualified Data.ByteString.Char8 as BSSC (pack, unpack)
-import qualified Data.ByteString.Lazy.Char8 as BSLC (null, pack, unpack)
+import qualified Data.ByteString.Char8 as BSSC (ByteString, pack, unpack, append, breakSubstring, concat)
+import qualified Data.ByteString.Lazy.Char8 as BSLC (ByteString, null, pack, unpack, toChunks)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
@@ -403,6 +403,9 @@ syntheticTests =
         updateSessionD session upd4 4
         status4 <- getBuildExeStatus session
         assertEqual "after all exe builds" (Just ExitSuccess) status4
+
+        dotCabal <- getDotCabal session
+        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: OrdList Maybes Exception\n    exposed: False\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
     )
   , ( "Build haddocks from some .lhs files"
     , withSession defaultSessionConfig $ \session -> do
@@ -747,6 +750,9 @@ syntheticTests =
         assertEqual "TH.TH exe output"
                     "(True,43)\n"
                     out
+
+        dotCabal <- getDotCabal session
+        assertEqual "dotCabal from TH" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0,\n                   containers ==0.4.2.1, deepseq ==1.3.0.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, pretty ==1.1.1.0, template-haskell ==2.7.0.0\n    exposed-modules: TH.TH TH.BlockingOps\n    exposed: False\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -XTemplateHaskell\n "
     )
   , ( "Build haddocks from TH"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
@@ -1710,6 +1716,9 @@ syntheticTests =
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
+
+        dotCabal <- getDotCabal session
+        assertEqual "dotCabal from Main" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: False\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
     )
   , ( "Build executable from Main with explicit -package"
     , let packageOpts = [ "-hide-all-packages"
@@ -1730,6 +1739,9 @@ syntheticTests =
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
+
+        dotCabal <- getDotCabal session
+        assertEqual "dotCabal from Main with explicit -package" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: False\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -hide-all-packages -package base -package parallel -package old-time\n "
     )
   , ( "Build executable from ParFib.Main"
     , withSession (withOpts []) $ \session -> do
@@ -1748,6 +1760,9 @@ syntheticTests =
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
+
+        dotCabal <- getDotCabal session
+        assertEqual "dotCabal from ParFib.Main" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: False\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
     )
   , ( "Build executable and fail"
     , withSession (withOpts []) $ \session -> do
@@ -3155,6 +3170,9 @@ syntheticTests =
                     "42\n"
                     out
         deletePackage "test/simple-lib17"
+
+        dotCabal <- getDotCabal session
+        assertEqual "dotCabal from simple-lib17" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, simple-lib17 ==0.1.0.0\n    exposed: False\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.28213/src.28213\n    ghc-options: -XCPP\n "
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo False)"
     , let packageOpts = ["-package parallel"]
@@ -4730,6 +4748,14 @@ testBufferMode bufferMode =
                    in case rest of
                         (x' : rest') -> (firstChunk ++ [x']) : chunkOn x rest'
                         []           -> [firstChunk]
+
+filterIdeBackendTest :: BSLC.ByteString -> BSSC.ByteString
+filterIdeBackendTest bs =
+  let toStrict = BSSC.concat . BSLC.toChunks  -- not in our old bytestring pkg
+      (bs1, rest1) =
+        BSSC.breakSubstring (BSSC.pack "ide-backend-test.") $ toStrict bs
+      (_, bs2) = BSSC.breakSubstring (BSSC.pack "\n") rest1
+  in BSSC.append bs1 bs2
 
 {------------------------------------------------------------------------------
   Aux
