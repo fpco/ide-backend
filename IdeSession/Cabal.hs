@@ -362,7 +362,7 @@ buildDotCabal ideSourcesDir ghcOpts computed = do
   -- so perhaps there won't be any problems.
   let soundMs = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-      library = libDesc ideSourcesDir ghcOpts projectMs
+      library = (libDesc ideSourcesDir ghcOpts projectMs) {libExposed = True}
       gpDesc libName = GenericPackageDescription
         { packageDescription = pkgDescFromName libName
         , genPackageFlags    = []  -- seem unused
