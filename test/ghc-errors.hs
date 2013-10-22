@@ -2683,6 +2683,21 @@ syntheticTests =
         let completeTru = autocomplete (Text.pack "A") "Tru"
         assertEqual "" "[True (DataName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)]" (show completeTru)
     )
+  , ( "Autocomplete 4: fpco issue #2518"
+    , withSession (withOpts ["-XPackageImports"]) $ \session -> do
+        let upd = (updateModule "M.hs" . BSLC.pack . unlines $
+              [ "module M where"
+              , "import qualified Data.ByteString.Lazy as B"
+              , "foo = toC"
+              ])
+        updateSessionD session upd 1
+        assertSourceErrors' session ["Not in scope: `toC'"]
+        autocomplete <- getAutocompletion session
+        let complete_toC = autocomplete (Text.pack "M") "toC"
+        assertSameSet "" (map idInfoQN complete_toC) [
+            "B.toChunks"
+          ]
+    )
     -- TODO: Autocomplete test that checks import errors
     -- - Explicitly importing somthing that wasn't exported
     -- - Explicitly hiding something that wasn't exported

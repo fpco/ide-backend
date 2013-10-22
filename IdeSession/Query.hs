@@ -245,6 +245,9 @@ getImports = computedQuery $ \Computed{..} mod ->
     StrictMap.lookup mod computedImports
 
 -- | Autocompletion
+--
+-- Use 'idInfoQN' to translate these 'IdInfo's into qualified names, taking
+-- into account the module imports.
 getAutocompletion :: Query (ModuleName -> String -> [IdInfo])
 getAutocompletion = computedQuery $ \Computed{..} ->
     autocomplete computedCache computedAutoMap
