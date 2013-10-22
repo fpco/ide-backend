@@ -5,8 +5,9 @@ import Control.Applicative ((<$>))
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad
+import Control.DeepSeq (rnf)
 import qualified Data.ByteString.Char8 as BSSC (ByteString, pack, unpack, append, breakSubstring, concat)
-import qualified Data.ByteString.Lazy.Char8 as BSLC (ByteString, null, pack, unpack, toChunks)
+import qualified Data.ByteString.Lazy.Char8 as BSLC (ByteString, null, pack, unpack, toChunks, writeFile)
 import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
@@ -23,6 +24,7 @@ import qualified System.Environment as System.Environment
 import System.Exit (ExitCode (..))
 import System.FilePath
 import System.FilePath.Find (always, extension, find)
+import System.IO as IO
 import System.IO.Temp (withTempDirectory)
 import System.Process (readProcess)
 import qualified System.Process as Process
@@ -404,8 +406,14 @@ syntheticTests =
         status4 <- getBuildExeStatus session
         assertEqual "after all exe builds" (Just ExitSuccess) status4
 
-        dotCabal <- getDotCabal session
-        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest $ dotCabal "libName") $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: OrdList Maybes Exception\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName"
+        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: OrdList Maybes Exception\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
+        let pkgDir = distDir </> "dotCabal.for.lhs"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
     )
   , ( "Build haddocks from some .lhs files"
     , withSession defaultSessionConfig $ \session -> do
@@ -751,8 +759,14 @@ syntheticTests =
                     "(True,43)\n"
                     out
 
-        dotCabal <- getDotCabal session
-        assertEqual "dotCabal from TH" (filterIdeBackendTest $ dotCabal "libName") $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0,\n                   containers ==0.4.2.1, deepseq ==1.3.0.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, pretty ==1.1.1.0, template-haskell ==2.7.0.0\n    exposed-modules: TH.TH TH.BlockingOps\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -XTemplateHaskell\n "
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName"
+        assertEqual "dotCabal from TH" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0,\n                   containers ==0.4.2.1, deepseq ==1.3.0.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, pretty ==1.1.1.0, template-haskell ==2.7.0.0\n    exposed-modules: TH.TH TH.BlockingOps\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -XTemplateHaskell\n "
+        let pkgDir = distDir </> "dotCabal.for.lhs"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XTemplateHaskell' use 'extensions:\nTemplateHaskell'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* '' is an absolute\ndirectory.\n\nHackage would reject this package.\n")
     )
   , ( "Build haddocks from TH"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
@@ -1717,8 +1731,14 @@ syntheticTests =
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
 
-        dotCabal <- getDotCabal session
-        assertEqual "dotCabal from Main" (filterIdeBackendTest $ dotCabal "main") $ filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "main"
+        assertEqual "dotCabal from Main" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
+        let pkgDir = distDir </> "dotCabal.for.lhs"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "main.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
     )
   , ( "Build executable from Main with explicit -package"
     , let packageOpts = [ "-hide-all-packages"
@@ -1740,8 +1760,14 @@ syntheticTests =
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
 
-        dotCabal <- getDotCabal session
-        assertEqual "dotCabal from Main with explicit -package" (filterIdeBackendTest $ dotCabal "libName") $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -hide-all-packages -package base -package parallel -package old-time\n "
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName"
+        assertEqual "dotCabal from Main with explicit -package" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -hide-all-packages -package base -package parallel -package old-time\n "
+        let pkgDir = distDir </> "dotCabal.for.lhs"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
     )
   , ( "Build executable from ParFib.Main"
     , withSession (withOpts []) $ \session -> do
@@ -1761,8 +1787,14 @@ syntheticTests =
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
 
-        dotCabal <- getDotCabal session
-        assertEqual "dotCabal from ParFib.Main" (filterIdeBackendTest $ dotCabal "libName") $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName"
+        assertEqual "dotCabal from ParFib.Main" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
+        let pkgDir = distDir </> "dotCabal.for.lhs"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
     )
   , ( "Build executable and fail"
     , withSession (withOpts []) $ \session -> do
@@ -3171,8 +3203,14 @@ syntheticTests =
                     out
         deletePackage "test/simple-lib17"
 
-        dotCabal <- getDotCabal session
-        assertEqual "dotCabal from simple-lib17" (filterIdeBackendTest $ dotCabal "libName") $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, simple-lib17 ==0.1.0.0\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.28213/src.28213\n    ghc-options: -XCPP\n "
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName"
+        assertEqual "dotCabal from simple-lib17" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, simple-lib17 ==0.1.0.0\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.28213/src.28213\n    ghc-options: -XCPP\n "
+        let pkgDir = distDir </> "dotCabal.for.lhs"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XCPP' use 'extensions: CPP'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* '' is an absolute\ndirectory.\n\nHackage would reject this package.\n")
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo False)"
     , let packageOpts = ["-package parallel"]
@@ -4361,6 +4399,30 @@ installPackage pkgDir = do
     (_,_,_,r2) <- Process.createProcess (Process.proc "cabal" ["-v0", cmd])
                     { Process.cwd = Just pkgDir }
     void $ Process.waitForProcess r2
+
+checkPackage :: FilePath -> IO String
+checkPackage pkgDir = do
+    (_, mlocal_std_out, _, r2)
+      <- Process.createProcess (Process.proc "cabal" ["check"])
+           { Process.cwd = Just pkgDir
+           , Process.std_out = Process.CreatePipe }
+    let local_std_out = fromJust mlocal_std_out
+    checkWarns <- IO.hGetContents local_std_out
+    Ex.evaluate $ rnf checkWarns
+    IO.hClose local_std_out
+    void $ Process.waitForProcess r2
+    return checkWarns
+
+assertCheckWarns :: String -> Assertion
+assertCheckWarns checkWarns =
+  assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "These warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* 'hs-source-dirs: /tmp/ide-backend-test.1786/src.1786' is an absolute\ndirectory.\n\nHackage would reject this package.\n")
+
+filterCheckWarns :: String -> BSSC.ByteString
+filterCheckWarns s =
+  let (bs1, rest1) =
+        BSSC.breakSubstring (BSSC.pack "hs-source-dirs") $ BSSC.pack s
+      (_, bs2) = BSSC.breakSubstring (BSSC.pack "' is") rest1
+  in BSSC.append bs1 bs2
 
 assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
 assertSameSet header xs ys = assertSameList header (sort xs) (sort ys)
