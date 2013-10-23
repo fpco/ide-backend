@@ -24,15 +24,17 @@ module IdeSession.Types.Private (
   , ImportEntities(..)
   , Import(..)
   , RunResult(..)
+  , BreakInfo(..)
     -- * Cache
   , ExplicitSharingCache(..)
+  , unionCache
     -- * Util
   , mkIdMap
   , mkExpMap
   , dominators
   ) where
 
-import Prelude hiding (span)
+import Prelude hiding (span, mod)
 import Data.Text (Text)
 import Data.ByteString (ByteString)
 import Control.Applicative ((<$>), (<*>))
@@ -44,6 +46,7 @@ import qualified IdeSession.Types.Public as Public
 import IdeSession.Strict.Container
 import IdeSession.Strict.IntervalMap (StrictIntervalMap, Interval(..))
 import qualified IdeSession.Strict.IntervalMap as IntervalMap
+import qualified IdeSession.Strict.IntMap      as IntMap
 
 newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
   deriving (Eq, Ord, Show)
@@ -60,7 +63,7 @@ data IdInfo = IdInfo {
 data IdProp = IdProp {
     idName       :: !Text
   , idSpace      :: !Public.IdNameSpace
-  , idType       :: !(Strict Maybe Text)
+  , idType       :: !(Strict Maybe Public.Type)
   , idDefinedIn  :: {-# UNPACK #-} !ModuleId
   , idDefSpan    :: !EitherSpan
   , idHomeModule :: !(Strict Maybe ModuleId)
@@ -162,7 +165,19 @@ data RunResult =
   | RunProgException String
     -- | GHC itself threw an exception when we tried to run the code
   | RunGhcException String
-  deriving (Typeable, Show, Eq)
+    -- | Execution was paused because of a breakpoint
+  | RunBreak BreakInfo
+  deriving (Typeable, Show)
+
+-- | Information about a triggered breakpoint
+data BreakInfo = BreakInfo {
+    breakInfoModule     :: Public.ModuleName
+  , breakInfoSpan       :: SourceSpan
+  , breakInfoResultType :: Public.Type
+  , breakInfoLocalVars  :: [(IdInfo, Text)]
+  , breakInfoCache      :: ExplicitSharingCache -- Partial cache
+  }
+  deriving (Typeable, Show)
 
 {------------------------------------------------------------------------------
   Cache
@@ -177,6 +192,12 @@ data ExplicitSharingCache = ExplicitSharingCache {
   , idPropCache   :: !(Strict IntMap IdProp)
   }
   deriving Show
+
+unionCache :: ExplicitSharingCache -> ExplicitSharingCache -> ExplicitSharingCache
+unionCache a b = ExplicitSharingCache {
+    filePathCache = IntMap.union (filePathCache a) (filePathCache b)
+  , idPropCache   = IntMap.union (idPropCache   a) (idPropCache   b)
+  }
 
 {------------------------------------------------------------------------------
   Binary instances
@@ -311,6 +332,7 @@ instance Binary RunResult where
   put RunOk                  = putWord8 0
   put (RunProgException str) = putWord8 1 >> put str
   put (RunGhcException str)  = putWord8 2 >> put str
+  put (RunBreak info)        = putWord8 3 >> put info
 
   get = do
     header <- getWord8
@@ -318,7 +340,18 @@ instance Binary RunResult where
       0 -> return RunOk
       1 -> RunProgException <$> get
       2 -> RunGhcException <$> get
+      3 -> RunBreak <$> get
       _ -> fail "RunResult.get: invalid header"
+
+instance Binary BreakInfo where
+  put (BreakInfo{..}) = do
+    put breakInfoModule
+    put breakInfoSpan
+    put breakInfoResultType
+    put breakInfoLocalVars
+    put breakInfoCache
+
+  get = BreakInfo <$> get <*> get <*> get <*> get <*> get
 
 {------------------------------------------------------------------------------
   Util

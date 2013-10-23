@@ -136,6 +136,7 @@ module IdeSession (
   , RunActions(..)
   , RunResult(..)
   , RunBufferMode(..)
+  , BreakInfo(..)
   , runStmt
   , runWaitAll
   , setBreakpoint
@@ -173,6 +174,7 @@ module IdeSession (
     -- * Types for identifier info, errors, etc.
     -- ** Types
   , IdNameSpace(..)
+  , Type
   , IdInfo(..)
   , IdProp(..)
   , IdScope(..)

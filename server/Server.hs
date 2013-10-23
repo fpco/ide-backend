@@ -11,12 +11,10 @@ import qualified Control.Exception as Ex
 import Control.Monad (void, unless, when, mplus)
 import Control.Monad.State (StateT, runStateT)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Maybe (MaybeT(..))
 import Data.Char (isSpace)
 import qualified Data.ByteString as BSS (hGetSome, hPut, null)
 import Data.Monoid ((<>))
 import Data.Text (Text)
-import Data.Maybe (catMaybes, listToMaybe)
 import qualified Data.Text as Text
 import qualified Data.List as List
 import Data.Function (on)
@@ -28,8 +26,6 @@ import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import System.Time (ClockTime)
 import System.Environment (withArgs)
-import Data.Array (Array)
-import qualified Data.Array as Array
 
 import IdeSession.GHC.API
 import IdeSession.RPC.Server
@@ -44,10 +40,7 @@ import qualified IdeSession.Strict.Map  as StrictMap
 import qualified IdeSession.Strict.List as StrictList
 
 import qualified GHC
-import qualified Module     as GHC
-import BreakArray
 import GhcMonad(Ghc(..))
-import HscTypes (BreakIndex)
 
 import Run
 import HsWalk
@@ -385,43 +378,9 @@ parseProgressMessage = Att.parseOnly parser
 
 -- | Handle a break request
 ghcHandleBreak :: RpcConversation -> ModuleName -> Public.SourceSpan -> Bool -> Ghc ()
-ghcHandleBreak RpcConversation{..} modName span value = liftIO . put =<< runMaybeT go
-  where
-    go :: MaybeT Ghc Bool
-    go = do
-      modInfo <- MaybeT $ GHC.getModuleInfo mod
-      let breaks = GHC.modInfoModBreaks modInfo
-          flags  = GHC.modBreaks_flags breaks
-          locs   = GHC.modBreaks_locs breaks
-
-      breakIndex <- MaybeT . return $ findBreakIndex locs
-      oldValue   <- MaybeT . liftIO $ getBreak flags breakIndex
-
-      void . lift . liftIO $
-        if value then setBreakOn  flags breakIndex
-                 else setBreakOff flags breakIndex
-      return $ oldValue == 1
-
-    findBreakIndex :: Array BreakIndex GHC.SrcSpan -> Maybe BreakIndex
-    findBreakIndex breaks = listToMaybe
-                          . catMaybes
-                          . map matchesSpan
-                          . Array.assocs
-                          $ breaks
-
-    matchesSpan :: (BreakIndex, GHC.SrcSpan) -> Maybe BreakIndex
-    matchesSpan (_, GHC.UnhelpfulSpan _) = Nothing
-    matchesSpan (i, GHC.RealSrcSpan span') =
-      if  GHC.srcSpanStartLine span' == Public.spanFromLine   span
-       && GHC.srcSpanStartCol  span' == Public.spanFromColumn span
-       && GHC.srcSpanEndLine   span' == Public.spanToLine     span
-       && GHC.srcSpanEndCol    span' == Public.spanToColumn   span
-      then Just i
-      else Nothing
-
-    mod :: GHC.Module
-    mod = GHC.mkModule GHC.mainPackageId
-                       (GHC.mkModuleName . Text.unpack $ modName)
+ghcHandleBreak RpcConversation{..} modName span value = do
+  oldValue <- breakFromSpan modName span value
+  liftIO $ put oldValue
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation

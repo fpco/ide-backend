@@ -7,6 +7,7 @@ module IdeSession.Types.Translation (
   , showNormalized
   ) where
 
+import Prelude hiding (mod, span)
 import qualified Data.ByteString.Char8 as BSSC
 import qualified Data.Text as Text
 import Data.Binary (Binary)
@@ -37,6 +38,7 @@ type instance XShared Public.ImportEntities  = Private.ImportEntities
 type instance XShared Public.Import          = Private.Import
 type instance XShared Public.SpanInfo        = Private.SpanInfo
 type instance XShared Public.RunResult       = Private.RunResult
+type instance XShared Public.BreakInfo       = Private.BreakInfo
 
 type instance MShared Private.IdProp         = Public.IdProp
 type instance MShared Private.IdInfo         = Public.IdInfo
@@ -52,6 +54,7 @@ type instance MShared Private.ImportEntities = Public.ImportEntities
 type instance MShared Private.Import         = Public.Import
 type instance MShared Private.SpanInfo       = Public.SpanInfo
 type instance MShared Private.RunResult      = Public.RunResult
+type instance MShared Private.BreakInfo      = Public.BreakInfo
 
 {------------------------------------------------------------------------------
   Removing explicit sharing
@@ -208,10 +211,22 @@ instance ExplicitSharing Public.SpanInfo where
     Private.SpanQQ idInfo -> Public.SpanQQ (removeExplicitSharing cache idInfo)
 
 instance ExplicitSharing Public.RunResult where
-  removeExplicitSharing _cache runResult = case runResult of
+  removeExplicitSharing cache runResult = case runResult of
     Private.RunOk              -> Public.RunOk
     Private.RunProgException e -> Public.RunProgException e
-    Private.RunGhcException  e -> Public.RunGhcException  e
+    Private.RunGhcException e  -> Public.RunGhcException e
+    Private.RunBreak info      -> Public.RunBreak (removeExplicitSharing cache info)
+
+instance ExplicitSharing Public.BreakInfo where
+  removeExplicitSharing cache' Private.BreakInfo{..} = Public.BreakInfo {
+      Public.breakInfoModule     = breakInfoModule
+    , Public.breakInfoSpan       = removeExplicitSharing cache breakInfoSpan
+    , Public.breakInfoResultType = breakInfoResultType
+    , Public.breakInfoLocalVars  = map aux breakInfoLocalVars
+    }
+    where
+      aux (idInfo, val) = (removeExplicitSharing cache idInfo, val)
+      cache = breakInfoCache `Private.unionCache` cache'
 
 {------------------------------------------------------------------------------
   Introducing explicit sharing

@@ -3,6 +3,7 @@
 module IdeSession.Types.Public (
     -- * Types
     IdNameSpace(..)
+  , Type
   , IdInfo(..)
   , IdProp(..)
   , IdScope(..)
@@ -20,6 +21,7 @@ module IdeSession.Types.Public (
   , SpanInfo(..)
   , RunBufferMode(..)
   , RunResult(..)
+  , BreakInfo(..)
     -- * Util
   , idInfoQN
 --, idInfoAtLocation
@@ -53,6 +55,10 @@ data IdInfo = IdInfo {
     idProp  :: {-# UNPACK #-} !IdProp
   , idScope :: !IdScope
   }
+  deriving Eq
+
+-- | For now we represent types in pretty-printed form
+type Type = Text
 
 -- | Identifier info that is independent of the usage site
 data IdProp = IdProp {
@@ -64,7 +70,7 @@ data IdProp = IdProp {
     -- | The type
     -- We don't always know this; in particular, we don't know kinds because
     -- the type checker does not give us LSigs for top-level annotations)
-  , idType  :: !(Maybe Text)
+  , idType  :: !(Maybe Type)
     -- | Module the identifier was defined in
   , idDefinedIn :: {-# UNPACK #-} !ModuleId
     -- | Where in the module was it defined (not always known)
@@ -204,6 +210,21 @@ data RunResult =
   | RunGhcException String
     -- | The session was restarted
   | RunForceCancelled
+    -- | Execution was paused because of a breakpoint
+  | RunBreak BreakInfo
+  deriving (Typeable, Show, Eq)
+
+-- | Information about a triggered breakpoint
+data BreakInfo = BreakInfo {
+    -- | Module containing the breakpoint
+    breakInfoModule :: ModuleName
+    -- | Location of the breakpoint
+  , breakInfoSpan :: SourceSpan
+    -- | Type of the result
+  , breakInfoResultType :: Type
+    -- | Local variables and their values
+  , breakInfoLocalVars :: [(IdInfo, Text)]
+  }
   deriving (Typeable, Show, Eq)
 
 {------------------------------------------------------------------------------
@@ -430,6 +451,7 @@ $(deriveJSON defaultOptions ''ModuleId)
 $(deriveJSON defaultOptions ''PackageId)
 $(deriveJSON defaultOptions ''IdInfo)
 $(deriveJSON defaultOptions ''SpanInfo)
+$(deriveJSON defaultOptions ''BreakInfo)
 $(deriveJSON defaultOptions ''RunResult)
 $(deriveJSON defaultOptions ''RunBufferMode)
 

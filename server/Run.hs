@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TemplateHaskell #-}
+{-# LANGUAGE CPP, TemplateHaskell, RecordWildCards #-}
 -- Copyright   : (c) JP Moresmau 2011,
 --                   Well-Typed 2012
 -- (JP Moresmau's buildwrapper package used as template for GHC API use)
@@ -38,68 +38,81 @@ module Run
   , runInGhc
   , RunResult(..)
   , RunBufferMode(..)
+  , breakFromSpan
   ) where
 
 #define DEBUG 0
 
-import Prelude hiding (mod)
-
-import Bag (bagToList)
-import qualified Config as GHC
-import DynFlags (defaultDynFlags)
-import qualified ErrUtils
-import Exception (ghandle)
-import FastString ( unpackFS )
-import qualified GHC
-import GhcMonad (liftIO)
-import qualified HscTypes
-import Outputable ( PprStyle, qualName, qualModule )
-import qualified Outputable as GHC
-#if __GLASGOW_HASKELL__ >= 706
-import ErrUtils   ( MsgDoc )
-#else
-import ErrUtils   ( Message )
-#endif
+import Prelude hiding (id, mod, span)
+import qualified Control.Exception as Ex
+import Control.Monad (filterM, liftM, void, forM)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Maybe (MaybeT(..))
+import Control.Applicative ((<$>))
+import Data.Maybe (catMaybes, listToMaybe)
+import Data.List ((\\))
+import Data.Text (Text)
+import Data.Array (Array)
+import qualified Data.Array as Array
+import qualified Data.Text as Text
+import System.FilePath.Find (find, always, extension)
+import System.Process
+import Control.Concurrent (MVar, ThreadId)
 
 #if defined(GHC_761)
 -- http://hackage.haskell.org/trac/ghc/ticket/7548
 -- is not fixed in this version. Compilation should fail,
 -- because the problem is not minor and not easy to spot otherwise.
 #else
-import GHC hiding (flags, ModuleName, RunResult(..))
-import GhcMonad (modifySession)
+import Bag (bagToList)
+import DynFlags (defaultDynFlags)
+import Exception (ghandle)
+import FastString ( unpackFS )
+import GHC hiding (flags, ModuleName, RunResult(..), BreakInfo(..))
+import GhcMonad (liftIO, modifySession)
 import HscTypes (HscEnv(hsc_mod_graph))
-import System.Time
+import Module (mainPackageId)
+import OccName (occEnvElts)
+import Outputable (PprStyle, qualName, qualModule, mkUserStyle)
+import RdrName (GlobalRdrEnv, GlobalRdrElt, gre_name)
 import RnNames (rnImports)
+import System.Time
 import TcRnMonad (initTc)
 import TcRnTypes (RnM)
-import OccName (occEnvElts)
-import RdrName (GlobalRdrEnv, GlobalRdrElt, gre_name)
+import RtClosureInspect (Term)
+import Pretty (showDocWith, Mode(OneLineMode))
+import PprTyThing (pprTypeForUser)
+import qualified ErrUtils
+import qualified HscTypes
+import qualified GHC           as GHC
+import qualified Config        as GHC
+import qualified Outputable    as GHC
+import qualified ByteCodeInstr as GHC
+import qualified Id            as GHC
 #endif
-
-import qualified Control.Exception as Ex
-import Control.Monad (filterM, liftM, void)
-import Control.Applicative ((<$>))
-import Data.List ((\\))
-import Data.Text (Text)
-import qualified Data.Text as Text
-import System.FilePath.Find (find, always, extension)
-import System.Process
-import Control.Concurrent (MVar, ThreadId)
+#if __GLASGOW_HASKELL__ >= 706
+import ErrUtils   ( MsgDoc )
+#else
+import ErrUtils   ( Message )
+#endif
 
 import IdeSession.GHC.API
 import IdeSession.Types.Public (RunBufferMode(..))
 import IdeSession.Types.Private
+import qualified IdeSession.Types.Public as Public
 import IdeSession.Util
 import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
-import qualified IdeSession.Strict.List  as StrictList
+import qualified IdeSession.Strict.List   as StrictList
+import qualified IdeSession.Strict.Maybe  as StrictMaybe
+import qualified IdeSession.Strict.IntMap as StrictIntMap
 
-import HsWalk (extractSourceSpan, idInfoForName, IsBinder(..))
+import HsWalk (idInfoForName, IsBinder(..))
 import Haddock
 import Debug
 import Conv
 import FilePathCaching
+import IdPropCaching
 
 type DynamicOpts = [Located String]
 
@@ -272,7 +285,7 @@ autocompletion summary = do
   let pkgDeps = pkgDepsFromModSummary dflags summary
   linkEnv <- liftIO $ linkEnvForDeps dflags pkgDeps
 
-  let eltsToAutocompleteMap :: GlobalRdrElt -> IO IdInfo
+  let eltsToAutocompleteMap :: GlobalRdrElt -> Ghc IdInfo
       eltsToAutocompleteMap elt = do
         let name          = gre_name elt
             currentModule = Nothing -- Must be imported (TH stage restriction)
@@ -309,7 +322,7 @@ autocompletion summary = do
         return $ env1 ++ env2
 
   envs    <- liftIO $ autoEnvs summary
-  idIs    <- liftIO $ mapM eltsToAutocompleteMap envs
+  idIs    <- mapM eltsToAutocompleteMap envs
   return $ force idIs
 
 -- | Run a snippet.
@@ -338,9 +351,10 @@ runInGhc (m, fun) outBMode errBMode tidMVar = do
         GHC.RunOk _ ->
           return RunOk
         GHC.RunException ex ->
-          return . RunProgException $ showExWithClass ex
-        GHC.RunBreak{} ->
-          error "checkModule: RunBreak"
+          return $ RunProgException (showExWithClass ex)
+        GHC.RunBreak _tid names mBreakInfo -> do
+          Just info <- importBreakInfo mBreakInfo names
+          return $ RunBreak info
   where
     expr :: String
     expr = fqn "run "
@@ -371,6 +385,107 @@ runInGhc (m, fun) outBMode errBMode tidMVar = do
     handleErrors :: Ghc RunResult -> Ghc RunResult
     handleErrors = handleSourceError handleError
                  . ghandle (handleError :: GhcException -> Ghc RunResult)
+
+{------------------------------------------------------------------------------
+  Dealing with breakpoints
+------------------------------------------------------------------------------}
+
+breakFromSpan :: ModuleName        -- ^ Module containing the breakpoint
+              -> Public.SourceSpan -- ^ Location of the breakpoint
+              -> Bool              -- ^ New value for the breakpoint
+              -> Ghc (Maybe Bool)    -- ^ Old valeu of the breakpoint (if valid)
+breakFromSpan modName span value = runMaybeT $ do
+    modInfo <- MaybeT $ getModuleInfo mod
+    let ModBreaks{..} = modInfoModBreaks modInfo
+    breakIndex <- MaybeT $ return $ findBreakIndex modBreaks_locs
+    oldValue   <- MaybeT $ liftIO $ getBreak modBreaks_flags breakIndex
+
+    void . lift . liftIO $
+      if value then setBreakOn  modBreaks_flags breakIndex
+               else setBreakOff modBreaks_flags breakIndex
+    return $ oldValue == 1
+  where
+    findBreakIndex :: Array BreakIndex SrcSpan -> Maybe BreakIndex
+    findBreakIndex breaks = listToMaybe
+                          . catMaybes
+                          . map matchesSpan
+                          . Array.assocs
+                          $ breaks
+
+    matchesSpan :: (BreakIndex, SrcSpan) -> Maybe BreakIndex
+    matchesSpan (_, UnhelpfulSpan _) = Nothing
+    matchesSpan (i, RealSrcSpan span') =
+      if  srcSpanStartLine span' == Public.spanFromLine   span
+       && srcSpanStartCol  span' == Public.spanFromColumn span
+       && srcSpanEndLine   span' == Public.spanToLine     span
+       && srcSpanEndCol    span' == Public.spanToColumn   span
+      then Just i
+      else Nothing
+
+    mod :: Module
+    mod = mkModule mainPackageId (mkModuleName . Text.unpack $ modName)
+
+importBreakInfo :: Maybe GHC.BreakInfo
+                -> [Name]
+                -> Ghc (Maybe BreakInfo)
+importBreakInfo (Just GHC.BreakInfo{..}) names = runMaybeT $ do
+    modInfo          <- MaybeT $ getModuleInfo breakInfo_module
+    printUnqualified <- MaybeT $ mkPrintUnqualifiedForModule modInfo
+    let ModBreaks{..} = modInfoModBreaks modInfo
+    localVars <- lift (mkTerms >>= mapM (mkLocalVar printUnqualified))
+    let srcSpan = modBreaks_locs Array.! breakInfo_number
+    ProperSpan srcSpan' <- lift . liftIO $ extractSourceSpan srcSpan
+    partialCache <- lift $ mkPartialCache (map (idProp . fst) localVars)
+    return BreakInfo {
+        breakInfoModule     = mod
+      , breakInfoSpan       = srcSpan'
+      , breakInfoResultType = Text.pack $ GHC.showSDoc (GHC.ppr breakInfo_resty)
+      , breakInfoLocalVars  = localVars
+      , breakInfoCache      = partialCache
+      }
+  where
+    mkTerms :: Ghc [(Id, Term)]
+    mkTerms = do
+      tythings <- catMaybes `liftM` mapM lookupName names
+      forM tythings $ \(AnId var) -> do
+        let depthBound = 100   -- This magic value comes from ghci (Debugger.hs)
+            forceEval  = False -- We don't force values by default
+        term <- obtainTermFromId depthBound forceEval var
+        return (var, term)
+
+    mkLocalVar :: PrintUnqualified -> (Id, Term) -> Ghc (IdInfo, Text)
+    mkLocalVar qual (var, term) = do
+      dynFlags <- getSessionDynFlags
+      (idPropPtr, Just idScope) <- idInfoForName
+                                     dynFlags
+                                     (GHC.idName var)
+                                     UseSite
+                                     Nothing
+                                     (Just breakInfo_module)
+                                     (const $ StrictMaybe.nothing)
+      -- Pretty print the value
+      let valStr = GHC.showSDoc . GHC.ppr $ term
+      -- Pretty print the type. This duplicates some logic from HsWalk :-/
+      let pprStyle    = mkUserStyle qual GHC.AllTheWay
+          showForalls = False
+          typStr      = showDocWith OneLineMode $ GHC.runSDoc
+                          (pprTypeForUser showForalls (GHC.idType var))
+                          (GHC.initSDocContext pprStyle)
+      recordIdPropType idPropPtr (Text.pack typStr)
+      return (IdInfo idPropPtr idScope, Text.pack valStr)
+
+    mkPartialCache :: [IdPropPtr] -> Ghc ExplicitSharingCache
+    mkPartialCache ids = do
+      let isLocalVar id _ = IdPropPtr id `elem` ids
+      idPropCache <- getIdPropCache
+      return ExplicitSharingCache {
+          filePathCache = StrictIntMap.empty
+        , idPropCache   = StrictIntMap.filterWithKey isLocalVar idPropCache
+        }
+
+
+    -- we ignore the package (because it's always the home package)
+    mod = Text.pack . moduleNameString . GHC.moduleName $ breakInfo_module
 
 -----------------------
 -- Source error conversion and collection

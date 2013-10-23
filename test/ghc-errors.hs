@@ -4317,18 +4317,7 @@ syntheticTests =
     )
   , ( "Debugging 1: Setting and clearing breakpoints"
     , withSession defaultSessionConfig $ \session -> do
-        let upd = (updateModule "Main.hs" . BSLC.pack . unlines $ [
-                    --          1         2         3         4         5
-                    -- 12345678901234567890123456789012345678901234567890123456
-                      "qsort [] = [] "
-                    , "qsort (a:as) = qsort left ++ [a] ++ qsort right"
-                    , "  where (left,right) = (filter (<=a) as, filter (>a) as)"
-                    , ""
-                    , "main = print (qsort [8, 4, 0, 3, 1, 23, 11, 18])"
-                    ])
-               <> (updateCodeGeneration True)
-
-        updateSessionD session upd 1
+        updateSessionD session qsort 1
         assertNoErrors session
 
         expTypes <- getExpTypes session
@@ -4345,7 +4334,41 @@ syntheticTests =
         assertEqual "breakpoint successfully unset" (Just False) r3
         assertEqual "invalid breakpoint"            Nothing      r4
     )
+  , ( "Debugging 2: Running until breakpoint"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session qsort 1
+        assertNoErrors session
+
+        expTypes <- getExpTypes session
+        let (modName, mouseSpan) = mkSpan "Main" (2, 16, 2, 16)
+            fullSpan = fst . last $ expTypes modName mouseSpan
+
+        Just False <- setBreakpoint session modName fullSpan True
+
+        runActions <- runStmt session "Main" "main"
+        (_output, result) <- runWaitAll runActions
+        assertBreak result "Main"
+                           "Main.hs@2:16-2:48"
+                           "[a]"
+                           [ ("_result" , "[Integer]" , "_")
+                           , ("a"       , "Integer"   , "8")
+                           , ("left"    , "[Integer]" , "_")
+                           , ("right"   , "[Integer]" , "_")
+                           ]
+    )
   ]
+
+qsort :: IdeSessionUpdate
+qsort = (updateModule "Main.hs" . BSLC.pack . unlines $ [
+          --          1         2         3         4         5
+          -- 12345678901234567890123456789012345678901234567890123456
+            "qsort [] = [] "
+          , "qsort (a:as) = qsort left ++ [a] ++ qsort right"
+          , "  where (left,right) = (filter (<=a) as, filter (>a) as)"
+          , ""
+          , "main = print (qsort [8, 4, 0, 3, 1, 23, 11, 18])"
+          ])
+     <> (updateCodeGeneration True)
 
 _ignoreFailure :: IO () -> IO ()
 _ignoreFailure io = Ex.catch io $ \(HUnitFailure err) ->
@@ -4660,6 +4683,25 @@ show3errors errs =
       more | length errs > 3 = "\n... and more ..."
            | otherwise       = ""
   in shown ++ more
+
+assertBreak :: RunResult
+            -> String                     -- ^ Module
+            -> String                     -- ^ Location
+            -> String                     -- ^ Result type
+            -> [(String, String, String)] -- ^ Var, type, value
+            -> Assertion
+assertBreak runResult mod loc resTy vars =
+  case runResult of
+    RunBreak BreakInfo{..} -> do
+      assertEqual "module name" mod   (Text.unpack breakInfoModule)
+      assertEqual "location"    loc   (show breakInfoSpan)
+      assertEqual "result type" resTy (Text.unpack breakInfoResultType)
+      assertEqual "number of local vars" (length vars) (length breakInfoLocalVars)
+      forM_ (zip vars breakInfoLocalVars) $ \((var, typ, val), (idInfo, val')) -> do
+        assertEqual "var name" var (Text.unpack . idName . idProp $ idInfo)
+        assertEqual "var type" (Just typ) (fmap Text.unpack . idType . idProp $ idInfo)
+        assertEqual "var val"  val (Text.unpack val')
+    _ -> assertFailure "Unexpected run result"
 
 restartRun :: [String] -> ExitCode -> Assertion
 restartRun code exitCode =

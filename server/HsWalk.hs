@@ -51,7 +51,6 @@ import IdeSession.Strict.Pair
 
 import Bag
 import DataCon (dataConName)
-import FastString (FastString, unpackFS)
 import GHC hiding (PackageId, idType, moduleName, ModuleName)
 import qualified GHC
 import HscPlugin
@@ -483,10 +482,7 @@ showTypeForUser typ = do
 recordType :: String -> Unique -> Type -> ExtractIdsM ()
 recordType _header uniq typ = do
   typStr <- tidyType typ >>= showTypeForUser
-  let idPropPtr = IdPropPtr $ getKey uniq
-  modifyIdPropCache idPropPtr $ \idInfo -> idInfo {
-      idType = Maybe.just typStr
-    }
+  recordIdPropType (IdPropPtr $ getKey uniq) typStr
 
 -- | Construct an IdInfo for a 'Name'. We assume the @GlobalRdrElt@ is
 -- uniquely determined by the @Name@ and the @DynFlags@ do not change
@@ -566,16 +562,6 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
 
       missingModule :: a
       missingModule = error $ "No module for " ++ showSDocDebug (ppr name)
-
-extractSourceSpan :: MonadFilePathCaching m => SrcSpan -> m EitherSpan
-extractSourceSpan (RealSrcSpan srcspan) = do
-  key <- mkFilePathPtr $ unpackFS (srcSpanFile srcspan)
-  return . ProperSpan $ SourceSpan
-    key
-    (srcSpanStartLine srcspan) (srcSpanStartCol srcspan)
-    (srcSpanEndLine srcspan)   (srcSpanEndCol   srcspan)
-extractSourceSpan (UnhelpfulSpan s) =
-  return . TextSpan $ fsToText s
 
 _showName :: Name -> String
 _showName n = "Name { n_sort = " ++ showNameSort ++ "\n"
@@ -1358,12 +1344,3 @@ splitFunTy2 :: Type -> (Type, Type, Type)
 splitFunTy2 ty0 = let (arg1, ty1) = splitFunTy ty0
                       (arg2, ty2) = splitFunTy ty1
                   in (arg1, arg2, ty2)
-
-{------------------------------------------------------------------------------
-  Auxiliary
-------------------------------------------------------------------------------}
-
-fsToText :: FastString -> Text
-fsToText = Text.pack . unpackFS
-
-

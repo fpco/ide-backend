@@ -14,6 +14,8 @@ module IdeSession.Strict.IntMap (
   , map
   , reverseLookup
   , filter
+  , filterWithKey
+  , union
   ) where
 
 import Prelude hiding (map, filter, lookup)
@@ -58,3 +60,9 @@ reverseLookup m v = List.lookup v $ List.map swap $ toList m
 
 filter :: (v -> Bool) -> Strict IntMap v -> Strict IntMap v
 filter p = StrictIntMap . IntMap.filter p . toLazyIntMap
+
+filterWithKey :: (Int -> v -> Bool) -> Strict IntMap v -> Strict IntMap v
+filterWithKey p = StrictIntMap . IntMap.filterWithKey p . toLazyIntMap
+
+union :: Strict IntMap v -> Strict IntMap v -> Strict IntMap v
+union a b = StrictIntMap $ IntMap.union (toLazyIntMap a) (toLazyIntMap b)
