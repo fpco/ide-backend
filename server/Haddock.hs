@@ -55,7 +55,7 @@ pkgDepsFromModSummary :: DynFlags
                       -> GHC.ModSummary
                       -> [GHC.PackageId]
 pkgDepsFromModSummary dflags s =
-    catMaybes (map (uncurry (moduleToPackageId dflags)) impMods)
+    catMaybes (map (uncurry (guessModulePackage dflags)) impMods)
   where
     aux :: Located (ImportDecl RdrName)
         -> (PackageQualifier, GHC.ModuleName)
@@ -140,7 +140,7 @@ homeModuleFor dflags linkEnv name =
         Nothing -> do
           StrictMaybe.nothing
         Just m ->
-          StrictMaybe.just (moduleToModuleId dflags m)
+          StrictMaybe.just (importModuleId dflags m)
 
 {------------------------------------------------------------------------------
   Link environment cache

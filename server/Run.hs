@@ -243,7 +243,7 @@ importList summary = do
     dflags  <- getSessionDynFlags
     let goImp :: Located (ImportDecl RdrName) -> Import
         goImp (L _ decl) = Import {
-            importModule    = moduleNameToId dflags (ideclPkgQual decl) (unLoc (ideclName decl))
+            importModule    = importModuleId' dflags (ideclPkgQual decl) (unLoc (ideclName decl))
           , importPackage   = force $ ((Text.pack . unpackFS) <$> ideclPkgQual decl)
           , importQualified = ideclQualified decl
           , importImplicit  = ideclImplicit decl

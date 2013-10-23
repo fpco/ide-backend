@@ -13,9 +13,7 @@ module HsWalk
   , extractSourceSpan
   , idInfoForName
   , constructExplicitSharingCache
-  , moduleNameToId
   , PluginResult(..)
-  , moduleToPackageId
   , IsBinder(..)
   ) where
 
@@ -324,7 +322,7 @@ execExtractIdsT dynFlags env idList current (ExtractIdsM m) = do
   return PluginResult {
       pluginIdList   = eIdsIdList   eIdsSt'
     , pluginExpTypes = eIdsExpTypes eIdsSt'
-    , pluginPkgDeps  = force $ map (fillVersion dynFlags) pkgDeps
+    , pluginPkgDeps  = force $ map (importPackageId dynFlags) pkgDeps
     , pluginUseSites = eIdsUseSites eIdsSt'
     }
 
@@ -511,7 +509,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
                          else fromMaybe missingModule $
                            Name.nameModule_maybe name
         idPropPtr    = IdPropPtr . getKey . getUnique $ name
-        idDefinedIn  = moduleToModuleId dflags mod
+        idDefinedIn  = importModuleId dflags mod
         idHomeModule = home name
 
     extendIdPropCache idPropPtr IdProp{..}
@@ -542,7 +540,7 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       scopeFromProv (RdrName.Imported spec) = do
         (impMod, impSpan, impQual) <- extractImportInfo spec
         return Imported {
-            idImportedFrom = moduleNameToId dflags Nothing impMod
+            idImportedFrom = importModuleId' dflags Nothing impMod
           , idImportSpan   = impSpan
           , idImportQual   = Text.pack $ impQual
           }
