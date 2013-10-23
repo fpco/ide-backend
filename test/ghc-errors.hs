@@ -766,7 +766,7 @@ syntheticTests =
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
         checkWarns <- checkPackage pkgDir
-        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XTemplateHaskell' use 'extensions:\nTemplateHaskell'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* '' is an absolute\ndirectory.\n\nHackage would reject this package.\n")
+        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XTemplateHaskell' use 'extensions:\nTemplateHaskell'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* 'hs-source-dirs: /tmp/ide-backend-test.1786/src.1786' is an absolute\ndirectory.\n\nHackage would reject this package.\n")
     )
   , ( "Build haddocks from TH"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
@@ -3210,7 +3210,7 @@ syntheticTests =
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
         checkWarns <- checkPackage pkgDir
-        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XCPP' use 'extensions: CPP'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* '' is an absolute\ndirectory.\n\nHackage would reject this package.\n")
+        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XCPP' use 'extensions: CPP'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* 'hs-source-dirs: /tmp/ide-backend-test.1786/src.1786' is an absolute\ndirectory.\n\nHackage would reject this package.\n")
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo False)"
     , let packageOpts = ["-package parallel"]
@@ -4420,7 +4420,7 @@ assertCheckWarns checkWarns =
 filterCheckWarns :: String -> BSSC.ByteString
 filterCheckWarns s =
   let (bs1, rest1) =
-        BSSC.breakSubstring (BSSC.pack "hs-source-dirs") $ BSSC.pack s
+        BSSC.breakSubstring (BSSC.pack "source-dirs") $ BSSC.pack s
       (_, bs2) = BSSC.breakSubstring (BSSC.pack "' is") rest1
   in BSSC.append bs1 bs2
 
@@ -4815,7 +4815,7 @@ filterIdeBackendTest :: BSLC.ByteString -> BSSC.ByteString
 filterIdeBackendTest bs =
   let toStrict = BSSC.concat . BSLC.toChunks  -- not in our old bytestring pkg
       (bs1, rest1) =
-        BSSC.breakSubstring (BSSC.pack "ide-backend-test.") $ toStrict bs
+        BSSC.breakSubstring (BSSC.pack "source-dirs:") $ toStrict bs
       (_, bs2) = BSSC.breakSubstring (BSSC.pack "\n") rest1
   in BSSC.append bs1 bs2
 
