@@ -29,6 +29,7 @@ module IdeSession.Update (
   , buildLicenses
     -- * Running code
   , runStmt
+  , setBreakpoint
     -- * Debugging
   , forceRecompile
   , crashGhcServer
@@ -36,6 +37,7 @@ module IdeSession.Update (
   )
   where
 
+import Prelude hiding (mod, span)
 import Control.Monad (when, void, forM, unless)
 import Control.Monad.State (MonadState, StateT, execStateT, lift)
 import Control.Monad.IO.Class (liftIO)
@@ -617,6 +619,15 @@ runStmt IdeSession{ideState} m fun = do
       return (removeExplicitSharing cache runResult)
     translateRunResult _cache Nothing =
       return Public.RunForceCancelled
+
+-- | Breakpoint
+--
+-- Set a breakpoint at the specified location. Returns @Just@ the old value of the
+-- breakpoint if successful, or @Nothing@ otherwise.
+setBreakpoint :: IdeSession -> ModuleName -> Public.SourceSpan -> Bool -> IO (Maybe Bool)
+setBreakpoint IdeSession{..} mod span value = withMVar ideState $ \state -> case state of
+  IdeSessionIdle idleState -> do
+    rpcBreakpoint (idleState ^. ideGhcServer) mod span value
 
 -- | Build an exe from sources added previously via the ide-backend
 -- updateModule* mechanism. The modules that contains the @main@ code are

@@ -138,6 +138,7 @@ module IdeSession (
   , RunBufferMode(..)
   , runStmt
   , runWaitAll
+  , setBreakpoint
     -- * Queries
     -- ** Types
   , Query

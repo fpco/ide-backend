@@ -4379,6 +4379,36 @@ syntheticTests =
            assertUseSites useSites "A" (14, 13, 14, 14) "a" uses_a
            assertUseSites useSites "A" (14, 23, 14, 24) "b" uses_b
     )
+  , ( "Debugging 1: Setting and clearing breakpoints"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateModule "Main.hs" . BSLC.pack . unlines $ [
+                    --          1         2         3         4         5
+                    -- 12345678901234567890123456789012345678901234567890123456
+                      "qsort [] = [] "
+                    , "qsort (a:as) = qsort left ++ [a] ++ qsort right"
+                    , "  where (left,right) = (filter (<=a) as, filter (>a) as)"
+                    , ""
+                    , "main = print (qsort [8, 4, 0, 3, 1, 23, 11, 18])"
+                    ])
+               <> (updateCodeGeneration True)
+
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        expTypes <- getExpTypes session
+        let (modName, mouseSpan) = mkSpan "Main" (2, 16, 2, 16)
+            fullSpan = fst . last $ expTypes modName mouseSpan
+            (_, wrongSpan) = mkSpan "Main" (0, 0, 0, 0)
+
+        r1 <- setBreakpoint session modName fullSpan True
+        r2 <- setBreakpoint session modName fullSpan False
+        r3 <- setBreakpoint session modName fullSpan False
+        r4 <- setBreakpoint session modName wrongSpan True
+        assertEqual "original value of breakpoint"  (Just False) r1
+        assertEqual "breakpoint successfully set"   (Just True)  r2
+        assertEqual "breakpoint successfully unset" (Just False) r3
+        assertEqual "invalid breakpoint"            Nothing      r4
+    )
   ]
 
 _ignoreFailure :: IO () -> IO ()
@@ -4600,23 +4630,16 @@ assertExpTypes :: (ModuleName -> SourceSpan -> [(SourceSpan, Text)])
                -> (Int, Int, Int, Int)
                -> [(Int, Int, Int, Int, String)]
                -> Assertion
-assertExpTypes expTypes mod (frLine, frCol, toLine, toCol) expected =
+assertExpTypes expTypes mod loc expected =
     assertEqual "" expected actual
   where
-    actual = flip map (expTypes (Text.pack mod) span) $ \(span', typ) ->
-      ( spanFromLine span'
-      , spanFromColumn span'
-      , spanToLine span'
-      , spanToColumn span'
-      , Text.unpack typ
+    actual = flip map (uncurry expTypes $ mkSpan mod loc) $ \(span, typ) ->
+      ( spanFromLine   span
+      , spanFromColumn span
+      , spanToLine     span
+      , spanToColumn   span
+      , Text.unpack    typ
       )
-
-    span = SourceSpan { spanFilePath   = mod ++ ".hs"
-                      , spanFromLine   = frLine
-                      , spanFromColumn = frCol
-                      , spanToLine     = toLine
-                      , spanToColumn   = toCol
-                      }
 
 assertUseSites :: (ModuleName -> SourceSpan -> [SourceSpan])
                -> String
@@ -4624,16 +4647,20 @@ assertUseSites :: (ModuleName -> SourceSpan -> [SourceSpan])
                -> String
                -> [String]
                -> Assertion
-assertUseSites useSites mod (frLine, frCol, toLine, toCol) symbol expected =
+assertUseSites useSites mod loc symbol expected =
     assertEqual ("Use sites of `" ++ symbol ++ "` in " ++ show mod) expected actual
   where
-    actual = map show (useSites (Text.pack mod) span)
-    span   = SourceSpan { spanFilePath   = mod ++ ".hs"
-                        , spanFromLine   = frLine
-                        , spanFromColumn = frCol
-                        , spanToLine     = toLine
-                        , spanToColumn   = toCol
-                        }
+    actual = map show (uncurry useSites $ mkSpan mod loc)
+
+mkSpan :: String -> (Int, Int, Int, Int) -> (ModuleName, SourceSpan)
+mkSpan mod (frLine, frCol, toLine, toCol) = (Text.pack mod, span)
+  where
+    span = SourceSpan { spanFilePath   = mod ++ ".hs"
+                      , spanFromLine   = frLine
+                      , spanFromColumn = frCol
+                      , spanToLine     = toLine
+                      , spanToColumn   = toCol
+                      }
 
 assertSourceErrors' :: IdeSession -> [String] -> Assertion
 assertSourceErrors' session = assertSourceErrors session . map

@@ -32,6 +32,11 @@ data GhcRequest
   | ReqSetArgs {
          reqSetArgs :: [String]
        }
+  | ReqBreakpoint {
+        reqBreakpointModule :: ModuleName
+      , reqBreakpointSpan   :: SourceSpan
+      , reqBreakpointValue  :: Bool
+      }
     -- | For debugging only! :)
   | ReqCrash {
          reqCrashDelay :: Maybe Int
@@ -62,8 +67,13 @@ instance Binary GhcRequest where
   put ReqSetArgs{..} = do
     putWord8 3
     put reqSetArgs
-  put ReqCrash{..} = do
+  put ReqBreakpoint{..} = do
     putWord8 4
+    put reqBreakpointModule
+    put reqBreakpointSpan
+    put reqBreakpointValue
+  put ReqCrash{..} = do
+    putWord8 5
     put reqCrashDelay
 
   get = do
@@ -73,7 +83,8 @@ instance Binary GhcRequest where
       1 -> ReqRun     <$> get <*> get <*> get <*> get
       2 -> ReqSetEnv  <$> get
       3 -> ReqSetArgs <$> get
-      4 -> ReqCrash   <$> get
+      4 -> ReqBreakpoint <$> get <*> get <*> get
+      5 -> ReqCrash   <$> get
       _ -> fail "GhcRequest.get: invalid header"
 
 instance Binary GhcRunRequest where

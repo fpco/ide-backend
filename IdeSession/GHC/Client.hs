@@ -18,6 +18,7 @@ module IdeSession.GHC.Client (
   , rpcCrash
   , rpcSetEnv
   , rpcSetArgs
+  , rpcBreakpoint
   ) where
 
 import Control.Concurrent (ThreadId, killThread)
@@ -37,7 +38,7 @@ import Paths_ide_backend
 import IdeSession.GHC.API
 import IdeSession.RPC.Client
 import IdeSession.Types.Progress
-import IdeSession.Types.Public (RunBufferMode)
+import IdeSession.Types.Public (ModuleName, SourceSpan, RunBufferMode)
 import IdeSession.Types.Private (RunResult(..))
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
@@ -172,6 +173,16 @@ rpcCompile server opts dir genCode callback =
                   GhcCompileDone result       -> return result
 
     go
+
+-- | Set breakpoint
+--
+-- Returns @Just@ the old value of the break if successful, or @Nothing@ if
+-- the breakpoint could not be found.
+rpcBreakpoint :: GhcServer -> ModuleName -> SourceSpan -> Bool -> IO (Maybe Bool)
+rpcBreakpoint server reqBreakpointModule reqBreakpointSpan reqBreakpointValue =
+  conversation server $ \RpcConversation{..} -> do
+    put ReqBreakpoint{..}
+    get
 
 data SnippetAction a =
        SnippetOutput BSS.ByteString
