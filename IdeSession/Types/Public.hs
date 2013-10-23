@@ -197,7 +197,7 @@ data RunBufferMode =
 -- | The outcome of running code
 data RunResult =
     -- | The code terminated okay
-    RunOk String
+    RunOk
     -- | The code threw an exception
   | RunProgException String
     -- | GHC itself threw an exception when we tried to run the code

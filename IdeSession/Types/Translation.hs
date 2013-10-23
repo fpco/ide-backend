@@ -209,9 +209,9 @@ instance ExplicitSharing Public.SpanInfo where
 
 instance ExplicitSharing Public.RunResult where
   removeExplicitSharing _cache runResult = case runResult of
-    Private.RunOk name         -> Public.RunOk name
+    Private.RunOk              -> Public.RunOk
     Private.RunProgException e -> Public.RunProgException e
-    Private.RunGhcException e  -> Public.RunGhcException e
+    Private.RunGhcException  e -> Public.RunGhcException  e
 
 {------------------------------------------------------------------------------
   Introducing explicit sharing

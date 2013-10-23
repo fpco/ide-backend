@@ -335,11 +335,8 @@ runInGhc (m, fun) outBMode errBMode tidMVar = do
     handleErrors $ do
       runRes <- runStmt expr RunToCompletion tidMVar
       case runRes of
-        GHC.RunOk [name] ->
-          -- TODO: ignore @name@; this was only useful for debug
-          return $ RunOk $ showSDocDebug flags (GHC.ppr name)
         GHC.RunOk _ ->
-          error "checkModule: unexpected names in RunOk"
+          return RunOk
         GHC.RunException ex ->
           return . RunProgException $ showExWithClass ex
         GHC.RunBreak{} ->

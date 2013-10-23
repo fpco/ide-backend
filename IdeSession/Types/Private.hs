@@ -157,7 +157,7 @@ data Import = Import {
 -- | The outcome of running code
 data RunResult =
     -- | The code terminated okay
-    RunOk String
+    RunOk
     -- | The code threw an exception
   | RunProgException String
     -- | GHC itself threw an exception when we tried to run the code
@@ -308,14 +308,14 @@ instance Binary SpanInfo where
       _ -> fail "SpanInfo.get: invalid header"
 
 instance Binary RunResult where
-  put (RunOk str)            = putWord8 0 >> put str
+  put RunOk                  = putWord8 0
   put (RunProgException str) = putWord8 1 >> put str
   put (RunGhcException str)  = putWord8 2 >> put str
 
   get = do
     header <- getWord8
     case header of
-      0 -> RunOk <$> get
+      0 -> return RunOk
       1 -> RunProgException <$> get
       2 -> RunGhcException <$> get
       _ -> fail "RunResult.get: invalid header"

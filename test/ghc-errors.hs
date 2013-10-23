@@ -191,15 +191,8 @@ multipleTests =
         assertNoErrors session
         runActions <- runStmt session "Central.TotallyMain" "main"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" output (BSLC.pack "\"test run\"\n")
-          RunProgException _ex ->
-            assertFailure "Unexpected exception raised by the running code."
-          RunGhcException ex  ->
-            assertFailure $ "Manually corrected code not run successfully: "
-                            ++ show ex
-          RunForceCancelled ->
-            assertFailure "Unexpected force-cancel"
+        assertEqual "" result RunOk
+        assertEqual "" output (BSLC.pack "\"test run\"\n")
       )
     , ( "Make sure deleting modules removes them from the directory"
       , \session originalUpdate lm -> do
@@ -361,9 +354,8 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "Maybes" "main"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" output (BSLC.pack "False\n")
-          _ -> assertFailure "Unexpected snippet run result"
+        assertEqual "" result RunOk
+        assertEqual "" output (BSLC.pack "False\n")
     )
   , ( "Build executable from some .lhs files"
     , withSession defaultSessionConfig $ \session -> do
@@ -738,9 +730,8 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "TH.TH" "main"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" output (BSLC.pack "(True,43)\n")
-          _ -> assertFailure "Unexpected snippet run result"
+        assertEqual "" result RunOk
+        assertEqual "" output (BSLC.pack "(True,43)\n")
     )
   , ( "Build executable from TH"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
@@ -891,9 +882,8 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSLC.pack "Hello World\n") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSLC.pack "Hello World\n") output
     )
   , ( "Capture stdout (single putStr)"
     , withSession defaultSessionConfig $ \session -> do
@@ -907,9 +897,8 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSLC.pack "Hello World") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSLC.pack "Hello World") output
     )
   , ( "Capture stdout (single putStr with delay)"
     , withSession defaultSessionConfig $ \session -> do
@@ -925,9 +914,8 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSLC.pack "hellohi") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSLC.pack "hellohi") output
     )
   , ( "Capture stdout (multiple putStrLn)"
     , withSession defaultSessionConfig $ \session -> do
@@ -943,9 +931,8 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSLC.pack "Hello World 1\nHello World 2\nHello World 3\n") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSLC.pack "Hello World 1\nHello World 2\nHello World 3\n") output
     )
   , ( "Capture stdout (mixed putStr and putStrLn)"
     , withSession defaultSessionConfig $ \session -> do
@@ -961,9 +948,8 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSLC.pack "Hello World 1\nHello World 2Hello World 3\n") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSLC.pack "Hello World 1\nHello World 2Hello World 3\n") output
     )
   , ( "Capture stdin (simple echo process)"
     , withSession defaultSessionConfig $ \session -> do
@@ -978,9 +964,8 @@ syntheticTests =
         runActions <- runStmt session "M" "echo"
         supplyStdin runActions (BSSC.pack "ECHO!\n")
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSLC.pack "ECHO!\n") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSLC.pack "ECHO!\n") output
     )
   , ( "Capture stdin (infinite echo process)"
     , withSession defaultSessionConfig $ \session -> do
@@ -1027,16 +1012,14 @@ syntheticTests =
         do runActions <- runStmt session "M" "echo"
            supplyStdin runActions (BSSC.pack "ECHO!\n")
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "ECHO!\n") output
-             _       -> assertFailure $ "Unexpected run result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "ECHO!\n") output
 
         do runActions <- runStmt session "M" "echoReverse"
            supplyStdin runActions (BSSC.pack "!OHCE\n")
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "ECHO!\n") output
-             _       -> assertFailure $ "Unexpected run result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "ECHO!\n") output
     )
   , ( "Make sure we can terminate the IDE session when code is running"
     , withSession defaultSessionConfig $ \session -> do
@@ -1064,9 +1047,8 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSLC.pack "Hello World\n") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSLC.pack "Hello World\n") output
     )
   , ( "Merge stdout and stderr"
     , withSession defaultSessionConfig $ \session -> do
@@ -1096,9 +1078,8 @@ syntheticTests =
                           ++ "Hello World 6\n"
                           ++ "Hello World 7"
                           ++ "Hello World 8"
-        case result of
-          RunOk _ -> assertEqual "" (BSLC.pack expectedOutput) output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSLC.pack expectedOutput) output
     )
   , ( "Set environment variables"
     , withSession defaultSessionConfig $ \session -> do
@@ -1130,40 +1111,32 @@ syntheticTests =
         updateSession session (updateEnv "Foo" (Just "Value1")) (\_ -> return ())
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
-             _       -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "Value1") output
         do runActions <- runStmt session "M" "printBar"
            (_, result) <- runWaitAll runActions
-           case result of
-             RunProgException ex -> assertEqual "" ex "IOException: Bar: getEnv: does not exist (no environment variable)"
-             _ -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result (RunProgException "IOException: Bar: getEnv: does not exist (no environment variable)")
 
         -- Update Bar, leave Foo defined
         updateSession session (updateEnv "Bar" (Just "Value2")) (\_ -> return ())
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
-             _       -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "Value1") output
         do runActions <- runStmt session "M" "printBar"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
-             _       -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "Value2") output
 
         -- Unset Foo, leave Bar defined
         updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
         do runActions <- runStmt session "M" "printFoo"
            (_, result) <- runWaitAll runActions
-           case result of
-             RunProgException ex -> assertEqual "" ex "IOException: Foo: getEnv: does not exist (no environment variable)"
-             _ -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result (RunProgException "IOException: Foo: getEnv: does not exist (no environment variable)")
         do runActions <- runStmt session "M" "printBar"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
-             _       -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "Value2") output
     )
   , ( "Update during run"
     , withSession defaultSessionConfig $ \session -> do
@@ -1230,9 +1203,8 @@ syntheticTests =
         do updateSessionD session upd2 1
            runActions <- runStmt session "Main" "main"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "1234\n") output
-             _       -> assertFailure $ "Unexpected result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "1234\n") output
     )
   , ( "Restart session (snippet doesn't swallow exceptions; after .1 sec)"
     , restartRun [ "module M where"
@@ -1293,9 +1265,8 @@ syntheticTests =
         assertNoErrors session
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
-             _       -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "Value1") output
 
         -- Start a new server
         serverBefore <- getGhcServer session
@@ -1317,9 +1288,8 @@ syntheticTests =
         -- Make sure environment is restored
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "Value1") output
-             _       -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "Value1") output
     )
   , ( "Buffer modes: RunNoBuffering"
     , testBufferMode RunNoBuffering
@@ -1356,9 +1326,8 @@ syntheticTests =
              assertNoErrors session
              runActions <- runStmt session "M" "hello"
              (output, result) <- runWaitAll runActions
-             case result of
-               RunOk _ -> assertEqual "" (BSLC.pack "Hello World") output
-               _       -> assertFailure $ "Unexpected run result: " ++ show result
+             assertEqual "" result RunOk
+             assertEqual "" (BSLC.pack "Hello World") output
     )
   , ( "Call runWait after termination (normal termination)"
     , withSession defaultSessionConfig $ \session -> do
@@ -1372,13 +1341,10 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSLC.pack "Hello World\n") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSLC.pack "Hello World\n") output
         result' <- runWait runActions
-        case result' of
-          Right (RunOk _) -> return ()
-          _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show result'
+        assertEqual "" result' (Right RunOk)
     )
   , ( "Call runWait after termination (interrupted)"
     , withSession defaultSessionConfig $ \session -> do
@@ -1443,9 +1409,8 @@ syntheticTests =
         -- Start first snippet and wait for it to terminate
         runActions1 <- runStmt session "M" "hello"
         do (output, result) <- runWaitAll runActions1
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "Hello World\n") output
-             _       -> assertFailure $ "Unexpected run result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "Hello World\n") output
 
         -- Start second snippet
         runActions2 <- runStmt session "M" "slowHello"
@@ -1453,9 +1418,7 @@ syntheticTests =
         -- While it is running, call runWait again on the old runActions, make
         -- sure it's still the same
         do result <- runWait runActions1
-           case result of
-             Right (RunOk _) -> return ()
-             _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show result
+           assertEqual "" result (Right RunOk)
 
         -- Make sure that a call to 'runStmt' throws an exception
         -- (because we are still in running state)
@@ -1466,9 +1429,8 @@ syntheticTests =
         -- Now call runWait on the *new* runActions and make sure we
         -- get the right result
         do (output, result) <- runWaitAll runActions2
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "Oh, hello\n") output
-             _       -> assertFailure $ "Unexpected run result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "Oh, hello\n") output
     )
   , ( "Don't recompile unnecessarily (single module)"
     , withSession defaultSessionConfig $ \session -> do
@@ -1544,9 +1506,7 @@ syntheticTests =
         updateSession session updates2 $ const $ return ()
         ra2 <- runStmt session "Main" "main"
         out2b <- runWait ra2
-        case out2b of
-          Right (RunOk _) -> return ()
-          _ -> assertFailure $ "Unexpected result " ++ show out2b
+        assertEqual "" out2b (Right RunOk)
 
         let updates3 =
               updateModule "Main.hs" (BSLC.pack "main = getLine >>= putStrLn")
@@ -1554,9 +1514,8 @@ syntheticTests =
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-        case out3b of
-          RunOk _ -> assertEqual "" (BSLC.pack "Michael\n") output
-          _ -> assertFailure $ "Unexpected result " ++ show out3b
+        assertEqual "" out3b RunOk
+        assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "First snippet closes stdin (interrupted 'interact'); next snippet unaffected"
     , withSession defaultSessionConfig $ \session -> do
@@ -1585,9 +1544,7 @@ syntheticTests =
         out3a @?= Left (BSSC.pack "Hi!\n")
         supplyStdin ra3 (BSSC.pack "Michael\n")
         out3b <- runWait ra3
-        case out3b of
-          Right (RunOk _) -> return ()
-          _ -> assertFailure $ "Unexpected result " ++ show out3b
+        assertEqual "" out3b (Right RunOk)
     )
   , ( "First snippet closes stdout; next snippet unaffected"
     , withSession defaultSessionConfig $ \session -> do
@@ -1598,9 +1555,7 @@ syntheticTests =
         updateSession session updates2 $ const $ return ()
         ra2 <- runStmt session "Main" "main"
         out2b <- runWait ra2
-        case out2b of
-          Right (RunOk _) -> return ()
-          _ -> assertFailure $ "Unexpected result " ++ show out2b
+        assertEqual "" out2b (Right RunOk)
 
         let updates3 =
               updateModule "Main.hs" (BSLC.pack "main = getLine >>= putStrLn")
@@ -1608,9 +1563,8 @@ syntheticTests =
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-        case out3b of
-          RunOk _ -> assertEqual "" (BSLC.pack "Michael\n") output
-          _ -> assertFailure $ "Unexpected result " ++ show out3b
+        assertEqual "" out3b RunOk
+        assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "First snippet closes stderr; next snippet unaffected"
     , withSession defaultSessionConfig $ \session -> do
@@ -1621,9 +1575,7 @@ syntheticTests =
         updateSession session updates2 $ const $ return ()
         ra2 <- runStmt session "Main" "main"
         out2b <- runWait ra2
-        case out2b of
-          Right (RunOk _) -> return ()
-          _ -> assertFailure $ "Unexpected result " ++ show out2b
+        assertEqual "" out2b (Right RunOk)
 
         let updates3 =
               updateModule "Main.hs" (BSLC.pack "import System.IO\nmain = getLine >>= hPutStrLn stderr")
@@ -1631,9 +1583,8 @@ syntheticTests =
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-        case out3b of
-          RunOk _ -> assertEqual "" (BSLC.pack "Michael\n") output
-          _ -> assertFailure $ "Unexpected result " ++ show out3b
+        assertEqual "" out3b RunOk
+        assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "Snippet closes stderr, using timeout buffering"
     , withSession defaultSessionConfig $ \session -> do
@@ -1660,9 +1611,7 @@ syntheticTests =
           result @?= Left (BSSC.pack $ show i ++ "\n")
 
         finalResult <- runWait ra
-        case finalResult of
-          Right (RunOk _) -> return ()
-          _ -> assertFailure $ "Unexpected result " ++ show finalResult
+        assertEqual "" finalResult (Right RunOk)
      )
   , ( "Make sure encoding is UTF8"
     , withSession defaultSessionConfig $ \session -> do
@@ -1676,9 +1625,8 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSL8.fromString "你好\n") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSL8.fromString "你好\n") output
     )
   , ( "Using something from a different package (no \"Loading package\" msg)"
       -- We pick something from the haskell platform but that doesn't come with ghc itself
@@ -1695,9 +1643,8 @@ syntheticTests =
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        case result of
-          RunOk _ -> assertEqual "" (BSL8.fromString "5\n") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
+        assertEqual "" result RunOk
+        assertEqual "" (BSL8.fromString "5\n") output
     )
   , ( "Using the FFI (expected failure)"
     , withSession defaultSessionConfig $ \session -> do
@@ -2797,9 +2744,8 @@ syntheticTests =
         -- The code should have recompiled and we should be able to execute it
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
-             _       -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "Value2") output
     )
   , ( "GHC crash 5: Repeated crashes and restarts"
     , withSession defaultSessionConfig $ \session -> do
@@ -2833,9 +2779,8 @@ syntheticTests =
           -- The code should have recompiled and we should be able to execute it
           do runActions <- runStmt session "M" "printFoo"
              (output, result) <- runWaitAll runActions
-             case result of
-               RunOk _ -> assertEqual "" (BSLC.pack "Value2") output
-               _       -> assertFailure $ "Unexpected result " ++ show result
+             assertEqual "" result RunOk
+             assertEqual "" (BSLC.pack "Value2") output
     )
   , ( "GHC crash 6: Add additional code after update"
     , withSession defaultSessionConfig $ \session -> do
@@ -2873,9 +2818,8 @@ syntheticTests =
         -- The code should have recompiled and we should be able to execute it
         do runActions <- runStmt session "B" "printAB"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "AB") output
-             _       -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "AB") output
     )
   , ( "GHC crash 7: Update imported module after update"
     , withSession defaultSessionConfig $ \session -> do
@@ -2919,9 +2863,8 @@ syntheticTests =
         -- The code should have recompiled and we should be able to execute it
         do runActions <- runStmt session "B" "printAB"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "A2B") output
-             _       -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "A2B") output
     )
   , ( "GHC crash 8: Update importing module after update"
     , withSession defaultSessionConfig $ \session -> do
@@ -2966,9 +2909,8 @@ syntheticTests =
         -- The code should have recompiled and we should be able to execute it
         do runActions <- runStmt session "B" "printAB"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "AB2") output
-             _       -> assertFailure $ "Unexpected result " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "AB2") output
     )
   , ( "Parse ghc 'Compiling' messages"
     , withSession defaultSessionConfig $ \session -> do
@@ -3100,33 +3042,29 @@ syntheticTests =
         -- Check that default is []
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "[]\n") output
-             _       -> assertFailure $ "Unexpected run result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "[]\n") output
 
         -- Check that we can set command line arguments
         updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
-             _       -> assertFailure $ "Unexpected run result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
 
         -- Check that we can change command line arguments
         updateSession session (updateArgs ["D", "E"]) (\_ -> return ())
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "[\"D\",\"E\"]\n") output
-             _       -> assertFailure $ "Unexpected run result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "[\"D\",\"E\"]\n") output
 
         -- Check that we can clear command line arguments
         updateSession session (updateArgs []) (\_ -> return ())
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "[]\n") output
-             _       -> assertFailure $ "Unexpected run result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "[]\n") output
     )
   , ( "Check that command line arguments survive restartSession"
     , withSession defaultSessionConfig $ \session -> do
@@ -3144,9 +3082,8 @@ syntheticTests =
         updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
-             _       -> assertFailure $ "Unexpected run result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
 
         -- Restart and update the session
         restartSession session Nothing
@@ -3156,9 +3093,8 @@ syntheticTests =
         -- Check that arguments are still here
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           case result of
-             RunOk _ -> assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
-             _       -> assertFailure $ "Unexpected run result: " ++ show result
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
     )
   , ( "Register a package, don't restart session, don't see the package"
     , withSession (withOpts ["-package simple-lib17"]) $ \session -> do
@@ -4073,7 +4009,7 @@ syntheticTests =
           Just runActions -> do
             mRunResult <- timeout 2000000 $ runWaitAll runActions
             case mRunResult of
-              Just (output, RunOk _) -> assertEqual "" (BSLC.pack "123\n") output
+              Just (output, RunOk) -> assertEqual "" (BSLC.pack "123\n") output
               Nothing -> assertFailure "Timeout in runWaitAll"
               _       -> assertFailure "Unexpected run result"
           Nothing ->
@@ -4790,7 +4726,7 @@ testBufferMode bufferMode =
                     case ret of
                       Left bs -> do
                         go (BSSC.unpack bs : acc)
-                      Right (RunOk _) ->
+                      Right RunOk ->
                         verify bufferMode (reverse acc)
                       Right res ->
                         assertFailure $ "Program terminated abnormally: " ++ show res
