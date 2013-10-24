@@ -171,6 +171,11 @@ rpcCompile server opts dir genCode callback =
 
     go
 
+data SnippetAction =
+       SnippetOutput BSS.ByteString
+     | SnippetTerminated RunResult
+     | SnippetForceTerminated RunResult
+
 -- | Run code
 rpcRun :: GhcServer       -- ^ GHC server
        -> String          -- ^ Module
@@ -179,7 +184,7 @@ rpcRun :: GhcServer       -- ^ GHC server
        -> RunBufferMode   -- ^ Buffer mode for stderr
        -> IO RunActions
 rpcRun server m fun outBMode errBMode = do
-  runWaitChan <- newChan :: IO (Chan (Either BSS.ByteString RunResult))
+  runWaitChan <- newChan :: IO (Chan SnippetAction)
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
   conv <- async . Ex.handle (handleExternalException runWaitChan) $
@@ -188,8 +193,11 @@ rpcRun server m fun outBMode errBMode = do
       withAsync (sendRequests put reqChan) $ \sentAck -> do
         let go = do resp <- get
                     case resp of
-                      GhcRunDone result -> writeChan runWaitChan (Right result)
-                      GhcRunOutp bs     -> writeChan runWaitChan (Left bs) >> go
+                      GhcRunDone result ->
+                        writeChan runWaitChan (SnippetTerminated result)
+                      GhcRunOutp bs -> do
+                        writeChan runWaitChan (SnippetOutput bs)
+                        go
         go
         $wait sentAck
 
@@ -210,11 +218,11 @@ rpcRun server m fun outBMode errBMode = do
         Left terminationCallback -> do
           outcome <- $readChan runWaitChan
           case outcome of
-            Left bs ->
+            SnippetOutput bs ->
               return (Left terminationCallback, Left bs)
-            Right res@RunForceCancelled ->
+            SnippetForceTerminated res ->
               return (Right res, Right res)
-            Right res -> do
+            SnippetTerminated res -> do
               terminationCallback res
               return (Right res, Right res)
     , interrupt   = writeChan reqChan GhcRunInterrupt
@@ -226,7 +234,7 @@ rpcRun server m fun outBMode errBMode = do
           Left callback ->
             return (Left (\res -> callback res >> callback' res))
     , forceCancel = do
-        writeChan runWaitChan (Right RunForceCancelled)
+        writeChan runWaitChan (SnippetForceTerminated RunForceCancelled)
         cancel conv
     }
   where
@@ -241,10 +249,13 @@ rpcRun server m fun outBMode errBMode = do
 
     -- TODO: should we restart the session when ghc crashes?
     -- Maybe recommend that the session is started on GhcExceptions?
-    handleExternalException :: Chan (Either BSS.ByteString RunResult)
+    handleExternalException :: Chan SnippetAction
                             -> ExternalException
                             -> IO ()
-    handleExternalException ch = writeChan ch . Right . RunGhcException . show
+    handleExternalException ch = writeChan ch
+                               . SnippetTerminated
+                               . RunGhcException
+                               . show
 
 -- | Crash the GHC server (for debugging purposes)
 rpcCrash :: GhcServer -> Maybe Int -> IO ()
