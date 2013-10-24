@@ -295,13 +295,17 @@ getUseSites = computedQuery $ \computed@Computed{..} mod span ->
     maybeListToList Nothing   = []
 
 -- | Minimal .cabal file for the loaded modules seen as a library.
+-- The argument specifies the name of the library.
 --
--- The library is called \'main\'.
--- All transitive package dependencies are included.
+-- License is set to @AllRightsReserved@.
+-- All transitive package dependencies are included,
+-- with package versions set to the currently used versions.
 -- Only modules that get compiled successfully are included.
+-- Source directory is the currently used session source directory.
 -- Warning: all modules named @Main@ (even in subdirectories
 -- or files with different names) are ignored so that they
--- don't get in the way when we build an executable using the library.
+-- don't get in the way when we build an executable using the library
+-- and so that the behaviour is consistent with that of @buildExe@.
 getDotCabal :: Query (String -> BSL.ByteString)
 getDotCabal session = withComputedState session
                       $ \idleState computed@Computed{..} -> do
