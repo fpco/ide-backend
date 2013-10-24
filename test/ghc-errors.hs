@@ -4415,13 +4415,13 @@ checkPackage pkgDir = do
 
 assertCheckWarns :: String -> Assertion
 assertCheckWarns checkWarns =
-  assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "These warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* 'hs-source-dirs: /tmp/ide-backend-test.1786/src.1786' is an absolute\ndirectory.\n\nHackage would reject this package.\n")
+  assertEqual "checkWarns for dotCabal" (filterCheckWarns checkWarns) (filterCheckWarns "These warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* 'hs-source-dirs: /tmp/ide-backend-test.1786/src.1786' is an absolute\ndirectory.\n\nHackage would reject this package.\n")
 
 filterCheckWarns :: String -> BSSC.ByteString
 filterCheckWarns s =
   let (bs1, rest1) =
-        BSSC.breakSubstring (BSSC.pack "source-dirs") $ BSSC.pack s
-      (_, bs2) = BSSC.breakSubstring (BSSC.pack "' is") rest1
+        BSSC.breakSubstring (BSSC.pack "source-dirs:") $ BSSC.pack s
+      (_, bs2) = BSSC.breakSubstring (BSSC.pack "'") rest1
   in BSSC.append bs1 bs2
 
 assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
