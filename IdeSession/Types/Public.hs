@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, DeriveDataTypeable #-}
 -- | The public types
 module IdeSession.Types.Public (
     -- * Types
@@ -18,6 +18,8 @@ module IdeSession.Types.Public (
   , ImportEntities(..)
   , Import(..)
   , SpanInfo(..)
+  , RunBufferMode(..)
+  , RunResult(..)
     -- * Util
   , idInfoQN
 --, idInfoAtLocation
@@ -30,6 +32,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Binary (Binary(..), getWord8, putWord8)
 import Data.Aeson.TH (deriveJSON, defaultOptions)
+import Data.Typeable (Typeable)
 
 import IdeSession.Util () -- Binary instance for Text
 
@@ -169,6 +172,39 @@ data SpanInfo =
     SpanId IdInfo
     -- | Quasi-quote. The 'IdInfo' field gives the quasi-quoter
   | SpanQQ IdInfo
+
+-- | Buffer modes for running code
+--
+-- Note that 'NoBuffering' means that something like 'putStrLn' will do a
+-- syscall per character, and each of these characters will be read and sent
+-- back to the client. This results in a large overhead.
+--
+-- When using 'LineBuffering' or 'BlockBuffering', 'runWait' will not report
+-- any output from the snippet until it outputs a linebreak/fills the buffer,
+-- respectively (or does an explicit flush). However, you can specify a timeout
+-- in addition to the buffering mode; if you set this to @Just n@, the buffer
+-- will be flushed every @n@ microseconds.
+--
+-- NOTE: This is duplicated in the IdeBackendRTS (defined in IdeSession)
+data RunBufferMode =
+    RunNoBuffering
+  | RunLineBuffering  { runBufferTimeout   :: Maybe Int }
+  | RunBlockBuffering { runBufferBlockSize :: Maybe Int
+                      , runBufferTimeout   :: Maybe Int
+                      }
+  deriving (Typeable, Show)
+
+-- | The outcome of running code
+data RunResult =
+    -- | The code terminated okay
+    RunOk String
+    -- | The code threw an exception
+  | RunProgException String
+    -- | GHC itself threw an exception when we tried to run the code
+  | RunGhcException String
+    -- | The session was restarted
+  | RunForceCancelled
+  deriving (Typeable, Show, Eq)
 
 {------------------------------------------------------------------------------
   Show instances
@@ -358,6 +394,22 @@ instance Binary IdInfo where
   put IdInfo{..} = put idProp >> put idScope
   get = IdInfo <$> get <*> get
 
+instance Binary RunBufferMode where
+  put RunNoBuffering        = putWord8 0
+  put RunLineBuffering{..}  = do putWord8 1
+                                 put runBufferTimeout
+  put RunBlockBuffering{..} = do putWord8 2
+                                 put runBufferBlockSize
+                                 put runBufferTimeout
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return RunNoBuffering
+      1 -> RunLineBuffering <$> get
+      2 -> RunBlockBuffering <$> get <*> get
+      _ -> fail "RunBufferMode.get: invalid header"
+
 {------------------------------------------------------------------------------
   JSON instances
 
@@ -378,6 +430,8 @@ $(deriveJSON defaultOptions ''ModuleId)
 $(deriveJSON defaultOptions ''PackageId)
 $(deriveJSON defaultOptions ''IdInfo)
 $(deriveJSON defaultOptions ''SpanInfo)
+$(deriveJSON defaultOptions ''RunResult)
+$(deriveJSON defaultOptions ''RunBufferMode)
 
 {------------------------------------------------------------------------------
   Util

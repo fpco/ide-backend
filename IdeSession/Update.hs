@@ -65,7 +65,11 @@ import IdeSession.Cabal
 import IdeSession.Config
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
-import IdeSession.Types.Private
+import IdeSession.Types.Private hiding (RunResult(..))
+import IdeSession.Types.Public (RunBufferMode(..))
+import IdeSession.Types.Translation (removeExplicitSharing)
+import qualified IdeSession.Types.Private as Private
+import qualified IdeSession.Types.Public  as Public
 import IdeSession.Types.Progress
 import IdeSession.Util
 import IdeSession.Strict.Container
@@ -562,7 +566,7 @@ updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ _ ->
 -- or when the server is in a dead state (i.e., when ghc has crashed). In the
 -- latter case 'getSourceErrors' will report the ghc exception; it is the
 -- responsibility of the client code to check for this.
-runStmt :: IdeSession -> String -> String -> IO (RunActions RunResult)
+runStmt :: IdeSession -> String -> String -> IO (RunActions Public.RunResult)
 runStmt IdeSession{ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
     IdeSessionIdle idleState ->
@@ -576,7 +580,7 @@ runStmt IdeSession{ideState} m fun = do
                                  m fun
                                  (idleState ^. ideStdoutBufferMode)
                                  (idleState ^. ideStderrBufferMode)
-                                 translateRunResult
+                                 (translateRunResult (computedCache comp))
             registerTerminationCallback runActions restoreToIdle
             return (IdeSessionRunning runActions idleState, runActions)
           else fail $ "Module " ++ show m
@@ -595,7 +599,7 @@ runStmt IdeSession{ideState} m fun = do
     IdeSessionServerDied _ _ ->
       fail "Server died (reset or call updateSession)"
   where
-    restoreToIdle :: RunResult -> IO ()
+    restoreToIdle :: Public.RunResult -> IO ()
     restoreToIdle _ = modifyMVar_ ideState $ \state -> case state of
       IdeSessionIdle _ ->
         Ex.throwIO (userError "The impossible happened!")
@@ -606,9 +610,13 @@ runStmt IdeSession{ideState} m fun = do
       IdeSessionServerDied _ _ ->
         return state
 
-    translateRunResult :: Maybe RunResult -> IO RunResult
-    translateRunResult (Just runResult) = return runResult
-    translateRunResult Nothing          = return RunForceCancelled
+    translateRunResult :: ExplicitSharingCache
+                       -> Maybe Private.RunResult
+                       -> IO Public.RunResult
+    translateRunResult cache (Just runResult) =
+      return (removeExplicitSharing cache runResult)
+    translateRunResult _cache Nothing =
+      return Public.RunForceCancelled
 
 -- | Build an exe from sources added previously via the ide-backend
 -- updateModule* mechanism. The modules that contains the @main@ code are

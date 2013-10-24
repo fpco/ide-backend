@@ -37,6 +37,8 @@ import Paths_ide_backend
 import IdeSession.GHC.API
 import IdeSession.RPC.Client
 import IdeSession.Types.Progress
+import IdeSession.Types.Public (RunBufferMode)
+import IdeSession.Types.Private (RunResult(..))
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
 

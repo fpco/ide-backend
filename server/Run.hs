@@ -88,6 +88,7 @@ import System.Process
 import Control.Concurrent (MVar, ThreadId)
 
 import IdeSession.GHC.API
+import IdeSession.Types.Public (RunBufferMode(..))
 import IdeSession.Types.Private
 import IdeSession.Util
 import IdeSession.Strict.Container

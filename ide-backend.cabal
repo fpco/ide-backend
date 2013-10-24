@@ -37,6 +37,8 @@ library
                       IdeSession.Types.Translation,
                       IdeSession.Types.Progress,
                       IdeSession.GHC.API,
+                      IdeSession.GHC.Requests,
+                      IdeSession.GHC.Responses,
                       IdeSession.GHC.Client,
                       IdeSession.Util,
                       IdeSession.Util.BlockingOps,

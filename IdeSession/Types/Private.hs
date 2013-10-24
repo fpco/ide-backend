@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TemplateHaskell, GeneralizedNewtypeDeriving, DeriveDataTypeable #-}
 -- | The private types
 module IdeSession.Types.Private (
     -- * Types without a public counterpart
@@ -23,6 +23,7 @@ module IdeSession.Types.Private (
   , SpanInfo(..)
   , ImportEntities(..)
   , Import(..)
+  , RunResult(..)
     -- * Cache
   , ExplicitSharingCache(..)
     -- * Util
@@ -37,6 +38,7 @@ import Data.ByteString (ByteString)
 import Control.Applicative ((<$>), (<*>))
 import Control.Arrow (first)
 import Data.Binary (Binary(..), getWord8, putWord8)
+import Data.Typeable (Typeable)
 
 import qualified IdeSession.Types.Public as Public
 import IdeSession.Strict.Container
@@ -151,6 +153,16 @@ data Import = Import {
   , importEntities  :: !ImportEntities
   }
   deriving (Show, Eq)
+
+-- | The outcome of running code
+data RunResult =
+    -- | The code terminated okay
+    RunOk String
+    -- | The code threw an exception
+  | RunProgException String
+    -- | GHC itself threw an exception when we tried to run the code
+  | RunGhcException String
+  deriving (Typeable, Show, Eq)
 
 {------------------------------------------------------------------------------
   Cache
@@ -294,6 +306,19 @@ instance Binary SpanInfo where
       0 -> SpanId <$> get
       1 -> SpanQQ <$> get
       _ -> fail "SpanInfo.get: invalid header"
+
+instance Binary RunResult where
+  put (RunOk str)            = putWord8 0 >> put str
+  put (RunProgException str) = putWord8 1 >> put str
+  put (RunGhcException str)  = putWord8 2 >> put str
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> RunOk <$> get
+      1 -> RunProgException <$> get
+      2 -> RunGhcException <$> get
+      _ -> fail "RunResult.get: invalid header"
 
 {------------------------------------------------------------------------------
   Util

@@ -38,9 +38,9 @@ import Data.Accessor (Accessor, accessor)
 import System.Exit (ExitCode)
 import System.FilePath ((</>))
 import System.Posix.Types (EpochTime)
-import IdeSession.Types.Private
+import IdeSession.Types.Private hiding (RunResult)
+import IdeSession.Types.Public (RunBufferMode, RunResult)
 import IdeSession.Config
-import IdeSession.GHC.API (RunBufferMode, RunResult)
 import IdeSession.GHC.Client (RunActions, GhcServer)
 import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
