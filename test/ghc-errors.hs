@@ -4421,7 +4421,7 @@ filterCheckWarns :: String -> BSSC.ByteString
 filterCheckWarns s =
   let (bs1, rest1) =
         BSSC.breakSubstring (BSSC.pack "source-dirs:") $ BSSC.pack s
-      (_, bs2) = BSSC.breakSubstring (BSSC.pack "'") rest1
+      (_, bs2) = BSSC.breakSubstring (BSSC.pack ".\n") rest1
   in BSSC.append bs1 bs2
 
 assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
