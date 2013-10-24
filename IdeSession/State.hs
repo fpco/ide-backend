@@ -40,7 +40,7 @@ import System.FilePath ((</>))
 import System.Posix.Types (EpochTime)
 import IdeSession.Types.Private
 import IdeSession.Config
-import IdeSession.GHC.API (RunBufferMode)
+import IdeSession.GHC.API (RunBufferMode, RunResult)
 import IdeSession.GHC.Client (RunActions, GhcServer)
 import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
@@ -101,7 +101,7 @@ data IdeStaticInfo = IdeStaticInfo {
 
 data IdeSessionState =
     IdeSessionIdle IdeIdleState
-  | IdeSessionRunning RunActions IdeIdleState
+  | IdeSessionRunning (RunActions RunResult) IdeIdleState
   | IdeSessionShutdown
   | IdeSessionServerDied ExternalException IdeIdleState
 

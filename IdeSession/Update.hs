@@ -562,7 +562,7 @@ updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ _ ->
 -- or when the server is in a dead state (i.e., when ghc has crashed). In the
 -- latter case 'getSourceErrors' will report the ghc exception; it is the
 -- responsibility of the client code to check for this.
-runStmt :: IdeSession -> String -> String -> IO RunActions
+runStmt :: IdeSession -> String -> String -> IO (RunActions RunResult)
 runStmt IdeSession{ideState} m fun = do
   modifyMVar ideState $ \state -> case state of
     IdeSessionIdle idleState ->
@@ -576,6 +576,7 @@ runStmt IdeSession{ideState} m fun = do
                                  m fun
                                  (idleState ^. ideStdoutBufferMode)
                                  (idleState ^. ideStderrBufferMode)
+                                 translateRunResult
             registerTerminationCallback runActions restoreToIdle
             return (IdeSessionRunning runActions idleState, runActions)
           else fail $ "Module " ++ show m
@@ -604,6 +605,10 @@ runStmt IdeSession{ideState} m fun = do
         return state
       IdeSessionServerDied _ _ ->
         return state
+
+    translateRunResult :: Maybe RunResult -> IO RunResult
+    translateRunResult (Just runResult) = return runResult
+    translateRunResult Nothing          = return RunForceCancelled
 
 -- | Build an exe from sources added previously via the ide-backend
 -- updateModule* mechanism. The modules that contains the @main@ code are

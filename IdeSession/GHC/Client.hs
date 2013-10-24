@@ -1,7 +1,7 @@
 -- | Client interface to the `ide-backend-server` process
 --
 -- It is important that none of the types here rely on the GHC library.
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, ScopedTypeVariables #-}
 module IdeSession.GHC.Client (
     -- * Starting and stopping the server
     InProcess
@@ -104,37 +104,37 @@ getGhcExitCode (InProcess _ _) =
 ------------------------------------------------------------------------------}
 
 -- | Handles to the running code, through which one can interact with the code.
-data RunActions = RunActions {
+data RunActions a = RunActions {
     -- | Wait for the code to output something or terminate
-    runWait                     :: IO (Either BSS.ByteString RunResult)
+    runWait :: IO (Either BSS.ByteString a)
     -- | Send a UserInterrupt exception to the code
     --
     -- A call to 'interrupt' after the snippet has terminated has no effect.
-  , interrupt                   :: IO ()
+  , interrupt :: IO ()
     -- | Make data available on the code's stdin
     --
     -- A call to 'supplyStdin' after the snippet has terminated has no effect.
-  , supplyStdin                 :: BSS.ByteString -> IO ()
+  , supplyStdin :: BSS.ByteString -> IO ()
     -- | Register a callback to be invoked when the program terminates
     -- The callback will only be invoked once.
     --
     -- A call to 'registerTerminationCallback' after the snippet has terminated
     -- has no effect. The termination handler is NOT called when the the
     -- 'RunActions' is 'forceCancel'ed.
-  , registerTerminationCallback :: (RunResult -> IO ()) -> IO ()
+  , registerTerminationCallback :: (a -> IO ()) -> IO ()
     -- | Force terminate the runaction
     -- (The server will be useless after this -- for internal use only).
     --
     -- Guranteed not to block.
-  , forceCancel                 :: IO ()
+  , forceCancel :: IO ()
   }
 
 -- | Repeatedly call 'runWait' until we receive a 'Right' result, while
 -- collecting all 'Left' results
-runWaitAll :: RunActions -> IO (BSL.ByteString, RunResult)
+runWaitAll :: forall a. RunActions a -> IO (BSL.ByteString, a)
 runWaitAll RunActions{runWait} = go []
   where
-    go :: [BSS.ByteString] -> IO (BSL.ByteString, RunResult)
+    go :: [BSS.ByteString] -> IO (BSL.ByteString, a)
     go acc = do
       resp <- runWait
       case resp of
@@ -171,20 +171,23 @@ rpcCompile server opts dir genCode callback =
 
     go
 
-data SnippetAction =
+data SnippetAction a =
        SnippetOutput BSS.ByteString
-     | SnippetTerminated RunResult
-     | SnippetForceTerminated RunResult
+     | SnippetTerminated a
+     | SnippetForceTerminated a
 
 -- | Run code
-rpcRun :: GhcServer       -- ^ GHC server
-       -> String          -- ^ Module
-       -> String          -- ^ Function
-       -> RunBufferMode   -- ^ Buffer mode for stdout
-       -> RunBufferMode   -- ^ Buffer mode for stderr
-       -> IO RunActions
-rpcRun server m fun outBMode errBMode = do
-  runWaitChan <- newChan :: IO (Chan SnippetAction)
+rpcRun :: forall a.
+          GhcServer                 -- ^ GHC server
+       -> String                    -- ^ Module
+       -> String                    -- ^ Function
+       -> RunBufferMode             -- ^ Buffer mode for stdout
+       -> RunBufferMode             -- ^ Buffer mode for stderr
+       -> (Maybe RunResult -> IO a) -- ^ Translate run results
+                                    -- @Nothing@ indicates force cancellation
+       -> IO (RunActions a)
+rpcRun server m fun outBMode errBMode translateResult = do
+  runWaitChan <- newChan :: IO (Chan (SnippetAction a))
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
   conv <- async . Ex.handle (handleExternalException runWaitChan) $
@@ -193,8 +196,9 @@ rpcRun server m fun outBMode errBMode = do
       withAsync (sendRequests put reqChan) $ \sentAck -> do
         let go = do resp <- get
                     case resp of
-                      GhcRunDone result ->
-                        writeChan runWaitChan (SnippetTerminated result)
+                      GhcRunDone result -> do
+                        result' <- translateResult (Just result)
+                        writeChan runWaitChan (SnippetTerminated result')
                       GhcRunOutp bs -> do
                         writeChan runWaitChan (SnippetOutput bs)
                         go
@@ -206,7 +210,7 @@ rpcRun server m fun outBMode errBMode = do
   -- This means that we will only execute the termination callback once, and
   -- the user can safely call runWait after termination and get the same
   -- result.
-  let onTermination :: RunResult -> IO ()
+  let onTermination :: a -> IO ()
       onTermination _ = do writeChan reqChan GhcRunAckDone
                            $wait conv
   runActionsState <- newMVar (Left onTermination)
@@ -234,7 +238,8 @@ rpcRun server m fun outBMode errBMode = do
           Left callback ->
             return (Left (\res -> callback res >> callback' res))
     , forceCancel = do
-        writeChan runWaitChan (SnippetForceTerminated RunForceCancelled)
+        result <- translateResult Nothing
+        writeChan runWaitChan (SnippetForceTerminated result)
         cancel conv
     }
   where
@@ -249,13 +254,12 @@ rpcRun server m fun outBMode errBMode = do
 
     -- TODO: should we restart the session when ghc crashes?
     -- Maybe recommend that the session is started on GhcExceptions?
-    handleExternalException :: Chan SnippetAction
+    handleExternalException :: Chan (SnippetAction a)
                             -> ExternalException
                             -> IO ()
-    handleExternalException ch = writeChan ch
-                               . SnippetTerminated
-                               . RunGhcException
-                               . show
+    handleExternalException ch e = do
+      result <- translateResult . Just . RunGhcException . show $ e
+      writeChan ch $ SnippetTerminated result
 
 -- | Crash the GHC server (for debugging purposes)
 rpcCrash :: GhcServer -> Maybe Int -> IO ()
