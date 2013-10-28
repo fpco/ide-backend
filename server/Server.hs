@@ -111,8 +111,8 @@ ghcServerEngine configGenerateModInfo
                 conv opts pluginRef importsRef dir
                 genCode configGenerateModInfo
               return args
-            ReqRun m fun outBMode errBMode -> do
-              ghcWithArgs args $ ghcHandleRun conv m fun outBMode errBMode
+            ReqRun runCmd -> do
+              ghcWithArgs args $ ghcHandleRun conv runCmd
               return args
             ReqSetEnv env -> do
               ghcHandleSetEnv conv env
@@ -383,13 +383,8 @@ ghcHandleBreak RpcConversation{..} modName span value = do
   liftIO $ put oldValue
 
 -- | Handle a run request
-ghcHandleRun :: RpcConversation
-             -> String            -- ^ Module
-             -> String            -- ^ Function
-             -> RunBufferMode     -- ^ Buffer mode for stdout
-             -> RunBufferMode     -- ^ Buffer mode for stderr
-             -> Ghc ()
-ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
+ghcHandleRun :: RpcConversation -> RunCmd -> Ghc ()
+ghcHandleRun RpcConversation{..} runCmd = do
     (stdOutputRd, stdOutputBackup, stdErrorBackup) <- redirectStdout
     (stdInputWr,  stdInputBackup)                  <- redirectStdin
 
@@ -414,8 +409,8 @@ ghcHandleRun RpcConversation{..} m fun outBMode errBMode = do
     -- 4. In the 'reqThread' we ignore GhcRunInterrupts once the 'MVar' is
     --    'Nothing'
 
-    runOutcome <- ghandle ghcException . ghandleJust isUserInterrupt return $ do
-      runInGhc (m, fun) outBMode errBMode ghcThread
+    runOutcome <- ghandle ghcException . ghandleJust isUserInterrupt return $
+      runInGhc runCmd ghcThread
 
     liftIO $ do
       -- Restore stdin and stdout

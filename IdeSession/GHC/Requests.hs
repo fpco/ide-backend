@@ -5,6 +5,7 @@
 module IdeSession.GHC.Requests (
     GhcRequest(..)
   , GhcRunRequest(..)
+  , RunCmd(..)
   ) where
 
 import Data.Binary
@@ -21,17 +22,14 @@ data GhcRequest
       , reqCompileGenCode   :: Bool
       }
   | ReqRun {
-        reqRunModule   :: String
-      , reqRunFun      :: String
-      , reqRunOutBMode :: RunBufferMode
-      , reqRunErrBMode :: RunBufferMode
+        reqRunCmd :: RunCmd
       }
   | ReqSetEnv {
-         reqSetEnv :: [(String, Maybe String)]
-       }
+        reqSetEnv :: [(String, Maybe String)]
+      }
   | ReqSetArgs {
-         reqSetArgs :: [String]
-       }
+        reqSetArgs :: [String]
+      }
   | ReqBreakpoint {
         reqBreakpointModule :: ModuleName
       , reqBreakpointSpan   :: SourceSpan
@@ -39,9 +37,18 @@ data GhcRequest
       }
     -- | For debugging only! :)
   | ReqCrash {
-         reqCrashDelay :: Maybe Int
-       }
+        reqCrashDelay :: Maybe Int
+      }
   deriving Typeable
+
+data RunCmd =
+    RunStmt {
+        runCmdModule   :: String
+      , runCmdFunction :: String
+      , runCmdStdout   :: RunBufferMode
+      , runCmdStderr   :: RunBufferMode
+      }
+  | Resume
 
 data GhcRunRequest =
     GhcRunInput ByteString
@@ -57,10 +64,7 @@ instance Binary GhcRequest where
     put reqCompileGenCode
   put ReqRun{..} = do
     putWord8 1
-    put reqRunModule
-    put reqRunFun
-    put reqRunOutBMode
-    put reqRunErrBMode
+    put reqRunCmd
   put ReqSetEnv{..} = do
     putWord8 2
     put reqSetEnv
@@ -80,12 +84,29 @@ instance Binary GhcRequest where
     header <- getWord8
     case header of
       0 -> ReqCompile <$> get <*> get <*> get
-      1 -> ReqRun     <$> get <*> get <*> get <*> get
+      1 -> ReqRun     <$> get
       2 -> ReqSetEnv  <$> get
       3 -> ReqSetArgs <$> get
       4 -> ReqBreakpoint <$> get <*> get <*> get
       5 -> ReqCrash   <$> get
       _ -> fail "GhcRequest.get: invalid header"
+
+instance Binary RunCmd where
+  put (RunStmt {..}) = do
+    putWord8 0
+    put runCmdModule
+    put runCmdFunction
+    put runCmdStdout
+    put runCmdStderr
+  put Resume = do
+    putWord8 1
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> RunStmt <$> get <*> get <*> get <*> get
+      1 -> return Resume
+      _ -> fail "RunCmd.get: invalid header"
 
 instance Binary GhcRunRequest where
   put (GhcRunInput bs) = putWord8 0 >> put bs

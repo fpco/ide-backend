@@ -36,6 +36,7 @@ module Run
   , autocompletion
     -- * Executing snippets
   , runInGhc
+  , RunCmd(..)
   , RunResult(..)
   , RunBufferMode(..)
   , breakFromSpan
@@ -326,27 +327,15 @@ autocompletion summary = do
   return $ force idIs
 
 -- | Run a snippet.
-runInGhc :: (String, String)  -- ^ module and function to execute
-         -> RunBufferMode     -- ^ Buffer mode for stdout
-         -> RunBufferMode     -- ^ Buffer mode for stderr
-         -> MVar (Maybe ThreadId)
-         -> Ghc RunResult
-runInGhc (m, fun) outBMode errBMode tidMVar = do
+runInGhc :: RunCmd -> MVar (Maybe ThreadId) -> Ghc RunResult
+runInGhc cmd tidMVar = do
   flags <- getSessionDynFlags
   -- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
   -- Set GHC verbosity to avoid stray GHC messages, e.g., from the linker.
   _ <- setSessionDynFlags (flags { verbosity = 0 })
-  -- TODO: not sure if this cleanup handler is needed:
   defaultCleanupHandler flags . handleErrors $ do
--- TODO: these debug statements break tests currently:
---    _debugPpContext flags "context before setContext"
-    setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName m
-                 , IIDecl $ simpleImportDecl $ mkModuleName "IdeBackendRTS"
-                 ]
---    _debugPpContext flags "context after setContext"
---    liftIO $ writeFile "/Users/fpco/fpco/ide-backend/RunStmt.hs" expr
     handleErrors $ do
-      runRes <- runStmt expr RunToCompletion tidMVar
+      runRes <- runCmd cmd tidMVar
       case runRes of
         GHC.RunOk _ ->
           return RunOk
@@ -356,11 +345,28 @@ runInGhc (m, fun) outBMode errBMode tidMVar = do
           Just info <- importBreakInfo mBreakInfo names
           return $ RunBreak info
   where
+    handleError :: Show a => a -> Ghc RunResult
+    handleError = return . RunGhcException . show
+
+    -- "such-and-such not in scope" is reported as a source error
+    -- not sure when GhcExceptions are thrown (if at all)
+    handleErrors :: Ghc RunResult -> Ghc RunResult
+    handleErrors = handleSourceError handleError
+                 . ghandle (handleError :: GhcException -> Ghc RunResult)
+
+-- | Auxiliary to 'runInGhc'
+runCmd :: RunCmd -> MVar (Maybe ThreadId) -> Ghc GHC.RunResult
+runCmd (RunStmt {..}) tidMVar = do
+    setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName runCmdModule
+                 , IIDecl $ simpleImportDecl $ mkModuleName "IdeBackendRTS"
+                 ]
+    runStmt expr RunToCompletion tidMVar
+  where
     expr :: String
     expr = fqn "run "
-        ++ "(" ++ fqBMode outBMode ++ ")"
-        ++ "(" ++ fqBMode errBMode ++ ")"
-        ++ "(" ++ m ++ "." ++ fun ++ ")"
+        ++ "(" ++ fqBMode runCmdStdout ++ ")"
+        ++ "(" ++ fqBMode runCmdStderr ++ ")"
+        ++ "(" ++ runCmdModule ++ "." ++ runCmdFunction ++ ")"
 
     fqn :: String -> String
     fqn = (++) "IdeBackendRTS."
@@ -376,15 +382,9 @@ runInGhc (m, fun) outBMode errBMode tidMVar = do
     fqMInt :: Maybe Int -> String
     fqMInt Nothing  = fqn "Nothing"
     fqMInt (Just n) = fqn "Just " ++ show n
-
-    handleError :: Show a => a -> Ghc RunResult
-    handleError = return . RunGhcException . show
-
-    -- "such-and-such not in scope" is reported as a source error
-    -- not sure when GhcExceptions are thrown (if at all)
-    handleErrors :: Ghc RunResult -> Ghc RunResult
-    handleErrors = handleSourceError handleError
-                 . ghandle (handleError :: GhcException -> Ghc RunResult)
+runCmd Resume _tidMVar =
+    -- TODO: by rights we should be using _tidMVar here somewhere
+    resume (const True) RunToCompletion
 
 {------------------------------------------------------------------------------
   Dealing with breakpoints

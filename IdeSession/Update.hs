@@ -578,10 +578,14 @@ runStmt IdeSession{ideState} m fun = do
           -- inside 'module .. where' counts.
           if Text.pack m `List.elem` computedLoadedModules comp
           then do
+            let runCmd = RunStmt {
+                    runCmdModule   = m
+                  , runCmdFunction = fun
+                  , runCmdStdout   = idleState ^. ideStdoutBufferMode
+                  , runCmdStderr   = idleState ^. ideStderrBufferMode
+                  }
             runActions <- rpcRun (idleState ^. ideGhcServer)
-                                 m fun
-                                 (idleState ^. ideStdoutBufferMode)
-                                 (idleState ^. ideStderrBufferMode)
+                                 runCmd
                                  (translateRunResult (computedCache comp))
             registerTerminationCallback runActions restoreToIdle
             return (IdeSessionRunning runActions idleState, runActions)

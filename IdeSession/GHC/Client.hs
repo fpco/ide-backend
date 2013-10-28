@@ -38,7 +38,7 @@ import Paths_ide_backend
 import IdeSession.GHC.API
 import IdeSession.RPC.Client
 import IdeSession.Types.Progress
-import IdeSession.Types.Public (ModuleName, SourceSpan, RunBufferMode)
+import IdeSession.Types.Public (ModuleName, SourceSpan)
 import IdeSession.Types.Private (RunResult(..))
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
@@ -192,20 +192,17 @@ data SnippetAction a =
 -- | Run code
 rpcRun :: forall a.
           GhcServer                 -- ^ GHC server
-       -> String                    -- ^ Module
-       -> String                    -- ^ Function
-       -> RunBufferMode             -- ^ Buffer mode for stdout
-       -> RunBufferMode             -- ^ Buffer mode for stderr
+       -> RunCmd                    -- ^ Run command
        -> (Maybe RunResult -> IO a) -- ^ Translate run results
                                     -- @Nothing@ indicates force cancellation
        -> IO (RunActions a)
-rpcRun server m fun outBMode errBMode translateResult = do
+rpcRun server cmd translateResult = do
   runWaitChan <- newChan :: IO (Chan (SnippetAction a))
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
   conv <- async . Ex.handle (handleExternalException runWaitChan) $
     conversation server $ \RpcConversation{..} -> do
-      put (ReqRun m fun outBMode errBMode)
+      put (ReqRun cmd)
       withAsync (sendRequests put reqChan) $ \sentAck -> do
         let go = do resp <- get
                     case resp of
