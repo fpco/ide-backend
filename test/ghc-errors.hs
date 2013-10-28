@@ -6,9 +6,10 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad
 import Control.DeepSeq (rnf)
-import qualified Data.ByteString.Char8 as BSSC (ByteString, pack, unpack, append, breakSubstring, concat)
-import qualified Data.ByteString.Lazy.Char8 as BSLC (ByteString, null, pack, unpack, toChunks, writeFile)
-import qualified Data.ByteString.Lazy.UTF8 as BSL8 (fromString)
+import qualified Data.ByteString.Char8      as BSSC
+import qualified Data.ByteString.Lazy       as BSL
+import qualified Data.ByteString.Lazy.Char8 as BSLC
+import qualified Data.ByteString.Lazy.UTF8  as BSL8
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
 import qualified Data.List as List
@@ -4334,7 +4335,7 @@ syntheticTests =
         assertEqual "breakpoint successfully unset" (Just False) r3
         assertEqual "invalid breakpoint"            Nothing      r4
     )
-  , ( "Debugging 2: Running until breakpoint"
+  , ( "Debugging 2: Running until breakpoint, then resuming"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session qsort 1
         assertNoErrors session
@@ -4345,16 +4346,28 @@ syntheticTests =
 
         Just False <- setBreakpoint session modName fullSpan True
 
-        runActions <- runStmt session "Main" "main"
-        (_output, result) <- runWaitAll runActions
-        assertBreak result "Main"
-                           "Main.hs@2:16-2:48"
-                           "[a]"
-                           [ ("_result" , "[Integer]" , "_")
-                           , ("a"       , "Integer"   , "8")
-                           , ("left"    , "[Integer]" , "_")
-                           , ("right"   , "[Integer]" , "_")
-                           ]
+        let inputList :: [Integer]
+            inputList = [8, 4, 0, 3, 1, 23, 11, 18]
+
+        outputs <- forM (mark inputList) $ \(i, isFirst, _isLast) -> do
+           runActions <- if isFirst then runStmt session "Main" "main"
+                                    else resume session
+           (output, result) <- runWaitAll runActions
+           assertBreak result "Main"
+                              "Main.hs@2:16-2:48"
+                              "[a]"
+                              [ ("_result" , "[Integer]" , "_")
+                              , ("a"       , "Integer"   , show i)
+                              , ("left"    , "[Integer]" , "_")
+                              , ("right"   , "[Integer]" , "_")
+                              ]
+           return output
+
+        do runActions <- resume session
+           (finalOutput, finalResult) <- runWaitAll runActions
+           let output = BSL.concat $ outputs ++ [finalOutput]
+           assertEqual "" finalResult RunOk
+           assertEqual "" (show (sort inputList) ++ "\n") (BSLC.unpack output)
     )
   ]
 
@@ -4845,3 +4858,14 @@ assertCounter :: Counter -> Int -> Assertion
 assertCounter (Counter c) i = do
   j <- readIORef c
   assertEqual "" i j
+
+-- | Mark each element of the list with booleans indicating whether it's the
+-- first and/or the last element in the list
+mark :: [a] -> [(a, Bool, Bool)]
+mark []     = []
+mark [x]    = [(x, True, True)]
+mark (x:xs) = (x, True, False) : aux xs
+  where
+    aux []     = error "impossible"
+    aux [y]    = [(y, False, True)]
+    aux (y:ys) = (y, False, False) : aux ys

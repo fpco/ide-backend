@@ -29,6 +29,7 @@ module IdeSession.Update (
   , buildLicenses
     -- * Running code
   , runStmt
+  , resume
   , setBreakpoint
     -- * Debugging
   , forceRecompile
@@ -569,35 +570,38 @@ updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ _ ->
 -- latter case 'getSourceErrors' will report the ghc exception; it is the
 -- responsibility of the client code to check for this.
 runStmt :: IdeSession -> String -> String -> IO (RunActions Public.RunResult)
-runStmt IdeSession{ideState} m fun = do
+runStmt ideSession m fun = runCmd ideSession $ \idleState -> RunStmt {
+    runCmdModule   = m
+  , runCmdFunction = fun
+  , runCmdStdout   = idleState ^. ideStdoutBufferMode
+  , runCmdStderr   = idleState ^. ideStderrBufferMode
+  }
+
+-- | Resume a previously interrupted statement
+resume :: IdeSession -> IO (RunActions Public.RunResult)
+resume ideSession = runCmd ideSession (const Resume)
+
+-- | Internal geneneralization used in 'runStmt' and 'resume'
+runCmd :: IdeSession -> (IdeIdleState -> RunCmd) -> IO (RunActions Public.RunResult)
+runCmd IdeSession{ideState} mkCmd = do
   modifyMVar ideState $ \state -> case state of
     IdeSessionIdle idleState ->
      case (toLazyMaybe (idleState ^. ideComputed), idleState ^. ideGenerateCode) of
-       (Just comp, True) ->
-          -- ideManagedFiles is irrelevant, because only the module name
-          -- inside 'module .. where' counts.
-          if Text.pack m `List.elem` computedLoadedModules comp
-          then do
-            let runCmd = RunStmt {
-                    runCmdModule   = m
-                  , runCmdFunction = fun
-                  , runCmdStdout   = idleState ^. ideStdoutBufferMode
-                  , runCmdStderr   = idleState ^. ideStderrBufferMode
-                  }
-            runActions <- rpcRun (idleState ^. ideGhcServer)
-                                 runCmd
-                                 (translateRunResult (computedCache comp))
-            registerTerminationCallback runActions restoreToIdle
-            return (IdeSessionRunning runActions idleState, runActions)
-          else fail $ "Module " ++ show m
-                      ++ " not successfully loaded, when trying to run code."
+       (Just comp, True) -> do
+         let cmd = mkCmd idleState
+         checkStateOk comp cmd
+         runActions <- rpcRun (idleState ^. ideGhcServer)
+                              cmd
+                              (translateRunResult (computedCache comp))
+         registerTerminationCallback runActions restoreToIdle
+         return (IdeSessionRunning runActions idleState, runActions)
        _ ->
-        -- This 'fail' invocation is, in part, a workaround for
-        -- http://hackage.haskell.org/trac/ghc/ticket/7539
-        -- which would otherwise lead to a hard GHC crash,
-        -- instead of providing a sensible error message
-        -- that we could show to the user.
-        fail "Cannot run before the code is generated."
+         -- This 'fail' invocation is, in part, a workaround for
+         -- http://hackage.haskell.org/trac/ghc/ticket/7539
+         -- which would otherwise lead to a hard GHC crash,
+         -- instead of providing a sensible error message
+         -- that we could show to the user.
+         fail "Cannot run before the code is generated."
     IdeSessionRunning _ _ ->
       fail "Cannot run code concurrently"
     IdeSessionShutdown ->
@@ -605,6 +609,17 @@ runStmt IdeSession{ideState} m fun = do
     IdeSessionServerDied _ _ ->
       fail "Server died (reset or call updateSession)"
   where
+    checkStateOk :: Computed -> RunCmd -> IO ()
+    checkStateOk comp RunStmt{..} =
+      -- ideManagedFiles is irrelevant, because only the module name inside
+      -- 'module .. where' counts.
+      unless (Text.pack runCmdModule `List.elem` computedLoadedModules comp) $
+        fail $ "Module " ++ show runCmdModule
+                         ++ " not successfully loaded, when trying to run code."
+    checkStateOk _comp Resume =
+      -- TODO: should we check that there is anything to resume here?
+      return ()
+
     restoreToIdle :: Public.RunResult -> IO ()
     restoreToIdle _ = modifyMVar_ ideState $ \state -> case state of
       IdeSessionIdle _ ->

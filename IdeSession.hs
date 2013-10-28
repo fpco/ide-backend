@@ -138,6 +138,7 @@ module IdeSession (
   , RunBufferMode(..)
   , BreakInfo(..)
   , runStmt
+  , resume
   , runWaitAll
   , setBreakpoint
     -- * Queries
