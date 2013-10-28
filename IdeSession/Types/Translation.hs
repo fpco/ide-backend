@@ -8,6 +8,7 @@ module IdeSession.Types.Translation (
   ) where
 
 import qualified Data.ByteString.Char8 as BSSC
+import qualified Data.Text as Text
 import Data.Binary (Binary)
 
 import IdeSession.Strict.Container
@@ -92,13 +93,31 @@ instance ExplicitSharing Public.IdProp where
 
 instance ExplicitSharing Public.IdInfo where
   removeExplicitSharing cache Private.IdInfo{..} = Public.IdInfo {
-      Public.idProp  = removeExplicitSharing cache $
-                         StrictIntMap.findWithDefault
-                           (error "IdInfo.removeExplicitSharing: could not resolve idPropPtr")
-                           (Private.idPropPtr idProp)
-                           (Private.idPropCache cache)
+      Public.idProp  = case StrictIntMap.lookup (Private.idPropPtr idProp)
+                                                (Private.idPropCache cache)
+                         of Just idProp' -> removeExplicitSharing cache idProp'
+                            Nothing      -> unknownProp
     , Public.idScope = removeExplicitSharing cache idScope
     }
+    where
+      unknownProp = Public.IdProp {
+          idName        = Text.pack "<<unknown id>>"
+        , idSpace       = Public.VarName
+        , idType        = Nothing
+        , idDefinedIn   = unknownModule
+        , idDefSpan     = Public.TextSpan (Text.pack "<<unknown span>>")
+        , idHomeModule  = Nothing
+        }
+
+      unknownModule = Public.ModuleId {
+          moduleName    = Text.pack "<<unknown module>>"
+        , modulePackage = unknownPackage
+        }
+
+      unknownPackage = Public.PackageId {
+         packageName    = Text.pack "<<unknown package>>"
+       , packageVersion = Nothing
+       }
 
 instance ExplicitSharing Public.ModuleId where
   removeExplicitSharing cache Private.ModuleId{..} = Public.ModuleId {
@@ -127,7 +146,7 @@ instance ExplicitSharing Public.SourceSpan where
   removeExplicitSharing cache Private.SourceSpan{..} = Public.SourceSpan {
       Public.spanFilePath   = BSSC.unpack $
                                 StrictIntMap.findWithDefault
-                                  (error "SourceSpan.removeExplicitSharing: could not resolve idPropPtr")
+                                  unknownFilePath
                                   (Private.filePathPtr spanFilePath)
                                   (Private.filePathCache cache)
     , Public.spanFromLine   = spanFromLine
@@ -135,6 +154,8 @@ instance ExplicitSharing Public.SourceSpan where
     , Public.spanToLine     = spanToLine
     , Public.spanToColumn   = spanToColumn
     }
+    where
+      unknownFilePath = BSSC.pack "<<unknown filepath>>"
 
 instance ExplicitSharing Public.EitherSpan where
   removeExplicitSharing cache eitherSpan = case eitherSpan of

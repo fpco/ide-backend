@@ -6,6 +6,7 @@
 module IdeSession.Strict.IntMap (
     fromList
   , toList
+  , lookup
   , findWithDefault
   , empty
   , adjust
@@ -15,12 +16,15 @@ module IdeSession.Strict.IntMap (
   , filter
   ) where
 
-import Prelude hiding (map, filter)
+import Prelude hiding (map, filter, lookup)
 import Data.Tuple (swap)
 import qualified Data.IntMap as IntMap
 import qualified Data.List as List
 
 import IdeSession.Strict.Container
+
+lookup :: Int -> Strict IntMap v -> Maybe v
+lookup i = IntMap.lookup i . toLazyIntMap
 
 findWithDefault :: v -> Int -> Strict IntMap v -> v
 findWithDefault def i = IntMap.findWithDefault def i . toLazyIntMap
@@ -50,7 +54,7 @@ map f = force . IntMap.map f . toLazyIntMap
 
 -- O(n)
 reverseLookup :: Eq v => Strict IntMap v -> v -> Maybe Int
-reverseLookup m v = lookup v $ List.map swap $ toList m
+reverseLookup m v = List.lookup v $ List.map swap $ toList m
 
 filter :: (v -> Bool) -> Strict IntMap v -> Strict IntMap v
 filter p = StrictIntMap . IntMap.filter p . toLazyIntMap
