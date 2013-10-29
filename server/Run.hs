@@ -46,7 +46,7 @@ module Run
 
 import Prelude hiding (id, mod, span)
 import qualified Control.Exception as Ex
-import Control.Monad (filterM, liftM, void, forM)
+import Control.Monad (filterM, liftM, void)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (MaybeT(..))
 import Control.Applicative ((<$>))
@@ -114,6 +114,7 @@ import Debug
 import Conv
 import FilePathCaching
 import IdPropCaching
+import Break
 
 type DynamicOpts = [Located String]
 
@@ -445,13 +446,7 @@ importBreakInfo (Just GHC.BreakInfo{..}) names = runMaybeT $ do
       }
   where
     mkTerms :: Ghc [(Id, Term)]
-    mkTerms = do
-      tythings <- catMaybes `liftM` mapM lookupName names
-      forM tythings $ \(AnId var) -> do
-        let depthBound = 100   -- This magic value comes from ghci (Debugger.hs)
-            forceEval  = False -- We don't force values by default
-        term <- obtainTermFromId depthBound forceEval var
-        return (var, term)
+    mkTerms = resolveNames names >>= evaluateIds False False
 
     mkLocalVar :: PrintUnqualified -> (Id, Term) -> Ghc (IdInfo, Text)
     mkLocalVar qual (var, term) = do
