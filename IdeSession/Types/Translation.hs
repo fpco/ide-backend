@@ -218,15 +218,12 @@ instance ExplicitSharing Public.RunResult where
     Private.RunBreak info      -> Public.RunBreak (removeExplicitSharing cache info)
 
 instance ExplicitSharing Public.BreakInfo where
-  removeExplicitSharing cache' Private.BreakInfo{..} = Public.BreakInfo {
-      Public.breakInfoModule     = breakInfoModule
-    , Public.breakInfoSpan       = removeExplicitSharing cache breakInfoSpan
-    , Public.breakInfoResultType = breakInfoResultType
-    , Public.breakInfoLocalVars  = map aux breakInfoLocalVars
+  removeExplicitSharing cache Private.BreakInfo{..} = Public.BreakInfo {
+      Public.breakInfoModule      = breakInfoModule
+    , Public.breakInfoSpan        = removeExplicitSharing cache breakInfoSpan
+    , Public.breakInfoResultType  = breakInfoResultType
+    , Public.breakInfoVariableEnv = breakInfoVariableEnv
     }
-    where
-      aux (idInfo, val) = (removeExplicitSharing cache idInfo, val)
-      cache = breakInfoCache `Private.unionCache` cache'
 
 {------------------------------------------------------------------------------
   Introducing explicit sharing

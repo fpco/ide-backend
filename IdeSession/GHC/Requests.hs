@@ -35,6 +35,11 @@ data GhcRequest
       , reqBreakpointSpan   :: SourceSpan
       , reqBreakpointValue  :: Bool
       }
+  | ReqPrint {
+        reqPrintVars  :: Name
+      , reqPrintBind  :: Bool
+      , reqPrintForce :: Bool
+      }
     -- | For debugging only! :)
   | ReqCrash {
         reqCrashDelay :: Maybe Int
@@ -76,19 +81,25 @@ instance Binary GhcRequest where
     put reqBreakpointModule
     put reqBreakpointSpan
     put reqBreakpointValue
-  put ReqCrash{..} = do
+  put ReqPrint{..} = do
     putWord8 5
+    put reqPrintVars
+    put reqPrintBind
+    put reqPrintForce
+  put ReqCrash{..} = do
+    putWord8 6
     put reqCrashDelay
 
   get = do
     header <- getWord8
     case header of
-      0 -> ReqCompile <$> get <*> get <*> get
-      1 -> ReqRun     <$> get
-      2 -> ReqSetEnv  <$> get
-      3 -> ReqSetArgs <$> get
+      0 -> ReqCompile    <$> get <*> get <*> get
+      1 -> ReqRun        <$> get
+      2 -> ReqSetEnv     <$> get
+      3 -> ReqSetArgs    <$> get
       4 -> ReqBreakpoint <$> get <*> get <*> get
-      5 -> ReqCrash   <$> get
+      5 -> ReqPrint      <$> get <*> get <*> get
+      6 -> ReqCrash      <$> get
       _ -> fail "GhcRequest.get: invalid header"
 
 instance Binary RunCmd where

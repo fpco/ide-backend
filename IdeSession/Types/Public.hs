@@ -4,6 +4,7 @@ module IdeSession.Types.Public (
     -- * Types
     IdNameSpace(..)
   , Type
+  , Name
   , IdInfo(..)
   , IdProp(..)
   , IdScope(..)
@@ -22,6 +23,8 @@ module IdeSession.Types.Public (
   , RunBufferMode(..)
   , RunResult(..)
   , BreakInfo(..)
+  , Value
+  , VariableEnv
     -- * Util
   , idInfoQN
 --, idInfoAtLocation
@@ -57,6 +60,9 @@ data IdInfo = IdInfo {
   }
   deriving Eq
 
+-- | Variable name
+type Name = Text
+
 -- | For now we represent types in pretty-printed form
 type Type = Text
 
@@ -64,7 +70,7 @@ type Type = Text
 data IdProp = IdProp {
     -- | The base name of the identifer at this location. Module prefix
     -- is not included.
-    idName  :: !Text
+    idName  :: !Name
     -- | Namespace this identifier is drawn from
   , idSpace :: !IdNameSpace
     -- | The type
@@ -223,9 +229,15 @@ data BreakInfo = BreakInfo {
     -- | Type of the result
   , breakInfoResultType :: Type
     -- | Local variables and their values
-  , breakInfoLocalVars :: [(IdInfo, Text)]
+  , breakInfoVariableEnv :: VariableEnv
   }
   deriving (Typeable, Show, Eq)
+
+-- | We present values only in pretty-printed form
+type Value = Text
+
+-- | Variables during execution (in debugging mode)
+type VariableEnv = [(Name, Type, Value)]
 
 {------------------------------------------------------------------------------
   Show instances

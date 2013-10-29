@@ -58,7 +58,7 @@ data IdInfo = IdInfo {
     idProp  :: {-# UNPACK #-} !IdPropPtr
   , idScope :: !IdScope
   }
-  deriving Show
+  deriving (Show, Typeable)
 
 data IdProp = IdProp {
     idName       :: !Text
@@ -171,11 +171,10 @@ data RunResult =
 
 -- | Information about a triggered breakpoint
 data BreakInfo = BreakInfo {
-    breakInfoModule     :: Public.ModuleName
-  , breakInfoSpan       :: SourceSpan
-  , breakInfoResultType :: Public.Type
-  , breakInfoLocalVars  :: [(IdInfo, Text)]
-  , breakInfoCache      :: ExplicitSharingCache -- Partial cache
+    breakInfoModule      :: Public.ModuleName
+  , breakInfoSpan        :: SourceSpan
+  , breakInfoResultType  :: Public.Type
+  , breakInfoVariableEnv :: Public.VariableEnv
   }
   deriving (Typeable, Show)
 
@@ -348,10 +347,9 @@ instance Binary BreakInfo where
     put breakInfoModule
     put breakInfoSpan
     put breakInfoResultType
-    put breakInfoLocalVars
-    put breakInfoCache
+    put breakInfoVariableEnv
 
-  get = BreakInfo <$> get <*> get <*> get <*> get <*> get
+  get = BreakInfo <$> get <*> get <*> get <*> get
 
 {------------------------------------------------------------------------------
   Util

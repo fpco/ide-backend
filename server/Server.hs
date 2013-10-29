@@ -123,6 +123,9 @@ ghcServerEngine configGenerateModInfo
             ReqBreakpoint mod span value -> do
               ghcHandleBreak conv mod span value
               return args
+            ReqPrint vars bind forceEval -> do
+              ghcHandlePrint conv vars bind forceEval
+              return args
             ReqCrash delay -> do
               ghcHandleCrash delay
               return args
@@ -381,6 +384,12 @@ ghcHandleBreak :: RpcConversation -> ModuleName -> Public.SourceSpan -> Bool -> 
 ghcHandleBreak RpcConversation{..} modName span value = do
   oldValue <- breakFromSpan modName span value
   liftIO $ put oldValue
+
+-- | Handle a print request
+ghcHandlePrint :: RpcConversation -> Public.Name -> Bool -> Bool -> Ghc ()
+ghcHandlePrint RpcConversation{..} var bind forceEval = do
+  vals <- printVars (Text.unpack var) bind forceEval
+  liftIO $ put vals
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation -> RunCmd -> Ghc ()

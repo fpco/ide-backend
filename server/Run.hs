@@ -40,6 +40,7 @@ module Run
   , RunResult(..)
   , RunBufferMode(..)
   , breakFromSpan
+  , printVars
   ) where
 
 #define DEBUG 0
@@ -104,16 +105,13 @@ import qualified IdeSession.Types.Public as Public
 import IdeSession.Util
 import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
-import qualified IdeSession.Strict.List   as StrictList
-import qualified IdeSession.Strict.Maybe  as StrictMaybe
-import qualified IdeSession.Strict.IntMap as StrictIntMap
+import qualified IdeSession.Strict.List as StrictList
 
 import HsWalk (idInfoForName, IsBinder(..))
 import Haddock
 import Debug
 import Conv
 import FilePathCaching
-import IdPropCaching
 import Break
 
 type DynamicOpts = [Located String]
@@ -433,54 +431,43 @@ importBreakInfo (Just GHC.BreakInfo{..}) names = runMaybeT $ do
     modInfo          <- MaybeT $ getModuleInfo breakInfo_module
     printUnqualified <- MaybeT $ mkPrintUnqualifiedForModule modInfo
     let ModBreaks{..} = modInfoModBreaks modInfo
-    localVars <- lift (mkTerms >>= mapM (mkLocalVar printUnqualified))
+    localVars <- lift (mkTerms >>= mapM (exportVar printUnqualified))
     let srcSpan = modBreaks_locs Array.! breakInfo_number
     ProperSpan srcSpan' <- lift . liftIO $ extractSourceSpan srcSpan
-    partialCache <- lift $ mkPartialCache (map (idProp . fst) localVars)
     return BreakInfo {
-        breakInfoModule     = mod
-      , breakInfoSpan       = srcSpan'
-      , breakInfoResultType = Text.pack $ GHC.showSDoc (GHC.ppr breakInfo_resty)
-      , breakInfoLocalVars  = localVars
-      , breakInfoCache      = partialCache
+        breakInfoModule      = mod
+      , breakInfoSpan        = srcSpan'
+      , breakInfoResultType  = Text.pack $ GHC.showSDoc (GHC.ppr breakInfo_resty)
+      , breakInfoVariableEnv = localVars
       }
   where
     mkTerms :: Ghc [(Id, Term)]
     mkTerms = resolveNames names >>= evaluateIds False False
 
-    mkLocalVar :: PrintUnqualified -> (Id, Term) -> Ghc (IdInfo, Text)
-    mkLocalVar qual (var, term) = do
-      dynFlags <- getSessionDynFlags
-      (idPropPtr, Just idScope) <- idInfoForName
-                                     dynFlags
-                                     (GHC.idName var)
-                                     UseSite
-                                     Nothing
-                                     (Just breakInfo_module)
-                                     (const $ StrictMaybe.nothing)
-      -- Pretty print the value
-      let valStr = GHC.showSDoc . GHC.ppr $ term
-      -- Pretty print the type. This duplicates some logic from HsWalk :-/
-      let pprStyle    = mkUserStyle qual GHC.AllTheWay
-          showForalls = False
-          typStr      = showDocWith OneLineMode $ GHC.runSDoc
-                          (pprTypeForUser showForalls (GHC.idType var))
-                          (GHC.initSDocContext pprStyle)
-      recordIdPropType idPropPtr (Text.pack typStr)
-      return (IdInfo idPropPtr idScope, Text.pack valStr)
-
-    mkPartialCache :: [IdPropPtr] -> Ghc ExplicitSharingCache
-    mkPartialCache ids = do
-      let isLocalVar id _ = IdPropPtr id `elem` ids
-      idPropCache <- getIdPropCache
-      return ExplicitSharingCache {
-          filePathCache = StrictIntMap.empty
-        , idPropCache   = StrictIntMap.filterWithKey isLocalVar idPropCache
-        }
-
-
     -- we ignore the package (because it's always the home package)
     mod = Text.pack . moduleNameString . GHC.moduleName $ breakInfo_module
+
+printVars :: String -> Bool -> Bool -> Ghc Public.VariableEnv
+printVars vars bind forceEval =
+  -- TODO: This calls to GHC.getPrintUnqual follows the approach in Debugger.hs
+  -- but I'm not convinced it uses enough context information
+  GHC.getPrintUnqual         >>= \unqual ->
+  parseNames vars            >>=
+  resolveNames               >>=
+  evaluateIds bind forceEval >>=
+  mapM (exportVar unqual)
+
+exportVar :: PrintUnqualified -> (Id, Term) -> Ghc (Public.Name, Public.Type, Public.Value)
+exportVar qual (var, term) = do
+  -- Pretty-printing the type duplicates some logic from HsWalk.hs :-/
+  let nameStr     = GHC.showSDoc . GHC.ppr $ GHC.idName var
+      valStr      = GHC.showSDoc . GHC.ppr $ term
+      pprStyle    = mkUserStyle qual GHC.AllTheWay
+      showForalls = False
+      typStr      = showDocWith OneLineMode $ GHC.runSDoc
+                      (pprTypeForUser showForalls (GHC.idType var))
+                      (GHC.initSDocContext pprStyle)
+  return (Text.pack nameStr, Text.pack typStr, Text.pack valStr)
 
 -----------------------
 -- Source error conversion and collection

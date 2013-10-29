@@ -648,6 +648,12 @@ setBreakpoint IdeSession{..} mod span value = withMVar ideState $ \state -> case
   IdeSessionIdle idleState -> do
     rpcBreakpoint (idleState ^. ideGhcServer) mod span value
 
+-- | Print and/or force values during debugging
+printVar :: IdeSession -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv
+printVar IdeSession{..} var bind forceEval = withMVar ideState $ \state -> case state of
+  IdeSessionIdle idleState ->
+    rpcPrint (idleState ^. ideGhcServer) var bind forceEval
+
 -- | Build an exe from sources added previously via the ide-backend
 -- updateModule* mechanism. The modules that contains the @main@ code are
 -- indicated by the arguments to @buildExe@. The function can be called

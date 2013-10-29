@@ -4709,10 +4709,10 @@ assertBreak runResult mod loc resTy vars =
       assertEqual "module name" mod   (Text.unpack breakInfoModule)
       assertEqual "location"    loc   (show breakInfoSpan)
       assertEqual "result type" resTy (Text.unpack breakInfoResultType)
-      assertEqual "number of local vars" (length vars) (length breakInfoLocalVars)
-      forM_ (zip vars breakInfoLocalVars) $ \((var, typ, val), (idInfo, val')) -> do
-        assertEqual "var name" var (Text.unpack . idName . idProp $ idInfo)
-        assertEqual "var type" (Just typ) (fmap Text.unpack . idType . idProp $ idInfo)
+      assertEqual "number of local vars" (length vars) (length breakInfoVariableEnv)
+      forM_ (zip vars breakInfoVariableEnv) $ \((var, typ, val), (var', typ', val')) -> do
+        assertEqual "var name" var (Text.unpack var')
+        assertEqual "var type" typ (Text.unpack typ')
         assertEqual "var val"  val (Text.unpack val')
     _ -> assertFailure "Unexpected run result"
 

@@ -19,6 +19,7 @@ module IdeSession.GHC.Client (
   , rpcSetEnv
   , rpcSetArgs
   , rpcBreakpoint
+  , rpcPrint
   ) where
 
 import Control.Concurrent (ThreadId, killThread)
@@ -38,7 +39,7 @@ import Paths_ide_backend
 import IdeSession.GHC.API
 import IdeSession.RPC.Client
 import IdeSession.Types.Progress
-import IdeSession.Types.Public (ModuleName, SourceSpan)
+import qualified IdeSession.Types.Public as Public
 import IdeSession.Types.Private (RunResult(..))
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
@@ -178,7 +179,10 @@ rpcCompile server opts dir genCode callback =
 --
 -- Returns @Just@ the old value of the break if successful, or @Nothing@ if
 -- the breakpoint could not be found.
-rpcBreakpoint :: GhcServer -> ModuleName -> SourceSpan -> Bool -> IO (Maybe Bool)
+rpcBreakpoint :: GhcServer
+              -> Public.ModuleName -> Public.SourceSpan
+              -> Bool
+              -> IO (Maybe Bool)
 rpcBreakpoint server reqBreakpointModule reqBreakpointSpan reqBreakpointValue =
   conversation server $ \RpcConversation{..} -> do
     put ReqBreakpoint{..}
@@ -270,6 +274,12 @@ rpcRun server cmd translateResult = do
     handleExternalException ch e = do
       result <- translateResult . Just . RunGhcException . show $ e
       writeChan ch $ SnippetTerminated result
+
+-- | Print a variable
+rpcPrint :: GhcServer -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv
+rpcPrint server var bind forceEval = conversation server $ \RpcConversation{..} -> do
+  put (ReqPrint var bind forceEval)
+  get
 
 -- | Crash the GHC server (for debugging purposes)
 rpcCrash :: GhcServer -> Maybe Int -> IO ()
