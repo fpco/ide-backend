@@ -26,11 +26,13 @@ Changelog
  *  Version 0.7.1
 
      * New functionality: types of subexpressions (#50). Known issues:
-     
+
        - We sometimes report multiple types for the same span (see comments
          at the end of https://github.com/fpco/ide-backend/issues/50).
 
      * New functionality: report use sites of identifiers (#129)
+
+     * New functionality: Generate .cabal files (#127)
 
      * Efficiency of construction of type information (and especially
        autocompletion information) has been improved (#132).
@@ -52,7 +54,7 @@ Changelog
 
         - Load CoreLicenses.txt via Template Haskell (#128)
         - Less license failures (#126)
-        - Use System.IO.UTF8 to avoid character encoding issues (#117) 
+        - Use System.IO.UTF8 to avoid character encoding issues (#117)
 
  *  Version 0.7.0.2
 
