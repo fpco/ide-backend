@@ -25,40 +25,40 @@ Changelog
 
  *  Version 0.8
 
-     * New functionality: debugging API (#131). 
-       
+     * New functionality: debugging API (#131).
+
        Breakpoints can be set/cleared using
 
-           setBreakpoint :: IdeSession 
-                         -> ModuleName 
-                         -> Public.SourceSpan 
-                         -> Bool 
+           setBreakpoint :: IdeSession
+                         -> ModuleName
+                         -> Public.SourceSpan
+                         -> Bool
                          -> IO (Maybe Bool)
 
        The existing API for binding subexpressions can be used to construct
        SourceSpans.
 
        When a breakpoint is set, snippets can stop with a new RunResult
-        
+
            data RunResult =
              ...
              | RunBreak
 
        They can be resumed using
-        
+
            resume :: IdeSession -> IO (RunActions Public.RunResult)
 
        Information about the current breakpoint (if any) can be got using
 
            getBreakInfo :: Query (Maybe BreakInfo)
-           
+
            data BreakInfo = BreakInfo {
                breakInfoModule      :: Public.ModuleName
              , breakInfoSpan        :: SourceSpan
              , breakInfoResultType  :: Public.Type
              , breakInfoVariableEnv :: Public.VariableEnv
              }
-                      
+
            type VariableEnv = [(Name, Type, Value)]
 
        Variables can be printed and/or forced using
@@ -71,14 +71,14 @@ Changelog
 
        The two booleans indicate whether new variables should be found (cf.
        ghci's :print vs :sprint) and whether the value should be forced (:print
-       vs :force). This is only valid during an active breakpoint. 
+       vs :force). This is only valid during an active breakpoint.
 
        Known issues with debugging:
 
        - Resumed (:continue) snippets cannot be interrupted (#133)
 
      * Minor API changes:
-       
+
         - RunActions now has kind * -> * ; what was previously just "RunActions"
           is now (from the client's perspective) "RunActions RunResult"
         - String argument to RunOk has been removed.
@@ -86,11 +86,13 @@ Changelog
  *  Version 0.7.1
 
      * New functionality: types of subexpressions (#50). Known issues:
-     
+
        - We sometimes report multiple types for the same span (see comments
          at the end of https://github.com/fpco/ide-backend/issues/50).
 
      * New functionality: report use sites of identifiers (#129)
+
+     * New functionality: Generate .cabal files (#127)
 
      * Efficiency of construction of type information (and especially
        autocompletion information) has been improved (#132).
@@ -112,7 +114,7 @@ Changelog
 
         - Load CoreLicenses.txt via Template Haskell (#128)
         - Less license failures (#126)
-        - Use System.IO.UTF8 to avoid character encoding issues (#117) 
+        - Use System.IO.UTF8 to avoid character encoding issues (#117)
 
  *  Version 0.7.0.2
 
