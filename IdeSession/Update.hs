@@ -31,6 +31,7 @@ module IdeSession.Update (
   , runStmt
   , resume
   , setBreakpoint
+  , printVar
     -- * Debugging
   , forceRecompile
   , crashGhcServer

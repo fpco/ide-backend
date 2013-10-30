@@ -141,6 +141,7 @@ module IdeSession (
   , resume
   , runWaitAll
   , setBreakpoint
+  , printVar
     -- * Queries
     -- ** Types
   , Query

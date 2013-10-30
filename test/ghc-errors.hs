@@ -4369,6 +4369,22 @@ syntheticTests =
            assertEqual "" finalResult RunOk
            assertEqual "" (show (sort inputList) ++ "\n") (BSLC.unpack output)
     )
+  , ( "Debugging 3: Printing and forcing"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session qsort 1
+        assertNoErrors session
+
+        expTypes <- getExpTypes session
+        let (modName, mouseSpan) = mkSpan "Main" (2, 16, 2, 16)
+            fullSpan = fst . last $ expTypes modName mouseSpan
+
+        Just False <- setBreakpoint session modName fullSpan True
+        runActions <- runStmt session "Main" "main"
+        (_output, RunBreak _breakInfo) <- runWaitAll runActions
+
+        print =<< printVar session (Text.pack "left") True False
+        print =<< printVar session (Text.pack "left") True True
+    )
   ]
 
 qsort :: IdeSessionUpdate
