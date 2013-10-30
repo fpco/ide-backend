@@ -23,7 +23,17 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
- *  Version ???
+ *  Version 0.7.1
+
+     * New functionality: types of subexpressions (#50). Known issues:
+     
+       - We sometimes report multiple types for the same span (see comments
+         at the end of https://github.com/fpco/ide-backend/issues/50).
+
+     * New functionality: report use sites of identifiers (#129)
+
+     * Efficiency of construction of type information (and especially
+       autocompletion information) has been improved (#132).
 
      * Move license catenation (#72) documentation to haddocks,
        flesh it out, make code more readable, improve error output,
@@ -34,7 +44,15 @@ Changelog
 
      * Optimize license catenation and add some benchmark tests (#72)
 
-     *
+     * Bugfix: for ghc progress messages in projects with 10 or more modules
+       the first 9 progress message were not parsed correctly because we didn't
+       allow for whitespace in between '[' and the first number ("[ 1 of 10]").
+
+     * Merged pull requests:
+
+        - Load CoreLicenses.txt via Template Haskell (#128)
+        - Less license failures (#126)
+        - Use System.IO.UTF8 to avoid character encoding issues (#117) 
 
  *  Version 0.7.0.2
 
