@@ -23,14 +23,7 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
- *  Version 0.8 
-
-     * New functionality: types of subexpressions (#50). Known issues:
-     
-       - We sometimes report multiple types for the same span (see comments
-         at the end of https://github.com/fpco/ide-backend/issues/50).
-
-     * New functionality: report use sites of identifiers (#129)
+ *  Version 0.8
 
      * New functionality: debugging API (#131). 
        
@@ -84,6 +77,21 @@ Changelog
 
        - Resumed (:continue) snippets cannot be interrupted (#133)
 
+     * Minor API changes:
+       
+        - RunActions now has kind * -> * ; what was previously just "RunActions"
+          is now (from the client's perspective) "RunActions RunResult"
+        - String argument to RunOk has been removed.
+
+ *  Version 0.7.1
+
+     * New functionality: types of subexpressions (#50). Known issues:
+     
+       - We sometimes report multiple types for the same span (see comments
+         at the end of https://github.com/fpco/ide-backend/issues/50).
+
+     * New functionality: report use sites of identifiers (#129)
+
      * Efficiency of construction of type information (and especially
        autocompletion information) has been improved (#132).
 
@@ -105,12 +113,6 @@ Changelog
         - Load CoreLicenses.txt via Template Haskell (#128)
         - Less license failures (#126)
         - Use System.IO.UTF8 to avoid character encoding issues (#117) 
-
-     * Minor API changes:
-       
-        - RunActions now has kind * -> * ; what was previously just "RunActions"
-          is now (from the client's perspective) "RunActions RunResult"
-        - String argument to RunOk has been removed.
 
  *  Version 0.7.0.2
 
