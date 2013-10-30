@@ -653,14 +653,22 @@ runCmd session mkCmd = modifyIdleState session $ \idleState ->
 --
 -- Set a breakpoint at the specified location. Returns @Just@ the old value of the
 -- breakpoint if successful, or @Nothing@ otherwise.
-setBreakpoint :: IdeSession -> ModuleName -> Public.SourceSpan -> Bool -> IO (Maybe Bool)
+setBreakpoint :: IdeSession
+              -> ModuleName        -- ^ Module where the breakshould should be set
+              -> Public.SourceSpan -- ^ Location of the breakpoint
+              -> Bool              -- ^ New value for the breakpoint
+              -> IO (Maybe Bool)   -- ^ Old value of the breakpoint (if valid)
 setBreakpoint session mod span value = withIdleState session $ \idleState ->
   rpcBreakpoint (idleState ^. ideGhcServer) mod span value
 
 -- | Print and/or force values during debugging
 --
 -- Only valid in breakpoint state.
-printVar :: IdeSession -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv
+printVar :: IdeSession
+         -> Public.Name -- ^ Variable to print
+         -> Bool        -- ^ Should printing bind new vars? (@:print@ vs. @:sprint@)
+         -> Bool        -- ^ Should the value be forced? (@:print@ vs. @:force@)
+         -> IO Public.VariableEnv
 printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
   rpcPrint (idleState ^. ideGhcServer) var bind forceEval
 
