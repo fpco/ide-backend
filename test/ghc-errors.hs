@@ -4382,8 +4382,10 @@ syntheticTests =
         runActions <- runStmt session "Main" "main"
         (_output, RunBreak _breakInfo) <- runWaitAll runActions
 
-        print =<< printVar session (Text.pack "left") True False
-        print =<< printVar session (Text.pack "left") True True
+        printed <- printVar session (Text.pack "left") True False
+        forced  <- printVar session (Text.pack "left") True True
+        assertEqual "" [(Text.pack "left", Text.pack "[Integer]", Text.pack "(_t1::[Integer])")] printed
+        assertEqual "" [(Text.pack "left", Text.pack "[Integer]", Text.pack "[4, 0, 3, 1]")] forced
     )
   ]
 
@@ -4730,7 +4732,7 @@ assertBreak runResult mod loc resTy vars =
         assertEqual "var name" var (Text.unpack var')
         assertEqual "var type" typ (Text.unpack typ')
         assertEqual "var val"  val (Text.unpack val')
-    _ -> assertFailure "Unexpected run result"
+    _ -> assertFailure $ "Unexpected run result: " ++ show runResult
 
 restartRun :: [String] -> ExitCode -> Assertion
 restartRun code exitCode =

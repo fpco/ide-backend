@@ -59,6 +59,7 @@ import qualified Data.Array as Array
 import qualified Data.Text as Text
 import System.FilePath.Find (find, always, extension)
 import System.Process
+import System.IO.Unsafe (unsafePerformIO)
 import Control.Concurrent (MVar, ThreadId)
 
 #if defined(GHC_761)
@@ -389,6 +390,18 @@ runCmd Resume _tidMVar =
   Dealing with breakpoints
 ------------------------------------------------------------------------------}
 
+-- | We store PrintQualified whenever we hit a breakpoint so that we have
+-- sufficient context for subsequent requests for pretty-printing types
+printContext :: StrictIORef PrintUnqualified
+{-# NOINLINE printContext #-}
+printContext = unsafePerformIO $ newIORef alwaysQualify
+
+getPrintContext :: Ghc PrintUnqualified
+getPrintContext = liftIO $ readIORef printContext
+
+setPrintContext :: PrintUnqualified -> Ghc ()
+setPrintContext ctxt = liftIO $ writeIORef printContext ctxt
+
 breakFromSpan :: ModuleName        -- ^ Module containing the breakpoint
               -> Public.SourceSpan -- ^ Location of the breakpoint
               -> Bool              -- ^ New value for the breakpoint
@@ -430,6 +443,7 @@ importBreakInfo :: Maybe GHC.BreakInfo
 importBreakInfo (Just GHC.BreakInfo{..}) names = runMaybeT $ do
     modInfo          <- MaybeT $ getModuleInfo breakInfo_module
     printUnqualified <- MaybeT $ mkPrintUnqualifiedForModule modInfo
+    lift $ setPrintContext printUnqualified
     let ModBreaks{..} = modInfoModBreaks modInfo
     localVars <- lift (mkTerms >>= mapM (exportVar printUnqualified))
     let srcSpan = modBreaks_locs Array.! breakInfo_number
@@ -449,9 +463,7 @@ importBreakInfo (Just GHC.BreakInfo{..}) names = runMaybeT $ do
 
 printVars :: String -> Bool -> Bool -> Ghc Public.VariableEnv
 printVars vars bind forceEval =
-  -- TODO: This calls to GHC.getPrintUnqual follows the approach in Debugger.hs
-  -- but I'm not convinced it uses enough context information
-  GHC.getPrintUnqual         >>= \unqual ->
+  getPrintContext            >>= \unqual ->
   parseNames vars            >>=
   resolveNames               >>=
   evaluateIds bind forceEval >>=
@@ -460,13 +472,13 @@ printVars vars bind forceEval =
 exportVar :: PrintUnqualified -> (Id, Term) -> Ghc (Public.Name, Public.Type, Public.Value)
 exportVar qual (var, term) = do
   -- Pretty-printing the type duplicates some logic from HsWalk.hs :-/
-  let nameStr     = GHC.showSDoc . GHC.ppr $ GHC.idName var
-      valStr      = GHC.showSDoc . GHC.ppr $ term
-      pprStyle    = mkUserStyle qual GHC.AllTheWay
-      showForalls = False
-      typStr      = showDocWith OneLineMode $ GHC.runSDoc
-                      (pprTypeForUser showForalls (GHC.idType var))
-                      (GHC.initSDocContext pprStyle)
+  let pprStyle     = mkUserStyle qual GHC.AllTheWay
+      showSDoc doc = showDocWith OneLineMode
+                   $ GHC.runSDoc doc (GHC.initSDocContext pprStyle)
+      showForalls  = False
+  let nameStr = showSDoc $ GHC.ppr (GHC.idName var)
+      valStr  = showSDoc $ GHC.ppr term
+      typStr  = showSDoc $ pprTypeForUser showForalls (GHC.idType var)
   return (Text.pack nameStr, Text.pack typStr, Text.pack valStr)
 
 -----------------------
