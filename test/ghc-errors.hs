@@ -710,7 +710,7 @@ syntheticTests =
     , withSession defaultSessionConfig $ \session -> do
         shutdownSession session
         assertRaises "runStmt session Main main"
-          (== userError "Session already shut down.")
+          (== userError "State not idle")
           (runStmt session "Main" "main")
     )
   , ( "Test recursive modules"
@@ -1424,7 +1424,7 @@ syntheticTests =
         -- Make sure that a call to 'runStmt' throws an exception
         -- (because we are still in running state)
         assertRaises "runStmt during running code"
-          (== userError "Cannot run code concurrently")
+          (== userError "State not idle")
           (runStmt session "M" "hello")
 
         -- Now call runWait on the *new* runActions and make sure we
@@ -4352,15 +4352,15 @@ syntheticTests =
         outputs <- forM (mark inputList) $ \(i, isFirst, _isLast) -> do
            runActions <- if isFirst then runStmt session "Main" "main"
                                     else resume session
-           (output, result) <- runWaitAll runActions
-           assertBreak result "Main"
-                              "Main.hs@2:16-2:48"
-                              "[a]"
-                              [ ("_result" , "[Integer]" , "_")
-                              , ("a"       , "Integer"   , show i)
-                              , ("left"    , "[Integer]" , "_")
-                              , ("right"   , "[Integer]" , "_")
-                              ]
+           (output, RunBreak) <- runWaitAll runActions
+           assertBreak session "Main"
+                               "Main.hs@2:16-2:48"
+                               "[a]"
+                               [ ("_result" , "[Integer]" , "_")
+                               , ("a"       , "Integer"   , show i)
+                               , ("left"    , "[Integer]" , "_")
+                               , ("right"   , "[Integer]" , "_")
+                               ]
            return output
 
         do runActions <- resume session
@@ -4368,6 +4368,8 @@ syntheticTests =
            let output = BSL.concat $ outputs ++ [finalOutput]
            assertEqual "" finalResult RunOk
            assertEqual "" (show (sort inputList) ++ "\n") (BSLC.unpack output)
+           mBreakInfo <- getBreakInfo session
+           assertEqual "" Nothing mBreakInfo
     )
   , ( "Debugging 3: Printing and forcing"
     , withSession defaultSessionConfig $ \session -> do
@@ -4380,7 +4382,7 @@ syntheticTests =
 
         Just False <- setBreakpoint session modName fullSpan True
         runActions <- runStmt session "Main" "main"
-        (_output, RunBreak _breakInfo) <- runWaitAll runActions
+        (_output, RunBreak) <- runWaitAll runActions
 
         printed <- printVar session (Text.pack "left") True False
         forced  <- printVar session (Text.pack "left") True True
@@ -4715,24 +4717,22 @@ show3errors errs =
            | otherwise       = ""
   in shown ++ more
 
-assertBreak :: RunResult
+assertBreak :: IdeSession
             -> String                     -- ^ Module
             -> String                     -- ^ Location
             -> String                     -- ^ Result type
             -> [(String, String, String)] -- ^ Var, type, value
             -> Assertion
-assertBreak runResult mod loc resTy vars =
-  case runResult of
-    RunBreak BreakInfo{..} -> do
-      assertEqual "module name" mod   (Text.unpack breakInfoModule)
-      assertEqual "location"    loc   (show breakInfoSpan)
-      assertEqual "result type" resTy (Text.unpack breakInfoResultType)
-      assertEqual "number of local vars" (length vars) (length breakInfoVariableEnv)
-      forM_ (zip vars breakInfoVariableEnv) $ \((var, typ, val), (var', typ', val')) -> do
-        assertEqual "var name" var (Text.unpack var')
-        assertEqual "var type" typ (Text.unpack typ')
-        assertEqual "var val"  val (Text.unpack val')
-    _ -> assertFailure $ "Unexpected run result: " ++ show runResult
+assertBreak session mod loc resTy vars = do
+  Just BreakInfo{..} <- getBreakInfo session
+  assertEqual "module name" mod   (Text.unpack breakInfoModule)
+  assertEqual "location"    loc   (show breakInfoSpan)
+  assertEqual "result type" resTy (Text.unpack breakInfoResultType)
+  assertEqual "number of local vars" (length vars) (length breakInfoVariableEnv)
+  forM_ (zip vars breakInfoVariableEnv) $ \((var, typ, val), (var', typ', val')) -> do
+    assertEqual "var name" var (Text.unpack var')
+    assertEqual "var type" typ (Text.unpack typ')
+    assertEqual "var val"  val (Text.unpack val')
 
 restartRun :: [String] -> ExitCode -> Assertion
 restartRun code exitCode =

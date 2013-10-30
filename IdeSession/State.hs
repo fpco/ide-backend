@@ -29,6 +29,7 @@ module IdeSession.State
   , ideUpdatedEnv
   , ideUpdatedCode
   , ideUpdatedArgs
+  , ideBreakInfo
   , managedSource
   , managedData
   ) where
@@ -39,7 +40,7 @@ import System.Exit (ExitCode)
 import System.FilePath ((</>))
 import System.Posix.Types (EpochTime)
 import IdeSession.Types.Private hiding (RunResult)
-import IdeSession.Types.Public (RunBufferMode, RunResult)
+import qualified IdeSession.Types.Public as Public
 import IdeSession.Config
 import IdeSession.GHC.Client (RunActions, GhcServer)
 import IdeSession.Strict.Container
@@ -101,7 +102,7 @@ data IdeStaticInfo = IdeStaticInfo {
 
 data IdeSessionState =
     IdeSessionIdle IdeIdleState
-  | IdeSessionRunning (RunActions RunResult) IdeIdleState
+  | IdeSessionRunning (RunActions Public.RunResult) IdeIdleState
   | IdeSessionShutdown
   | IdeSessionServerDied ExternalException IdeIdleState
 
@@ -134,9 +135,9 @@ data IdeIdleState = IdeIdleState {
     -- | The GHC server (this is replaced in 'restartSession')
   , _ideGhcServer        :: !GhcServer
     -- | Buffer mode for standard output for 'runStmt'
-  , _ideStdoutBufferMode :: !RunBufferMode
+  , _ideStdoutBufferMode :: !Public.RunBufferMode
     -- | Buffer mode for standard error for 'runStmt'
-  , _ideStderrBufferMode :: !RunBufferMode
+  , _ideStderrBufferMode :: !Public.RunBufferMode
     -- | Has the environment (as recorded in this state) diverged from the
     -- environment on the server?
   , _ideUpdatedEnv       :: !Bool
@@ -145,6 +146,8 @@ data IdeIdleState = IdeIdleState {
   , _ideUpdatedCode      :: !Bool
     -- | Has the value of ideArgs diverged from what's recorded on the server?
   , _ideUpdatedArgs      :: !Bool
+    -- | Are we currently in a breakpoint?
+  , _ideBreakInfo        :: !(Strict Maybe Public.BreakInfo)
   }
 
 -- | The collection of source and data files submitted by the user.
@@ -164,22 +167,23 @@ internalFile ideSourcesDir m = ideSourcesDir </> m
   Accessors
 ------------------------------------------------------------------------------}
 
-ideLogicalTimestamp :: Accessor IdeIdleState LogicalTimestamp
-ideComputed         :: Accessor IdeIdleState (Strict Maybe Computed)
-ideNewOpts          :: Accessor IdeIdleState (Maybe [String])
-ideGenerateCode     :: Accessor IdeIdleState Bool
-ideManagedFiles     :: Accessor IdeIdleState ManagedFilesInternal
-ideBuildExeStatus   :: Accessor IdeIdleState (Maybe ExitCode)
-ideBuildDocStatus   :: Accessor IdeIdleState (Maybe ExitCode)
+ideLogicalTimestamp    :: Accessor IdeIdleState LogicalTimestamp
+ideComputed            :: Accessor IdeIdleState (Strict Maybe Computed)
+ideNewOpts             :: Accessor IdeIdleState (Maybe [String])
+ideGenerateCode        :: Accessor IdeIdleState Bool
+ideManagedFiles        :: Accessor IdeIdleState ManagedFilesInternal
+ideBuildExeStatus      :: Accessor IdeIdleState (Maybe ExitCode)
+ideBuildDocStatus      :: Accessor IdeIdleState (Maybe ExitCode)
 ideBuildLicensesStatus :: Accessor IdeIdleState (Maybe ExitCode)
-ideEnv              :: Accessor IdeIdleState [(String, Maybe String)]
-ideArgs             :: Accessor IdeIdleState [String]
-ideGhcServer        :: Accessor IdeIdleState GhcServer
-ideStdoutBufferMode :: Accessor IdeIdleState RunBufferMode
-ideStderrBufferMode :: Accessor IdeIdleState RunBufferMode
-ideUpdatedEnv       :: Accessor IdeIdleState Bool
-ideUpdatedCode      :: Accessor IdeIdleState Bool
-ideUpdatedArgs      :: Accessor IdeIdleState Bool
+ideEnv                 :: Accessor IdeIdleState [(String, Maybe String)]
+ideArgs                :: Accessor IdeIdleState [String]
+ideGhcServer           :: Accessor IdeIdleState GhcServer
+ideStdoutBufferMode    :: Accessor IdeIdleState Public.RunBufferMode
+ideStderrBufferMode    :: Accessor IdeIdleState Public.RunBufferMode
+ideUpdatedEnv          :: Accessor IdeIdleState Bool
+ideUpdatedCode         :: Accessor IdeIdleState Bool
+ideUpdatedArgs         :: Accessor IdeIdleState Bool
+ideBreakInfo           :: Accessor IdeIdleState (Strict Maybe Public.BreakInfo)
 
 ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
@@ -198,6 +202,7 @@ ideStderrBufferMode = accessor _ideStderrBufferMode $ \x s -> s { _ideStderrBuff
 ideUpdatedEnv       = accessor _ideUpdatedEnv       $ \x s -> s { _ideUpdatedEnv       = x }
 ideUpdatedCode      = accessor _ideUpdatedCode      $ \x s -> s { _ideUpdatedCode      = x }
 ideUpdatedArgs      = accessor _ideUpdatedArgs      $ \x s -> s { _ideUpdatedArgs      = x }
+ideBreakInfo        = accessor _ideBreakInfo        $ \x s -> s { _ideBreakInfo        = x }
 
 managedSource :: Accessor ManagedFilesInternal [(FilePath, (MD5Digest, LogicalTimestamp))]
 managedData   :: Accessor ManagedFilesInternal [FilePath]

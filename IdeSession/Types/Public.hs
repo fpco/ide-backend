@@ -217,7 +217,7 @@ data RunResult =
     -- | The session was restarted
   | RunForceCancelled
     -- | Execution was paused because of a breakpoint
-  | RunBreak BreakInfo
+  | RunBreak
   deriving (Typeable, Show, Eq)
 
 -- | Information about a triggered breakpoint

@@ -210,13 +210,6 @@ instance ExplicitSharing Public.SpanInfo where
     Private.SpanId idInfo -> Public.SpanId (removeExplicitSharing cache idInfo)
     Private.SpanQQ idInfo -> Public.SpanQQ (removeExplicitSharing cache idInfo)
 
-instance ExplicitSharing Public.RunResult where
-  removeExplicitSharing cache runResult = case runResult of
-    Private.RunOk              -> Public.RunOk
-    Private.RunProgException e -> Public.RunProgException e
-    Private.RunGhcException e  -> Public.RunGhcException e
-    Private.RunBreak info      -> Public.RunBreak (removeExplicitSharing cache info)
-
 instance ExplicitSharing Public.BreakInfo where
   removeExplicitSharing cache Private.BreakInfo{..} = Public.BreakInfo {
       Public.breakInfoModule      = breakInfoModule

@@ -24,6 +24,7 @@ module IdeSession.Query (
   , getBuildExeStatus
   , getBuildDocStatus
   , getBuildLicensesStatus
+  , getBreakInfo
     -- * Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
@@ -162,17 +163,23 @@ getManagedFiles = simpleQuery $ translate . getVal ideManagedFiles
       , dataFiles   = _managedData files
       }
 
--- Get exit status of the last invocation of 'buildExe', if any.
+-- | Get exit status of the last invocation of 'buildExe', if any.
 getBuildExeStatus :: Query (Maybe ExitCode)
 getBuildExeStatus = simpleQuery $ getVal ideBuildExeStatus
 
--- Get exit status of the last invocation of 'buildDoc', if any.
+-- | Get exit status of the last invocation of 'buildDoc', if any.
 getBuildDocStatus :: Query (Maybe ExitCode)
 getBuildDocStatus = simpleQuery $ getVal ideBuildDocStatus
 
--- Get exit status of the last invocation of 'buildLicenses', if any.
+-- | Get exit status of the last invocation of 'buildLicenses', if any.
 getBuildLicensesStatus :: Query (Maybe ExitCode)
 getBuildLicensesStatus = simpleQuery $ getVal ideBuildLicensesStatus
+
+-- | Get information about the last breakpoint that we hit
+--
+-- Returns Nothing if we are not currently stopped on a breakpoint.
+getBreakInfo :: Query (Maybe BreakInfo)
+getBreakInfo = simpleQuery $ toLazyMaybe . getVal ideBreakInfo
 
 {------------------------------------------------------------------------------
   Queries that rely on computed state

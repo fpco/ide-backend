@@ -160,6 +160,7 @@ module IdeSession (
   , getEnv
   , getGhcServer
   , getManagedFiles
+  , getBreakInfo
     -- ** Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules

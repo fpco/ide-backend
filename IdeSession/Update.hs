@@ -83,7 +83,7 @@ import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
 import qualified IdeSession.Strict.List   as List
 import qualified IdeSession.Strict.Trie   as Trie
-import IdeSession.Strict.MVar (newMVar, modifyMVar, modifyMVar_, withMVar)
+import IdeSession.Strict.MVar
 
 {------------------------------------------------------------------------------
   Starting and stopping
@@ -147,6 +147,7 @@ initSession initParams ideConfig@SessionConfig{..} = do
                         , _ideUpdatedCode      = True
                         , _ideStdoutBufferMode = RunNoBuffering
                         , _ideStderrBufferMode = RunNoBuffering
+                        , _ideBreakInfo        = Maybe.nothing
                         , _ideGhcServer
                         }
   let ideStaticInfo = IdeStaticInfo{..}
@@ -584,31 +585,25 @@ resume ideSession = runCmd ideSession (const Resume)
 
 -- | Internal geneneralization used in 'runStmt' and 'resume'
 runCmd :: IdeSession -> (IdeIdleState -> RunCmd) -> IO (RunActions Public.RunResult)
-runCmd IdeSession{ideState} mkCmd = do
-  modifyMVar ideState $ \state -> case state of
-    IdeSessionIdle idleState ->
-     case (toLazyMaybe (idleState ^. ideComputed), idleState ^. ideGenerateCode) of
-       (Just comp, True) -> do
-         let cmd = mkCmd idleState
-         checkStateOk comp cmd
-         runActions <- rpcRun (idleState ^. ideGhcServer)
-                              cmd
-                              (translateRunResult (computedCache comp))
-         registerTerminationCallback runActions restoreToIdle
-         return (IdeSessionRunning runActions idleState, runActions)
-       _ ->
-         -- This 'fail' invocation is, in part, a workaround for
-         -- http://hackage.haskell.org/trac/ghc/ticket/7539
-         -- which would otherwise lead to a hard GHC crash,
-         -- instead of providing a sensible error message
-         -- that we could show to the user.
-         fail "Cannot run before the code is generated."
-    IdeSessionRunning _ _ ->
-      fail "Cannot run code concurrently"
-    IdeSessionShutdown ->
-      fail "Session already shut down."
-    IdeSessionServerDied _ _ ->
-      fail "Server died (reset or call updateSession)"
+runCmd session mkCmd = modifyIdleState session $ \idleState ->
+  case (toLazyMaybe (idleState ^. ideComputed), idleState ^. ideGenerateCode) of
+    (Just comp, True) -> do
+      let cmd   = mkCmd idleState
+          cache = computedCache comp
+      checkStateOk comp cmd
+      isBreak    <- newEmptyMVar
+      runActions <- rpcRun (idleState ^. ideGhcServer)
+                           cmd
+                           (translateRunResult isBreak)
+      registerTerminationCallback runActions (restoreToIdle cache isBreak)
+      return (IdeSessionRunning runActions idleState, runActions)
+    _ ->
+      -- This 'fail' invocation is, in part, a workaround for
+      -- http://hackage.haskell.org/trac/ghc/ticket/7539
+      -- which would otherwise lead to a hard GHC crash,
+      -- instead of providing a sensible error message
+      -- that we could show to the user.
+      fail "Cannot run before the code is generated."
   where
     checkStateOk :: Computed -> RunCmd -> IO ()
     checkStateOk comp RunStmt{..} =
@@ -621,39 +616,53 @@ runCmd IdeSession{ideState} mkCmd = do
       -- TODO: should we check that there is anything to resume here?
       return ()
 
-    restoreToIdle :: Public.RunResult -> IO ()
-    restoreToIdle _ = modifyMVar_ ideState $ \state -> case state of
-      IdeSessionIdle _ ->
-        Ex.throwIO (userError "The impossible happened!")
-      IdeSessionRunning _ idleState -> do
-        return $ IdeSessionIdle idleState
-      IdeSessionShutdown ->
-        return state
-      IdeSessionServerDied _ _ ->
-        return state
+    restoreToIdle :: ExplicitSharingCache -> StrictMVar (Strict Maybe BreakInfo) -> Public.RunResult -> IO ()
+    restoreToIdle cache isBreak _ = do
+      mBreakInfo <- readMVar isBreak
+      modifyMVar_ (ideState session) $ \state -> case state of
+        IdeSessionIdle _ ->
+          Ex.throwIO (userError "The impossible happened!")
+        IdeSessionRunning _ idleState -> do
+          let upd = ideBreakInfo ^= fmap (removeExplicitSharing cache) mBreakInfo
+          return $ IdeSessionIdle (upd idleState)
+        IdeSessionShutdown ->
+          return state
+        IdeSessionServerDied _ _ ->
+          return state
 
-    translateRunResult :: ExplicitSharingCache
+    translateRunResult :: StrictMVar (Strict Maybe BreakInfo)
                        -> Maybe Private.RunResult
                        -> IO Public.RunResult
-    translateRunResult cache (Just runResult) =
-      return (removeExplicitSharing cache runResult)
-    translateRunResult _cache Nothing =
-      return Public.RunForceCancelled
+    translateRunResult isBreak (Just Private.RunOk) = do
+      putMVar isBreak Maybe.nothing
+      return $ Public.RunOk
+    translateRunResult isBreak (Just (Private.RunProgException str)) = do
+      putMVar isBreak Maybe.nothing
+      return $ Public.RunProgException str
+    translateRunResult isBreak (Just (Private.RunGhcException str)) = do
+      putMVar isBreak Maybe.nothing
+      return $ Public.RunGhcException str
+    translateRunResult isBreak (Just (Private.RunBreak breakInfo)) = do
+      putMVar isBreak (Maybe.just breakInfo)
+      return $ Public.RunBreak
+    translateRunResult _isBreak Nothing =
+      -- Termination handler not called in this case, no need to update _isBreak
+      return $ Public.RunForceCancelled
 
 -- | Breakpoint
 --
 -- Set a breakpoint at the specified location. Returns @Just@ the old value of the
 -- breakpoint if successful, or @Nothing@ otherwise.
 setBreakpoint :: IdeSession -> ModuleName -> Public.SourceSpan -> Bool -> IO (Maybe Bool)
-setBreakpoint IdeSession{..} mod span value = withMVar ideState $ \state -> case state of
-  IdeSessionIdle idleState -> do
-    rpcBreakpoint (idleState ^. ideGhcServer) mod span value
+setBreakpoint session mod span value = withIdleState session $ \idleState ->
+  rpcBreakpoint (idleState ^. ideGhcServer) mod span value
 
 -- | Print and/or force values during debugging
+--
+-- Only valid in breakpoint state.
 printVar :: IdeSession -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv
-printVar IdeSession{..} var bind forceEval = withMVar ideState $ \state -> case state of
-  IdeSessionIdle idleState ->
-    rpcPrint (idleState ^. ideGhcServer) var bind forceEval
+printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
+  rpcPrint (idleState ^. ideGhcServer) var bind forceEval
 
 -- | Build an exe from sources added previously via the ide-backend
 -- updateModule* mechanism. The modules that contains the @main@ code are
@@ -794,10 +803,25 @@ forceRecompile = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
 -- @Nothing@, crash immediately; otherwise, set up a thread that throws
 -- an exception to the main thread after the delay.
 crashGhcServer :: IdeSession -> Maybe Int -> IO ()
-crashGhcServer IdeSession{ideState} delay = do
-  withMVar ideState $ \state ->
-    case state of
-      IdeSessionIdle idleState ->
-        rpcCrash (idleState ^. ideGhcServer) delay
-      _ ->
-        Ex.throwIO (userError "Call to crashGhcServer while state not idle")
+crashGhcServer session delay = withIdleState session $ \idleState ->
+  rpcCrash (idleState ^. ideGhcServer) delay
+
+{------------------------------------------------------------------------------
+  Aux
+------------------------------------------------------------------------------}
+
+withBreakInfo :: IdeSession -> (IdeIdleState -> Public.BreakInfo -> IO a) -> IO a
+withBreakInfo session act = withIdleState session $ \idleState ->
+  case toLazyMaybe (idleState ^. ideBreakInfo) of
+    Just breakInfo -> act idleState breakInfo
+    Nothing        -> Ex.throwIO (userError "Not in breakpoint state")
+
+withIdleState :: IdeSession -> (IdeIdleState -> IO a) -> IO a
+withIdleState session act = modifyIdleState session $ \idleState -> do
+  result <- act idleState
+  return (IdeSessionIdle idleState, result)
+
+modifyIdleState :: IdeSession -> (IdeIdleState -> IO (IdeSessionState, a)) -> IO a
+modifyIdleState IdeSession{..} act = modifyMVar ideState $ \state -> case state of
+  IdeSessionIdle idleState -> act idleState
+  _                        -> Ex.throwIO $ userError "State not idle"
