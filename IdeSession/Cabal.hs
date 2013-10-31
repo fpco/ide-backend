@@ -20,6 +20,7 @@ import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
 import System.FilePath ((</>), takeFileName, takeDirectory)
+import System.FilePath.Find (find, always, extension)
 import System.Directory (
     doesFileExist
   , createDirectoryIfMissing
@@ -63,6 +64,7 @@ import Distribution.Verbosity (silent)
 import Language.Haskell.Extension (Language (Haskell2010))
 import Language.Haskell.TH.Syntax (lift, runIO)
 
+import IdeSession.GHC.API (cExtensions)
 import IdeSession.Licenses ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
 import IdeSession.State
 import IdeSession.Strict.Container
@@ -129,24 +131,30 @@ pkgDescFromName pkgName = PackageDescription
 pkgDesc :: PackageDescription
 pkgDesc = pkgDescFromName "main"
 
-bInfo :: FilePath -> [String] -> BuildInfo
-bInfo sourceDir ghcOpts =
+bInfo :: FilePath -> [String] -> [FilePath] -> BuildInfo
+bInfo sourceDir ghcOpts cSources =
   emptyBuildInfo
     { buildable = True
     , hsSourceDirs = [sourceDir]
     , defaultLanguage = Just Haskell2010
     , options = [(GHC, ghcOpts)]
+    , cSources
     }
+
+getCSources :: FilePath -> IO [FilePath]
+getCSources sourceDir =
+  find always ((`elem` cExtensions) `liftM` extension) sourceDir
 
 exeDesc :: FilePath -> FilePath -> [String] -> (ModuleName, FilePath)
         -> IO Executable
 exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
+  cSources <- getCSources ideSourcesDir
   let exeName = Text.unpack m
   if exeName == "Main" then do  -- that's what Cabal expects, no wrapper needed
     return $ Executable
       { exeName
       , modulePath = path
-      , buildInfo = bInfo ideSourcesDir ghcOpts
+      , buildInfo = bInfo ideSourcesDir ghcOpts cSources
       }
   else do
     -- TODO: Verify @path@ somehow.
@@ -159,16 +167,17 @@ exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
     return $ Executable
       { exeName
       , modulePath
-      , buildInfo = bInfo mDir ghcOpts
+      , buildInfo = bInfo mDir ghcOpts cSources
       }
 
 libDesc :: FilePath -> [String] -> [Distribution.ModuleName.ModuleName]
-        -> Library
-libDesc ideSourcesDir ghcOpts ms =
-  Library
+        -> IO Library
+libDesc ideSourcesDir ghcOpts ms = do
+  cSources <- getCSources ideSourcesDir
+  return $ Library
     { exposedModules = ms
     , libExposed = False
-    , libBuildInfo = bInfo ideSourcesDir ghcOpts
+    , libBuildInfo = bInfo ideSourcesDir ghcOpts cSources
     }
 
 -- TODO: we could do the parsing early and export parsed Versions via our API,
@@ -240,8 +249,8 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-      library = libDesc ideSourcesDir ghcOpts projectMs
-      gpDesc = GenericPackageDescription
+  library <- libDesc ideSourcesDir ghcOpts projectMs
+  let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
         , condLibrary        = Just $ CondNode library libDeps []
@@ -310,8 +319,8 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-      library = libDesc ideSourcesDir ghcOpts projectMs
-      gpDesc = GenericPackageDescription
+  library <- libDesc ideSourcesDir ghcOpts projectMs
+  let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
         , condLibrary        = Just $ CondNode library libDeps []
@@ -363,11 +372,12 @@ buildDotCabal ideSourcesDir ghcOpts computed = do
   let soundMs = delete (Text.pack "Main") loadedMs
       projectMs =
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-      library = (libDesc ideSourcesDir ghcOpts projectMs) {libExposed = True}
+  library <- libDesc ideSourcesDir ghcOpts projectMs
+  let libE = library {libExposed = True}
       gpDesc libName = GenericPackageDescription
         { packageDescription = pkgDescFromName libName
         , genPackageFlags    = []  -- seem unused
-        , condLibrary        = Just $ CondNode library libDeps []
+        , condLibrary        = Just $ CondNode libE libDeps []
         , condExecutables    = []
         , condTestSuites     = []
         , condBenchmarks     = []

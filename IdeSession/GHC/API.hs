@@ -9,6 +9,7 @@ module IdeSession.GHC.API (
     -- * Configuration
   , ideBackendApiVersion
   , hsExtensions
+  , cExtensions
   , cabalMacrosLocation
   ) where
 
@@ -34,6 +35,10 @@ hsExtensions = [".hs", ".lhs"]
 -- Boot files are not so simple. They should probably be copied to the src dir,
 -- but not made proper targets. This is probably similar to .h files.
 -- hsExtentions = [".hs", ".lhs", ".hs-boot", ".lhs-boot", ".hi-boot"]
+
+-- | Extensions of files to compile using the C compiler.
+cExtensions :: [FilePath]
+cExtensions = [".c"]
 
 cabalMacrosLocation :: FilePath -> FilePath
 cabalMacrosLocation ideSourcesDir = ideSourcesDir </> "cabal_macros.h"
