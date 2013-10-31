@@ -33,9 +33,6 @@ ideBackendApiVersion = 1382516208
 -- | These source files are type-checked.
 hsExtensions :: [FilePath]
 hsExtensions = [".hs", ".lhs"]
--- Boot files are not so simple. They should probably be copied to the src dir,
--- but not made proper targets. This is probably similar to .h files.
--- hsExtentions = [".hs", ".lhs", ".hs-boot", ".lhs-boot", ".hi-boot"]
 
 -- | Extensions of files to compile using the C compiler.
 cExtensions :: [FilePath]
@@ -43,7 +40,9 @@ cExtensions = [".c"]
 
 -- | Extensions of all source files we keep in our source directory.
 sourceExtensions :: [FilePath]
-sourceExtensions = [".h"] ++ cExtensions ++ hsExtensions
+sourceExtensions = [".hs-boot", ".lhs-boot", ".hi-boot"]
+                   ++ [".h"] ++ cExtensions
+                   ++ hsExtensions
 
 cabalMacrosLocation :: FilePath -> FilePath
 cabalMacrosLocation ideSourcesDir = ideSourcesDir </> "cabal_macros.h"

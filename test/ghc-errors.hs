@@ -719,7 +719,7 @@ syntheticTests =
         -- Fails, because special support is needed, similar to .h files.
         -- Proabably, the .hs-boot files should be copied to the src dir,
         -- but not made GHC.load targets.
-        assertOneError session
+        assertNoErrors session
     )
   , ( "Test TH; code generation on"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
