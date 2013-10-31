@@ -1652,17 +1652,40 @@ syntheticTests =
         let upd = mconcat [
                 updateCodeGeneration True
               , updateModuleFromFile "test/FFI/Main.hs"
+              , updateModuleFromFile "test/FFI/life.c"
+              , updateModuleFromFile "test/FFI/life.h"
               ]
-        updateSessionD session upd 1
+        updateSessionD session upd 3
         assertOneError session
-        {-
-        assertEqual "This should compile without errors" [] msgs
+{-
+        assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
         case result of
-          RunOk _ -> assertEqual "" (BSL8.fromString "5\n") output
-          _       -> assertFailure $ "Unexpected run result: " ++ show result
-        -}
+          RunOk -> assertEqual "" (BSL8.fromString "42\n") output
+          _     -> assertFailure $ "Unexpected run result: " ++ show result
+-}
+    )
+  , ( "Using the FFI compiled via buildExe"
+    , withSession (withOpts ["-hide-all-packages", "-package base"]  -- do not depend on the GHC API compilatioin success
+                  ) $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateModuleFromFile "test/FFI/Main.hs"
+              , updateModuleFromFile "test/FFI/life.c"
+              , updateModuleFromFile "test/FFI/life.h"
+              ]
+        updateSessionD session upd 3
+        let m = "Main"
+            upd2 = buildExe [(Text.pack m, "test/FFI/Main.hs")]
+        updateSessionD session upd2 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        buildStdout <- readFile $ distDir </> "build/ide-backend-exe.stdout"
+        assertEqual "buildStdout length" 365 (length buildStdout)
+        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "FFI exe output" "42\n" exeOut
     )
   , ( "Build executable from Main"
     , withSession (withOpts []) $ \session -> do
