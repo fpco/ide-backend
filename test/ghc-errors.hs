@@ -579,33 +579,21 @@ syntheticTests =
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , withSession (withOpts []) $ \session -> do
-        let update = updateDataFileFromFile "EventLogFormat.h"
-                                            "test/Puns/EventLogFormat.h"
-        updateSessionD session update 0
         loadModulesFrom session "test/Puns"
-        -- Exact errors depend on order of loaded modules, etc.
-        -- Anyway, right not the test is partially bit-rotted,
-        -- because the .h files are no longer available in the source dir
-        -- and the data dir can't be set to the source dir. See #10.
-        msgs <- getSourceErrors session
-        assertSomeErrors msgs
+        assertMoreErrors session
         let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
             update2 = updateGhcOptions (Just punOpts)
         (_, lm) <- getModules session
         updateSessionD session update2 (length lm)
-        msgs2 <- getSourceErrors session
-        assertSomeErrors msgs2
--- TODO: the hack with supplying .h as a data file no longer works;
--- we need a proper support for .h
---      assertNoErrors msgs2
+        assertNoErrors session
     )
-  , ( "Build licenses from NamedFieldPuns"
+  , ( "Build licenses from NamedFieldPuns (with errors)"
     , withSession (withOpts []) $ \session -> do
         loadModulesFrom session "test/Puns"
+        assertMoreErrors session
         let upd = buildLicenses "test/Puns/cabals"
         updateSessionD session upd 99
-        msgs <- getSourceErrors session
-        assertSomeErrors msgs
+        assertMoreErrors session
         distDir <- getDistDir session
         errExists <- doesFileExist $ distDir </> "licenses.stderr"
         when errExists $ do
@@ -621,8 +609,12 @@ syntheticTests =
   , ( "Build licenses with wrong cabal files and fail"
     , withSession (withOpts []) $ \session -> do
         loadModulesFrom session "test/Puns"
-        let upd = buildLicenses "test/Puns/cabals/parse_error"
+        assertMoreErrors session
+        let updL = buildLicenses "test/Puns/cabals/parse_error"
+            punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
+            upd = updL <> updateGhcOptions (Just punOpts)
         updateSessionD session upd 99
+        assertNoErrors session
         status <- getBuildLicensesStatus session
         assertEqual "after license parse_error" (Just ExitSuccess) status
         distDir <- getDistDir session
@@ -4732,6 +4724,12 @@ assertOneError session = do
   assertSomeErrors msgs
   assertBool ("Too many type errors: " ++ show3errors msgs)
     $ length msgs <= 1
+
+assertMoreErrors :: IdeSession -> Assertion
+assertMoreErrors session = do
+  msgs <- getSourceErrors session
+  assertBool ("Too few type errors: " ++ show3errors msgs)
+    $ length msgs >= 2
 
 show3errors :: [SourceError] -> String
 show3errors errs =
