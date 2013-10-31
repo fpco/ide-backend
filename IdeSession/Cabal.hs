@@ -361,7 +361,8 @@ buildDotCabal ideSourcesDir ghcOpts computed = do
   -- passing the files to you, so that shouldn't be an ide-backend concern.",
   -- so perhaps there won't be any problems.
   let soundMs = delete (Text.pack "Main") loadedMs
-      projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
+      projectMs =
+        sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
       library = (libDesc ideSourcesDir ghcOpts projectMs) {libExposed = True}
       gpDesc libName = GenericPackageDescription
         { packageDescription = pkgDescFromName libName
