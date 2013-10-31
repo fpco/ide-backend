@@ -54,7 +54,7 @@ getModulesFrom session originalSourcesDir = do
   -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
   -- using the IdeSession's update mechanism.
   originalFiles <- find always
-                        ((`elem` hsExtensions) `liftM` extension)
+                        ((`elem` sourceExtensions) `liftM` extension)
                         originalSourcesDir
   let originalUpdate = updateCodeGeneration False
                     <> (mconcat $ map updateModuleFromFile originalFiles)

@@ -83,7 +83,7 @@ check opts what configDir = do
 
     modules <- if isFile
       then return [what]
-      else find always ((`elem` hsExtensions) `liftM` extension) what
+      else find always ((`elem` sourceExtensions) `liftM` extension) what
 
     print modules
 

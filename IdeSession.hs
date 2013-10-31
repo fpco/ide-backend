@@ -208,6 +208,7 @@ module IdeSession (
   , dumpIdInfo
   , crashGhcServer
   , hsExtensions
+  , sourceExtensions
   , ideBackendApiVersion
   , buildLicsFromPkgs
 ) where
