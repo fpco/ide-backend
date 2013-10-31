@@ -408,7 +408,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName"
-        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: OrdList Maybes Exception\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
+        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: Exception Maybes OrdList\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -761,7 +761,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName"
-        assertEqual "dotCabal from TH" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0,\n                   containers ==0.4.2.1, deepseq ==1.3.0.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, pretty ==1.1.1.0, template-haskell ==2.7.0.0\n    exposed-modules: TH.TH TH.BlockingOps\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -XTemplateHaskell\n "
+        assertEqual "dotCabal from TH" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0,\n                   containers ==0.4.2.1, deepseq ==1.3.0.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, pretty ==1.1.1.0, template-haskell ==2.7.0.0\n    exposed-modules: TH.BlockingOps TH.TH\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -XTemplateHaskell\n "
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
