@@ -24,7 +24,7 @@ import IdeSession.GHC.Responses
 -- We use a Unix timestamp for this so that these API versions have some
 -- semantics (http://www.epochconverter.com/, GMT).
 ideBackendApiVersion :: Int
-ideBackendApiVersion = 1382516208
+ideBackendApiVersion = 1383263050
 
 {------------------------------------------------------------------------------
   Configuration
@@ -46,4 +46,4 @@ sourceExtensions :: [FilePath]
 sourceExtensions = [".h"] ++ cExtensions ++ hsExtensions
 
 cabalMacrosLocation :: FilePath -> FilePath
-cabalMacrosLocation ideSourcesDir = ideSourcesDir </> "cabal_macros.h"
+cabalMacrosLocation ideDistDir = ideDistDir </> "cabal_macros.h"

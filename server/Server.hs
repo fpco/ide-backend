@@ -106,9 +106,9 @@ ghcServerEngine configGenerateModInfo
     let go args = do
           req <- liftIO get
           args' <- case req of
-            ReqCompile opts dir genCode -> do
+            ReqCompile opts dir distDir genCode -> do
               ghcHandleCompile
-                conv opts pluginRef importsRef dir
+                conv opts pluginRef importsRef dir distDir
                 genCode configGenerateModInfo
               return args
             ReqRun runCmd -> do
@@ -157,11 +157,12 @@ ghcHandleCompile
   -> StrictIORef (Strict (Map ModuleName) ModSummary)
                          -- ^ see doc for 'ModSummary'
   -> FilePath            -- ^ source directory
+  -> FilePath            -- ^ cabal's dist directory
   -> Bool                -- ^ should we generate code
   -> Bool                -- ^ should we generate per-module info
   -> Ghc ()
 ghcHandleCompile RpcConversation{..} ideNewOpts
-                 pluginRef modsRef configSourcesDir
+                 pluginRef modsRef configSourcesDir ideDistDir
                  ideGenerateCode configGenerateModInfo = do
     errsRef <- liftIO $ newIORef StrictList.nil
     (errs, loadedModules) <-
@@ -322,7 +323,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
           rtsOpts = ["-package ide-backend-rts"]
           -- Include cabal_macros.h.
           cppOpts = [ "-optP-include"
-                    , "-optP" ++ cabalMacrosLocation configSourcesDir
+                    , "-optP" ++ cabalMacrosLocation ideDistDir
                     ]
       in userOpts <> optsToDynFlags (rtsOpts ++ cppOpts)
 

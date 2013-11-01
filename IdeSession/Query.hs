@@ -130,8 +130,8 @@ getAllDataFiles = staticQuery $ \IdeStaticInfo{ideDataDir} ->
             ideDataDir
 
 getCabalMacros :: Query BSL.ByteString
-getCabalMacros = staticQuery $ \IdeStaticInfo{ideSourcesDir} ->
-  BSL.readFile $ cabalMacrosLocation ideSourcesDir
+getCabalMacros = staticQuery $ \IdeStaticInfo{ideDistDir} ->
+  BSL.readFile $ cabalMacrosLocation ideDistDir
 
 {------------------------------------------------------------------------------
   Queries that do not rely on computed state

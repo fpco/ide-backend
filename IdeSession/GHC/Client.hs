@@ -161,12 +161,13 @@ rpcSetArgs (InProcess _ _) _ =
 rpcCompile :: GhcServer           -- ^ GHC server
            -> Maybe [String]      -- ^ Options
            -> FilePath            -- ^ Source directory
+           -> FilePath            -- ^ Cabal's dist directory
            -> Bool                -- ^ Should we generate code?
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO GhcCompileResult
-rpcCompile server opts dir genCode callback =
+rpcCompile server opts dir distDir genCode callback =
   conversation server $ \RpcConversation{..} -> do
-    put (ReqCompile opts dir genCode)
+    put (ReqCompile opts dir distDir genCode)
 
     let go = do response <- get
                 case response of

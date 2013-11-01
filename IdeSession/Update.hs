@@ -208,13 +208,13 @@ envWithPathOverride extraPathDirs = do
 -- | Write per-package CPP macros.
 writeMacros :: IdeStaticInfo -> Maybe BSL.ByteString -> IO ()
 writeMacros IdeStaticInfo{ ideConfig = SessionConfig {..}
-                         , ideSourcesDir
+                         , ideDistDir
                          }
             configCabalMacros = do
   macros <- case configCabalMacros of
               Nothing     -> generateMacros configPackageDBStack configExtraPathDirs
               Just macros -> return (BSL.unpack macros)
-  writeFile (cabalMacrosLocation ideSourcesDir) macros
+  writeFile (cabalMacrosLocation ideDistDir) macros
 
 -- | Close a session down, releasing the resources.
 --
@@ -357,6 +357,7 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
             GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
                                                (idleState' ^. ideNewOpts)
                                                (ideSourcesDir ideStaticInfo)
+                                               (ideDistDir    ideStaticInfo)
                                                (idleState' ^. ideGenerateCode)
                                                callback
 

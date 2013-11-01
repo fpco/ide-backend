@@ -518,15 +518,18 @@ syntheticTests =
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "M with cabal macro exe output" "5\n" mOut
     )
-  , ( "Use cabal macro VERSION by including the macros file"
+  , ( "Use cabal macro VERSION by including a fixed macros file"
     , withSession (withOpts ["-XCPP"]) $ \session -> do
         macros <- getCabalMacros session
         assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
-        let update = updateModule "M.hs" $ BSLC.pack $ unlines
+        let update = updateModule "M.hs" ( BSLC.pack $ unlines
               [ "module M where"
               , "#include \"cabal_macros.h\""
               , "main = print $ VERSION_base == \"foo\""
-              ]
+              ])
+              <> updateModule "cabal_macros.h" (BSLC.pack $ unlines
+              [ "#define VERSION_base \"4.5.1.0\""
+              ])
         updateSessionD session (update <> updateCodeGeneration True) 1
         assertNoErrors session
         runActions <- runStmt session "M" "main"
@@ -1674,8 +1677,6 @@ syntheticTests =
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
-        buildStdout <- readFile $ distDir </> "build/ide-backend-exe.stdout"
-        assertEqual "buildStdout length" 365 (length buildStdout)
         exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "FFI exe output" "42\n" exeOut
     )
