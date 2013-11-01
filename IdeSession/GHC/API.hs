@@ -10,6 +10,7 @@ module IdeSession.GHC.API (
   , ideBackendApiVersion
   , hsExtensions
   , cExtensions
+  , cHeaderExtensions
   , sourceExtensions
   , cabalMacrosLocation
   ) where
@@ -41,9 +42,13 @@ hsExtensions = [".hs", ".lhs"]
 cExtensions :: [FilePath]
 cExtensions = [".c"]
 
+-- | Extensions of C header files (for inclusion in .c and .hs files).
+cHeaderExtensions :: [FilePath]
+cHeaderExtensions = [".h"]
+
 -- | Extensions of all source files we keep in our source directory.
 sourceExtensions :: [FilePath]
-sourceExtensions = [".h"] ++ cExtensions ++ hsExtensions
+sourceExtensions = cHeaderExtensions ++ cExtensions ++ hsExtensions
 
 cabalMacrosLocation :: FilePath -> FilePath
 cabalMacrosLocation ideDistDir = ideDistDir </> "cabal_macros.h"

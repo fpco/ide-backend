@@ -401,7 +401,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName"
-        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: Exception Maybes OrdList\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
+        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: Exception Maybes OrdList\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n ") $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -541,6 +541,15 @@ syntheticTests =
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "M with cabal macro exe output" "False\n" mOut
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName"
+        assertEqual "dotCabal" (filterIdeBackendTestH "cabal_macros.h" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: M\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    install-includes: /tmp/ide-backend-test.22201/src.22201/cabal_macros.h\n    hs-source-dirs: /tmp/ide-backend-test.22201/src.22201\n    ghc-options: -XCPP\n ") $ filterIdeBackendTestH "cabal_macros.h" $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.test"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
     )
   , ( "Caching cabal macros"
     , do macros <- withSession defaultSessionConfig getCabalMacros
@@ -597,6 +606,15 @@ syntheticTests =
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName"
+        assertEqual "dotCabal" (filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0, binary ==0.5.1.0,\n                   bytestring ==0.9.2.1, containers ==0.4.2.1, deepseq ==1.3.0.0,\n                   ghc-prim ==0.2.0.0, integer-gmp ==0.4.0.0, mtl ==2.1.2,\n                   transformers ==0.3.0.0\n    exposed-modules: GHC.RTS.EventParserUtils GHC.RTS.EventTypes\n                     GHC.RTS.Events\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    install-includes: /tmp/ide-backend-test.20883/src.20883/GHC/RTS/EventLogFormat.h\n    hs-source-dirs: /tmp/ide-backend-test.20883/src.20883\n    ghc-options: -XNamedFieldPuns -XRecordWildCards\n ") $ filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.test"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
     )
   , ( "Build licenses from NamedFieldPuns (with errors)"
     , withSession (withOpts []) $ \session -> do
@@ -756,7 +774,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName"
-        assertEqual "dotCabal from TH" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0,\n                   containers ==0.4.2.1, deepseq ==1.3.0.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, pretty ==1.1.1.0, template-haskell ==2.7.0.0\n    exposed-modules: TH.BlockingOps TH.TH\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -XTemplateHaskell\n "
+        assertEqual "dotCabal from TH" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0,\n                   containers ==0.4.2.1, deepseq ==1.3.0.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, pretty ==1.1.1.0, template-haskell ==2.7.0.0\n    exposed-modules: TH.BlockingOps TH.TH\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -XTemplateHaskell\n ") $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -1687,6 +1705,15 @@ syntheticTests =
         assertEqual "buildStderr empty" "" buildStderr
         exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "FFI exe output" "42\n" exeOut
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName"
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    exposed: True\n    buildable: True\n    c-sources: /tmp/ide-backend-test.22783/src.22783/test/FFI/life.c\n    default-language: Haskell2010\n    install-includes: /tmp/ide-backend-test.22783/src.22783/test/FFI/life.h\n    hs-source-dirs: /tmp/ide-backend-test.22783/src.22783\n    ghc-options: -hide-all-packages -package base\n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.test"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
     )
   , ( "Build executable from Main"
     , withSession (withOpts []) $ \session -> do
@@ -1705,7 +1732,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "main"
-        assertEqual "dotCabal from Main" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
+        assertEqual "dotCabal from Main" (filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n ") $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "main.cabal") dotCabal
@@ -1734,7 +1761,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName"
-        assertEqual "dotCabal from Main with explicit -package" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -hide-all-packages -package base -package parallel -package old-time\n "
+        assertEqual "dotCabal from Main with explicit -package" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n    ghc-options: -hide-all-packages -package base -package parallel -package old-time\n ") $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -1761,7 +1788,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName"
-        assertEqual "dotCabal from ParFib.Main" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n "
+        assertEqual "dotCabal from ParFib.Main" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.18576/src.18576\n ") $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -3166,7 +3193,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName"
-        assertEqual "dotCabal from simple-lib17" (filterIdeBackendTest dotCabal) $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, simple-lib17 ==0.1.0.0\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.28213/src.28213\n    ghc-options: -XCPP\n "
+        assertEqual "dotCabal from simple-lib17" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, simple-lib17 ==0.1.0.0\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    hs-source-dirs: /tmp/ide-backend-test.28213/src.28213\n    ghc-options: -XCPP\n ") $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -4878,12 +4905,24 @@ testBufferMode bufferMode =
                         []           -> [firstChunk]
 
 filterIdeBackendTest :: BSLC.ByteString -> BSSC.ByteString
-filterIdeBackendTest bs =
+filterIdeBackendTest bsLazy =
   let toStrict = BSSC.concat . BSLC.toChunks  -- not in our old bytestring pkg
-      (bs1, rest1) =
-        BSSC.breakSubstring (BSSC.pack "source-dirs:") $ toStrict bs
+      bs = toStrict bsLazy
+      (bs1, rest1) = BSSC.breakSubstring (BSSC.pack "hs-source-dirs:") bs
       (_, bs2) = BSSC.breakSubstring (BSSC.pack "\n") rest1
-  in BSSC.append bs1 bs2
+  in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
+
+filterIdeBackendTestC :: String -> BSSC.ByteString -> BSSC.ByteString
+filterIdeBackendTestC lastFile bs =
+  let (bs1, rest1) = BSSC.breakSubstring (BSSC.pack "c-sources:") bs
+      (_, bs2) = BSSC.breakSubstring (BSSC.pack lastFile) rest1
+  in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
+
+filterIdeBackendTestH :: String -> BSSC.ByteString -> BSSC.ByteString
+filterIdeBackendTestH lastFile bs =
+  let (bs1, rest1) = BSSC.breakSubstring (BSSC.pack "install-includes:") bs
+      (_, bs2) = BSSC.breakSubstring (BSSC.pack lastFile) rest1
+  in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
 
 {------------------------------------------------------------------------------
   Aux

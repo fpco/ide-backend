@@ -64,7 +64,7 @@ import Distribution.Verbosity (silent)
 import Language.Haskell.Extension (Language (Haskell2010))
 import Language.Haskell.TH.Syntax (lift, runIO)
 
-import IdeSession.GHC.API (cExtensions)
+import IdeSession.GHC.API (cExtensions, cHeaderExtensions)
 import IdeSession.Licenses ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
 import IdeSession.State
 import IdeSession.Strict.Container
@@ -131,30 +131,36 @@ pkgDescFromName pkgName = PackageDescription
 pkgDesc :: PackageDescription
 pkgDesc = pkgDescFromName "main"
 
-bInfo :: FilePath -> [String] -> [FilePath] -> BuildInfo
-bInfo sourceDir ghcOpts cSources =
+bInfo :: FilePath -> [String] -> [FilePath] -> [FilePath] -> BuildInfo
+bInfo sourceDir ghcOpts cSources installIncludes =
   emptyBuildInfo
     { buildable = True
     , hsSourceDirs = [sourceDir]
     , defaultLanguage = Just Haskell2010
     , options = [(GHC, ghcOpts)]
     , cSources
+    , installIncludes
     }
 
 getCSources :: FilePath -> IO [FilePath]
 getCSources sourceDir =
   find always ((`elem` cExtensions) `liftM` extension) sourceDir
 
+getCHeaders :: FilePath -> IO [FilePath]
+getCHeaders sourceDir =
+  find always ((`elem` cHeaderExtensions) `liftM` extension) sourceDir
+
 exeDesc :: FilePath -> FilePath -> [String] -> (ModuleName, FilePath)
         -> IO Executable
 exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
   cSources <- getCSources ideSourcesDir
+  cHeaders <- getCHeaders ideSourcesDir
   let exeName = Text.unpack m
   if exeName == "Main" then do  -- that's what Cabal expects, no wrapper needed
     return $ Executable
       { exeName
       , modulePath = path
-      , buildInfo = bInfo ideSourcesDir ghcOpts cSources
+      , buildInfo = bInfo ideSourcesDir ghcOpts cSources cHeaders
       }
   else do
     -- TODO: Verify @path@ somehow.
@@ -167,17 +173,18 @@ exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
     return $ Executable
       { exeName
       , modulePath
-      , buildInfo = bInfo mDir ghcOpts cSources
+      , buildInfo = bInfo mDir ghcOpts cSources cHeaders
       }
 
 libDesc :: FilePath -> [String] -> [Distribution.ModuleName.ModuleName]
         -> IO Library
 libDesc ideSourcesDir ghcOpts ms = do
   cSources <- getCSources ideSourcesDir
+  cHeaders <- getCHeaders ideSourcesDir
   return $ Library
     { exposedModules = ms
     , libExposed = False
-    , libBuildInfo = bInfo ideSourcesDir ghcOpts cSources
+    , libBuildInfo = bInfo ideSourcesDir ghcOpts cSources cHeaders
     }
 
 -- TODO: we could do the parsing early and export parsed Versions via our API,
