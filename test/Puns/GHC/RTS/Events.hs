@@ -5,6 +5,7 @@
  -}
 
 module GHC.RTS.Events (
+       main,
        -- * The event log types
        EventLog(..),
        EventType(..),
@@ -59,6 +60,9 @@ import GHC.RTS.EventParserUtils
 
 #define EVENTLOG_CONSTANTS_ONLY
 #include "EventLogFormat.h"
+
+main :: IO ()
+main = return ()
 
 ------------------------------------------------------------------------------
 -- Binary instances
@@ -612,12 +616,12 @@ getEventBlock :: EventParsers -> GetEvents [Event]
 getEventBlock parsers = do
   b <- lift . lift $ isEmpty
   if b then return [] else do
-  mb_e <- getEvent parsers
-  case mb_e of
-    Nothing -> return []
-    Just e  -> do
-      es <- getEventBlock parsers
-      return (e:es)
+   mb_e <- getEvent parsers
+   case mb_e of
+     Nothing -> return []
+     Just e  -> do
+       es <- getEventBlock parsers
+       return (e:es)
 
 getEventLog :: ErrorT String Get EventLog
 getEventLog = do

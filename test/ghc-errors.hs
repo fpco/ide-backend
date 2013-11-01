@@ -582,13 +582,21 @@ syntheticTests =
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , withSession (withOpts []) $ \session -> do
-        loadModulesFrom session "test/Puns"
+        setCurrentDirectory "test/Puns"
+        loadModulesFrom session "."
         assertMoreErrors session
         let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
             update2 = updateGhcOptions (Just punOpts)
         (_, lm) <- getModules session
         updateSessionD session update2 (length lm)
+        setCurrentDirectory "../../"
         assertNoErrors session
+        let m = "GHC.RTS.Events"
+            upd2 = buildExe [(Text.pack m, "GHC/RTS/Events.hs")]
+        updateSessionD session upd2 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
     )
   , ( "Build licenses from NamedFieldPuns (with errors)"
     , withSession (withOpts []) $ \session -> do
