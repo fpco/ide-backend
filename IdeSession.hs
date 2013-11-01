@@ -115,9 +115,9 @@ module IdeSession (
     -- ** Session updates
   , IdeSessionUpdate -- Abstract
   , updateSession
-  , updateModule
-  , updateModuleFromFile
-  , updateModuleDelete
+  , updateSourceFile
+  , updateSourceFileFromFile
+  , updateSourceFileDelete
   , updateGhcOptions
   , updateCodeGeneration
   , updateDataFile
@@ -211,7 +211,13 @@ module IdeSession (
   , sourceExtensions
   , ideBackendApiVersion
   , buildLicsFromPkgs
+  -- * DEPRECATED aliases
+  , updateModule
+  , updateModuleFromFile
+  , updateModuleDelete
 ) where
+
+import qualified Data.ByteString.Lazy.Char8 as BSL
 
 import IdeSession.Config
 import IdeSession.Update
@@ -224,3 +230,17 @@ import IdeSession.GHC.Client
 import IdeSession.RPC.Client (ExternalException (..))
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
+
+-- * DEPRECATED aliases
+
+updateModule :: FilePath -> BSL.ByteString -> IdeSessionUpdate
+{-# DEPRECATED updateModule "alias for updateSourceFile" #-}
+updateModule = updateSourceFile
+
+updateModuleFromFile :: FilePath -> IdeSessionUpdate
+{-# DEPRECATED updateModuleFromFile "alias for updateSourceFileFromFile" #-}
+updateModuleFromFile = updateSourceFileFromFile
+
+updateModuleDelete :: FilePath -> IdeSessionUpdate
+{-# DEPRECATED updateModuleDelete "alias for updateSourceFileDelete" #-}
+updateModuleDelete = updateSourceFileDelete

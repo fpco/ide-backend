@@ -96,7 +96,7 @@ check opts what configDir = do
                   ++ "] "
                   ++ Text.unpack (fromJust progressParsedMsg)
 
-        update = mconcat (map updateModuleFromFile modules)
+        update = mconcat (map updateSourceFileFromFile modules)
 
     updateSession session update displayCounter
     errs <- getSourceErrors session

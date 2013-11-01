@@ -91,7 +91,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
     (start, end) <- textBufferGetBounds textBuffer
     src <- textBufferGetByteString textBuffer start end False
     -- TODO: We should be able to vary the module name
-    let upd = updateModule "M.hs" (fromChunks [src])
+    let upd = updateSourceFile "M.hs" (fromChunks [src])
     updateSession ideSession upd (const $ return ())
     errors <- getSourceErrors ideSession
     idInfo <- getSpanInfo ideSession

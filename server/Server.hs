@@ -233,9 +233,9 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
 
               return (m, newSummary)
 
-            updateModule :: ModuleName -> ModSummary -> GHC.ModSummary
+            updateSourceFile :: ModuleName -> ModSummary -> GHC.ModSummary
                          -> StateT GhcCompileResult Ghc (ModuleName, ModSummary)
-            updateModule m oldSummary ghcSummary = do
+            updateSourceFile m oldSummary ghcSummary = do
               (imports, importsChanged) <-
                 -- We recompute imports when the file changed, rather than when
                 -- it got (successfully) recompiled because we provide the
@@ -282,7 +282,7 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
                 GT -> do newSummary   <- addNewModule (m', ghcSummary)
                          newSummaries <- go ((m, oldSummary) : old) new
                          return $ newSummary : newSummaries
-                EQ -> do newSummary   <- updateModule m oldSummary ghcSummary
+                EQ -> do newSummary   <- updateSourceFile m oldSummary ghcSummary
                          newSummaries <- go old new
                          return $ newSummary : newSummaries
             go old new = do

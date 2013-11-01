@@ -151,7 +151,7 @@ getGhcServer = simpleQuery $ getVal ideGhcServer
 
 -- | Get the collection of files submitted by the user and not deleted yet.
 -- The module names are those supplied by the user as the first
--- arguments of the @updateModule@ and @updateModuleFromFile@ calls,
+-- arguments of the @updateSourceFile@ and @updateSourceFileFromFile@ calls,
 -- as opposed to the compiler internal @module ... end@ module names.
 -- Usually the two names are equal, but they needn't be.
 getManagedFiles :: Query ManagedFiles

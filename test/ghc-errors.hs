@@ -57,7 +57,7 @@ getModulesFrom session originalSourcesDir = do
                         ((`elem` sourceExtensions) `liftM` extension)
                         originalSourcesDir
   let originalUpdate = updateCodeGeneration False
-                    <> (mconcat $ map updateModuleFromFile originalFiles)
+                    <> (mconcat $ map updateSourceFileFromFile originalFiles)
   return (originalUpdate, originalFiles)
 
 getModules :: IdeSession -> IO (IdeSessionUpdate, [FilePath])
@@ -129,7 +129,7 @@ multipleTests =
   , ( "Overwrite with the same module name in all files"
     , \session originalUpdate lm -> do
         let upd m =
-              updateModule m (BSLC.pack "module Wrong where\na = 1")
+              updateSourceFile m (BSLC.pack "module Wrong where\na = 1")
             update = originalUpdate <> mconcat (map upd lm)
         updateSessionD session update 2
         if length lm >= 2
@@ -181,7 +181,7 @@ multipleTests =
         let upd m = loadModule m "x = 1"
             update =
               originalUpdate
-              <> updateModule
+              <> updateSourceFile
                    "Central/TotallyMain.hs"
                    (BSLC.pack
                       "module Central.TotallyMain where\nmain = print \"test run\"")
@@ -198,7 +198,7 @@ multipleTests =
     , ( "Make sure deleting modules removes them from the directory"
       , \session originalUpdate lm -> do
         updateSessionD session originalUpdate (length lm)
-        let updateDel = mconcat $ map updateModuleDelete lm
+        let updateDel = mconcat $ map updateSourceFileDelete lm
         updateSessionD session updateDel 0
         assertNoErrors session
         -- The updates cancel each other out.
@@ -224,7 +224,7 @@ multipleTests =
           Right runActions -> void $ runWaitAll runActions  -- now runWaitAll
           Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
         restartSession session Nothing
-        let update2 = mconcat $ map updateModuleDelete lm
+        let update2 = mconcat $ map updateSourceFileDelete lm
         updateSessionD session update2 0  -- if any file missing, would yell
         assertNoErrors session
         let update3 = updateCodeGeneration True
@@ -441,7 +441,7 @@ syntheticTests =
         macros <- getCabalMacros session
         assertBool "Main with cabal macro exe output" (not $ BSLC.null macros)
         -- assertEqual "Main with cabal macro exe output" (BSLC.pack "") macros
-        let update = updateModule "Main.hs" $ BSLC.pack $ unlines
+        let update = updateSourceFile "Main.hs" $ BSLC.pack $ unlines
               [ "#if !MIN_VERSION_base(999,0,0)"
               , "main = print 5"
               , "#else"
@@ -465,7 +465,7 @@ syntheticTests =
     )
   , ( "Use cabal macro MIN_VERSION for a package we don't really depend on"
     , withSession (withOpts ["-XCPP"]) $ \session -> do
-        let update = updateModule "Main.hs" $ BSLC.pack $ unlines
+        let update = updateSourceFile "Main.hs" $ BSLC.pack $ unlines
               [ "#if !MIN_VERSION_containers(999,0,0)"
               , "main = print 5"
               , "#else"
@@ -492,7 +492,7 @@ syntheticTests =
     , withSession (withOpts ["-XCPP"]) $ \session -> do
         macros <- getCabalMacros session
         assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
-        let update = updateModule "M.hs" $ BSLC.pack $ unlines
+        let update = updateSourceFile "M.hs" $ BSLC.pack $ unlines
               [ "module M where"
               , "#ifdef VERSION_base"
               , ""
@@ -522,12 +522,12 @@ syntheticTests =
     , withSession (withOpts ["-XCPP"]) $ \session -> do
         macros <- getCabalMacros session
         assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
-        let update = updateModule "M.hs" ( BSLC.pack $ unlines
+        let update = updateSourceFile "M.hs" ( BSLC.pack $ unlines
               [ "module M where"
               , "#include \"cabal_macros.h\""
               , "main = print $ VERSION_base == \"foo\""
               ])
-              <> updateModule "cabal_macros.h" (BSLC.pack $ unlines
+              <> updateSourceFile "cabal_macros.h" (BSLC.pack $ unlines
               [ "#define VERSION_base \"4.5.1.0\""
               ])
         updateSessionD session (update <> updateCodeGeneration True) 1
@@ -549,7 +549,7 @@ syntheticTests =
                             }
          withSession' initParams (withOpts ["-XCPP"]) $ \session -> do
            let update = (updateCodeGeneration True)
-                     <> (updateModule "Main.hs" $ BSLC.pack $ unlines [
+                     <> (updateSourceFile "Main.hs" $ BSLC.pack $ unlines [
                              "#if !MIN_VERSION_base(999,0,0)"
                            , "main = print 5"
                            , "#else"
@@ -567,7 +567,7 @@ syntheticTests =
                                }
          withSession' initParams' (withOpts ["-XCPP"]) $ \session -> do
            let update = (updateCodeGeneration True)
-                     <> (updateModule "Main.hs" $ BSLC.pack $ unlines [
+                     <> (updateSourceFile "Main.hs" $ BSLC.pack $ unlines [
                              "#if HELLO"
                            , "main = print 6"
                            , "#else"
@@ -668,7 +668,7 @@ syntheticTests =
     , withSession (withOpts []) $ \session -> do
         let update = updateCodeGeneration True
                      <> updateDataFile "test.txt" (BSLC.pack "test data")
-        let update2 = updateModule "Main.hs" $ BSLC.pack $ unlines
+        let update2 = updateSourceFile "Main.hs" $ BSLC.pack $ unlines
               [ "{-# LANGUAGE TemplateHaskell #-}"
               , "module Main where"
               , "import Language.Haskell.TH.Syntax"
@@ -780,7 +780,7 @@ syntheticTests =
     )
   , ( "Test CPP: ifdefed module header"
     , withSession (withOpts ["-XCPP"]) $ \session -> do
-        let update = updateModule "Good.hs" $ BSLC.pack $ unlines
+        let update = updateSourceFile "Good.hs" $ BSLC.pack $ unlines
               [ "#if __GLASGOW_HASKELL__ < 600"
               , "module Bad where"
               , "import Data.List"
@@ -810,11 +810,11 @@ syntheticTests =
     )
   , ( "Reject a module with mangled header"
     , withSession defaultSessionConfig $ \session -> do
-        let update = updateModule "M.hs"
+        let update = updateSourceFile "M.hs"
                                   (BSLC.pack "module very-wrong where")
         updateSessionD session update 1
         assertSourceErrors' session ["parse error on input `very'\n"]
-        let update2 = updateModule "M.hs"
+        let update2 = updateSourceFile "M.hs"
                                    (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update2 1
         assertSourceErrors' session ["parse error on input `.'\n"]
@@ -822,7 +822,7 @@ syntheticTests =
   , ( "Interrupt runStmt (after 1 sec)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent (threadDelay)"
                     , "loop :: IO ()"
@@ -841,7 +841,7 @@ syntheticTests =
   , ( "Interrupt runStmt (immediately)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent (threadDelay)"
                     , "loop :: IO ()"
@@ -859,7 +859,7 @@ syntheticTests =
   , ( "Interrupt runStmt (black hole; after 1 sec)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "loop :: IO ()"
                     , "loop = loop"
@@ -877,7 +877,7 @@ syntheticTests =
   , ( "Capture stdout (single putStrLn)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = putStrLn \"Hello World\""
@@ -892,7 +892,7 @@ syntheticTests =
   , ( "Capture stdout (single putStr)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = putStr \"Hello World\""
@@ -907,7 +907,7 @@ syntheticTests =
   , ( "Capture stdout (single putStr with delay)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent (threadDelay)"
                     , "import System.IO"
@@ -924,7 +924,7 @@ syntheticTests =
   , ( "Capture stdout (multiple putStrLn)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = do putStrLn \"Hello World 1\""
@@ -941,7 +941,7 @@ syntheticTests =
   , ( "Capture stdout (mixed putStr and putStrLn)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = do putStrLn \"Hello World 1\""
@@ -958,7 +958,7 @@ syntheticTests =
   , ( "Capture stdin (simple echo process)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "echo :: IO ()"
                     , "echo = getLine >>= putStrLn"
@@ -974,7 +974,7 @@ syntheticTests =
   , ( "Capture stdin (infinite echo process)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.IO"
                     , "import Control.Monad"
@@ -1003,7 +1003,7 @@ syntheticTests =
   , ( "Two calls to runStmt"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "echo :: IO ()"
                     , "echo = getLine >>= putStrLn"
@@ -1028,7 +1028,7 @@ syntheticTests =
   , ( "Make sure we can terminate the IDE session when code is running"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "echo :: IO ()"
                     , "echo = (getLine >>= putStrLn) >> echo"
@@ -1041,7 +1041,7 @@ syntheticTests =
   , ( "Capture stderr"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.IO"
                     , "hello :: IO ()"
@@ -1057,7 +1057,7 @@ syntheticTests =
   , ( "Merge stdout and stderr"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.IO"
                     , "hello :: IO ()"
@@ -1088,7 +1088,7 @@ syntheticTests =
   , ( "Set environment variables"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.Environment (getEnv)"
                     , "printFoo :: IO ()"
@@ -1145,7 +1145,7 @@ syntheticTests =
   , ( "Update during run"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "loop :: IO ()"
                     , "loop = loop"
@@ -1160,7 +1160,7 @@ syntheticTests =
   , ( "getSourceErrors during run"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "{-# OPTIONS_GHC -Wall #-}"
                     , "module M where"
                     , "loop = loop"
@@ -1176,7 +1176,7 @@ syntheticTests =
   , ( "getLoadedModules during run"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "{-# OPTIONS_GHC -Wall #-}"
                     , "module M where"
                     , "loop = loop"
@@ -1191,11 +1191,11 @@ syntheticTests =
   , ( "Interrupt, then capture stdout"
     , withSession defaultSessionConfig $ \session -> do
         updateSession session (updateCodeGeneration True) (\_ -> return ())
-        let upd1 = updateModule "Main.hs" . BSLC.pack . unlines $
+        let upd1 = updateSourceFile "Main.hs" . BSLC.pack . unlines $
                      [ "import Control.Monad"
                      , "main = forever $ print 1"
                      ]
-            upd2 = updateModule "Main.hs" . BSLC.pack . unlines $
+            upd2 = updateSourceFile "Main.hs" . BSLC.pack . unlines $
                      [ "main = print 1234" ]
 
         do updateSessionD session upd1 1
@@ -1254,7 +1254,7 @@ syntheticTests =
   , ( "Make sure environment is restored after session restart"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.Environment (getEnv)"
                     , "printFoo :: IO ()"
@@ -1321,7 +1321,7 @@ syntheticTests =
                                  }
            withSession sessionConfig $ \session -> do
              let upd = (updateCodeGeneration True)
-                    <> (updateModule "M.hs" . BSLC.pack . unlines $
+                    <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                          [ "module M where"
                          , "hello :: IO ()"
                          , "hello = putStr \"Hello World\""
@@ -1336,7 +1336,7 @@ syntheticTests =
   , ( "Call runWait after termination (normal termination)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = putStrLn \"Hello World\""
@@ -1353,7 +1353,7 @@ syntheticTests =
   , ( "Call runWait after termination (interrupted)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent (threadDelay)"
                     , "loop :: IO ()"
@@ -1376,7 +1376,7 @@ syntheticTests =
   , ( "Call runWait after termination (restarted session)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent (threadDelay)"
                     , "loop :: IO ()"
@@ -1399,7 +1399,7 @@ syntheticTests =
   , ( "Call runWait after termination (started new snippet in meantime)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Control.Concurrent"
                     , "hello :: IO ()"
@@ -1439,7 +1439,7 @@ syntheticTests =
   , ( "Don't recompile unnecessarily (single module)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "A.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "a :: IO ()"
                     , "a = print 'a'"
@@ -1458,7 +1458,7 @@ syntheticTests =
     , withSession defaultSessionConfig $ \session -> do
         -- 'updA' is defined so that the interface of 'updA n' is different
         -- to the interface of 'updA m' (with n /= m)
-        let updA n = updateModule "A.hs" . BSLC.pack . unlines $
+        let updA n = updateSourceFile "A.hs" . BSLC.pack . unlines $
                        [ "module A where"
                        , "import B"
                        ]
@@ -1466,7 +1466,7 @@ syntheticTests =
                        [ "a" ++ show i ++ " = b" ++ show i
                        | i <- [0 .. n :: Int]
                        ]
-        let updB n = updateModule "B.hs" . BSLC.pack . unlines $
+        let updB n = updateSourceFile "B.hs" . BSLC.pack . unlines $
                        [ "module B where"
                        ]
                       ++
@@ -1505,7 +1505,7 @@ syntheticTests =
     , withSession defaultSessionConfig $ \session -> do
         let updates2 = mconcat
                 [ updateCodeGeneration True
-                , updateModule "Main.hs" (BSLC.pack "import System.IO\nmain = hClose stdin")
+                , updateSourceFile "Main.hs" (BSLC.pack "import System.IO\nmain = hClose stdin")
                 ]
         updateSession session updates2 $ const $ return ()
         ra2 <- runStmt session "Main" "main"
@@ -1513,7 +1513,7 @@ syntheticTests =
         assertEqual "" out2b (Right RunOk)
 
         let updates3 =
-              updateModule "Main.hs" (BSLC.pack "main = getLine >>= putStrLn")
+              updateSourceFile "Main.hs" (BSLC.pack "main = getLine >>= putStrLn")
         updateSession session updates3 $ const $ return ()
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
@@ -1525,7 +1525,7 @@ syntheticTests =
     , withSession defaultSessionConfig $ \session -> do
         let updates2 = mconcat
                 [ updateCodeGeneration True
-                , updateModule "Main.hs" (BSLC.pack "main = getContents >>= putStr")
+                , updateSourceFile "Main.hs" (BSLC.pack "main = getContents >>= putStr")
                 , updateStdoutBufferMode $ RunLineBuffering Nothing
                 ]
         updateSession session updates2 $ const $ return ()
@@ -1539,7 +1539,7 @@ syntheticTests =
 
         let updates3 = mconcat
                 [ updateCodeGeneration True
-                , updateModule "Main.hs" (BSLC.pack "main = putStrLn \"Hi!\" >> getLine >> return ()")
+                , updateSourceFile "Main.hs" (BSLC.pack "main = putStrLn \"Hi!\" >> getLine >> return ()")
                 , updateStdoutBufferMode $ RunLineBuffering Nothing
                 ]
         updateSession session updates3 $ const $ return ()
@@ -1554,7 +1554,7 @@ syntheticTests =
     , withSession defaultSessionConfig $ \session -> do
         let updates2 = mconcat
                 [ updateCodeGeneration True
-                , updateModule "Main.hs" (BSLC.pack "import System.IO\nmain = hClose stdout")
+                , updateSourceFile "Main.hs" (BSLC.pack "import System.IO\nmain = hClose stdout")
                 ]
         updateSession session updates2 $ const $ return ()
         ra2 <- runStmt session "Main" "main"
@@ -1562,7 +1562,7 @@ syntheticTests =
         assertEqual "" out2b (Right RunOk)
 
         let updates3 =
-              updateModule "Main.hs" (BSLC.pack "main = getLine >>= putStrLn")
+              updateSourceFile "Main.hs" (BSLC.pack "main = getLine >>= putStrLn")
         updateSession session updates3 $ const $ return ()
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
@@ -1574,7 +1574,7 @@ syntheticTests =
     , withSession defaultSessionConfig $ \session -> do
         let updates2 = mconcat
                 [ updateCodeGeneration True
-                , updateModule "Main.hs" (BSLC.pack "import System.IO\nmain = hClose stderr")
+                , updateSourceFile "Main.hs" (BSLC.pack "import System.IO\nmain = hClose stderr")
                 ]
         updateSession session updates2 $ const $ return ()
         ra2 <- runStmt session "Main" "main"
@@ -1582,7 +1582,7 @@ syntheticTests =
         assertEqual "" out2b (Right RunOk)
 
         let updates3 =
-              updateModule "Main.hs" (BSLC.pack "import System.IO\nmain = getLine >>= hPutStrLn stderr")
+              updateSourceFile "Main.hs" (BSLC.pack "import System.IO\nmain = getLine >>= hPutStrLn stderr")
         updateSession session updates3 $ const $ return ()
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
@@ -1596,7 +1596,7 @@ syntheticTests =
                       updateCodeGeneration True
                     , updateStdoutBufferMode $ RunLineBuffering Nothing
                     , updateStderrBufferMode $ RunBlockBuffering (Just 4096) (Just 250000)
-                    , updateModule "Main.hs" . BSLC.pack . unlines $ [
+                    , updateSourceFile "Main.hs" . BSLC.pack . unlines $ [
                           "import Control.Concurrent"
                         , "import Control.Monad"
                         , "import System.IO"
@@ -1620,7 +1620,7 @@ syntheticTests =
   , ( "Make sure encoding is UTF8"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSL8.fromString . unlines $
+               <> (updateSourceFile "M.hs" . BSL8.fromString . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = putStrLn \"你好\""
@@ -1637,7 +1637,7 @@ syntheticTests =
       -- https://github.com/haskell/haskell-platform/blob/2012.4.0.0/haskell-platform.cabal
     , withSession (withOpts []) $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSL8.fromString . unlines $
+               <> (updateSourceFile "M.hs" . BSL8.fromString . unlines $
                     [ "module M where"
                     , "import Control.Monad.IO.Class" -- From transformers
                     , "hello :: IO ()"
@@ -1654,9 +1654,9 @@ syntheticTests =
     , withSession defaultSessionConfig $ \session -> do
         let upd = mconcat [
                 updateCodeGeneration True
-              , updateModuleFromFile "test/FFI/Main.hs"
-              , updateModuleFromFile "test/FFI/life.c"
-              , updateModuleFromFile "test/FFI/life.h"
+              , updateSourceFileFromFile "test/FFI/Main.hs"
+              , updateSourceFileFromFile "test/FFI/life.c"
+              , updateSourceFileFromFile "test/FFI/life.h"
               ]
         updateSessionD session upd 3
         assertOneError session
@@ -1674,9 +1674,9 @@ syntheticTests =
                   ) $ \session -> do
         let upd = mconcat [
                 updateCodeGeneration True
-              , updateModuleFromFile "test/FFI/Main.hs"
-              , updateModuleFromFile "test/FFI/life.c"
-              , updateModuleFromFile "test/FFI/life.h"
+              , updateSourceFileFromFile "test/FFI/Main.hs"
+              , updateSourceFileFromFile "test/FFI/life.c"
+              , updateSourceFileFromFile "test/FFI/life.h"
               ]
         updateSessionD session upd 3
         let m = "Main"
@@ -1888,7 +1888,7 @@ syntheticTests =
     )
   , ( "Type information 1: Local identifiers and Prelude"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "a = (5 :: Int)"
                     , "b = a + 6"
@@ -1914,7 +1914,7 @@ syntheticTests =
     )
   , ( "Type information 2: Simple ADTs"
     , withSession defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "data T = MkT"
                     ])
@@ -1926,7 +1926,7 @@ syntheticTests =
     )
   , ( "Type information 3: Polymorphism"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "data TMaybe a = TNothing | TJust a"
                     , ""
@@ -1985,14 +1985,14 @@ syntheticTests =
     )
   , ( "Type information 4: Multiple modules"
     , withSession defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "data T = MkT"
                     ])
                     -- Make sure that an occurrence of MkT in a second module
                     -- doesn't cause us to lose type information we learned
                     -- while processing the first
-               <> (updateModule "B.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                     [ "module B where"
                     , "import A"
                     , "foo = MkT"
@@ -2010,7 +2010,7 @@ syntheticTests =
                  , "-XKindSignatures"
                  ]
       in ifIdeBackendHaddockTestsEnabled (withOpts opts) $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
 
                     , "import Control.Parallel"
@@ -2078,7 +2078,7 @@ syntheticTests =
     )
   , ( "Type information 6: Reusing type variables"
     , withSession (withOpts ["-XScopedTypeVariables"]) $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
 
                     , "f1 (x, y) = x"
@@ -2144,7 +2144,7 @@ syntheticTests =
     )
   , ( "Type information 7: Qualified imports"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.Maybe"
                     , "import qualified Data.List"
@@ -2161,7 +2161,7 @@ syntheticTests =
     )
   , ( "Type information 8: Imprecise source spans"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "main = print True"
                     ])
@@ -2180,7 +2180,7 @@ syntheticTests =
   , ( "Type information 9a: Quasi-quotation (QQ in own package)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = updateCodeGeneration True
-               <> (updateModule "A.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
                     , "module A where"
                     , "import Language.Haskell.TH.Quote"
@@ -2195,7 +2195,7 @@ syntheticTests =
                     , "       , quoteDec  = undefined"
                     , "       }"
                     ])
-               <> (updateModule "B.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE QuasiQuotes #-}"
                     , "module B where"
                     , "import A"
@@ -2228,7 +2228,7 @@ syntheticTests =
   , ( "Type information 9b: Quasi-quotation (QQ in separate package, check home module info)"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = updateCodeGeneration True
-               <> (updateModule "Main.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "Main.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TypeFamilies, QuasiQuotes, MultiParamTypeClasses,"
                     , "             TemplateHaskell, OverloadedStrings #-}"
                     , "import Yesod"
@@ -2262,7 +2262,7 @@ syntheticTests =
   , ( "Type information 10: Template Haskell"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
         let upd = updateCodeGeneration True
-               <> (updateModule "A.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
                     , "module A where"
                     , "import Language.Haskell.TH"
@@ -2271,7 +2271,7 @@ syntheticTests =
                     , "ex2 :: Q Type"
                     , "ex2 = [t| String -> String |]"
                     ])
-               <> (updateModule "B.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
                     , "module B where"
                     , "import A"
@@ -2304,7 +2304,7 @@ syntheticTests =
     )
   , ( "Type information 11: Take advantage of scope (1)"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "main = print True"
                     ])
@@ -2315,7 +2315,7 @@ syntheticTests =
     )
   , ( "Type information 12: Take advantage of scope (2)"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString (append)"
                     , "foo = append"
@@ -2327,7 +2327,7 @@ syntheticTests =
     )
   , ( "Type information 13: Take advantage of scope (3)"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString"
                     , "foo = append"
@@ -2339,7 +2339,7 @@ syntheticTests =
     )
   , ( "Type information 14: Take advantage of scope (4)"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Data.ByteString (append)"
                     , "import qualified Data.ByteString as BS"
@@ -2352,7 +2352,7 @@ syntheticTests =
     )
   , ( "Type information 15: Other constructs"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ {-  1 -} "{-# LANGUAGE StandaloneDeriving, DoRec #-}"
                     , {-  2 -} "module A where"
 
@@ -2405,7 +2405,7 @@ syntheticTests =
     )
   , ( "Type information 16: FFI"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE ForeignFunctionInterface #-}"
                     , "module A where"
 
@@ -2433,7 +2433,7 @@ syntheticTests =
     )
   , ( "Type information 17: GADTs"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE GADTs, KindSignatures, RankNTypes #-}"
                     , "module A where"
 
@@ -2456,7 +2456,7 @@ syntheticTests =
     )
   , ( "Type information 18: Other types"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ {-  1 -} "{-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, TypeFamilies #-}"
                     , {-  2 -} "module A where"
 
@@ -2497,7 +2497,7 @@ syntheticTests =
     )
   , ( "Type information 19: Default methods"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "class Foo a where"
                     , "  foo :: a -> Int"
@@ -2510,7 +2510,7 @@ syntheticTests =
     )
   , ( "Test internal consistency of local id markers"
     , withSession defaultSessionConfig $ \session -> do
-        let upd = (updateModule "M.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import qualified Text.PrettyPrint as Disp"
               , "class Text a where"
@@ -2524,7 +2524,7 @@ syntheticTests =
     )
   , ( "Test internal consistency of imported id markers"
     , withSession defaultSessionConfig $ \session -> do
-        let upd = (updateModule "M.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import qualified Text.PrettyPrint as Disp"
               , "class Text a where"
@@ -2542,7 +2542,7 @@ syntheticTests =
     )
   , ( "Autocomplete 1: Imports for partial module"
     , withSession (withOpts ["-XPackageImports"]) $ \session -> do
-        let upd = (updateModule "M.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import Control.Monad"
               , "import Control.Category hiding (id)"
@@ -2651,12 +2651,12 @@ syntheticTests =
     )
   , ( "Autocomplete 2: Recompute after recompilation"
     , withSession defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "foobar :: Bool -> Bool"
                     , "foobar = id"
                     ])
-               <> (updateModule "B.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                     [ "module B where"
                     , "import A"
                     ])
@@ -2672,7 +2672,7 @@ syntheticTests =
         -- Change A, but not B. The type reported in the autocompletion for B
         -- should now be changed, too
 
-        let upd' = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd' = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                      [ "module A where"
                      , "foobar :: Int -> Int"
                      , "foobar = id"
@@ -2691,7 +2691,7 @@ syntheticTests =
     )
   , ( "Autocomplete 3: Autocompletion entries should have home module info"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     ])
 
@@ -2704,7 +2704,7 @@ syntheticTests =
     )
   , ( "Autocomplete 4: fpco issue #2518"
     , withSession (withOpts ["-XPackageImports"]) $ \session -> do
-        let upd = (updateModule "M.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "M.hs" . BSLC.pack . unlines $
               [ "module M where"
               , "import qualified Data.ByteString.Lazy as B"
               , "foo = toC"
@@ -2743,7 +2743,7 @@ syntheticTests =
     , withSession defaultSessionConfig $ \session -> do
         -- Compile some code
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.Environment (getEnv)"
                     , "printFoo :: IO ()"
@@ -2776,7 +2776,7 @@ syntheticTests =
     , withSession defaultSessionConfig $ \session -> do
         -- Compile some code
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.Environment (getEnv)"
                     , "printFoo :: IO ()"
@@ -2810,13 +2810,13 @@ syntheticTests =
   , ( "GHC crash 6: Add additional code after update"
     , withSession defaultSessionConfig $ \session -> do
         let updA = (updateCodeGeneration True)
-                <> (updateModule "A.hs" . BSLC.pack . unlines $
+                <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                      [ "module A where"
                      , "printA :: IO ()"
                      , "printA = putStr \"A\""
                      ])
         let updB = (updateCodeGeneration True)
-                <> (updateModule "B.hs" . BSLC.pack . unlines $
+                <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                      [ "module B where"
                      , "import A"
                      , "printAB :: IO ()"
@@ -2849,13 +2849,13 @@ syntheticTests =
   , ( "GHC crash 7: Update imported module after update"
     , withSession defaultSessionConfig $ \session -> do
         let updA = (updateCodeGeneration True)
-                <> (updateModule "A.hs" . BSLC.pack . unlines $
+                <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                      [ "module A where"
                      , "printA :: IO ()"
                      , "printA = putStr \"A\""
                      ])
         let updB = (updateCodeGeneration True)
-                <> (updateModule "B.hs" . BSLC.pack . unlines $
+                <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                      [ "module B where"
                      , "import A"
                      , "printAB :: IO ()"
@@ -2873,7 +2873,7 @@ syntheticTests =
 
         -- The next request fails, and we get a source error
         let updA2 = (updateCodeGeneration True)
-                 <> (updateModule "A.hs" . BSLC.pack . unlines $
+                 <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                       [ "module A where"
                       , "printA :: IO ()"
                       , "printA = putStr \"A2\""
@@ -2894,13 +2894,13 @@ syntheticTests =
   , ( "GHC crash 8: Update importing module after update"
     , withSession defaultSessionConfig $ \session -> do
         let updA = (updateCodeGeneration True)
-                <> (updateModule "A.hs" . BSLC.pack . unlines $
+                <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                      [ "module A where"
                      , "printA :: IO ()"
                      , "printA = putStr \"A\""
                      ])
         let updB = (updateCodeGeneration True)
-                <> (updateModule "B.hs" . BSLC.pack . unlines $
+                <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                      [ "module B where"
                      , "import A"
                      , "printAB :: IO ()"
@@ -2918,7 +2918,7 @@ syntheticTests =
 
         -- The next request fails, and we get a source error
         let updB2 = (updateCodeGeneration True)
-                 <> (updateModule "B.hs" . BSLC.pack . unlines $
+                 <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                       [ "module B where"
                       , "import A"
                       , "printAB :: IO ()"
@@ -2940,12 +2940,12 @@ syntheticTests =
   , ( "Parse ghc 'Compiling' messages"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "A.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "printA :: IO ()"
                     , "printA = putStr \"A\""
                     ])
-               <> (updateModule "B.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                     [ "module B where"
                     , "import A"
                     , "printAB :: IO ()"
@@ -2967,14 +2967,14 @@ syntheticTests =
   , ( "Parse ghc 'Compiling' messages (with TH)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "A.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
                     , "module A where"
                     , "import Language.Haskell.TH"
                     , "foo :: Q Exp"
                     , "foo = [| True |]"
                     ])
-               <> (updateModule "Main.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "Main.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
                     , "module Main where"
                     , "import A"
@@ -2999,7 +2999,7 @@ syntheticTests =
         -- API; but just in case, we check that we still get the right messages
         -- (and not, for instance, '[TH]' as the module name).
 
-        let upd2 = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd2 = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
                     , "module A where"
                     , "import Language.Haskell.TH"
@@ -3020,7 +3020,7 @@ syntheticTests =
     , let config = defaultSessionConfig { configGenerateModInfo = False }
       in withSession config $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = putStrLn \"Hello World\""
@@ -3032,14 +3032,14 @@ syntheticTests =
     )
   , ( "Package dependencies"
     , withSession defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     ])
-               <> (updateModule "B.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                     [ "module B where"
                     , "import Control.Parallel"
                     ])
-               <> (updateModule "C.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "C.hs" . BSLC.pack . unlines $
                     [ "module C where"
                     , "import Control.Monad.Cont" -- from mtl
                     ])
@@ -3055,7 +3055,7 @@ syntheticTests =
   , ( "Set command line arguments"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.Environment (getArgs)"
                     , "printArgs :: IO ()"
@@ -3094,7 +3094,7 @@ syntheticTests =
   , ( "Check that command line arguments survive restartSession"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import System.Environment (getArgs)"
                     , "printArgs :: IO ()"
@@ -3125,7 +3125,7 @@ syntheticTests =
     , withSession (withOpts ["-package simple-lib17"]) $ \session -> do
         deletePackage "test/simple-lib17"
         restartSession session (Just defaultSessionInitParams)
-        let upd = updateModule "Main.hs" . BSLC.pack . unlines $
+        let upd = updateSourceFile "Main.hs" . BSLC.pack . unlines $
                     [ "module Main where"
                     , "import SimpleLib (simpleLib)"
                     , "main = print simpleLib"
@@ -3141,7 +3141,7 @@ syntheticTests =
     , withSession (withOpts ["-XCPP"]) $ \session -> do
         deletePackage "test/simple-lib17"
         restartSession session (Just defaultSessionInitParams)
-        let upd = updateModule "Main.hs" . BSLC.pack . unlines $
+        let upd = updateSourceFile "Main.hs" . BSLC.pack . unlines $
                     [ "module Main where"
                     , "import SimpleLib (simpleLib)"
                     , "#if MIN_VERSION_simple_lib17(0,1,0)"
@@ -3181,7 +3181,7 @@ syntheticTests =
                           , configStaticOpts      = packageOpts
                           }
       in withSession config $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Control.Parallel"
                     ])
@@ -3203,7 +3203,7 @@ syntheticTests =
                           , configStaticOpts      = packageOpts
                           }
       in withSession config $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Control.Parallel"
                     ])
@@ -3226,7 +3226,7 @@ syntheticTests =
                           }
       in withSession config $ \session -> do
         restartSession session Nothing
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Control.Parallel"
                     ])
@@ -3247,7 +3247,7 @@ syntheticTests =
       in ifIdeBackendHaddockTestsEnabled (withOpts packageOpts) $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
-            updMod = \mod code -> updateModule mod (BSLC.pack code)
+            updMod = \mod code -> updateSourceFile mod (BSLC.pack code)
 
         update $ updateCodeGeneration True
         update $ updateStdoutBufferMode (RunLineBuffering Nothing)
@@ -3324,7 +3324,7 @@ syntheticTests =
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
-            updMod = \mod code -> updateModule mod (BSLC.pack code)
+            updMod = \mod code -> updateSourceFile mod (BSLC.pack code)
 
         update $ updMod "Control/Parallel.hs"
             "module Control.Parallel where\n\
@@ -3386,7 +3386,7 @@ syntheticTests =
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \sess -> do
         let cb = \_ -> return ()
             update = flip (updateSession sess) cb
-            updMod = \mod code -> updateModule mod (BSLC.pack code)
+            updMod = \mod code -> updateSourceFile mod (BSLC.pack code)
 
         update $ updMod "Control/Parallel.hs"
             "module Control.Parallel where\n\
@@ -3420,7 +3420,7 @@ syntheticTests =
   , ( "Quickfix for Updating static files never triggers recompilation"
     , withSession defaultSessionConfig $ \session -> do
         let upd = updateDataFile "A.foo" (BSLC.pack "unboundVarName")
-               <> (updateModule "A.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
                     , "module A where"
                     , "import Language.Haskell.TH.Syntax"
@@ -3440,7 +3440,7 @@ syntheticTests =
   , ( "Quickfix for Updating static files never triggers --- illegal var name"
     , withSession defaultSessionConfig $ \session -> do
         let upd = updateDataFile "A.foo" (BSLC.pack "42 is a wrong var name")
-               <> (updateModule "A.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
                     , "module A where"
                     , "import Language.Haskell.TH.Syntax"
@@ -3459,7 +3459,7 @@ syntheticTests =
     )
   , ( "Quickfix for Updating static files never triggers --- missing file"
     , withSession defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
                     , "module A where"
                     , "import Language.Haskell.TH.Syntax"
@@ -3482,7 +3482,7 @@ syntheticTests =
                         , "-package MonadCatchIO-transformers"
                         ]
       in withSession (withOpts packageOpts) $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE PackageImports #-}"
                     , "module A where"
                     , "import Control.Monad.CatchIO"
@@ -3501,7 +3501,7 @@ syntheticTests =
                           , configStaticOpts      = packageOpts
                           }
       in withSession config $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                     , "import Control.Monad.CatchIO"
                     ])
@@ -3515,7 +3515,7 @@ syntheticTests =
                         , "-package MonadCatchIO-transformers"
                         ]
       in ifIdeBackendHaddockTestsEnabled (withOpts packageOpts) $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE PackageImports #-}"
                     , "module A where"
                     , "import \"MonadCatchIO-transformers\" Control.Monad.CatchIO"
@@ -3569,7 +3569,7 @@ syntheticTests =
                         , "-package MonadCatchIO-transformers"
                         ]
       in ifIdeBackendHaddockTestsEnabled (withOpts packageOpts) $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE PackageImports #-}"
                     , "module A where"
                     , "import \"MonadCatchIO-mtl\" Control.Monad.CatchIO"
@@ -3632,7 +3632,7 @@ syntheticTests =
 
         -- Compile code and execute
 
-        update $ updateModule "src/Main.hs" . BSLC.pack $
+        update $ updateSourceFile "src/Main.hs" . BSLC.pack $
             "main = putStrLn \"Version 1\""
         assertNoErrors sess
 
@@ -3642,7 +3642,7 @@ syntheticTests =
 
         -- Update the code and execute again
 
-        update $ updateModule "src/Main.hs" . BSLC.pack $
+        update $ updateSourceFile "src/Main.hs" . BSLC.pack $
             "main = putStrLn \"Version 2\""
         assertNoErrors sess
 
@@ -3652,7 +3652,7 @@ syntheticTests =
     )
   , ( "Subexpression types 1: Simple expressions"
     , withSession (withOpts ["-XNoMonomorphismRestriction"]) $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "module A where"
                       -- Single type var inst, boolean literal
                       --        123456789012
@@ -3872,7 +3872,7 @@ syntheticTests =
     )
   , ( "Subexpression types 2: TH and QQ"
     , withSession (withOpts ["-XNoMonomorphismRestriction", "-XTemplateHaskell"]) $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ {-  1 -} "module A where"
                     , {-  2 -} "import Language.Haskell.TH.Syntax"
                       -- Quotations (expressions, types)
@@ -3882,7 +3882,7 @@ syntheticTests =
                       --        1234567890123456789012345
                     , {-  5 -} "qComp x xs = [| x : xs |]"
                     ])
-               <> (updateModule "B.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                     [ {-  1 -} "module B where"
                     , {-  2 -} "import A"
                       -- Splices (expressions, types)
@@ -3919,7 +3919,7 @@ syntheticTests =
     )
   , ( "Subexpression types 3: Type families (fpco #2609)"
     , withSession (withOpts ["-XTypeFamilies"]) $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $ [
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $ [
                        {- 1 -} "module A where"
                      , {- 2 -} "type family TestTypeFamily a"
                      -- Monomorphic instance
@@ -3950,7 +3950,7 @@ syntheticTests =
     )
   , ( "Subexpression types 4: Higher rank types (fpco #2635)"
     , withSession (withOpts ["-XRank2Types"]) $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $ [
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $ [
                        {- 1 -} "module A where"
                      , {- 2 -} "newtype T = MkT (forall a. Ord a => a -> a -> Bool)"
                        --       12345678901234
@@ -3974,7 +3974,7 @@ syntheticTests =
     )
   , ( "Subexpression types 5: Sections of functions with 3 or more args"
     , withSession defaultSessionConfig $ \session -> do
-        let upd = (updateModule "A.hs" . BSLC.pack . unlines $ [
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $ [
                        {- 1 -} "module A where"
                      , {- 2 -} "f :: Int -> Bool -> Char -> ()"
                      , {- 3 -} "f = undefined"
@@ -4006,7 +4006,7 @@ syntheticTests =
         update $ updateStderrBufferMode (RunLineBuffering Nothing)
         update $ updateGhcOptions $ Just ["-Wall", "-Werror"]
 
-        update $ updateModule "src/Main.hs" $ BSLC.pack $ unlines [
+        update $ updateSourceFile "src/Main.hs" $ BSLC.pack $ unlines [
             "module Main where"
 
           , "import System.Process"
@@ -4042,7 +4042,7 @@ syntheticTests =
     )
   , ( "Use sites 1: Global values"
     , withSession defaultSessionConfig $ \session -> do
-        let upd1 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+        let upd1 = (updateSourceFile "A.hs" . BSLC.pack . unlines $ [
                         {- 1 -} "module A where"
                               -- 123456789012345
                       , {- 2 -} "f :: Int -> Int"
@@ -4050,7 +4050,7 @@ syntheticTests =
                       , {- 4 -} "g :: Int -> Int"
                       , {- 5 -} "g = f . f"
                       ])
-                <> (updateModule "B.hs" . BSLC.pack . unlines $ [
+                <> (updateSourceFile "B.hs" . BSLC.pack . unlines $ [
                         {- 1 -} "module B where"
                       , {- 2 -} "import A"
                       , {- 3 -} "h :: Int -> Int"
@@ -4086,7 +4086,7 @@ syntheticTests =
 
         -- Update B, swap positions of g and f
 
-        let upd2 = (updateModule "B.hs" . BSLC.pack . unlines $ [
+        let upd2 = (updateSourceFile "B.hs" . BSLC.pack . unlines $ [
                         {- 1 -} "module B where"
                       , {- 2 -} "import A"
                       , {- 3 -} "h :: Int -> Int"
@@ -4116,7 +4116,7 @@ syntheticTests =
 
         -- Update A, remove one internal use of f, and shift the other
 
-        let upd3 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+        let upd3 = (updateSourceFile "A.hs" . BSLC.pack . unlines $ [
                         {- 1 -} "module A where"
                               -- 123456789012345
                       , {- 2 -} "f :: Int -> Int"
@@ -4152,13 +4152,13 @@ syntheticTests =
         -- This test follows the same structure as "Use sites 1", but
         -- tests types rather than values
 
-        let upd1 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+        let upd1 = (updateSourceFile "A.hs" . BSLC.pack . unlines $ [
                         {- 1 -} "module A where"
                               -- 1234567890123456
                       , {- 2 -} "data F = MkF Int"
                       , {- 3 -} "data G = MkG F F"
                       ])
-                <> (updateModule "B.hs" . BSLC.pack . unlines $ [
+                <> (updateSourceFile "B.hs" . BSLC.pack . unlines $ [
                         {- 1 -} "module B where"
                       , {- 2 -} "import A"
                               -- 12345678901234567890
@@ -4194,7 +4194,7 @@ syntheticTests =
 
         -- Update B, swap positions of g and f
 
-        let upd2 = (updateModule "B.hs" . BSLC.pack . unlines $ [
+        let upd2 = (updateSourceFile "B.hs" . BSLC.pack . unlines $ [
                         {- 1 -} "module B where"
                       , {- 2 -} "import A"
                               -- 12345678901234567890
@@ -4224,7 +4224,7 @@ syntheticTests =
 
         -- Update A, remove one internal use of f, and shift the other
 
-        let upd3 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+        let upd3 = (updateSourceFile "A.hs" . BSLC.pack . unlines $ [
                         {- 1 -} "module A where"
                               -- 123456789012345678
                       , {- 2 -} "data F = MkF Int"
@@ -4255,7 +4255,7 @@ syntheticTests =
     )
   , ( "Use sites 3: Local identifiers"
     , withSession (withOpts ["-XScopedTypeVariables"]) $ \session -> do
-        let upd1 = (updateModule "A.hs" . BSLC.pack . unlines $ [
+        let upd1 = (updateSourceFile "A.hs" . BSLC.pack . unlines $ [
                         {-  1 -} "module A where"
                               -- 123456789012345
                       , {-  2 -} "test = (+ 1) . f . g"
@@ -4416,7 +4416,7 @@ syntheticTests =
   ]
 
 qsort :: IdeSessionUpdate
-qsort = (updateModule "Main.hs" . BSLC.pack . unlines $ [
+qsort = (updateSourceFile "Main.hs" . BSLC.pack . unlines $ [
           --          1         2         3         4         5
           -- 12345678901234567890123456789012345678901234567890123456
             "qsort [] = [] "
@@ -4591,7 +4591,7 @@ updateSessionD session update numProgressUpdates = do
 loadModule :: FilePath -> String -> IdeSessionUpdate
 loadModule file contents =
     let mod =  "module " ++ mname file ++ " where\n" ++ contents
-    in updateModule file (BSLC.pack mod)
+    in updateSourceFile file (BSLC.pack mod)
   where
     -- This is a hack: construct a module name from a filename
     mname :: FilePath -> String
@@ -4768,7 +4768,7 @@ restartRun :: [String] -> ExitCode -> Assertion
 restartRun code exitCode =
       withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
-               <> (updateModule "M.hs" . BSLC.pack . unlines $
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                      code)
 
         -- Compile and run the code on the first server
@@ -4806,7 +4806,7 @@ testBufferMode bufferMode =
     let upd = (updateCodeGeneration True)
            <> (updateStdoutBufferMode bufferMode)
            <> (updateStderrBufferMode bufferMode)
-           <> (updateModule "M.hs" . BSLC.pack . unlines $
+           <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                 [ "module M where"
                 , "import Control.Concurrent"
                 , "import Control.Monad"

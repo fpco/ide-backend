@@ -12,9 +12,9 @@ module IdeSession.Update (
     -- * Session updates
   , IdeSessionUpdate -- Abstract
   , updateSession
-  , updateModule
-  , updateModuleFromFile
-  , updateModuleDelete
+  , updateSourceFile
+  , updateSourceFileFromFile
+  , updateSourceFileDelete
   , updateGhcOptions
   , updateCodeGeneration
   , updateDataFile
@@ -434,16 +434,17 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
              , List.singleton idInfo
              )
 
--- | A session update that changes a source module by giving a new value for
--- the module source. This can be used to add a new module or update an
--- existing one. The ModuleName argument determines the directory
--- and file where the module is located within the project. The actual
--- internal compiler module name, such as the one given by the
+-- | A session update that changes a source file by providing some contents.
+-- This can be used to add a new module or update an existing one.
+-- The @FilePath@ argument determines the directory
+-- and file where the module is located within the project.
+-- In case of Haskell source files, the actual internal
+-- compiler module name, such as the one given by the
 -- @getLoadedModules@ query, comes from within @module ... end@.
 -- Usually the two names are equal, but they needn't be.
 --
-updateModule :: FilePath -> BSL.ByteString -> IdeSessionUpdate
-updateModule m bs = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
+updateSourceFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate
+updateSourceFile m bs = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
   let internal = internalFile ideSourcesDir m
   old <- get (ideManagedFiles .> managedSource .> lookup' m)
   -- We always overwrite the file, and then later set the timestamp back
@@ -466,20 +467,20 @@ nextLogicalTimestamp = do
   modify ideLogicalTimestamp (+ 1)
   return newTS
 
--- | Like 'updateModule' except that instead of passing the module source by
+-- | Like 'updateSourceFile' except that instead of passing the source by
 -- value, it's given by reference to an existing file, which will be copied.
 --
-updateModuleFromFile :: FilePath -> IdeSessionUpdate
-updateModuleFromFile p = IdeSessionUpdate $ \callback staticInfo -> do
-  -- We just call 'updateModule' because we need to read the file anyway
+updateSourceFileFromFile :: FilePath -> IdeSessionUpdate
+updateSourceFileFromFile p = IdeSessionUpdate $ \callback staticInfo -> do
+  -- We just call 'updateSourceFile' because we need to read the file anyway
   -- to compute the hash.
   bs <- liftIO $ BSL.readFile p
-  runSessionUpdate (updateModule p bs) callback staticInfo
+  runSessionUpdate (updateSourceFile p bs) callback staticInfo
 
--- | A session update that deletes an existing module.
+-- | A session update that deletes an existing source file.
 --
-updateModuleDelete :: FilePath -> IdeSessionUpdate
-updateModuleDelete m = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
+updateSourceFileDelete :: FilePath -> IdeSessionUpdate
+updateSourceFileDelete m = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
   liftIO $ Dir.removeFile (internalFile ideSourcesDir m)
       `Ex.catch` \e -> if isDoesNotExistError e
                        then return ()
@@ -674,7 +675,7 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
   rpcPrint (idleState ^. ideGhcServer) var bind forceEval
 
 -- | Build an exe from sources added previously via the ide-backend
--- updateModule* mechanism. The modules that contains the @main@ code are
+-- updateSourceFile* mechanism. The modules that contains the @main@ code are
 -- indicated by the arguments to @buildExe@. The function can be called
 -- multiple times with different arguments.
 --
@@ -721,7 +722,7 @@ buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
--- the ide-backend updateModule* mechanism. Similarly to 'buildExe',
+-- the ide-backend updateSourceFile* mechanism. Similarly to 'buildExe',
 -- it needs the project modules to be already loaded within the session
 -- and the generated docs can be found in the @doc@ subdirectory
 -- of 'Query.getDistDir'.

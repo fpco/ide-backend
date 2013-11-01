@@ -85,7 +85,7 @@ main = do
     replicateM 1000 $ do
       prog <- randomProgram
       before <- getCurrentTime
-      updateSession session (updateModule "Main.hs" (pack prog)) ignoreProgress
+      updateSession session (updateSourceFile "Main.hs" (pack prog)) ignoreProgress
       after <- getCurrentTime
       let latency = (1e6 :: Double) * realToFrac (diffUTCTime after before)
       hPutStrLn stderr $ show (length prog) ++ " " ++ show latency

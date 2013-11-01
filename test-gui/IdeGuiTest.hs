@@ -55,21 +55,21 @@ guiMain args = do
 
             onModuleAdd :: ModuleName -> FilePath -> IO ()
             onModuleAdd mn fp = do
-              addUpdate ("updateModuleFromFile (" ++ show mn ++ ") " ++ show fp)
-                        (updateModuleFromFile mn fp)
+              addUpdate ("updateSourceFileFromFile (" ++ show mn ++ ") " ++ show fp)
+                        (updateSourceFileFromFile mn fp)
                         (do content <- BS.readFile fp
                             addModuleBuffer gui mn content)
 
             onModuleDelete :: ModuleName -> IO ()
             onModuleDelete mn = do
-              addUpdate ("updateModuleDelete (" ++ show mn ++ ")")
-                        (updateModuleDelete mn)
+              addUpdate ("updateSourceFileDelete (" ++ show mn ++ ")")
+                        (updateSourceFileDelete mn)
                         (deleteModuleBuffer gui mn)
 
             onBufferUpdate :: ModuleName -> SourceBuffer -> ByteString -> IO ()
             onBufferUpdate mn buffer content = do
-              addUpdate ("updateModule (" ++ show mn ++ ") (data)")
-                        (updateModule mn (LBS.fromChunks [content]))
+              addUpdate ("updateSourceFile (" ++ show mn ++ ") (data)")
+                        (updateSourceFile mn (LBS.fromChunks [content]))
                         (textBufferSetModified buffer False)
 
             onUpdateSession :: IO ()

@@ -251,7 +251,7 @@ testDBsGhc cfg = do
                  ++ ["main = do"]
                  ++ configToProg cfg
     let upd = (updateCodeGeneration True)
-           <> (updateModule "Main.hs" . BSLC.pack $ prog)
+           <> (updateSourceFile "Main.hs" . BSLC.pack $ prog)
 
     updateSession session upd (\_ -> return ())
 
@@ -285,7 +285,7 @@ testDBsCabal cfg = do
                  ++ ["main = do"]
                  ++ configToProg cfg
     let upd = (updateCodeGeneration True)
-           <> (updateModule "Main.hs" . BSLC.pack $ prog)
+           <> (updateSourceFile "Main.hs" . BSLC.pack $ prog)
 
     updateSession session upd (\_ -> return ())
 
@@ -348,7 +348,7 @@ testOrderGhc pkg expectedOutput stack = do
                  , "main = do putStrLn testPkg" ++ pkg
                  ]
     let upd = (updateCodeGeneration True)
-           <> (updateModule "Main.hs" . BSLC.pack $ prog)
+           <> (updateSourceFile "Main.hs" . BSLC.pack $ prog)
 
     updateSession session upd (\_ -> return ())
 
@@ -380,7 +380,7 @@ testOrderCabal pkg expectedOutput stack = do
                  , "main = putStrLn testPkg" ++ pkg
                  ]
     let upd = (updateCodeGeneration False)
-           <> (updateModule "Main.hs" . BSLC.pack $ prog)
+           <> (updateSourceFile "Main.hs" . BSLC.pack $ prog)
 
     updateSession session upd (\_ -> return ())
 
