@@ -19,7 +19,7 @@ import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
-import System.FilePath ((</>), takeFileName, takeDirectory)
+import System.FilePath ((</>), makeRelative, takeFileName, takeDirectory)
 import System.FilePath.Find (find, always, extension)
 import System.Directory (
     doesFileExist
@@ -142,18 +142,27 @@ bInfo sourceDir ghcOpts cSources installIncludes =
     , installIncludes
     }
 
-getCSources :: FilePath -> IO [FilePath]
-getCSources sourceDir =
-  find always ((`elem` cExtensions) `liftM` extension) sourceDir
+-- @relative@ is a hack, because when building, we need an absolute path
+-- (so that ghc sees the .c files), but .cabal files need a relative path
+-- (and that's enough for 'cabal install', since the package dir
+-- will have both the .cabal and the C sources, unlike the directories
+-- we build exes in).
+getCSources :: Bool -> FilePath -> IO [FilePath]
+getCSources relative sourceDir = do
+  files <- find always ((`elem` cExtensions) `liftM` extension) sourceDir
+  return $ if relative
+           then map (makeRelative sourceDir) files
+           else files
 
 getCHeaders :: FilePath -> IO [FilePath]
 getCHeaders sourceDir =
-  find always ((`elem` cHeaderExtensions) `liftM` extension) sourceDir
+  fmap (map takeFileName) $
+    find always ((`elem` cHeaderExtensions) `liftM` extension) sourceDir
 
 exeDesc :: FilePath -> FilePath -> [String] -> (ModuleName, FilePath)
         -> IO Executable
 exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
-  cSources <- getCSources ideSourcesDir
+  cSources <- getCSources False ideSourcesDir
   cHeaders <- getCHeaders ideSourcesDir
   let exeName = Text.unpack m
   if exeName == "Main" then do  -- that's what Cabal expects, no wrapper needed
@@ -176,10 +185,10 @@ exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
       , buildInfo = bInfo mDir ghcOpts cSources cHeaders
       }
 
-libDesc :: FilePath -> [String] -> [Distribution.ModuleName.ModuleName]
+libDesc :: Bool -> FilePath -> [String] -> [Distribution.ModuleName.ModuleName]
         -> IO Library
-libDesc ideSourcesDir ghcOpts ms = do
-  cSources <- getCSources ideSourcesDir
+libDesc relative ideSourcesDir ghcOpts ms = do
+  cSources <- getCSources relative ideSourcesDir
   cHeaders <- getCHeaders ideSourcesDir
   return $ Library
     { exposedModules = ms
@@ -256,7 +265,7 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc ideSourcesDir ghcOpts projectMs
+  library <- libDesc False ideSourcesDir ghcOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -326,7 +335,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc ideSourcesDir ghcOpts projectMs
+  library <- libDesc False ideSourcesDir ghcOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -379,7 +388,8 @@ buildDotCabal ideSourcesDir ghcOpts computed = do
   let soundMs = delete (Text.pack "Main") loadedMs
       projectMs =
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc ideSourcesDir ghcOpts projectMs
+  library <- libDesc True -- relative C files paths
+                     ideSourcesDir ghcOpts projectMs
   let libE = library {libExposed = True}
       gpDesc libName = GenericPackageDescription
         { packageDescription = pkgDescFromName libName

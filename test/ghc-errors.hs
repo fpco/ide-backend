@@ -518,7 +518,7 @@ syntheticTests =
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "M with cabal macro exe output" "5\n" mOut
     )
-  , ( "Use cabal macro VERSION by including a fixed macros file"
+  , ( "Use cabal macro VERSION by including an external macros file"
     , withSession (withOpts ["-XCPP"]) $ \session -> do
         macros <- getCabalMacros session
         assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
@@ -544,12 +544,12 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName"
-        assertEqual "dotCabal" (filterIdeBackendTestH "cabal_macros.h" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: M\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    install-includes: /tmp/ide-backend-test.22201/src.22201/cabal_macros.h\n    hs-source-dirs: /tmp/ide-backend-test.22201/src.22201\n    ghc-options: -XCPP\n ") $ filterIdeBackendTestH "cabal_macros.h" $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal" (filterIdeBackendTestH "cabal_macros.h" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: M\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    install-includes: cabal_macros.h\n    hs-source-dirs: /tmp/ide-backend-test.22201/src.22201\n    ghc-options: -XCPP\n ") $ filterIdeBackendTestH "cabal_macros.h" $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.test"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
         checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
+        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XCPP' use 'extensions: CPP'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* 'hs-.\n\nHackage would reject this package.\n")
     )
   , ( "Caching cabal macros"
     , do macros <- withSession defaultSessionConfig getCabalMacros
@@ -609,12 +609,12 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName"
-        assertEqual "dotCabal" (filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0, binary ==0.5.1.0,\n                   bytestring ==0.9.2.1, containers ==0.4.2.1, deepseq ==1.3.0.0,\n                   ghc-prim ==0.2.0.0, integer-gmp ==0.4.0.0, mtl ==2.1.2,\n                   transformers ==0.3.0.0\n    exposed-modules: GHC.RTS.EventParserUtils GHC.RTS.EventTypes\n                     GHC.RTS.Events\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    install-includes: /tmp/ide-backend-test.20883/src.20883/GHC/RTS/EventLogFormat.h\n    hs-source-dirs: /tmp/ide-backend-test.20883/src.20883\n    ghc-options: -XNamedFieldPuns -XRecordWildCards\n ") $ filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal" (filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0, binary ==0.5.1.0,\n                   bytestring ==0.9.2.1, containers ==0.4.2.1, deepseq ==1.3.0.0,\n                   ghc-prim ==0.2.0.0, integer-gmp ==0.4.0.0, mtl ==2.1.2,\n                   transformers ==0.3.0.0\n    exposed-modules: GHC.RTS.EventParserUtils GHC.RTS.EventTypes\n                     GHC.RTS.Events\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    install-includes: EventLogFormat.h\n    hs-source-dirs: /tmp/ide-backend-test.20883/src.20883\n    ghc-options: -XNamedFieldPuns -XRecordWildCards\n ") $ filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.test"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
         checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
+        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XNamedFieldPuns -XRecordWildCards' use\n'extensions: NamedFieldPuns RecordWildCards'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\n* 'hs-.\n\nHackage would reject this package.\n")
     )
   , ( "Build licenses from NamedFieldPuns (with errors)"
     , withSession (withOpts []) $ \session -> do
@@ -1708,7 +1708,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName"
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    exposed: True\n    buildable: True\n    c-sources: /tmp/ide-backend-test.22783/src.22783/test/FFI/life.c\n    default-language: Haskell2010\n    install-includes: /tmp/ide-backend-test.22783/src.22783/test/FFI/life.h\n    hs-source-dirs: /tmp/ide-backend-test.22783/src.22783\n    ghc-options: -hide-all-packages -package base\n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    exposed: True\n    buildable: True\n    c-sources: life.c\n    default-language: Haskell2010\n    install-includes: life.h\n    hs-source-dirs: /tmp/ide-backend-test.22783/src.22783\n    ghc-options: -hide-all-packages -package base\n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.test"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
