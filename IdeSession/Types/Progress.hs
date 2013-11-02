@@ -2,9 +2,11 @@ module IdeSession.Types.Progress (
     Progress(..)
   ) where
 
+import Control.Applicative ((<$>), (<*>), (<|>))
 import Data.Binary (Binary(..))
-import Control.Applicative ((<$>), (<*>))
 import Data.Text (Text)
+import Data.Maybe (fromJust)
+import qualified Data.Text as Text
 import IdeSession.Util () -- instance Binary Text
 
 -- | This type represents intermediate progress information during compilation.
@@ -31,7 +33,7 @@ data Progress = Progress {
     -- | The full original message (see 'progressMsg')
   , progressOrigMsg :: Maybe Text
   }
-  deriving (Show, Eq, Ord)
+  deriving (Eq, Ord)
 
 instance Binary Progress where
   put (Progress {..}) = do put progressStep
@@ -39,3 +41,15 @@ instance Binary Progress where
                            put progressParsedMsg
                            put progressOrigMsg
   get = Progress <$> get <*> get <*> get <*> get
+
+instance Show Progress where
+  show (Progress{..}) =
+         "["
+      ++ show progressStep
+      ++ " of "
+      ++ show progressNumSteps
+      ++ "]"
+      ++ fromJust (pad progressParsedMsg <|> pad progressOrigMsg <|> Just "")
+    where
+      pad :: Maybe Text -> Maybe String
+      pad = fmap $ \t -> " " ++ Text.unpack t

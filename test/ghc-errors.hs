@@ -4440,6 +4440,97 @@ syntheticTests =
         assertEqual "" [(Text.pack "left", Text.pack "[Integer]", Text.pack "(_t1::[Integer])")] printed
         assertEqual "" [(Text.pack "left", Text.pack "[Integer]", Text.pack "[4, 0, 3, 1]")] forced
     )
+{-
+  , ( "Loading object files"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Foreign.C"
+                    , "foreign import ccall \"f\" c_f :: CInt"
+                    , "hello :: IO ()"
+                    , "hello = print c_f"
+                    ])
+        let upd2 = (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Foreign.C"
+                    , "foreign import ccall \"f\" c_f :: CInt"
+                    , "hello :: IO ()"
+                    , "hello = print (c_f, c_f)"
+                    ])
+        loadObject session "/Users/dev/wt/projects/fpco/ide-backend/ffi1/FFItestC.o"
+        updateSessionD session upd 1
+        assertNoErrors session
+        do runActions <- runStmt session "M" "hello"
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "1234\n") output
+
+        unloadObject session "/Users/dev/wt/projects/fpco/ide-backend/ffi1/FFItestC.o"
+        loadObject   session "/Users/dev/wt/projects/fpco/ide-backend/ffi1/FFItestC2.o"
+        updateSessionD session upd2 1 -- (*) Force M to be recompiled (and relinked)
+        assertNoErrors session
+        do runActions <- runStmt session "M" "hello"
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "(4321,4321)\n") output
+    )
+-}
+  , ( "Using C files"
+    , withSession defaultSessionConfig $ \session -> do
+        putStrLn "** 1 **"
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Foreign.C"
+                    , "foreign import ccall \"foo\" c_f :: CInt"
+                    , "hello :: IO ()"
+                    , "hello = print c_f"
+                    ])
+               <> (updateSourceFile "MC.c" . BSLC.pack . unlines $
+                    [ "int foo() {"
+                    , "  return 12345;"
+                    , "}"
+                    ])
+        --updateSessionD session upd 1
+        updateSession session upd print
+        assertNoErrors session
+        do runActions <- runStmt session "M" "hello"
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "12345\n") output
+
+        -- Update the Haskell module without updating the C module
+        putStrLn "** 2 **"
+        let upd2 = (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Foreign.C"
+                    , "foreign import ccall \"foo\" c_f :: CInt"
+                    , "hello :: IO ()"
+                    , "hello = print (c_f + 1)"
+                    ])
+        updateSession session upd2 print
+        assertNoErrors session
+        do runActions <- runStmt session "M" "hello"
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "12346\n") output
+
+        -- Update the C code without updating the Haskell module
+        putStrLn "** 3 **"
+        let upd3 = (updateSourceFile "MC.c" . BSLC.pack . unlines $
+                    [ "int foo() {"
+                    , "  return 54321;"
+                    , "}"
+                    ])
+        --updateSessionD session upd 1
+        updateSession session upd3 print
+        assertNoErrors session
+        do runActions <- runStmt session "M" "hello"
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "54322\n") output
+    )
   ]
 
 qsort :: IdeSessionUpdate ()

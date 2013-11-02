@@ -20,6 +20,7 @@ module IdeSession.GHC.Client (
   , rpcSetArgs
   , rpcBreakpoint
   , rpcPrint
+  , rpcLoad
   ) where
 
 import Control.Concurrent (ThreadId, killThread)
@@ -280,6 +281,12 @@ rpcRun server cmd translateResult = do
 rpcPrint :: GhcServer -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv
 rpcPrint server var bind forceEval = conversation server $ \RpcConversation{..} -> do
   put (ReqPrint var bind forceEval)
+  get
+
+-- | Load an object file
+rpcLoad :: GhcServer -> FilePath -> Bool -> IO ()
+rpcLoad server path unload = conversation server $ \RpcConversation{..} -> do
+  put (ReqLoad path unload)
   get
 
 -- | Crash the GHC server (for debugging purposes)

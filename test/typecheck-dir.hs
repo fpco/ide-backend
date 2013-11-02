@@ -3,8 +3,6 @@ module Main where
 import Control.Exception (bracket)
 import Control.Monad (liftM, unless)
 import Data.Monoid (mconcat)
-import Data.Maybe (fromJust)
-import qualified Data.Text as Text
 import System.Directory
 import System.Environment
 import System.FilePath.Find (always, extension, find)
@@ -87,17 +85,8 @@ check opts what configDir = do
 
     print modules
 
-    let displayCounter :: Progress -> IO ()
-        displayCounter Progress{..} =
-          putStrLn $ "["
-                  ++ show progressStep
-                  ++ " of "
-                  ++ show progressNumSteps
-                  ++ "] "
-                  ++ Text.unpack (fromJust progressParsedMsg)
+    let update = mconcat (map updateSourceFileFromFile modules)
 
-        update = mconcat (map updateSourceFileFromFile modules)
-
-    updateSession session update displayCounter
+    updateSession session update print
     errs <- getSourceErrors session
     putStrLn $ "\nErrors and warnings:\n" ++ unlines (map show errs)

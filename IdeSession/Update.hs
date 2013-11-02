@@ -52,17 +52,27 @@ import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString.Char8 as BSS
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, catMaybes)
 import Data.Foldable (forM_)
 import qualified System.Directory as Dir
-import System.FilePath (takeDirectory, makeRelative, (</>),
-                        splitSearchPath, searchPathSeparator)
+import System.FilePath (
+    takeDirectory
+  , makeRelative
+  , (</>)
+  , splitSearchPath
+  , searchPathSeparator
+  , takeExtension
+  , replaceExtension
+  , takeFileName
+  )
 import System.Posix.Files (setFileTimes)
 import System.IO.Temp (createTempDirectory)
 import System.IO.Error (isDoesNotExistError)
 import qualified Data.Text as Text
 import System.Environment (getEnv, getEnvironment)
 import Data.Version (Version(..))
+import System.Cmd (system)
+import System.Exit (ExitCode(..))
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
 
@@ -137,6 +147,7 @@ initSession initParams ideConfig@SessionConfig{..} = do
                         , _ideNewOpts          = Nothing
                         , _ideGenerateCode     = False
                         , _ideManagedFiles     = ManagedFilesInternal [] []
+                        , _ideObjectFiles      = []
                         , _ideBuildExeStatus   = Nothing
                         , _ideBuildDocStatus   = Nothing
                         , _ideBuildLicensesStatus = Nothing
@@ -364,7 +375,10 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
     -- We don't want to call 'restartSession' while we hold the lock
     shouldRestart <- modifyMVar ideState $ \state -> case state of
       IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
-        idleState' <- execSessionUpdate update ideStaticInfo callback idleState
+        idleState' <- execSessionUpdate (update >> recompileObjectFiles)
+                                        ideStaticInfo
+                                        callback
+                                        idleState
 
         -- Update environment
         when (idleState' ^. ideUpdatedEnv) $
@@ -456,6 +470,95 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
              , List.singleton idInfo
              )
 
+recompileObjectFiles :: IdeSessionUpdate ()
+recompileObjectFiles = do
+    callback     <- getCallback
+    staticInfo   <- getStaticInfo
+    managedFiles <- get (ideManagedFiles .> managedSource)
+
+    let cFiles :: [(FilePath, LogicalTimestamp)]
+        cFiles = filter ((`elem` cExtensions) . takeExtension . fst)
+               $ map (\(fp, (_, ts)) -> (fp, ts))
+               $ managedFiles
+
+        srcDir, objDir :: FilePath
+        srcDir = ideSourcesDir staticInfo
+        objDir = ideDistDir staticInfo </> "objs"
+
+    liftIO $ Dir.createDirectoryIfMissing True objDir
+    recompiled <- forM cFiles $ \(fp, ts) -> do
+      let absC     = srcDir </> fp
+          absObj   = objDir </> replaceExtension fp ".o"
+
+      mObjFile <- get (ideObjectFiles .> lookup' fp)
+
+      -- Unload the old object (if necessary)
+      case mObjFile of
+        Just (objFile, ts') | ts' < ts -> do
+          callback $ progress "Unloading" objFile
+          unloadObject objFile
+        _ ->
+          return ()
+
+      -- Recompile (if necessary)
+      case mObjFile of
+        Just (_objFile, ts') | ts' > ts ->
+          -- The object is newer than the C file. Recompilation unnecessary
+          return Nothing
+        _ -> do
+          -- TODO: We need to figure out precisely what happens when C files
+          -- are stored in subdirs (and if we care at all)
+          -- TODO: We need to deal with errors in the C code
+          callback $ progress "Compiling" fp
+          ExitSuccess <- runGcc absC absObj
+          ts' <- updateFileTimes absObj
+          callback $ progress "Loading" absObj
+          loadObject absObj
+          set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
+          return (Just fp)
+
+    markAsUpdated (update (catMaybes recompiled))
+  where
+    -- TODO: Think about more meaningful numbers here
+    -- TODO: And possibly adjust the gHc progress numbers too
+    -- TODO: Can we ask gcc for a progress message?
+    progress :: String -> FilePath -> Progress
+    progress prefix fp =
+      Progress { progressStep      = 0
+               , progressNumSteps  = 0
+               , progressParsedMsg = msg
+               , progressOrigMsg   = msg
+               }
+      where
+        msg = Just . Text.pack $ prefix ++ " " ++ takeFileName fp
+
+    -- NOTE: When using HscInterpreted/LinkInMemory, then C symbols get
+    -- resolved during compilation, not during a separate linking step. To be
+    -- precise, they get resolved from deep inside the compiler. Example
+    -- callchain:
+    --
+    -- >            lookupStaticPtr   <-- does the resolution
+    -- > called by  generateCCall
+    -- > called by  schemeT
+    -- > called by  schemeE
+    -- > called by  doCase
+    -- > called by  schemeE
+    -- > called by  schemeER_wrk
+    -- > called by  schemeR_wrk
+    -- > called by  schemeR
+    -- > called by  schemeTopBind
+    -- > called by  byteCodeGen
+    -- > called by  hscInteractive
+    --
+    -- Hence, we really need to recompile, rather than just relink.
+    --
+    -- TODO: If we knew which Haskell modules depended on which C files,
+    -- we should do better here. For now we recompile all Haskell modules
+    -- whenever any C file gets recompiled.
+    update :: [FilePath] -> FilePath -> Bool
+    update recompiled src = not (null recompiled)
+                         && takeExtension src == ".hs"
+
 -- | A session update that changes a source file by providing some contents.
 -- This can be used to add a new module or update an existing one.
 -- The @FilePath@ argument determines the directory
@@ -478,17 +581,9 @@ updateSourceFile m bs = do
     Just (oldHash, oldTS) | oldHash == newHash ->
       liftIO $ setFileTimes internal oldTS oldTS
     _ -> do
-      newTS <- nextLogicalTimestamp
-      liftIO $ setFileTimes internal newTS newTS
+      newTS <- updateFileTimes internal
       set (ideManagedFiles .> managedSource .> lookup' m) (Just (newHash, newTS))
       set ideUpdatedCode True
-
--- | Get the next available logical timestamp
-nextLogicalTimestamp :: MonadState IdeIdleState m => m LogicalTimestamp
-nextLogicalTimestamp = do
-  newTS <- get ideLogicalTimestamp
-  modify ideLogicalTimestamp (+ 1)
-  return newTS
 
 -- | Like 'updateSourceFile' except that instead of passing the source by
 -- value, it's given by reference to an existing file, which will be copied.
@@ -832,15 +927,7 @@ buildLicenses cabalsDir = do
 
 -- | Force recompilation of all modules. For debugging only.
 forceRecompile :: IdeSessionUpdate ()
-forceRecompile = do
-  IdeStaticInfo{ideSourcesDir} <- getStaticInfo
-  sources  <- get (ideManagedFiles .> managedSource)
-  sources' <- forM sources $ \(path, (digest, _oldTS)) -> do
-    newTS <- nextLogicalTimestamp
-    liftIO $ setFileTimes (internalFile ideSourcesDir path) newTS newTS
-    return (path, (digest, newTS))
-  set (ideManagedFiles .> managedSource) sources'
-  set ideUpdatedCode True
+forceRecompile = markAsUpdated (const True)
 
 -- | Crash the GHC server. For debugging only. If the specified delay is
 -- @Nothing@, crash immediately; otherwise, set up a thread that throws
@@ -856,8 +943,59 @@ crashGhcServer session delay = withIdleState session $ \idleState ->
 getStaticInfo :: IdeSessionUpdate IdeStaticInfo
 getStaticInfo = asks fst
 
-getCallback :: IdeSessionUpdate (Progress -> IO ())
-getCallback = asks snd
+getCallback :: MonadIO m => IdeSessionUpdate (Progress -> m ())
+getCallback = (liftIO .) <$> asks snd
+
+-- | Load an object file
+loadObject :: FilePath -> IdeSessionUpdate ()
+loadObject path = do
+  ghcServer <- get ideGhcServer
+  liftIO $ rpcLoad ghcServer path False
+
+-- | Unload an object file
+unloadObject :: FilePath -> IdeSessionUpdate ()
+unloadObject path = do
+  ghcServer <- get ideGhcServer
+  liftIO $ rpcLoad ghcServer path True
+
+-- | Force recompilation of the given modules
+markAsUpdated :: (FilePath -> Bool) -> IdeSessionUpdate ()
+markAsUpdated shouldMark = do
+  IdeStaticInfo{ideSourcesDir} <- getStaticInfo
+  sources  <- get (ideManagedFiles .> managedSource)
+  sources' <- forM sources $ \(path, (digest, oldTS)) ->
+    if shouldMark path
+      then do newTS <- updateFileTimes (internalFile ideSourcesDir path)
+              return (path, (digest, newTS))
+      else return (path, (digest, oldTS))
+  set (ideManagedFiles .> managedSource) sources'
+  set ideUpdatedCode True
+
+-- | Update the file times of the given file with the next logical timestamp
+updateFileTimes :: FilePath -> IdeSessionUpdate LogicalTimestamp
+updateFileTimes path = do
+  ts <- nextLogicalTimestamp
+  liftIO $ setFileTimes path ts ts
+  return ts
+
+-- | Get the next available logical timestamp
+nextLogicalTimestamp :: MonadState IdeIdleState m => m LogicalTimestamp
+nextLogicalTimestamp = do
+  newTS <- get ideLogicalTimestamp
+  modify ideLogicalTimestamp (+ 1)
+  return newTS
+
+-- | Call gcc
+--
+-- TODO: For now we manually invoke gcc with no options at all. We need to
+-- figure out what cabal does and make sure that we do the same thing
+runGcc :: FilePath -> FilePath -> IdeSessionUpdate ExitCode
+runGcc src dst = liftIO $
+    system $ gcc ++ " -c -o " ++ dst ++ " " ++ src
+  where
+    -- TODO: this should be configurable
+    gcc :: FilePath
+    gcc = "/usr/bin/gcc"
 
 {------------------------------------------------------------------------------
   Aux

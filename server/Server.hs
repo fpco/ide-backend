@@ -41,6 +41,7 @@ import qualified IdeSession.Strict.List as StrictList
 
 import qualified GHC
 import GhcMonad(Ghc(..))
+import qualified ObjLink as Linker
 
 import Run
 import HsWalk
@@ -125,6 +126,9 @@ ghcServerEngine configGenerateModInfo
               return args
             ReqPrint vars bind forceEval -> do
               ghcHandlePrint conv vars bind forceEval
+              return args
+            ReqLoad path unload -> do
+              ghcHandleLoad conv path unload
               return args
             ReqCrash delay -> do
               ghcHandleCrash delay
@@ -391,6 +395,13 @@ ghcHandlePrint :: RpcConversation -> Public.Name -> Bool -> Bool -> Ghc ()
 ghcHandlePrint RpcConversation{..} var bind forceEval = do
   vals <- printVars (Text.unpack var) bind forceEval
   liftIO $ put vals
+
+-- | Handle a load object request
+ghcHandleLoad :: RpcConversation -> FilePath -> Bool -> Ghc ()
+ghcHandleLoad RpcConversation{..} path unload = do
+  liftIO $ if unload then Linker.unloadObj path
+                     else Linker.loadObj   path
+  liftIO $ put ()
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation -> RunCmd -> Ghc ()

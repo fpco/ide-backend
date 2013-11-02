@@ -18,6 +18,7 @@ module IdeSession.State
   , ideNewOpts
   , ideGenerateCode
   , ideManagedFiles
+  , ideObjectFiles
   , ideBuildExeStatus
   , ideBuildDocStatus
   , ideBuildLicensesStatus
@@ -122,6 +123,8 @@ data IdeIdleState = IdeIdleState {
   , _ideGenerateCode     :: !Bool
     -- | Files submitted by the user and not deleted yet.
   , _ideManagedFiles     :: !ManagedFilesInternal
+    -- | Object files created from .c files
+  , _ideObjectFiles      :: !ObjectFiles
     -- | Exit status of the last invocation of 'buildExe', if any.
   , _ideBuildExeStatus   :: !(Maybe ExitCode)
     -- | Exit status of the last invocation of 'buildDoc', if any.
@@ -156,6 +159,9 @@ data ManagedFilesInternal = ManagedFilesInternal
   , _managedData   :: [FilePath]
   }
 
+-- | Mapping from C files to the corresponding .o files and their timestamps
+type ObjectFiles = [(FilePath, (FilePath, LogicalTimestamp))]
+
 {------------------------------------------------------------------------------
   Util
 ------------------------------------------------------------------------------}
@@ -172,6 +178,7 @@ ideComputed            :: Accessor IdeIdleState (Strict Maybe Computed)
 ideNewOpts             :: Accessor IdeIdleState (Maybe [String])
 ideGenerateCode        :: Accessor IdeIdleState Bool
 ideManagedFiles        :: Accessor IdeIdleState ManagedFilesInternal
+ideObjectFiles         :: Accessor IdeIdleState ObjectFiles
 ideBuildExeStatus      :: Accessor IdeIdleState (Maybe ExitCode)
 ideBuildDocStatus      :: Accessor IdeIdleState (Maybe ExitCode)
 ideBuildLicensesStatus :: Accessor IdeIdleState (Maybe ExitCode)
@@ -190,6 +197,7 @@ ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed  
 ideNewOpts          = accessor _ideNewOpts          $ \x s -> s { _ideNewOpts          = x }
 ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCode     = x }
 ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }
+ideObjectFiles      = accessor _ideObjectFiles      $ \x s -> s { _ideObjectFiles      = x }
 ideBuildExeStatus   = accessor _ideBuildExeStatus   $ \x s -> s { _ideBuildExeStatus   = x }
 ideBuildDocStatus   = accessor _ideBuildDocStatus   $ \x s -> s { _ideBuildDocStatus   = x }
 ideBuildLicensesStatus =
