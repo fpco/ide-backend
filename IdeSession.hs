@@ -233,14 +233,14 @@ import Distribution.Simple (PackageDBStack, PackageDB(..))
 
 -- * DEPRECATED aliases
 
-updateModule :: FilePath -> BSL.ByteString -> IdeSessionUpdate
+updateModule :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
 {-# DEPRECATED updateModule "alias for updateSourceFile" #-}
 updateModule = updateSourceFile
 
-updateModuleFromFile :: FilePath -> IdeSessionUpdate
+updateModuleFromFile :: FilePath -> IdeSessionUpdate ()
 {-# DEPRECATED updateModuleFromFile "alias for updateSourceFileFromFile" #-}
 updateModuleFromFile = updateSourceFileFromFile
 
-updateModuleDelete :: FilePath -> IdeSessionUpdate
+updateModuleDelete :: FilePath -> IdeSessionUpdate ()
 {-# DEPRECATED updateModuleDelete "alias for updateSourceFileDelete" #-}
 updateModuleDelete = updateSourceFileDelete

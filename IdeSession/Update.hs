@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving #-}
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
@@ -41,8 +41,10 @@ module IdeSession.Update (
 
 import Prelude hiding (mod, span)
 import Control.Monad (when, void, forM, unless)
-import Control.Monad.State (MonadState, StateT, execStateT, lift)
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (MonadState, StateT, runStateT)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Applicative (Applicative, (<$>), (<*>))
 import qualified Control.Exception as Ex
 import Data.List (delete, elemIndices, intercalate)
 import Data.Monoid (Monoid(..))
@@ -315,19 +317,41 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
 --
 -- In particular it is an instance of 'Monoid', so multiple primitive updates
 -- can be easily combined. Updates can override each other left to right.
-newtype IdeSessionUpdate = IdeSessionUpdate {
-    runSessionUpdate :: (Progress -> IO ()) -> IdeStaticInfo
-                     -> StateT IdeIdleState IO ()
+newtype IdeSessionUpdate a = IdeSessionUpdate {
+    _runSessionUpdate :: ReaderT (IdeStaticInfo, Progress -> IO ())
+                          (StateT IdeIdleState IO)
+                            a
   }
+  deriving ( Functor
+           , Applicative
+           , Monad
+           , MonadReader (IdeStaticInfo, Progress -> IO ())
+           , MonadState IdeIdleState
+           , MonadIO
+           )
+
+runSessionUpdate :: IdeSessionUpdate a
+                 -> IdeStaticInfo
+                 -> (Progress -> IO ())
+                 -> IdeIdleState
+                 -> IO (a, IdeIdleState)
+runSessionUpdate upd staticInfo callback idleState =
+  runStateT (runReaderT (_runSessionUpdate upd) (staticInfo, callback)) idleState
+
+execSessionUpdate :: IdeSessionUpdate ()
+                  -> IdeStaticInfo
+                  -> (Progress -> IO ())
+                  -> IdeIdleState
+                  -> IO IdeIdleState
+execSessionUpdate upd staticInfo callback idleState =
+  snd <$> runSessionUpdate upd staticInfo callback idleState
 
 -- We assume, if updates are combined within the monoid, they can all
 -- be applied in the context of the same session.
 -- Otherwise, call 'updateSession' sequentially with the updates.
-instance Monoid IdeSessionUpdate where
-  mempty = IdeSessionUpdate $ \_callback _staticInfo -> return ()
-  (IdeSessionUpdate f) `mappend` (IdeSessionUpdate g) =
-    IdeSessionUpdate $ \callback staticInfo ->
-      f callback staticInfo >> g callback staticInfo
+instance Monoid a => Monoid (IdeSessionUpdate a) where
+  mempty        = return mempty
+  f `mappend` g = mappend <$> f <*> g
 
 -- | Given the current IDE session state, go ahead and
 -- update the session, eventually resulting in a new session state,
@@ -335,14 +359,12 @@ instance Monoid IdeSessionUpdate where
 --
 -- The update can be a long running operation, so we support a callback
 -- which can be used to monitor progress of the operation.
-updateSession :: IdeSession -> IdeSessionUpdate -> (Progress -> IO ()) -> IO ()
+updateSession :: IdeSession -> IdeSessionUpdate () -> (Progress -> IO ()) -> IO ()
 updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
     -- We don't want to call 'restartSession' while we hold the lock
     shouldRestart <- modifyMVar ideState $ \state -> case state of
       IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
-        idleState' <-
-          execStateT (runSessionUpdate update callback ideStaticInfo)
-                     idleState
+        idleState' <- execSessionUpdate update ideStaticInfo callback idleState
 
         -- Update environment
         when (idleState' ^. ideUpdatedEnv) $
@@ -443,8 +465,9 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
 -- @getLoadedModules@ query, comes from within @module ... end@.
 -- Usually the two names are equal, but they needn't be.
 --
-updateSourceFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate
-updateSourceFile m bs = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
+updateSourceFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
+updateSourceFile m bs = do
+  IdeStaticInfo{ideSourcesDir} <- getStaticInfo
   let internal = internalFile ideSourcesDir m
   old <- get (ideManagedFiles .> managedSource .> lookup' m)
   -- We always overwrite the file, and then later set the timestamp back
@@ -470,17 +493,18 @@ nextLogicalTimestamp = do
 -- | Like 'updateSourceFile' except that instead of passing the source by
 -- value, it's given by reference to an existing file, which will be copied.
 --
-updateSourceFileFromFile :: FilePath -> IdeSessionUpdate
-updateSourceFileFromFile p = IdeSessionUpdate $ \callback staticInfo -> do
+updateSourceFileFromFile :: FilePath -> IdeSessionUpdate ()
+updateSourceFileFromFile p = do
   -- We just call 'updateSourceFile' because we need to read the file anyway
   -- to compute the hash.
   bs <- liftIO $ BSL.readFile p
-  runSessionUpdate (updateSourceFile p bs) callback staticInfo
+  updateSourceFile p bs
 
 -- | A session update that deletes an existing source file.
 --
-updateSourceFileDelete :: FilePath -> IdeSessionUpdate
-updateSourceFileDelete m = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
+updateSourceFileDelete :: FilePath -> IdeSessionUpdate ()
+updateSourceFileDelete m = do
+  IdeStaticInfo{ideSourcesDir} <- getStaticInfo
   liftIO $ Dir.removeFile (internalFile ideSourcesDir m)
       `Ex.catch` \e -> if isDoesNotExistError e
                        then return ()
@@ -491,15 +515,15 @@ updateSourceFileDelete m = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} ->
 -- | Update dynamic compiler flags, including pragmas and packages to use.
 -- Warning: only dynamic flags can be set here.
 -- Static flags need to be set at server startup.
-updateGhcOptions :: (Maybe [String]) -> IdeSessionUpdate
-updateGhcOptions opts = IdeSessionUpdate $ \_ _ -> do
+updateGhcOptions :: (Maybe [String]) -> IdeSessionUpdate ()
+updateGhcOptions opts = do
   set ideNewOpts opts
   set ideUpdatedCode True
 
 -- | Enable or disable code generation in addition
 -- to type-checking. Required by 'runStmt'.
-updateCodeGeneration :: Bool -> IdeSessionUpdate
-updateCodeGeneration b = IdeSessionUpdate $ \_ _ -> do
+updateCodeGeneration :: Bool -> IdeSessionUpdate ()
+updateCodeGeneration b = do
   set ideGenerateCode b
   set ideUpdatedCode True
 
@@ -508,8 +532,9 @@ updateCodeGeneration b = IdeSessionUpdate $ \_ _ -> do
 -- Since source files can include data files (e.g., via TH), we set
 -- @ideUpdatedCode@ to force recompilation (see #94).
 --
-updateDataFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate
-updateDataFile n bs = IdeSessionUpdate $ \_ IdeStaticInfo{ideDataDir} -> do
+updateDataFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
+updateDataFile n bs = do
+  IdeStaticInfo{ideDataDir} <- getStaticInfo
   liftIO $ writeFileAtomic (ideDataDir </> n) bs
   modify (ideManagedFiles .> managedData) (n :)
   set ideUpdatedCode True
@@ -518,9 +543,9 @@ updateDataFile n bs = IdeSessionUpdate $ \_ IdeStaticInfo{ideDataDir} -> do
 -- value, it's given by reference to an existing file (the second argument),
 -- which will be copied.
 --
-updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate
-updateDataFileFromFile n p = IdeSessionUpdate
-                             $ \_ IdeStaticInfo{ideDataDir} -> do
+updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate ()
+updateDataFileFromFile n p = do
+  IdeStaticInfo{ideDataDir} <- getStaticInfo
   let targetPath = ideDataDir </> n
       targetDir  = takeDirectory targetPath
   liftIO $ Dir.createDirectoryIfMissing True targetDir
@@ -530,8 +555,9 @@ updateDataFileFromFile n p = IdeSessionUpdate
 
 -- | A session update that deletes an existing data file.
 --
-updateDataFileDelete :: FilePath -> IdeSessionUpdate
-updateDataFileDelete n = IdeSessionUpdate $ \_ IdeStaticInfo{ideDataDir} -> do
+updateDataFileDelete :: FilePath -> IdeSessionUpdate ()
+updateDataFileDelete n = do
+  IdeStaticInfo{ideDataDir} <- getStaticInfo
   liftIO $ Dir.removeFile (ideDataDir </> n)
       `Ex.catch` \e -> if isDoesNotExistError e
                        then return ()
@@ -542,26 +568,26 @@ updateDataFileDelete n = IdeSessionUpdate $ \_ IdeStaticInfo{ideDataDir} -> do
 -- | Set an environment variable
 --
 -- Use @updateEnv var Nothing@ to unset @var@.
-updateEnv :: String -> Maybe String -> IdeSessionUpdate
-updateEnv var val = IdeSessionUpdate $ \_ _ -> do
+updateEnv :: String -> Maybe String -> IdeSessionUpdate ()
+updateEnv var val = do
   set (ideEnv .> lookup' var) (Just val)
   set ideUpdatedEnv True
 
 -- | Set command line arguments for snippets
 -- (i.e., the expected value of `getArgs`)
-updateArgs :: [String] -> IdeSessionUpdate
-updateArgs args = IdeSessionUpdate $ \_ _ -> do
+updateArgs :: [String] -> IdeSessionUpdate ()
+updateArgs args = do
   set ideArgs args
   set ideUpdatedArgs True
 
 -- | Set buffering mode for snippets' stdout
-updateStdoutBufferMode :: RunBufferMode -> IdeSessionUpdate
-updateStdoutBufferMode bufferMode = IdeSessionUpdate $ \_ _ ->
+updateStdoutBufferMode :: RunBufferMode -> IdeSessionUpdate ()
+updateStdoutBufferMode bufferMode = do
   set ideStdoutBufferMode bufferMode
 
 -- | Set buffering mode for snippets' stderr
-updateStderrBufferMode :: RunBufferMode -> IdeSessionUpdate
-updateStderrBufferMode bufferMode = IdeSessionUpdate $ \_ _ ->
+updateStderrBufferMode :: RunBufferMode -> IdeSessionUpdate ()
+updateStderrBufferMode bufferMode = do
   set ideStderrBufferMode bufferMode
 
 -- | Run a given function in a given module (the name of the module
@@ -698,10 +724,12 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 -- in the 'Query.getDistDir' directory.
 --
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
-buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate
-buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
-    mcomputed <- get ideComputed
-    ghcNewOpts <- get ideNewOpts
+buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate ()
+buildExe ms = do
+    IdeStaticInfo{..} <- getStaticInfo
+    callback          <- getCallback
+    mcomputed         <- get ideComputed
+    ghcNewOpts        <- get ideNewOpts
     let SessionConfig{ configDynLink
                      , configPackageDBStack
                      , configGenerateModInfo
@@ -712,7 +740,7 @@ buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    exitCode <- lift $ Ex.bracket
+    exitCode <- liftIO $ Ex.bracket
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
@@ -732,10 +760,12 @@ buildExe ms = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 -- in the 'Query.getDistDir' directory.
 --
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
-buildDoc :: IdeSessionUpdate
-buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
-    mcomputed <- get ideComputed
-    ghcNewOpts <- get ideNewOpts
+buildDoc :: IdeSessionUpdate ()
+buildDoc = do
+    IdeStaticInfo{..} <- getStaticInfo
+    callback          <- getCallback
+    mcomputed         <- get ideComputed
+    ghcNewOpts        <- get ideNewOpts
     let SessionConfig{ configDynLink
                      , configPackageDBStack
                      , configGenerateModInfo
@@ -745,7 +775,7 @@ buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    exitCode <- lift $ Ex.bracket
+    exitCode <- liftIO $ Ex.bracket
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
@@ -779,19 +809,21 @@ buildDoc = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 --
 -- Note: currently 'configGenerateModInfo' needs to be set
 -- for this function to work (see #86).
-buildLicenses :: FilePath -> IdeSessionUpdate
-buildLicenses cabalsDir = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
-    mcomputed <- get ideComputed
+buildLicenses :: FilePath -> IdeSessionUpdate ()
+buildLicenses cabalsDir = do
+    IdeStaticInfo{..} <- getStaticInfo
+    callback          <- getCallback
+    mcomputed         <- get ideComputed
     let SessionConfig{..} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    exitCode <-
-      lift $ buildLicenseCatenation mcomputed
-                                    cabalsDir ideDistDir configExtraPathDirs
-                                    configPackageDBStack
-                                    configLicenseExc configLicenseFixed
-                                    callback
+    exitCode <- liftIO $
+      buildLicenseCatenation mcomputed
+                             cabalsDir ideDistDir configExtraPathDirs
+                             configPackageDBStack
+                             configLicenseExc configLicenseFixed
+                             callback
     set ideBuildLicensesStatus (Just exitCode)
 
 {------------------------------------------------------------------------------
@@ -799,8 +831,9 @@ buildLicenses cabalsDir = IdeSessionUpdate $ \callback IdeStaticInfo{..} -> do
 ------------------------------------------------------------------------------}
 
 -- | Force recompilation of all modules. For debugging only.
-forceRecompile :: IdeSessionUpdate
-forceRecompile = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
+forceRecompile :: IdeSessionUpdate ()
+forceRecompile = do
+  IdeStaticInfo{ideSourcesDir} <- getStaticInfo
   sources  <- get (ideManagedFiles .> managedSource)
   sources' <- forM sources $ \(path, (digest, _oldTS)) -> do
     newTS <- nextLogicalTimestamp
@@ -815,6 +848,16 @@ forceRecompile = IdeSessionUpdate $ \_ IdeStaticInfo{ideSourcesDir} -> do
 crashGhcServer :: IdeSession -> Maybe Int -> IO ()
 crashGhcServer session delay = withIdleState session $ \idleState ->
   rpcCrash (idleState ^. ideGhcServer) delay
+
+{------------------------------------------------------------------------------
+  Internal session updates
+------------------------------------------------------------------------------}
+
+getStaticInfo :: IdeSessionUpdate IdeStaticInfo
+getStaticInfo = asks fst
+
+getCallback :: IdeSessionUpdate (Progress -> IO ())
+getCallback = asks snd
 
 {------------------------------------------------------------------------------
   Aux

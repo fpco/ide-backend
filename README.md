@@ -82,6 +82,9 @@ Changelog
         - RunActions now has kind * -> * ; what was previously just "RunActions"
           is now (from the client's perspective) "RunActions RunResult"
         - String argument to RunOk has been removed.
+        - IdeSessionUpdate now has kind * -> * ; what was previously just
+          "IdeSessionUpdate" is now "IdeSessionUpdate ()". IdeSessionUpdate
+          has been given a Monad instance.
 
  *  Version 0.7.1
 

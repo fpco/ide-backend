@@ -46,7 +46,7 @@ import TestTools
 -- and a variety of small test Haskell projects.
 
 -- | Update the session with all modules of the given directory.
-getModulesFrom :: IdeSession -> FilePath -> IO (IdeSessionUpdate, [FilePath])
+getModulesFrom :: IdeSession -> FilePath -> IO (IdeSessionUpdate (), [FilePath])
 getModulesFrom session originalSourcesDir = do
   sourcesDir <- getSourcesDir session
   debug dVerbosity $ "\nCopying files from: " ++ originalSourcesDir
@@ -60,7 +60,7 @@ getModulesFrom session originalSourcesDir = do
                     <> (mconcat $ map updateSourceFileFromFile originalFiles)
   return (originalUpdate, originalFiles)
 
-getModules :: IdeSession -> IO (IdeSessionUpdate, [FilePath])
+getModules :: IdeSession -> IO (IdeSessionUpdate (), [FilePath])
 getModules session = do
   sourcesDir <- getSourcesDir session
   getModulesFrom session sourcesDir
@@ -113,7 +113,7 @@ withOpts opts =
 -- E.g., check that the values of Progress do not exceeed the number of files.
 -- Also, check ModuleDelete and all the DataFileChange constructors,
 -- getSourceModule an getDataFile.
-multipleTests :: [(String, IdeSession -> IdeSessionUpdate -> [String] -> Assertion)]
+multipleTests :: [(String, IdeSession -> IdeSessionUpdate () -> [String] -> Assertion)]
 multipleTests =
   [ ( "Overwrite with error"
     , \session originalUpdate lm -> do
@@ -4442,7 +4442,7 @@ syntheticTests =
     )
   ]
 
-qsort :: IdeSessionUpdate
+qsort :: IdeSessionUpdate ()
 qsort = (updateSourceFile "Main.hs" . BSLC.pack . unlines $ [
           --          1         2         3         4         5
           -- 12345678901234567890123456789012345678901234567890123456
@@ -4567,7 +4567,7 @@ traceTests = map $ \(label, test) -> (label, do traceEventIO ("TEST " ++ label) 
 main :: IO ()
 main = defaultMain tests
 
-updateSessionP :: IdeSession -> IdeSessionUpdate -> [(Int, Int, String)] -> IO ()
+updateSessionP :: IdeSession -> IdeSessionUpdate () -> [(Int, Int, String)] -> IO ()
 updateSessionP session update expectedProgressUpdates = do
   progressRef <- newIORef []
 
@@ -4588,7 +4588,7 @@ updateSessionP session update expectedProgressUpdates = do
                   Just actualMsg -> msg `isInfixOf` Text.unpack actualMsg
                   Nothing        -> False)
 
-updateSessionD :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
+updateSessionD :: IdeSession -> IdeSessionUpdate () -> Int -> IO ()
 updateSessionD session update numProgressUpdates = do
   progressRef <- newIORef []
 
@@ -4615,7 +4615,7 @@ updateSessionD session update numProgressUpdates = do
 -- Extra test tools.
 --
 
-loadModule :: FilePath -> String -> IdeSessionUpdate
+loadModule :: FilePath -> String -> IdeSessionUpdate ()
 loadModule file contents =
     let mod =  "module " ++ mname file ++ " where\n" ++ contents
     in updateSourceFile file (BSLC.pack mod)
