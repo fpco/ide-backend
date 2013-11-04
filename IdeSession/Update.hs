@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes #-}
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
@@ -324,20 +324,23 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
   Session updates
 ------------------------------------------------------------------------------}
 
+data IdeSessionUpdateEnv = IdeSessionUpdateEnv {
+    ideSessionUpdateStaticInfo :: IdeStaticInfo
+  , ideSessionUpdateCallback   :: forall m. MonadIO m => Progress -> m ()
+  }
+
 -- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
 -- bunch of updates.
 --
 -- In particular it is an instance of 'Monoid', so multiple primitive updates
 -- can be easily combined. Updates can override each other left to right.
 newtype IdeSessionUpdate a = IdeSessionUpdate {
-    _runSessionUpdate :: ReaderT (IdeStaticInfo, Progress -> IO ())
-                          (StateT IdeIdleState IO)
-                            a
+    _runSessionUpdate :: ReaderT IdeSessionUpdateEnv (StateT IdeIdleState IO) a
   }
   deriving ( Functor
            , Applicative
            , Monad
-           , MonadReader (IdeStaticInfo, Progress -> IO ())
+           , MonadReader IdeSessionUpdateEnv
            , MonadState IdeIdleState
            , MonadIO
            )
@@ -348,7 +351,12 @@ runSessionUpdate :: IdeSessionUpdate a
                  -> IdeIdleState
                  -> IO (a, IdeIdleState)
 runSessionUpdate upd staticInfo callback idleState =
-  runStateT (runReaderT (_runSessionUpdate upd) (staticInfo, callback)) idleState
+    runStateT (runReaderT (_runSessionUpdate upd) env) idleState
+  where
+    env = IdeSessionUpdateEnv {
+              ideSessionUpdateStaticInfo = staticInfo
+            , ideSessionUpdateCallback   = liftIO . callback
+            }
 
 execSessionUpdate :: IdeSessionUpdate ()
                   -> IdeStaticInfo
@@ -473,51 +481,54 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
 
 recompileObjectFiles :: IdeSessionUpdate ()
 recompileObjectFiles = do
-    callback     <- getCallback
-    staticInfo   <- getStaticInfo
-    managedFiles <- get (ideManagedFiles .> managedSource)
-
-    let cFiles :: [(FilePath, LogicalTimestamp)]
-        cFiles = filter ((`elem` cExtensions) . takeExtension . fst)
-               $ map (\(fp, (_, ts)) -> (fp, ts))
-               $ managedFiles
-
-        srcDir, objDir :: FilePath
-        srcDir = ideSourcesDir staticInfo
-        objDir = ideDistDir staticInfo </> "objs"
-
-    recompiled <- forM cFiles $ \(fp, ts) -> do
-      let absC     = srcDir </> fp
-          absObj   = objDir </> replaceExtension fp ".o"
-
-      mObjFile <- get (ideObjectFiles .> lookup' fp)
-
-      -- Unload the old object (if necessary)
-      case mObjFile of
-        Just (objFile, ts') | ts' < ts -> do
-          callback $ progress "Unloading" objFile
-          unloadObject objFile
-        _ ->
-          return ()
-
-      -- Recompile (if necessary)
-      case mObjFile of
-        Just (_objFile, ts') | ts' > ts ->
-          -- The object is newer than the C file. Recompilation unnecessary
-          return Nothing
-        _ -> do
-          -- TODO: We need to deal with errors in the C code
-          callback $ progress "Compiling" fp
-          liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
-          ExitSuccess <- runGcc absC absObj
-          ts' <- updateFileTimes absObj
-          callback $ progress "Loading" absObj
-          loadObject absObj
-          set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
-          return (Just fp)
-
+    recompiled <- recompile
     markAsUpdated (update (catMaybes recompiled))
   where
+    recompile :: IdeSessionUpdate [Maybe FilePath]
+    recompile = do
+      callback     <- asks ideSessionUpdateCallback
+      staticInfo   <- asks ideSessionUpdateStaticInfo
+      managedFiles <- get (ideManagedFiles .> managedSource)
+
+      let cFiles :: [(FilePath, LogicalTimestamp)]
+          cFiles = filter ((`elem` cExtensions) . takeExtension . fst)
+                 $ map (\(fp, (_, ts)) -> (fp, ts))
+                 $ managedFiles
+
+          srcDir, objDir :: FilePath
+          srcDir = ideSourcesDir staticInfo
+          objDir = ideDistDir staticInfo </> "objs"
+
+      forM cFiles $ \(fp, ts) -> do
+        let absC     = srcDir </> fp
+            absObj   = objDir </> replaceExtension fp ".o"
+
+        mObjFile <- get (ideObjectFiles .> lookup' fp)
+
+        -- Unload the old object (if necessary)
+        case mObjFile of
+          Just (objFile, ts') | ts' < ts -> do
+            callback $ progress "Unloading" objFile
+            unloadObject objFile
+          _ ->
+            return ()
+
+        -- Recompile (if necessary)
+        case mObjFile of
+          Just (_objFile, ts') | ts' > ts ->
+            -- The object is newer than the C file. Recompilation unnecessary
+            return Nothing
+          _ -> do
+            -- TODO: We need to deal with errors in the C code
+            callback $ progress "Compiling" fp
+            liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
+            ExitSuccess <- runGcc absC absObj
+            ts' <- updateFileTimes absObj
+            callback $ progress "Loading" absObj
+            loadObject absObj
+            set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
+            return (Just fp)
+
     -- TODO: Think about more meaningful numbers here
     -- TODO: And possibly adjust the gHc progress numbers too
     -- TODO: Can we ask gcc for a progress message?
@@ -569,7 +580,7 @@ recompileObjectFiles = do
 --
 updateSourceFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
 updateSourceFile m bs = do
-  IdeStaticInfo{ideSourcesDir} <- getStaticInfo
+  IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
   let internal = internalFile ideSourcesDir m
   old <- get (ideManagedFiles .> managedSource .> lookup' m)
   -- We always overwrite the file, and then later set the timestamp back
@@ -598,7 +609,7 @@ updateSourceFileFromFile p = do
 --
 updateSourceFileDelete :: FilePath -> IdeSessionUpdate ()
 updateSourceFileDelete m = do
-  IdeStaticInfo{ideSourcesDir} <- getStaticInfo
+  IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
   liftIO $ Dir.removeFile (internalFile ideSourcesDir m)
       `Ex.catch` \e -> if isDoesNotExistError e
                        then return ()
@@ -628,7 +639,7 @@ updateCodeGeneration b = do
 --
 updateDataFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
 updateDataFile n bs = do
-  IdeStaticInfo{ideDataDir} <- getStaticInfo
+  IdeStaticInfo{ideDataDir} <- asks ideSessionUpdateStaticInfo
   liftIO $ writeFileAtomic (ideDataDir </> n) bs
   modify (ideManagedFiles .> managedData) (n :)
   set ideUpdatedCode True
@@ -639,7 +650,7 @@ updateDataFile n bs = do
 --
 updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate ()
 updateDataFileFromFile n p = do
-  IdeStaticInfo{ideDataDir} <- getStaticInfo
+  IdeStaticInfo{ideDataDir} <- asks ideSessionUpdateStaticInfo
   let targetPath = ideDataDir </> n
       targetDir  = takeDirectory targetPath
   liftIO $ Dir.createDirectoryIfMissing True targetDir
@@ -651,7 +662,7 @@ updateDataFileFromFile n p = do
 --
 updateDataFileDelete :: FilePath -> IdeSessionUpdate ()
 updateDataFileDelete n = do
-  IdeStaticInfo{ideDataDir} <- getStaticInfo
+  IdeStaticInfo{ideDataDir} <- asks ideSessionUpdateStaticInfo
   liftIO $ Dir.removeFile (ideDataDir </> n)
       `Ex.catch` \e -> if isDoesNotExistError e
                        then return ()
@@ -820,8 +831,8 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate ()
 buildExe ms = do
-    IdeStaticInfo{..} <- getStaticInfo
-    callback          <- getCallback
+    IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     ghcNewOpts        <- get ideNewOpts
     let SessionConfig{ configDynLink
@@ -856,8 +867,8 @@ buildExe ms = do
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildDoc :: IdeSessionUpdate ()
 buildDoc = do
-    IdeStaticInfo{..} <- getStaticInfo
-    callback          <- getCallback
+    IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     ghcNewOpts        <- get ideNewOpts
     let SessionConfig{ configDynLink
@@ -905,8 +916,8 @@ buildDoc = do
 -- for this function to work (see #86).
 buildLicenses :: FilePath -> IdeSessionUpdate ()
 buildLicenses cabalsDir = do
-    IdeStaticInfo{..} <- getStaticInfo
-    callback          <- getCallback
+    IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     let SessionConfig{..} = ideConfig
     when (not configGenerateModInfo) $
@@ -939,12 +950,6 @@ crashGhcServer session delay = withIdleState session $ \idleState ->
   Internal session updates
 ------------------------------------------------------------------------------}
 
-getStaticInfo :: IdeSessionUpdate IdeStaticInfo
-getStaticInfo = asks fst
-
-getCallback :: MonadIO m => IdeSessionUpdate (Progress -> m ())
-getCallback = (liftIO .) <$> asks snd
-
 -- | Load an object file
 loadObject :: FilePath -> IdeSessionUpdate ()
 loadObject path = do
@@ -960,7 +965,7 @@ unloadObject path = do
 -- | Force recompilation of the given modules
 markAsUpdated :: (FilePath -> Bool) -> IdeSessionUpdate ()
 markAsUpdated shouldMark = do
-  IdeStaticInfo{ideSourcesDir} <- getStaticInfo
+  IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
   sources  <- get (ideManagedFiles .> managedSource)
   sources' <- forM sources $ \(path, (digest, oldTS)) ->
     if shouldMark path
