@@ -4439,7 +4439,6 @@ syntheticTests =
     )
   , ( "Using C files"
     , withSession defaultSessionConfig $ \session -> do
-        putStrLn "** 1 **"
         let upd = (updateCodeGeneration True)
                <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -4453,8 +4452,13 @@ syntheticTests =
                     , "  return 12345;"
                     , "}"
                     ])
-        --updateSessionD session upd 1
-        updateSession session upd print
+        -- TODO: Ideally, we'd fix this jump in the reported total number of
+        -- progress messages
+        updateSessionP session upd [
+            (1, 2, "Compiling MC.c")
+          , (2, 2, "Loading MC.o")
+          , (3, 3, "Compiling M")
+          ]
         assertNoErrors session
         do runActions <- runStmt session "M" "hello"
            (output, result) <- runWaitAll runActions
@@ -4462,7 +4466,6 @@ syntheticTests =
            assertEqual "" (BSLC.pack "12345\n") output
 
         -- Update the Haskell module without updating the C module
-        putStrLn "** 2 **"
         let upd2 = (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
                     , "import Foreign.C"
@@ -4470,7 +4473,9 @@ syntheticTests =
                     , "hello :: IO ()"
                     , "hello = print (c_f + 1)"
                     ])
-        updateSession session upd2 print
+        updateSessionP session upd2 [
+            (1, 1, "Compiling M")
+          ]
         assertNoErrors session
         do runActions <- runStmt session "M" "hello"
            (output, result) <- runWaitAll runActions
@@ -4478,14 +4483,17 @@ syntheticTests =
            assertEqual "" (BSLC.pack "12346\n") output
 
         -- Update the C code without updating the Haskell module
-        putStrLn "** 3 **"
         let upd3 = (updateSourceFile "MC.c" . BSLC.pack . unlines $
                     [ "int foo() {"
                     , "  return 54321;"
                     , "}"
                     ])
-        --updateSessionD session upd 1
-        updateSession session upd3 print
+        updateSessionP session upd3 [
+            (1 ,3, "Unloading MC.o")
+          , (2, 3, "Compiling MC.c")
+          , (3, 3, "Loading MC.o")
+          , (4, 4, "Compiling M")
+          ]
         assertNoErrors session
         do runActions <- runStmt session "M" "hello"
            (output, result) <- runWaitAll runActions

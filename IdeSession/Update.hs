@@ -360,14 +360,6 @@ runSessionUpdate upd staticInfo callback idleState =
             , ideSessionUpdateCallback   = liftIO . callback
             }
 
-execSessionUpdate :: IdeSessionUpdate ()
-                  -> IdeStaticInfo
-                  -> (Progress -> IO ())
-                  -> IdeIdleState
-                  -> IO IdeIdleState
-execSessionUpdate upd staticInfo callback idleState =
-  snd <$> runSessionUpdate upd staticInfo callback idleState
-
 -- We assume, if updates are combined within the monoid, they can all
 -- be applied in the context of the same session.
 -- Otherwise, call 'updateSession' sequentially with the updates.
@@ -386,10 +378,16 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
     -- We don't want to call 'restartSession' while we hold the lock
     shouldRestart <- modifyMVar ideState $ \state -> case state of
       IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
-        idleState' <- execSessionUpdate (update >> recompileObjectFiles)
-                                        ideStaticInfo
-                                        callback
-                                        idleState
+        (numActions, idleState') <-
+          runSessionUpdate (update >> recompileObjectFiles)
+                           ideStaticInfo
+                           callback
+                           idleState
+
+        let callback' p = callback p {
+                progressStep     = progressStep     p + numActions
+              , progressNumSteps = progressNumSteps p + numActions
+              }
 
         -- Update environment
         when (idleState' ^. ideUpdatedEnv) $
@@ -406,7 +404,7 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
                                                (ideSourcesDir ideStaticInfo)
                                                (ideDistDir    ideStaticInfo)
                                                (idleState' ^. ideGenerateCode)
-                                               callback
+                                               callback'
 
             let applyDiff :: Strict (Map ModuleName) (Diff v)
                           -> (Computed -> Strict (Map ModuleName) v)
@@ -486,14 +484,27 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
 -- messages.
 type RecompileAction = (String, WriterT [FilePath] IdeSessionUpdate ())
 
-recompileObjectFiles :: IdeSessionUpdate ()
+-- | Recompile any C files that need recompiling; if any, also mark all Haskell
+-- modules are requiring recompilation.
+--
+-- Returns the number of actions that were executed, so we can adjust
+-- Progress messages returned by ghc
+recompileObjectFiles :: IdeSessionUpdate Int
 recompileObjectFiles = do
     actions    <- execWriterT $ recompile
     callback   <- asks ideSessionUpdateCallback
-    recompiled <- execWriterT $ forM_ actions $ \(lab, act) -> do
-                                  callback (progress lab)
-                                  act
+    recompiled <- execWriterT $
+                    forM_ (zip actions [1..]) $ \((lab, act), i) -> do
+                      let msg = Just (Text.pack lab)
+                      callback $ Progress {
+                                    progressStep      = i
+                                  , progressNumSteps  = length actions
+                                  , progressParsedMsg = msg
+                                  , progressOrigMsg   = msg
+                                  }
+                      act
     markAsUpdated (update recompiled)
+    return (length actions)
   where
     recompile :: WriterT [RecompileAction] IdeSessionUpdate ()
     recompile = do
@@ -532,6 +543,7 @@ recompileObjectFiles = do
             delay "Compiling" fp $ do
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
               lift $ do
+                -- TODO: Can we ask gcc for a progress message?
                 ExitSuccess <- runGcc absC absObj
                 ts' <- updateFileTimes absObj
                 set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
@@ -546,19 +558,6 @@ recompileObjectFiles = do
           -> m ()
     delay prefix file act =
       tell [(prefix ++ " " ++ takeFileName file, act)]
-
-    -- TODO: Think about more meaningful numbers here
-    -- TODO: And possibly adjust the gHc progress numbers too
-    -- TODO: Can we ask gcc for a progress message?
-    progress :: String -> Progress
-    progress msg' =
-      Progress { progressStep      = 0
-               , progressNumSteps  = 0
-               , progressParsedMsg = msg
-               , progressOrigMsg   = msg
-               }
-      where
-        msg = Just $ Text.pack msg'
 
     -- NOTE: When using HscInterpreted/LinkInMemory, then C symbols get
     -- resolved during compilation, not during a separate linking step. To be
