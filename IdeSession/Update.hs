@@ -43,6 +43,8 @@ import Prelude hiding (mod, span)
 import Control.Monad (when, void, forM, unless)
 import Control.Monad.State (MonadState, StateT, runStateT)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
+import Control.Monad.Writer (WriterT, execWriterT, tell)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Applicative (Applicative, (<$>), (<*>))
 import qualified Control.Exception as Ex
@@ -52,7 +54,7 @@ import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString.Char8 as BSS
-import Data.Maybe (fromMaybe, catMaybes)
+import Data.Maybe (fromMaybe)
 import Data.Foldable (forM_)
 import qualified System.Directory as Dir
 import System.FilePath (
@@ -481,10 +483,10 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
 
 recompileObjectFiles :: IdeSessionUpdate ()
 recompileObjectFiles = do
-    recompiled <- recompile
-    markAsUpdated (update (catMaybes recompiled))
+    recompiled <- execWriterT recompile
+    markAsUpdated (update recompiled)
   where
-    recompile :: IdeSessionUpdate [Maybe FilePath]
+    recompile :: WriterT [FilePath] IdeSessionUpdate ()
     recompile = do
       callback     <- asks ideSessionUpdateCallback
       staticInfo   <- asks ideSessionUpdateStaticInfo
@@ -499,7 +501,7 @@ recompileObjectFiles = do
           srcDir = ideSourcesDir staticInfo
           objDir = ideDistDir staticInfo </> "objs"
 
-      forM cFiles $ \(fp, ts) -> do
+      forM_ cFiles $ \(fp, ts) -> do
         let absC     = srcDir </> fp
             absObj   = objDir </> replaceExtension fp ".o"
 
@@ -509,7 +511,7 @@ recompileObjectFiles = do
         case mObjFile of
           Just (objFile, ts') | ts' < ts -> do
             callback $ progress "Unloading" objFile
-            unloadObject objFile
+            lift $ unloadObject objFile
           _ ->
             return ()
 
@@ -517,17 +519,17 @@ recompileObjectFiles = do
         case mObjFile of
           Just (_objFile, ts') | ts' > ts ->
             -- The object is newer than the C file. Recompilation unnecessary
-            return Nothing
+            return ()
           _ -> do
             -- TODO: We need to deal with errors in the C code
             callback $ progress "Compiling" fp
             liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
-            ExitSuccess <- runGcc absC absObj
-            ts' <- updateFileTimes absObj
+            ExitSuccess <- lift $ runGcc absC absObj
+            ts' <- lift $ updateFileTimes absObj
             callback $ progress "Loading" absObj
-            loadObject absObj
+            lift $ loadObject absObj
             set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
-            return (Just fp)
+            tell [fp]
 
     -- TODO: Think about more meaningful numbers here
     -- TODO: And possibly adjust the gHc progress numbers too
