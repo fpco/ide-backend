@@ -43,7 +43,7 @@ import Prelude hiding (mod, span)
 import Control.Monad (when, void, forM, unless)
 import Control.Monad.State (MonadState, StateT, runStateT)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
-import Control.Monad.Writer (WriterT, execWriterT, tell)
+import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Applicative (Applicative, (<$>), (<*>))
@@ -481,14 +481,22 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
              , List.singleton idInfo
              )
 
+-- | In 'recompileObjectFiles' we first collect a number of 'RecompileAction's,
+-- before executing them. This makes it possible to generate better progress
+-- messages.
+type RecompileAction = (String, WriterT [FilePath] IdeSessionUpdate ())
+
 recompileObjectFiles :: IdeSessionUpdate ()
 recompileObjectFiles = do
-    recompiled <- execWriterT recompile
+    actions    <- execWriterT $ recompile
+    callback   <- asks ideSessionUpdateCallback
+    recompiled <- execWriterT $ forM_ actions $ \(lab, act) -> do
+                                  callback (progress lab)
+                                  act
     markAsUpdated (update recompiled)
   where
-    recompile :: WriterT [FilePath] IdeSessionUpdate ()
+    recompile :: WriterT [RecompileAction] IdeSessionUpdate ()
     recompile = do
-      callback     <- asks ideSessionUpdateCallback
       staticInfo   <- asks ideSessionUpdateStaticInfo
       managedFiles <- get (ideManagedFiles .> managedSource)
 
@@ -510,8 +518,7 @@ recompileObjectFiles = do
         -- Unload the old object (if necessary)
         case mObjFile of
           Just (objFile, ts') | ts' < ts -> do
-            callback $ progress "Unloading" objFile
-            lift $ unloadObject objFile
+            delay "Unloading" objFile $ lift $ unloadObject objFile
           _ ->
             return ()
 
@@ -522,27 +529,36 @@ recompileObjectFiles = do
             return ()
           _ -> do
             -- TODO: We need to deal with errors in the C code
-            callback $ progress "Compiling" fp
-            liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
-            ExitSuccess <- lift $ runGcc absC absObj
-            ts' <- lift $ updateFileTimes absObj
-            callback $ progress "Loading" absObj
-            lift $ loadObject absObj
-            set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
-            tell [fp]
+            delay "Compiling" fp $ do
+              liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
+              lift $ do
+                ExitSuccess <- runGcc absC absObj
+                ts' <- updateFileTimes absObj
+                set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
+              tell [fp]
+            delay "Loading" absObj $
+              lift $ loadObject absObj
+
+    delay :: MonadWriter [RecompileAction] m
+          => String
+          -> FilePath
+          -> WriterT [FilePath] IdeSessionUpdate ()
+          -> m ()
+    delay prefix file act =
+      tell [(prefix ++ " " ++ takeFileName file, act)]
 
     -- TODO: Think about more meaningful numbers here
     -- TODO: And possibly adjust the gHc progress numbers too
     -- TODO: Can we ask gcc for a progress message?
-    progress :: String -> FilePath -> Progress
-    progress prefix fp =
+    progress :: String -> Progress
+    progress msg' =
       Progress { progressStep      = 0
                , progressNumSteps  = 0
                , progressParsedMsg = msg
                , progressOrigMsg   = msg
                }
       where
-        msg = Just . Text.pack $ prefix ++ " " ++ takeFileName fp
+        msg = Just $ Text.pack msg'
 
     -- NOTE: When using HscInterpreted/LinkInMemory, then C symbols get
     -- resolved during compilation, not during a separate linking step. To be
