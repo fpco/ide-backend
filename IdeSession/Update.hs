@@ -965,11 +965,11 @@ markAsUpdated shouldMark = do
   sources  <- get (ideManagedFiles .> managedSource)
   sources' <- forM sources $ \(path, (digest, oldTS)) ->
     if shouldMark path
-      then do newTS <- updateFileTimes (internalFile ideSourcesDir path)
+      then do set ideUpdatedCode True
+              newTS <- updateFileTimes (internalFile ideSourcesDir path)
               return (path, (digest, newTS))
       else return (path, (digest, oldTS))
   set (ideManagedFiles .> managedSource) sources'
-  set ideUpdatedCode True
 
 -- | Update the file times of the given file with the next logical timestamp
 updateFileTimes :: FilePath -> IdeSessionUpdate LogicalTimestamp
