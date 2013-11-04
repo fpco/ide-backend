@@ -64,6 +64,7 @@ import System.FilePath (
   , takeExtension
   , replaceExtension
   , takeFileName
+  , dropFileName
   )
 import System.Posix.Files (setFileTimes)
 import System.IO.Temp (createTempDirectory)
@@ -485,7 +486,6 @@ recompileObjectFiles = do
         srcDir = ideSourcesDir staticInfo
         objDir = ideDistDir staticInfo </> "objs"
 
-    liftIO $ Dir.createDirectoryIfMissing True objDir
     recompiled <- forM cFiles $ \(fp, ts) -> do
       let absC     = srcDir </> fp
           absObj   = objDir </> replaceExtension fp ".o"
@@ -506,10 +506,9 @@ recompileObjectFiles = do
           -- The object is newer than the C file. Recompilation unnecessary
           return Nothing
         _ -> do
-          -- TODO: We need to figure out precisely what happens when C files
-          -- are stored in subdirs (and if we care at all)
           -- TODO: We need to deal with errors in the C code
           callback $ progress "Compiling" fp
+          liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
           ExitSuccess <- runGcc absC absObj
           ts' <- updateFileTimes absObj
           callback $ progress "Loading" absObj
