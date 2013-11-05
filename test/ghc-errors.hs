@@ -4522,7 +4522,6 @@ syntheticTests =
                     , "  return 23;"
                     , "}"
                     ])
-        -- TODO: Show subdirs
         updateSessionP session upd [
             (1, 4, "Compiling a/MC.c")
           , (2, 4, "Loading a/MC.o")
@@ -4535,6 +4534,39 @@ syntheticTests =
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "79\n") output
+    )
+  , ( "Using C files 3: Errors and warnings in the C code"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Foreign.C"
+                    , "foreign import ccall \"foo\" c_f :: CInt"
+                    , "hello :: IO ()"
+                    , "hello = print c_f"
+                    ])
+               <> (updateSourceFile "MC.c" . BSLC.pack . unlines $ [
+                      "int f() {"
+                    , "  return thisSymbolDoesNotExist;"
+                    , "}"
+                    , ""
+                    , "void g() {"
+                    , "  return 1;"
+                    , "}"
+                    ])
+        updateSessionP session upd [
+            (1, 2, "Compiling MC.c")
+          , (2, 2, "Skipped loading MC.o")
+          , (3, 3, "Compiling M")
+          ]
+        errors <- getSourceErrors session
+        case errors of
+          [e1, e2] -> do
+            -- Currently we generate precisely one gcc error
+            assertEqual "" (TextSpan (Text.pack "<gcc error>")) (errorSpan e1)
+            -- The ByteCodeLink exception because of the missing symbol
+            assertEqual "" (TextSpan (Text.pack "<from GhcException>")) (errorSpan e2)
+          _ -> assertFailure $ "Unexpected errors: " ++ show errors
     )
   ]
 

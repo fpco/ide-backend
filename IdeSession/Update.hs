@@ -41,13 +41,14 @@ module IdeSession.Update (
 
 import Prelude hiding (mod, span)
 import Control.Monad (when, void, forM, unless)
-import Control.Monad.State (MonadState, StateT, runStateT)
+import Control.Monad.State (MonadState, StateT, execStateT, runStateT)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
 import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Applicative (Applicative, (<$>), (<*>))
 import qualified Control.Exception as Ex
+import qualified Control.Monad.State as St
 import Data.List (delete, elemIndices, intercalate)
 import Data.Monoid (Monoid(..))
 import Data.Accessor ((.>), (^.), (^=))
@@ -73,7 +74,7 @@ import System.IO.Error (isDoesNotExistError)
 import qualified Data.Text as Text
 import System.Environment (getEnv, getEnvironment)
 import Data.Version (Version(..))
-import System.Cmd (system)
+import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
@@ -377,7 +378,7 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
     -- We don't want to call 'restartSession' while we hold the lock
     shouldRestart <- modifyMVar ideState $ \state -> case state of
       IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
-        (numActions, idleState') <-
+        ((numActions, cErrors), idleState') <-
           runSessionUpdate (update >> recompileObjectFiles)
                            ideStaticInfo
                            callback
@@ -417,7 +418,7 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
                 diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
 
             return $ Maybe.just Computed {
-                computedErrors        = ghcCompileErrors
+                computedErrors        = force cErrors List.++ ghcCompileErrors
               , computedLoadedModules = ghcCompileLoaded
               , computedImports       = ghcCompileImports  `applyDiff` computedImports
               , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
@@ -480,30 +481,33 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
 
 -- | In 'recompileObjectFiles' we first collect a number of 'RecompileAction's,
 -- before executing them. This makes it possible to generate better progress
--- messages.
-type RecompileAction = (String, WriterT [FilePath] IdeSessionUpdate ())
+-- messages. These recompile actions write out a list of C files that got
+-- recompiled (for dependency tracking) as well as a list of compiliation errors.
+type RecompileAction = (forall m. MonadIO m => String -> m ())
+                    -> StateT ([FilePath], [SourceError]) IdeSessionUpdate ()
 
 -- | Recompile any C files that need recompiling; if any, also mark all Haskell
 -- modules are requiring recompilation.
 --
 -- Returns the number of actions that were executed, so we can adjust
 -- Progress messages returned by ghc
-recompileObjectFiles :: IdeSessionUpdate Int
+recompileObjectFiles :: IdeSessionUpdate (Int, [SourceError])
 recompileObjectFiles = do
-    actions    <- execWriterT $ recompile
-    callback   <- asks ideSessionUpdateCallback
-    recompiled <- execWriterT $
-                    forM_ (zip actions [1..]) $ \((lab, act), i) -> do
-                      let msg = Just (Text.pack lab)
-                      callback $ Progress {
-                                    progressStep      = i
-                                  , progressNumSteps  = length actions
-                                  , progressParsedMsg = msg
-                                  , progressOrigMsg   = msg
-                                  }
-                      act
+    actions  <- execWriterT $ recompile
+    callback <- asks ideSessionUpdateCallback
+    (recompiled, errs) <- flip execStateT ([], []) $
+       forM_ (zip actions [1..]) $ \(act, i) -> do
+         let callback' :: forall m. MonadIO m => String -> m ()
+             callback' msg = liftIO $ callback $
+               Progress {
+                  progressStep      = i
+                , progressNumSteps  = length actions
+                , progressParsedMsg = Just (Text.pack msg)
+                , progressOrigMsg   = Just (Text.pack msg)
+                }
+         act callback'
     markAsUpdated (update recompiled)
-    return (length actions)
+    return (length actions, errs)
   where
     recompile :: WriterT [RecompileAction] IdeSessionUpdate ()
     recompile = do
@@ -519,10 +523,11 @@ recompileObjectFiles = do
           srcDir = ideSourcesDir staticInfo
           objDir = ideDistDir staticInfo </> "objs"
 
-          compiling, loading, unloading :: FilePath -> String
+          compiling, loading, unloading, skipped :: FilePath -> String
           compiling src = "Compiling " ++ makeRelative srcDir src
           loading   obj = "Loading "   ++ makeRelative objDir obj
           unloading obj = "Unloading " ++ makeRelative objDir obj
+          skipped   obj = "Skipped loading " ++ makeRelative objDir obj
 
       forM_ cFiles $ \(fp, ts) -> do
         let absC     = srcDir </> fp
@@ -533,7 +538,9 @@ recompileObjectFiles = do
         -- Unload the old object (if necessary)
         case mObjFile of
           Just (objFile, ts') | ts' < ts -> do
-            delay (unloading objFile) $ lift $ unloadObject objFile
+            delay $ \callback -> do
+              callback (unloading objFile)
+              lift $ unloadObject objFile
           _ ->
             return ()
 
@@ -544,20 +551,26 @@ recompileObjectFiles = do
             return ()
           _ -> do
             -- TODO: We need to deal with errors in the C code
-            delay (compiling fp) $ do
+            delay $ \callback -> do
+              callback (compiling fp)
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
-              lift $ do
-                -- TODO: Can we ask gcc for a progress message?
-                ExitSuccess <- runGcc absC absObj
-                ts' <- updateFileTimes absObj
-                set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
-              tell [fp]
-            delay (loading absObj) $
-              lift $ loadObject absObj
+              errs <- lift $ do
+                errs <- runGcc absC absObj
+                when (null errs) $ do
+                  ts' <- updateFileTimes absObj
+                  set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
+                return errs
+              if null errs then tellSt ([fp], [])
+                           else tellSt ([], errs)
+            delay $ \callback -> do
+              (compiled, _errs) <- St.get
+              if (fp `elem` compiled)
+                then do callback (loading absObj)
+                        lift $ loadObject absObj
+                else callback (skipped absObj)
 
-    delay :: MonadWriter [RecompileAction] m
-          => String -> WriterT [FilePath] IdeSessionUpdate () -> m ()
-    delay lab act = tell [(lab, act)]
+    delay :: MonadWriter [RecompileAction] m => RecompileAction -> m ()
+    delay act = tell [act]
 
     -- NOTE: When using HscInterpreted/LinkInMemory, then C symbols get
     -- resolved during compilation, not during a separate linking step. To be
@@ -1010,13 +1023,34 @@ nextLogicalTimestamp = do
 --
 -- TODO: For now we manually invoke gcc with no options at all. We need to
 -- figure out what cabal does and make sure that we do the same thing
-runGcc :: FilePath -> FilePath -> IdeSessionUpdate ExitCode
-runGcc src dst = liftIO $
-    system $ gcc ++ " -c -o " ++ dst ++ " " ++ src
+runGcc :: FilePath -> FilePath -> IdeSessionUpdate [SourceError]
+runGcc src dst = liftIO $ do
+    (exitCode, stdout, stderr) <- readProcessWithExitCode gcc args stdin
+    case exitCode of
+      ExitSuccess   -> return []
+      ExitFailure _ -> return (parseErrorMsgs stdout stderr)
   where
     -- TODO: this should be configurable
     gcc :: FilePath
     gcc = "/usr/bin/gcc"
+
+    args :: [String]
+    args = [ "-c"
+           , "-o", dst
+           , src
+           ]
+
+    stdin :: String
+    stdin = ""
+
+    -- TODO: Parse the error messages returned by gcc. For now, we just
+    -- return all output as a single, unlocated, error.
+    parseErrorMsgs :: String -> String -> [SourceError]
+    parseErrorMsgs stdout stderr = [SourceError {
+        errorKind = KindError
+      , errorSpan = TextSpan (Text.pack "<gcc error>")
+      , errorMsg  = Text.pack (stdout ++ stderr)
+      }]
 
 {------------------------------------------------------------------------------
   Aux
@@ -1037,3 +1071,7 @@ modifyIdleState :: IdeSession -> (IdeIdleState -> IO (IdeSessionState, a)) -> IO
 modifyIdleState IdeSession{..} act = modifyMVar ideState $ \state -> case state of
   IdeSessionIdle idleState -> act idleState
   _                        -> Ex.throwIO $ userError "State not idle"
+
+-- | Variaton on 'tell' for the State monad rather than writer monad
+tellSt :: (Monoid w, MonadState w m) => w -> m ()
+tellSt w = St.modify (`mappend` w)
