@@ -4437,7 +4437,7 @@ syntheticTests =
         assertEqual "" [(Text.pack "left", Text.pack "[Integer]", Text.pack "(_t1::[Integer])")] printed
         assertEqual "" [(Text.pack "left", Text.pack "[Integer]", Text.pack "[4, 0, 3, 1]")] forced
     )
-  , ( "Using C files"
+  , ( "Using C files 1: Basic functionality, recompiling Haskell modules when necessary"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
@@ -4499,6 +4499,42 @@ syntheticTests =
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "54322\n") output
+    )
+  , ( "Using C files 2: C files in subdirs"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Foreign.C"
+                    , "foreign import ccall \"foo\" c_f :: CInt"
+                    , "foreign import ccall \"bar\" c_g :: CInt"
+                    , "hello :: IO ()"
+                    , "hello = print (c_f + c_g)"
+                    ])
+               <> (updateSourceFile "a/MC.c" . BSLC.pack . unlines $
+                    [ "int foo() {"
+                    , "  return 56;"
+                    , "}"
+                    ])
+                    -- intentionally same name for the file
+               <> (updateSourceFile "b/MC.c" . BSLC.pack . unlines $
+                    [ "int bar() {"
+                    , "  return 23;"
+                    , "}"
+                    ])
+        -- TODO: Show subdirs
+        updateSessionP session upd [
+            (1, 4, "Compiling a/MC.c")
+          , (2, 4, "Loading a/MC.o")
+          , (3, 4, "Compiling b/MC.c")
+          , (4, 4, "Loading b/MC.o")
+          , (5, 5, "Compiling M")
+          ]
+        assertNoErrors session
+        do runActions <- runStmt session "M" "hello"
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result RunOk
+           assertEqual "" (BSLC.pack "79\n") output
     )
   ]
 

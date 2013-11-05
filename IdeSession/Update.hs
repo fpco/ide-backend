@@ -65,7 +65,6 @@ import System.FilePath (
   , searchPathSeparator
   , takeExtension
   , replaceExtension
-  , takeFileName
   , dropFileName
   )
 import System.Posix.Files (setFileTimes)
@@ -520,6 +519,11 @@ recompileObjectFiles = do
           srcDir = ideSourcesDir staticInfo
           objDir = ideDistDir staticInfo </> "objs"
 
+          compiling, loading, unloading :: FilePath -> String
+          compiling src = "Compiling " ++ makeRelative srcDir src
+          loading   obj = "Loading "   ++ makeRelative objDir obj
+          unloading obj = "Unloading " ++ makeRelative objDir obj
+
       forM_ cFiles $ \(fp, ts) -> do
         let absC     = srcDir </> fp
             absObj   = objDir </> replaceExtension fp ".o"
@@ -529,7 +533,7 @@ recompileObjectFiles = do
         -- Unload the old object (if necessary)
         case mObjFile of
           Just (objFile, ts') | ts' < ts -> do
-            delay "Unloading" objFile $ lift $ unloadObject objFile
+            delay (unloading objFile) $ lift $ unloadObject objFile
           _ ->
             return ()
 
@@ -540,7 +544,7 @@ recompileObjectFiles = do
             return ()
           _ -> do
             -- TODO: We need to deal with errors in the C code
-            delay "Compiling" fp $ do
+            delay (compiling fp) $ do
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
               lift $ do
                 -- TODO: Can we ask gcc for a progress message?
@@ -548,16 +552,12 @@ recompileObjectFiles = do
                 ts' <- updateFileTimes absObj
                 set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
               tell [fp]
-            delay "Loading" absObj $
+            delay (loading absObj) $
               lift $ loadObject absObj
 
     delay :: MonadWriter [RecompileAction] m
-          => String
-          -> FilePath
-          -> WriterT [FilePath] IdeSessionUpdate ()
-          -> m ()
-    delay prefix file act =
-      tell [(prefix ++ " " ++ takeFileName file, act)]
+          => String -> WriterT [FilePath] IdeSessionUpdate () -> m ()
+    delay lab act = tell [(lab, act)]
 
     -- NOTE: When using HscInterpreted/LinkInMemory, then C symbols get
     -- resolved during compilation, not during a separate linking step. To be
