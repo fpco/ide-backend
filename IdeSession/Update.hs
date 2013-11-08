@@ -559,8 +559,8 @@ recompileObjectFiles = do
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
               errs <- lift $ do
                 errs <- runGcc configPackageDBStack configExtraPathDirs
-                               distDir absC
-                --  errs <- _runGccTest absC objDir
+                               distDir absC absObj objDir
+                --  errs <- _runGccTest absC absObj
                 when (null errs) $ do
                   ts' <- updateFileTimes absObj
                   set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
@@ -1025,12 +1025,13 @@ nextLogicalTimestamp = do
   return newTS
 
 -- | Call gcc via ghc, with the same parameters cabal uses.
-runGcc :: PackageDBStack -> [FilePath] -> FilePath -> FilePath
+runGcc :: PackageDBStack -> [FilePath]
+       -> FilePath -> FilePath -> FilePath -> FilePath
        -> IdeSessionUpdate [SourceError]
 runGcc configPackageDBStack configExtraPathDirs
-       ideDistDir filename = liftIO $ do
+       ideDistDir absC absObj pref = liftIO $ do
   runComponentCc configPackageDBStack configExtraPathDirs
-                 ideDistDir filename
+                 ideDistDir absC absObj pref
   return []  -- TODO
 
 -- | Call gcc directly

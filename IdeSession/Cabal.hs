@@ -20,7 +20,8 @@ import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
 import System.Exit (ExitCode (ExitSuccess, ExitFailure))
-import System.FilePath ((</>), makeRelative, takeFileName, takeDirectory)
+import System.FilePath ( (</>), takeFileName, makeRelative
+                       , takeDirectory, replaceExtension )
 import System.FilePath.Find (find, always, extension)
 import System.Directory (
     doesFileExist
@@ -763,9 +764,11 @@ localBuildInfo withPackageDB configExtraPathDirs = LocalBuildInfo
 
 -- | Run gcc via ghc, with correct parameters.
 -- Copied from bits and pieces of @Distribution.Simple.GHC@.
-runComponentCc :: PackageDBStack -> [FilePath] -> FilePath -> FilePath -> IO ()
+runComponentCc :: PackageDBStack -> [FilePath]
+               -> FilePath -> FilePath -> FilePath -> FilePath
+               -> IO ()
 runComponentCc configPackageDBStack configExtraPathDirs
-               ideDistDir filename = do
+               ideDistDir absC absObj pref = do
   let verbosity = silent
       lbi = localBuildInfo configPackageDBStack configExtraPathDirs
       libBi = emptyBuildInfo
@@ -774,22 +777,35 @@ runComponentCc configPackageDBStack configExtraPathDirs
       clbi = ComponentLocalBuildInfo []
                -- a stub, this would be expensive (lookups in pkgIndex);
                -- TODO: is it needed? e.g., for C calling into Haskell?
-      pref = ideDistDir </> "objs"
       vanillaCcOpts = (componentCcGhcOptions verbosity lbi
-                         libBi clbi pref filename) `mappend` mempty {
+                         libBi clbi pref absC) `mappend` mempty {
                         ghcOptProfilingMode = Setup.toFlag (withProfLib lbi)
+                      , -- ghc ignores -odir for .o files coming from .c files
+                        ghcOptExtra = ["-o", absObj]
                       }
       sharedCcOpts  = vanillaCcOpts `mappend` mempty {
                         ghcOptFPic      = Setup.toFlag True,
                         ghcOptDynamic   = Setup.toFlag True,
                         ghcOptObjSuffix = Setup.toFlag "dyn_o"
+                      , ghcOptExtra = ["-o", replaceExtension absObj "dyn_o"]
                       }
       odir          = Setup.fromFlag (ghcOptObjDir vanillaCcOpts)
-  createDirectoryIfMissingVerbose verbosity True odir
 
-  (ghcProg, _) <- requireProgram
-                    verbosity Cabal.Program.ghcProgram (withPrograms lbi)
-  let runGhcProg = runGHC verbosity ghcProg
-  runGhcProg vanillaCcOpts
-  let ifSharedLib = when (withSharedLib lbi)
-  ifSharedLib (runGhcProg sharedCcOpts)
+  let stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
+      stderrLog = ideDistDir </> "ide-backend-cc.stderr"
+  _exitCode :: Either ExitCode () <- Ex.bracket
+    (do stdOutputBackup <- redirectStdOutput stdoutLog
+        stdErrorBackup  <- redirectStdError  stderrLog
+        return (stdOutputBackup, stdErrorBackup))
+    (\(stdOutputBackup, stdErrorBackup) -> do
+        restoreStdOutput stdOutputBackup
+        restoreStdError  stdErrorBackup)
+    (\_ -> Ex.try $ do
+        createDirectoryIfMissingVerbose verbosity True odir
+        (ghcProg, _) <- requireProgram
+                          verbosity Cabal.Program.ghcProgram (withPrograms lbi)
+        let runGhcProg = runGHC verbosity ghcProg
+        runGhcProg vanillaCcOpts
+        let ifSharedLib = when (withSharedLib lbi)
+        ifSharedLib (runGhcProg sharedCcOpts))
+  return ()
