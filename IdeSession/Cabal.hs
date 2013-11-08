@@ -766,7 +766,7 @@ localBuildInfo withPackageDB configExtraPathDirs = LocalBuildInfo
 -- Copied from bits and pieces of @Distribution.Simple.GHC@.
 runComponentCc :: PackageDBStack -> [FilePath]
                -> FilePath -> FilePath -> FilePath -> FilePath
-               -> IO ()
+               -> IO (ExitCode, String, String)
 runComponentCc configPackageDBStack configExtraPathDirs
                ideDistDir absC absObj pref = do
   let verbosity = silent
@@ -793,7 +793,7 @@ runComponentCc configPackageDBStack configExtraPathDirs
 
   let stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
       stderrLog = ideDistDir </> "ide-backend-cc.stderr"
-  _exitCode :: Either ExitCode () <- Ex.bracket
+  exitCode :: Either ExitCode () <- Ex.bracket
     (do stdOutputBackup <- redirectStdOutput stdoutLog
         stdErrorBackup  <- redirectStdError  stderrLog
         return (stdOutputBackup, stdErrorBackup))
@@ -808,4 +808,7 @@ runComponentCc configPackageDBStack configExtraPathDirs
         runGhcProg vanillaCcOpts
         let ifSharedLib = when (withSharedLib lbi)
         ifSharedLib (runGhcProg sharedCcOpts))
-  return ()
+  sout <- readFile stdoutLog
+  serr <- readFile stderrLog
+  let exitC = either id (const ExitSuccess) exitCode
+  return (exitC, sout, serr)

@@ -1030,41 +1030,35 @@ runGcc :: PackageDBStack -> [FilePath]
        -> IdeSessionUpdate [SourceError]
 runGcc configPackageDBStack configExtraPathDirs
        ideDistDir absC absObj pref = liftIO $ do
-  runComponentCc configPackageDBStack configExtraPathDirs
-                 ideDistDir absC absObj pref
-  return []  -- TODO
+  -- Direct call to gcc, for testing only:
+  let gcc :: FilePath
+      gcc = "/usr/bin/gcc"
+      args :: [String]
+      args = [ "-c"
+             , "-o", absObj
+             , absC
+             ]
+      stdin :: String
+      stdin = ""
+  (_exitCode, _stdout, _stderr)
+    <- readProcessWithExitCode gcc args stdin
+  -- The real deal; we call gcc via ghc via cabal functions:
+  (exitCode, stdout, stderr)
+    <- runComponentCc configPackageDBStack configExtraPathDirs
+                      ideDistDir absC absObj pref
+  case exitCode of
+    ExitSuccess   -> return []
+    ExitFailure _ -> return (parseErrorMsgs stdout stderr)
+ where
+  -- TODO: Parse the error messages returned by gcc. For now, we just
+  -- return all output as a single, unlocated, error.
+  parseErrorMsgs :: String -> String -> [SourceError]
+  parseErrorMsgs stdout stderr = [SourceError
+    { errorKind = KindError
+    , errorSpan = TextSpan (Text.pack "<gcc error>")
+    , errorMsg  = Text.pack (stdout ++ stderr)
+    }]
 
--- | Call gcc directly
---
--- For testing only: we manually invoke gcc with no options at all.
-_runGccTest :: FilePath -> FilePath -> IdeSessionUpdate [SourceError]
-_runGccTest src dst = liftIO $ do
-    (exitCode, stdout, stderr) <- readProcessWithExitCode gcc args stdin
-    case exitCode of
-      ExitSuccess   -> return []
-      ExitFailure _ -> return (parseErrorMsgs stdout stderr)
-  where
-    -- TODO: this should be configurable
-    gcc :: FilePath
-    gcc = "/usr/bin/gcc"
-
-    args :: [String]
-    args = [ "-c"
-           , "-o", dst
-           , src
-           ]
-
-    stdin :: String
-    stdin = ""
-
-    -- TODO: Parse the error messages returned by gcc. For now, we just
-    -- return all output as a single, unlocated, error.
-    parseErrorMsgs :: String -> String -> [SourceError]
-    parseErrorMsgs stdout stderr = [SourceError {
-        errorKind = KindError
-      , errorSpan = TextSpan (Text.pack "<gcc error>")
-      , errorMsg  = Text.pack (stdout ++ stderr)
-      }]
 
 {------------------------------------------------------------------------------
   Aux
