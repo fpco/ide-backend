@@ -1668,7 +1668,7 @@ syntheticTests =
         assertEqual "" result RunOk
         assertEqual "" (BSL8.fromString "5\n") output
     )
-  , ( "Using the FFI"
+  , ( "Using the FFI via GHC API"
     , withSession defaultSessionConfig $ \session -> do
         let upd = mconcat [
                 updateCodeGeneration True

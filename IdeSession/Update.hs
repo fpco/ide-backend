@@ -521,7 +521,10 @@ recompileObjectFiles = do
 
           srcDir, objDir :: FilePath
           srcDir = ideSourcesDir staticInfo
-          objDir = ideDistDir staticInfo </> "objs"
+          distDir = ideDistDir staticInfo
+          objDir = distDir </> "objs"
+          SessionConfig{ configPackageDBStack
+                       , configExtraPathDirs } = ideConfig staticInfo
 
           compiling, loading, unloading, skipped :: FilePath -> String
           compiling src = "Compiling " ++ makeRelative srcDir src
@@ -555,7 +558,9 @@ recompileObjectFiles = do
               callback (compiling fp)
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
               errs <- lift $ do
-                errs <- runGcc absC absObj
+                errs <- runGcc configPackageDBStack configExtraPathDirs
+                               distDir absC
+                --  errs <- _runGccTest absC objDir
                 when (null errs) $ do
                   ts' <- updateFileTimes absObj
                   set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
@@ -1019,12 +1024,20 @@ nextLogicalTimestamp = do
   modify ideLogicalTimestamp (+ 1)
   return newTS
 
--- | Call gcc
+-- | Call gcc via ghc, with the same parameters cabal uses.
+runGcc :: PackageDBStack -> [FilePath] -> FilePath -> FilePath
+       -> IdeSessionUpdate [SourceError]
+runGcc configPackageDBStack configExtraPathDirs
+       ideDistDir filename = liftIO $ do
+  runComponentCc configPackageDBStack configExtraPathDirs
+                 ideDistDir filename
+  return []  -- TODO
+
+-- | Call gcc directly
 --
--- TODO: For now we manually invoke gcc with no options at all. We need to
--- figure out what cabal does and make sure that we do the same thing
-runGcc :: FilePath -> FilePath -> IdeSessionUpdate [SourceError]
-runGcc src dst = liftIO $ do
+-- For testing only: we manually invoke gcc with no options at all.
+_runGccTest :: FilePath -> FilePath -> IdeSessionUpdate [SourceError]
+_runGccTest src dst = liftIO $ do
     (exitCode, stdout, stderr) <- readProcessWithExitCode gcc args stdin
     case exitCode of
       ExitSuccess   -> return []

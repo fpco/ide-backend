@@ -2,7 +2,7 @@
 {-# LANGUAGE TemplateHaskell     #-}
 module IdeSession.Cabal (
     buildExecutable, buildHaddock, buildLicenseCatenation
-  , packageDbArgs, generateMacros, buildDotCabal
+  , packageDbArgs, generateMacros, buildDotCabal, runComponentCc
   , buildLicsFromPkgs  -- for testing only
   ) where
 
@@ -13,6 +13,7 @@ import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.Function (on)
 import Data.List (delete, sort, groupBy, nub, intersperse)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
+import Data.Monoid (Monoid(..))
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
 import Data.Version (Version (..), parseVersion)
@@ -34,6 +35,7 @@ import Distribution.InstalledPackageInfo
   (InstalledPackageInfo_ ( InstalledPackageInfo
                          , haddockInterfaces ))
 import Distribution.License (License (..))
+import qualified Distribution.Compiler as Compiler
 import qualified Distribution.ModuleName
 import Distribution.PackageDescription
 import Distribution.PackageDescription.PrettyPrint (showGenericPackageDescription)
@@ -46,19 +48,22 @@ import qualified Distribution.Simple.Build as Build
 import Distribution.Simple.Build.Macros
 import qualified Distribution.Simple.Haddock as Haddock
 import Distribution.Simple (PackageDB(..), PackageDBStack)
-import Distribution.Simple.Compiler (CompilerFlavor (GHC))
+import qualified Distribution.Simple.Compiler as Simple.Compiler
 import Distribution.Simple.Configure (configure)
-import Distribution.Simple.GHC (getInstalledPackages)
+import Distribution.Simple.GHC (getInstalledPackages, componentCcGhcOptions)
 import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo (..)
+                                          , ComponentLocalBuildInfo (..)
                                           , localPkgDescr)
 import Distribution.Simple.PackageIndex ( lookupSourcePackageId )
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import qualified Distribution.Simple.Setup as Setup
 import qualified Distribution.Simple.Program as Cabal.Program
-import Distribution.Simple.Program.Db (configureAllKnownPrograms, requireProgram)
 import Distribution.Simple.Program.Builtin (ghcPkgProgram)
+import Distribution.Simple.Program.Db (configureAllKnownPrograms, requireProgram)
+import Distribution.Simple.Program.GHC (GhcOptions(..), runGHC)
 import qualified Distribution.Simple.Program.HcPkg as HcPkg
 import qualified Distribution.Text
+import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
 import Distribution.Version (anyVersion, thisVersion)
 import Distribution.Verbosity (silent)
 import Language.Haskell.Extension (Language (Haskell2010))
@@ -137,7 +142,7 @@ bInfo sourceDir ghcOpts cSources installIncludes =
     { buildable = True
     , hsSourceDirs = [sourceDir]
     , defaultLanguage = Just Haskell2010
-    , options = [(GHC, ghcOpts)]
+    , options = [(Simple.Compiler.GHC, ghcOpts)]
     , cSources
     , installIncludes
     }
@@ -720,3 +725,71 @@ defaultProgramConfiguration configExtraPathDirs =
     ( Cabal.Program.ProgramSearchPathDefault
     : map Cabal.Program.ProgramSearchPathDir configExtraPathDirs )
   Cabal.Program.defaultProgramConfiguration
+
+localBuildInfo :: PackageDBStack -> [FilePath] -> LocalBuildInfo
+localBuildInfo withPackageDB configExtraPathDirs = LocalBuildInfo
+  { withPackageDB
+  , withOptimization = Simple.Compiler.NormalOptimisation
+  , compiler = Simple.Compiler.Compiler
+      { compilerId = Compiler.CompilerId Compiler.GHC (Version [7, 4, 2] [])
+      , compilerLanguages  = undefined
+      , compilerExtensions = undefined
+      }
+  , configFlags = undefined
+  , extraConfigArgs = undefined
+  , installDirTemplates = undefined
+  , buildDir = undefined
+  , scratchDir = undefined
+  , libraryConfig = undefined
+  , executableConfigs = undefined
+  , compBuildOrder = undefined
+  , testSuiteConfigs = undefined
+  , benchmarkConfigs = undefined
+  , installedPkgs = undefined
+  , pkgDescrFile = undefined
+  , localPkgDescr = undefined
+  , withPrograms = defaultProgramConfiguration configExtraPathDirs
+  , withVanillaLib = undefined
+  , withProfLib = False
+  , withSharedLib = False
+  , withDynExe = undefined
+  , withProfExe = undefined
+  , withGHCiLib = undefined
+  , splitObjs = undefined
+  , stripExes = undefined
+  , progPrefix = undefined
+  , progSuffix = undefined
+  }
+
+-- | Run gcc via ghc, with correct parameters.
+-- Copied from bits and pieces of @Distribution.Simple.GHC@.
+runComponentCc :: PackageDBStack -> [FilePath] -> FilePath -> FilePath -> IO ()
+runComponentCc configPackageDBStack configExtraPathDirs
+               ideDistDir filename = do
+  let verbosity = silent
+      lbi = localBuildInfo configPackageDBStack configExtraPathDirs
+      libBi = emptyBuildInfo
+                -- of these, only includeDirs and ccOptions are used,
+                -- but we don't set them for GHC API so far
+      clbi = ComponentLocalBuildInfo []
+               -- a stub, this would be expensive (lookups in pkgIndex);
+               -- TODO: is it needed? e.g., for C calling into Haskell?
+      pref = ideDistDir </> "objs"
+      vanillaCcOpts = (componentCcGhcOptions verbosity lbi
+                         libBi clbi pref filename) `mappend` mempty {
+                        ghcOptProfilingMode = Setup.toFlag (withProfLib lbi)
+                      }
+      sharedCcOpts  = vanillaCcOpts `mappend` mempty {
+                        ghcOptFPic      = Setup.toFlag True,
+                        ghcOptDynamic   = Setup.toFlag True,
+                        ghcOptObjSuffix = Setup.toFlag "dyn_o"
+                      }
+      odir          = Setup.fromFlag (ghcOptObjDir vanillaCcOpts)
+  createDirectoryIfMissingVerbose verbosity True odir
+
+  (ghcProg, _) <- requireProgram
+                    verbosity Cabal.Program.ghcProgram (withPrograms lbi)
+  let runGhcProg = runGHC verbosity ghcProg
+  runGhcProg vanillaCcOpts
+  let ifSharedLib = when (withSharedLib lbi)
+  ifSharedLib (runGhcProg sharedCcOpts)
