@@ -4568,6 +4568,38 @@ syntheticTests =
             assertEqual "" (TextSpan (Text.pack "<from GhcException>")) (errorSpan e2)
           _ -> assertFailure $ "Unexpected errors: " ++ show errors
     )
+  , ( "ghc qAddDependentFile patch (#118)"
+    , withSession defaultSessionConfig $ \session -> do
+        let cb     = \_ -> return ()
+            update = flip (updateSession session) cb
+
+        let mainContents = BSLC.pack $ unlines
+                [ "{-# LANGUAGE TemplateHaskell #-}"
+                , "import Language.Haskell.TH.Syntax"
+                , "main = print ($(do"
+                , "  qAddDependentFile \"foo.hamlet\""
+                , "  s <- qRunIO $ readFile \"foo.hamlet\""
+                , "  lift $ (read s :: Int)"
+                , "  ) :: Int)"
+                ]
+
+        update $ mconcat
+            [ updateSourceFile "Main.hs" mainContents
+            , updateDataFile "foo.hamlet" (BSLC.pack "invalid")
+            ]
+
+        -- Error message expected, invalid data file
+        assertOneError session
+
+        update $ updateDataFile "foo.hamlet" (BSLC.pack "42")
+        assertNoErrors session
+
+        update $ updateSourceFile "Main.hs" $ mainContents `BSLC.append` (BSLC.pack "\n\n-- Trigger a recompile")
+        assertNoErrors session
+
+        update $ updateDataFile "foo.hamlet" (BSLC.pack "invalid")
+        assertOneError session
+    )
   ]
 
 qsort :: IdeSessionUpdate ()
