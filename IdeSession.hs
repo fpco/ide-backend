@@ -127,6 +127,7 @@ module IdeSession (
   , updateArgs
   , updateStdoutBufferMode
   , updateStderrBufferMode
+  , updateTargets
   , buildExe
   , buildDoc
   , buildLicenses

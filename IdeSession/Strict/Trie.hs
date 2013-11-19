@@ -1,5 +1,6 @@
 module IdeSession.Strict.Trie (
-    submap
+    empty
+  , submap
   , elems
   , fromListWith
   ) where
@@ -8,6 +9,9 @@ import Data.ByteString (ByteString)
 import qualified Data.Trie as Trie
 import qualified Data.Trie.Convenience as Trie
 import IdeSession.Strict.Container
+
+empty :: Strict Trie a
+empty = StrictTrie $ Trie.empty
 
 submap :: ByteString -> Strict Trie a -> Strict Trie a
 submap bs = StrictTrie . Trie.submap bs . toLazyTrie

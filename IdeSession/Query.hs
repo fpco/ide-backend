@@ -273,7 +273,7 @@ getAutocompletion = computedQuery $ \Computed{..} ->
              $ concatMap (toLazyList . StrictList.map (removeExplicitSharing cache))
              . StrictTrie.elems
              . StrictTrie.submap n
-             $ mapOfTries StrictMap.! modName
+             $ StrictMap.findWithDefault StrictTrie.empty modName mapOfTries
 
 -- | (Transitive) package dependencies
 --

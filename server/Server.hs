@@ -107,10 +107,10 @@ ghcServerEngine configGenerateModInfo
     let go args = do
           req <- liftIO get
           args' <- case req of
-            ReqCompile opts dir distDir genCode -> do
+            ReqCompile opts dir distDir genCode targets -> do
               ghcHandleCompile
                 conv opts pluginRef importsRef dir distDir
-                genCode configGenerateModInfo
+                genCode targets configGenerateModInfo
               return args
             ReqRun runCmd -> do
               ghcWithArgs args $ ghcHandleRun conv runCmd
@@ -163,16 +163,18 @@ ghcHandleCompile
   -> FilePath            -- ^ source directory
   -> FilePath            -- ^ cabal's dist directory
   -> Bool                -- ^ should we generate code
+  -> Maybe [ModuleName]  -- ^ targets
   -> Bool                -- ^ should we generate per-module info
   -> Ghc ()
 ghcHandleCompile RpcConversation{..} ideNewOpts
                  pluginRef modsRef configSourcesDir ideDistDir
-                 ideGenerateCode configGenerateModInfo = do
+                 ideGenerateCode targets configGenerateModInfo = do
     errsRef <- liftIO $ newIORef StrictList.nil
     (errs, loadedModules) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
+                                       targets
                                        verbosity
                                        errsRef
                                        progressCallback

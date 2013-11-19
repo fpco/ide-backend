@@ -21,6 +21,7 @@ data GhcRequest
       , reqCompileSourceDir :: FilePath
       , reqCompileDistDir   :: FilePath
       , reqCompileGenCode   :: Bool
+      , reqCompileTargets   :: Maybe [ModuleName]
       }
   | ReqRun {
         reqRunCmd :: RunCmd
@@ -73,6 +74,7 @@ instance Binary GhcRequest where
     put reqCompileSourceDir
     put reqCompileDistDir
     put reqCompileGenCode
+    put reqCompileTargets
   put ReqRun{..} = do
     putWord8 1
     put reqRunCmd
@@ -103,7 +105,7 @@ instance Binary GhcRequest where
   get = do
     header <- getWord8
     case header of
-      0   -> ReqCompile    <$> get <*> get <*> get <*> get
+      0   -> ReqCompile    <$> get <*> get <*> get <*> get <*> get
       1   -> ReqRun        <$> get
       2   -> ReqSetEnv     <$> get
       3   -> ReqSetArgs    <$> get

@@ -42,6 +42,9 @@ data SessionConfig = SessionConfig {
     -- | Function to be used for logging. Messages logged in this manner may be
     -- provided to users in a special debugging UI.
   , configLog :: String -> IO ()
+    -- | Delete temporary files when session finishes?
+    -- (Defaults to True; mostly for internal debugging purposes)
+  , configDeleteTempFiles :: Bool
   }
 
 -- | Default session configuration
@@ -83,4 +86,5 @@ defaultSessionConfig = SessionConfig {
     , ("integer-gmp", (Just BSD3, Just "LICENSE", Nothing))
     ]
   , configLog             = const $ return ()
+  , configDeleteTempFiles = True
   }

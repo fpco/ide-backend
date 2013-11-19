@@ -52,7 +52,6 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (MaybeT(..))
 import Control.Applicative ((<$>))
 import Data.Maybe (catMaybes, listToMaybe)
-import Data.List ((\\))
 import Data.Text (Text)
 import Data.Array (Array)
 import qualified Data.Array as Array
@@ -167,20 +166,17 @@ invalidateModSummaryCache =
 compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this call
              -> Bool                -- ^ should we generate code
+             -> Maybe [ModuleName]  -- ^ targets
              -> Int                 -- ^ verbosity level
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc (Strict [] SourceError, [ModuleName])
 compileInGhc configSourcesDir dynOpts
-             generateCode verbosity
+             generateCode mTargets verbosity
              errsRef handlerOutput handlerRemaining = do
     -- Reset errors storage.
     liftIO $ writeIORef errsRef StrictList.nil
-    -- Determine files to process.
-    targets <- liftIO $ find always
-                             ((`elem` hsExtensions) `liftM` extension)
-                             configSourcesDir
     -- Compute new GHC flags.
     flags0 <- getSessionDynFlags
     (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
@@ -204,23 +200,9 @@ compileInGhc configSourcesDir dynOpts
         invalidateModSummaryCache
 #endif
         _ <- setSessionDynFlags flags
-        -- Set up targets.
-        oldTargets <- getTargets
-        let targetIdFromFile file = TargetFile file Nothing
-            addSingle filename = do
-              addTarget Target
-                { targetId           = targetIdFromFile filename
-                , targetAllowObjCode = True
-                , targetContents     = Nothing
-                }
-            fileFromTarget Target{targetId} =
-              case targetId of
-                TargetFile file Nothing -> file
-                _ -> error "fileFromTarget: not a known target"
-            oldFiles = map fileFromTarget oldTargets
-        mapM_ addSingle (targets \\ oldFiles)
-        mapM_ removeTarget $ map targetIdFromFile $ oldFiles \\ targets
-        -- Load modules to typecheck and perhaps generate code, too.
+        liftIO (print =<< find always ((`elem` hsExtensions) `liftM` extension)
+                              configSourcesDir)
+        setTargets =<< computeTargets
         void $ load LoadAllTargets
 
     -- Collect info
@@ -230,6 +212,29 @@ compileInGhc configSourcesDir dynOpts
            , map (Text.pack . moduleNameString) loaded
            )
   where
+    computeTargets :: Ghc [Target]
+    computeTargets = do
+      targetIds <- case mTargets of
+        Just targets -> return (map targetIdFromModule targets)
+        Nothing      -> liftIO $ do
+          paths <- find always ((`elem` hsExtensions) `liftM` extension)
+                               configSourcesDir
+          return (map targetIdFromFile paths)
+      return (map targetWithId targetIds)
+
+    targetWithId :: TargetId -> Target
+    targetWithId targetId = Target {
+        targetId           = targetId
+      , targetAllowObjCode = True
+      , targetContents     = Nothing
+      }
+
+    targetIdFromFile :: FilePath -> TargetId
+    targetIdFromFile path = TargetFile path Nothing
+
+    targetIdFromModule :: ModuleName -> TargetId
+    targetIdFromModule = TargetModule . mkModuleName . Text.unpack
+
     sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ()
     sourceErrorHandler _flags e = liftIO $ do
       debug dVerbosity $ "handleSourceError: " ++ show e

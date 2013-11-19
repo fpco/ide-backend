@@ -24,6 +24,7 @@ module IdeSession.Update (
   , updateArgs
   , updateStdoutBufferMode
   , updateStderrBufferMode
+  , updateTargets
   , buildExe
   , buildDoc
   , buildLicenses
@@ -127,17 +128,19 @@ initSession :: SessionInitParams -> SessionConfig -> IO IdeSession
 initSession initParams ideConfig@SessionConfig{..} = do
   verifyConfig ideConfig
 
-  -- TODO: Don't hardcode ghc version
-  let ghcOpts = configStaticOpts
-             ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
-
   configDirCanon <- Dir.canonicalizePath configDir
   ideSourcesDir  <- createTempDirectory configDirCanon "src."
   ideDataDir     <- createTempDirectory configDirCanon "data."
   ideDistDir     <- createTempDirectory configDirCanon "dist."
   env            <- envWithPathOverride configExtraPathDirs
-  _ideGhcServer  <- forkGhcServer configGenerateModInfo ghcOpts
-                                  (Just ideDataDir) env configInProcess
+
+  -- TODO: Don't hardcode ghc version
+  let ghcOpts = configStaticOpts
+             ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
+             ++ ["-i" ++ ideSourcesDir]
+
+  _ideGhcServer <- forkGhcServer configGenerateModInfo ghcOpts
+                                 (Just ideDataDir) env configInProcess
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
   -- a workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
@@ -165,6 +168,7 @@ initSession initParams ideConfig@SessionConfig{..} = do
                         , _ideStderrBufferMode = RunNoBuffering
                         , _ideBreakInfo        = Maybe.nothing
                         , _ideGhcServer
+                        , _ideTargets          = Nothing
                         }
   let ideStaticInfo = IdeStaticInfo{..}
   let session = IdeSession{..}
@@ -261,7 +265,7 @@ shutdownSession IdeSession{ideState, ideStaticInfo} = do
     IdeSessionServerDied _ _ ->
       cleanupDirs
  where
-  cleanupDirs = do
+  cleanupDirs = when (configDeleteTempFiles . ideConfig $ ideStaticInfo) $ do
     let dataDir    = ideDataDir ideStaticInfo
         sourcesDir = ideSourcesDir ideStaticInfo
     -- TODO: this has a race condition (not sure we care; if not, say why not)
@@ -404,6 +408,7 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
                                                (ideSourcesDir ideStaticInfo)
                                                (ideDistDir    ideStaticInfo)
                                                (idleState' ^. ideGenerateCode)
+                                               (idleState' ^. ideTargets)
                                                callback'
 
             let applyDiff :: Strict (Map ModuleName) (Diff v)
@@ -722,13 +727,15 @@ updateArgs args = do
 
 -- | Set buffering mode for snippets' stdout
 updateStdoutBufferMode :: RunBufferMode -> IdeSessionUpdate ()
-updateStdoutBufferMode bufferMode = do
-  set ideStdoutBufferMode bufferMode
+updateStdoutBufferMode = set ideStdoutBufferMode
 
 -- | Set buffering mode for snippets' stderr
 updateStderrBufferMode :: RunBufferMode -> IdeSessionUpdate ()
-updateStderrBufferMode bufferMode = do
-  set ideStderrBufferMode bufferMode
+updateStderrBufferMode = set ideStderrBufferMode
+
+-- | Set compilation targets
+updateTargets :: Maybe [ModuleName] -> IdeSessionUpdate ()
+updateTargets = set ideTargets
 
 -- | Run a given function in a given module (the name of the module
 -- is the one between @module ... end@, which may differ from the file name).

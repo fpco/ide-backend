@@ -1,7 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
 module Main (main) where
 
-import Control.Applicative ((<$>))
 import Control.Concurrent (threadDelay)
 import qualified Control.Exception as Ex
 import Control.Monad
@@ -26,7 +25,7 @@ import System.Exit (ExitCode (..))
 import System.FilePath
 import System.FilePath.Find (always, extension, find)
 import System.IO as IO
-import System.IO.Temp (withTempDirectory)
+import System.IO.Temp (withTempDirectory, createTempDirectory)
 import System.Process (readProcess)
 import qualified System.Process as Process
 import System.Random (randomRIO)
@@ -83,15 +82,8 @@ withSession :: SessionConfig -> (IdeSession -> IO a) -> IO a
 withSession = withSession' defaultSessionInitParams
 
 withSession' :: SessionInitParams -> SessionConfig -> (IdeSession -> IO a) -> IO a
-withSession' initParams config io = do
-  slashTmp <- getTemporaryDirectory
-  withTempDirectory slashTmp "ide-backend-test." $ \tempDir -> do
-    -- Only actually use the temp dir if it's not specifically overriden
-    let config' = config {
-            configDir = if configDir config == configDir defaultSessionConfig
-                          then tempDir
-                          else configDir config
-          }
+withSession' initParams config io = inTempDir $ \tempDir -> do
+    let config' = config { configDir = tempDir }
     Ex.bracket (initSession initParams config') tryShutdownSession io
   where
     tryShutdownSession session = do
@@ -99,6 +91,21 @@ withSession' initParams config io = do
       case mDidShutdown of
         Just () -> return ()
         Nothing -> putStrLn "WARNING: Failed to shutdown session (timeout)"
+
+    isDefaultConfigDir = configDir config == configDir defaultSessionConfig
+
+    -- Only actually use the temp dir if it's not specifically overriden
+    inTempDir act
+      | isDefaultConfigDir && configDeleteTempFiles config = do
+          slashTmp <- getTemporaryDirectory
+          withTempDirectory slashTmp "ide-backend-test." act
+      | not isDefaultConfigDir && configDeleteTempFiles config =
+          act (configDir config)
+      | isDefaultConfigDir && not (configDeleteTempFiles config) = do
+          tempDir <- createTempDirectory "." "ide-backend-test."
+          act tempDir
+      | otherwise = do
+          Ex.throwIO (userError "inTempDir: unsupported setup")
 
 withOpts :: [String] -> SessionConfig
 withOpts opts =
@@ -123,7 +130,7 @@ multipleTests =
         -- Overwrite one of the copied files.
         (_, ms) <- getModules session
         let update = loadModule (head ms) "a = unknownX"
-        updateSessionD session update 1  -- at most 1 recompiled
+        updateSessionD session update (length ms)  -- we don't know how many modules get recompiled
         assertSourceErrors' session ["Not in scope: `unknownX'"]
     )
   , ( "Overwrite with the same module name in all files"
@@ -147,7 +154,7 @@ multipleTests =
         let update1 =
               updateCodeGeneration False
               <> loadModule (head lm) "a = unknownX"
-        updateSessionD session update1 1
+        updateSessionD session update1 (length lm)
         assertSourceErrors' session ["Not in scope: `unknownX'"]
         updateSessionD session mempty 1  -- was an error, so trying again
         assertSourceErrors' session ["Not in scope: `unknownX'"]
@@ -238,45 +245,39 @@ syntheticTests :: [(String, Assertion)]
 syntheticTests =
   [ ( "Maintain list of compiled modules I"
     , withSession defaultSessionConfig $ \session -> do
-        let assEq name goodMods =
-              assertEqual name (map Text.pack goodMods)
-                =<< (sort <$> getLoadedModules session)
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
-        assEq "XXX" ["XXX"]
+        assertLoadedModules session "XXX" ["XXX"]
         updateSessionD session (loadModule "A.hs" "a = 5") 1
-        assEq "[m1]" ["A", "XXX"]
+        assertLoadedModules session "[m1]" ["A", "XXX"]
         updateSessionD session (loadModule "A2.hs" "import A\na2 = A.a") 1
-        assEq "[m1, m2]" ["A", "A2", "XXX"]
+        assertLoadedModules session "[m1, m2]" ["A", "A2", "XXX"]
         updateSessionD session (loadModule "A3.hs" "") 1
-        assEq "[m1, m2, m3]" ["A", "A2", "A3", "XXX"]
+        assertLoadedModules session "[m1, m2, m3]" ["A", "A2", "A3", "XXX"]
         updateSessionD session (loadModule "Wrong.hs" "import A4\na2 = A4.a + 1") 1
-        assEq "wrong1" ["A", "A2", "A3", "XXX"]
+        assertLoadedModules session "wrong1" ["A", "A2", "A3", "XXX"]
         updateSessionD session (loadModule "Wrong.hs" "import A\na2 = A.a + c") 1
-        assEq "wrong2" ["A", "A2", "A3", "XXX"]
+        assertLoadedModules session "wrong2" ["A", "A2", "A3", "XXX"]
         updateSessionD session (loadModule "A.hs" "a = c") 1
         -- Module "A" is compiled before "Wrong", fails, so it's invalidated
         -- and all modules that depend on it are invalidated. Module "Wrong"
         -- is never compiled.
-        assEq "wrong3" ["A3", "XXX"]
+        assertLoadedModules session "wrong3" ["A3", "XXX"]
     )
   , ( "Maintain list of compiled modules II"
     , withSession defaultSessionConfig $ \session -> do
-        let assEq name goodMods =
-              assertEqual name (map Text.pack goodMods)
-                =<< (sort <$> getLoadedModules session)
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
-        assEq "XXX" ["XXX"]
+        assertLoadedModules session "XXX" ["XXX"]
         updateSessionD session (loadModule "A.hs" "a = 5") 1
-        assEq "[m1]" ["A", "XXX"]
+        assertLoadedModules session "[m1]" ["A", "XXX"]
         updateSessionD session (loadModule "A2.hs" "import A\na2 = A.a") 1
-        assEq "[m1, m2]" ["A", "A2", "XXX"]
+        assertLoadedModules session "[m1, m2]" ["A", "A2", "XXX"]
         updateSessionD session (loadModule "A3.hs" "") 1
-        assEq "[m1, m2, m3]" ["A", "A2", "A3", "XXX"]
+        assertLoadedModules session "[m1, m2, m3]" ["A", "A2", "A3", "XXX"]
         updateSessionD session (loadModule "Wrong.hs" "import A4\na2 = A4.a + 1") 1
-        assEq "wrong1" ["A", "A2", "A3", "XXX"]
+        assertLoadedModules session "wrong1" ["A", "A2", "A3", "XXX"]
         -- This has to be disabled to get the different outcome below:
           -- updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
-          -- assEq "wrong2" [m1, m2, m3, xxx]
+          -- assertLoadedModules session "wrong2" [m1, m2, m3, xxx]
         -- We get this differemnt outcome both in original 7.4.2
         -- and after the GHC#7231 fix. It's probably caused by target
         -- Wrong place before or after target "A" depending on what kind
@@ -284,27 +285,24 @@ syntheticTests =
         updateSessionD session (loadModule "A.hs" "a = c") 1
         -- Module "Wrong" is compiled first here, fails, so module "A"
         -- is never comipiled, so it's not invalidated.
-        assEq "wrong3" ["A", "A2", "A3", "XXX"]
+        assertLoadedModules session "wrong3" ["A", "A2", "A3", "XXX"]
     )
   , ( "Maintain list of compiled modules III"
     , withSession defaultSessionConfig $ \session -> do
-        let assEq name goodMods =
-              assertEqual name (sort (map Text.pack goodMods))
-                =<< getLoadedModules session
         updateSessionD session (loadModule "A.hs" "a = 5") 1
-        assEq "1 [A]" ["A"]
+        assertLoadedModules session "1 [A]" ["A"]
         updateSessionD session (loadModule "A.hs" "a = 5 + True") 1
-        assEq "1 []" []
+        assertLoadedModules session "1 []" []
         updateSessionD session (loadModule "A.hs" "a = 5") 1
-        assEq "2 [A]" ["A"]
+        assertLoadedModules session "2 [A]" ["A"]
         updateSessionD session (loadModule "A.hs" "a = 5 + wrong") 1
-        assEq "2 []" []
+        assertLoadedModules session "2 []" []
         updateSessionD session (loadModule "A.hs" "a = 5") 1
-        assEq "3 [A]" ["A"]
+        assertLoadedModules session "3 [A]" ["A"]
         updateSessionD session (loadModule "A.hs" "import WRONG\na = 5") 1
-        assEq "3 [A]; wrong imports do not unload old modules" ["A"]
+        assertLoadedModules session "3 [A]; wrong imports do not unload old modules" ["A"]
         updateSessionD session (loadModule "A.hs" "a = 5 + True") 1
-        assEq "3 []" []
+        assertLoadedModules session "3 []" []
     )
   , ( "Duplicate shutdown"
     , withSession defaultSessionConfig $ \session ->
@@ -3051,8 +3049,7 @@ syntheticTests =
                     ])
         updateSessionD session upd 1
         assertNoErrors session
-        mods <- getLoadedModules session
-        assertEqual "" [Text.pack "M"] mods
+        assertLoadedModules session "" ["M"]
     )
   , ( "Package dependencies"
     , withSession defaultSessionConfig $ \session -> do
@@ -4600,6 +4597,208 @@ syntheticTests =
         update $ updateDataFile "foo.hamlet" (BSLC.pack "invalid")
         assertOneError session
     )
+  , ( "setTargets  1: [{} < A, {A} < B, {A} < C], require [A]"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "0"
+          , modBn "0"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "A"])
+          ]) 1
+        assertNoErrors session
+        assertLoadedModules session "" ["A"]
+    )
+  , ( "setTargets  2: [{} < A, {A} < B, {A} < C], require [A], error in B"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "0"
+          , modBn "invalid"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "A"])
+          ]) 1
+        assertNoErrors session
+        assertLoadedModules session "" ["A"]
+    )
+  , ( "setTargets  3: [{} < A, {A} < B, {A} < C], require [B]"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "0"
+          , modBn "0"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "B"])
+          ]) 2
+        assertNoErrors session
+        assertLoadedModules session "" ["A", "B"]
+    )
+  , ( "setTargets  4: [{} < A, {A} < B, {A} < C], require [B], error in C"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "0"
+          , modBn "0"
+          , modCn "invalid"
+          , updateTargets (Just [Text.pack "B"])
+          ]) 2
+        assertNoErrors session
+        assertLoadedModules session "" ["A", "B"]
+    )
+  , ( "setTargets  5: [{} < A, {A} < B, {A} < C], require [A], error in A"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "invalid"
+          , modBn "0"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "A"])
+          ]) 1
+        assertOneError session
+        assertLoadedModules session "" []
+    )
+  , ( "setTargets  6: [{} < A, {A} < B, {A} < C], require [B], error in A"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "invalid"
+          , modBn "0"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "B"])
+          ]) 2
+        assertOneError session
+        assertLoadedModules session "" []
+    )
+  , ( "setTargets  7: [{} < A, {A} < B, {A} < C], require [B], error in B"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "0"
+          , modBn "invalid"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "B"])
+          ]) 2
+        assertOneError session
+        assertLoadedModules session "" ["A"]
+    )
+  , ( "setTargets  8: [{} < A, {A} < B, {A} < C], require [B, C]"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "0"
+          , modBn "0"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "B", Text.pack "C"])
+          ]) 3
+        assertNoErrors session
+        assertLoadedModules session "" ["A", "B", "C"]
+        autocomplete <- getAutocompletion session
+        assertEqual "we have autocompletion info for C" 2 $
+          length (autocomplete (Text.pack "C") "sp") -- span, split
+    )
+  , ( "setTargets  9: [{} < A, {A} < B, {A} < C], require [B, C], then [B]"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "0"
+          , modBn "0"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "B", Text.pack "C"])
+          ]) 3
+        assertNoErrors session
+        assertLoadedModules session "" ["A", "B", "C"]
+        do autocomplete <- getAutocompletion session
+           assertEqual "we have autocompletion info for C" 2 $
+             length (autocomplete (Text.pack "C") "sp") -- span, split
+
+        updateSessionD session (mconcat [
+            updateTargets (Just [Text.pack "B"])
+          ]) 0
+        assertLoadedModules session "" ["A", "B", "C"]
+        do autocomplete <- getAutocompletion session
+           assertEqual "we still have autocompletion info for C" 2 $
+             length (autocomplete (Text.pack "C") "sp") -- span, split
+    )
+  , ( "setTargets 10: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with modified B"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "0"
+          , modBn "0"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "B", Text.pack "C"])
+          ]) 3
+        assertNoErrors session
+        assertLoadedModules session "" ["A", "B", "C"]
+        do autocomplete <- getAutocompletion session
+           assertEqual "we have autocompletion info for C" 2 $
+             length (autocomplete (Text.pack "C") "sp") -- span, split
+
+        updateSessionD session (mconcat [
+            modBn "1"
+          , updateTargets (Just [Text.pack "B"])
+          ]) 1
+        assertLoadedModules session "" ["A", "B"]
+        do autocomplete <- getAutocompletion session
+           assertEqual "autocompletion info for C cleared" 0 $
+             length (autocomplete (Text.pack "C") "sp")
+    )
+  , ( "setTargets 11: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with modified B and error in C"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "0"
+          , modBn "0"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "B", Text.pack "C"])
+          ]) 3
+        assertNoErrors session
+        assertLoadedModules session "" ["A", "B", "C"]
+        do autocomplete <- getAutocompletion session
+           assertEqual "we have autocompletion info for C" 2 $
+             length (autocomplete (Text.pack "C") "sp") -- span, split
+
+        updateSessionD session (mconcat [
+            modBn "1"
+          , modCn "invalid"
+          , updateTargets (Just [Text.pack "B"])
+          ]) 1
+        assertLoadedModules session "" ["A", "B"]
+        do autocomplete <- getAutocompletion session
+           assertEqual "autocompletion info for C cleared" 0 $
+             length (autocomplete (Text.pack "C") "sp")
+    )
+  , ( "setTargets 12: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with error in C"
+    , withSession defaultSessionConfig $ \session -> do
+        updateSessionD session (mconcat [
+            modAn "0"
+          , modBn "0"
+          , modCn "0"
+          , updateTargets (Just [Text.pack "B", Text.pack "C"])
+          ]) 3
+        assertNoErrors session
+        assertLoadedModules session "" ["A", "B", "C"]
+        do autocomplete <- getAutocompletion session
+           assertEqual "we have autocompletion info for C" 2 $
+             length (autocomplete (Text.pack "C") "sp") -- span, split
+
+        updateSessionD session (mconcat [
+            modCn "invalid"
+          , updateTargets (Just [Text.pack "B"])
+          ]) 1
+        assertLoadedModules session "" ["A", "B"]
+        do autocomplete <- getAutocompletion session
+           assertEqual "autocompletion info for C cleared" 0 $
+             length (autocomplete (Text.pack "C") "sp")
+    )
+  ]
+
+modAn, modBn, modCn :: String -> IdeSessionUpdate ()
+modAn n = updateSourceFile "A.hs" $ BSLC.pack $ unlines [
+    "module A (foo) where"
+  , "foo :: Int"
+  , "foo = " ++ n
+  ]
+modBn n = updateSourceFile "B.hs" $ BSLC.pack $ unlines [
+    "module B (bar) where"
+  , "import A (foo)"
+  , "bar :: Int"
+  , "bar = foo + " ++ n
+  ]
+modCn n = updateSourceFile "C.hs" $ BSLC.pack $ unlines [
+    "module C (baz) where"
+  , "import A (foo)"
+  , "baz :: Int"
+  , "baz = foo + " ++ n
   ]
 
 qsort :: IdeSessionUpdate ()
@@ -4933,6 +5132,11 @@ show3errors errs =
       more | length errs > 3 = "\n... and more ..."
            | otherwise       = ""
   in shown ++ more
+
+assertLoadedModules :: IdeSession -> String -> [String] -> Assertion
+assertLoadedModules session header goodMods = do
+  loadedMods <- getLoadedModules session
+  assertSameSet header (map Text.pack goodMods) loadedMods
 
 assertBreak :: IdeSession
             -> String                     -- ^ Module

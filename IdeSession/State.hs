@@ -31,6 +31,7 @@ module IdeSession.State
   , ideUpdatedCode
   , ideUpdatedArgs
   , ideBreakInfo
+  , ideTargets
   , managedSource
   , managedData
   ) where
@@ -151,6 +152,8 @@ data IdeIdleState = IdeIdleState {
   , _ideUpdatedArgs      :: !Bool
     -- | Are we currently in a breakpoint?
   , _ideBreakInfo        :: !(Strict Maybe Public.BreakInfo)
+    -- | Targets for compilation
+  , _ideTargets          :: !(Maybe [ModuleName])
   }
 
 -- | The collection of source and data files submitted by the user.
@@ -191,6 +194,7 @@ ideUpdatedEnv          :: Accessor IdeIdleState Bool
 ideUpdatedCode         :: Accessor IdeIdleState Bool
 ideUpdatedArgs         :: Accessor IdeIdleState Bool
 ideBreakInfo           :: Accessor IdeIdleState (Strict Maybe Public.BreakInfo)
+ideTargets             :: Accessor IdeIdleState (Maybe [ModuleName])
 
 ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
@@ -211,6 +215,7 @@ ideUpdatedEnv       = accessor _ideUpdatedEnv       $ \x s -> s { _ideUpdatedEnv
 ideUpdatedCode      = accessor _ideUpdatedCode      $ \x s -> s { _ideUpdatedCode      = x }
 ideUpdatedArgs      = accessor _ideUpdatedArgs      $ \x s -> s { _ideUpdatedArgs      = x }
 ideBreakInfo        = accessor _ideBreakInfo        $ \x s -> s { _ideBreakInfo        = x }
+ideTargets          = accessor _ideTargets          $ \x s -> s { _ideTargets          = x }
 
 managedSource :: Accessor ManagedFilesInternal [(FilePath, (MD5Digest, LogicalTimestamp))]
 managedData   :: Accessor ManagedFilesInternal [FilePath]
