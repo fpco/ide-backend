@@ -26,6 +26,7 @@ import System.FilePath
 import System.FilePath.Find (always, extension, find)
 import System.IO as IO
 import System.IO.Temp (withTempDirectory, createTempDirectory)
+import System.IO.Unsafe (unsafePerformIO)
 import System.Process (readProcess)
 import qualified System.Process as Process
 import System.Random (randomRIO)
@@ -38,7 +39,8 @@ import Test.HUnit (Assertion, assertBool, assertEqual, assertFailure, (@?=))
 import Test.HUnit.Lang (HUnitFailure(..))
 
 import Debug
-import IdeSession
+import IdeSession hiding (defaultSessionConfig)
+import qualified IdeSession as IdeSession
 import TestTools
 
 -- Tests using various functions of the IdeSession API
@@ -83,7 +85,12 @@ withSession = withSession' defaultSessionInitParams
 
 withSession' :: SessionInitParams -> SessionConfig -> (IdeSession -> IO a) -> IO a
 withSession' initParams config io = inTempDir $ \tempDir -> do
-    let config' = config { configDir = tempDir }
+    extraPathDirs <- (System.Environment.getEnv "IDE_BACKEND_EXTRA_PATH_DIRS")
+                      `Ex.catch` (\(_ :: Ex.IOException) -> return "")
+    let config' = config {
+            configDir           = tempDir
+          , configExtraPathDirs = splitSearchPath extraPathDirs
+          }
     Ex.bracket (initSession initParams config') tryShutdownSession io
   where
     tryShutdownSession session = do
@@ -5289,6 +5296,26 @@ filterIdeBackendTestH lastFile bs =
   in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
 
 {------------------------------------------------------------------------------
+  Default configuration
+
+  This is slightly bold: we use an unsafePerformIO in order to read the
+  system environment.
+------------------------------------------------------------------------------}
+
+defaultSessionConfig :: SessionConfig
+defaultSessionConfig = unsafePerformIO $ do
+  packageDb <- (System.Environment.getEnv "IDE_BACKEND_PACKAGE_DB")
+                `Ex.catch` (\(_ :: Ex.IOException) -> return "")
+  if null packageDb
+    then return IdeSession.defaultSessionConfig
+    else return IdeSession.defaultSessionConfig {
+                    configPackageDBStack = [
+                        GlobalPackageDB
+                      , SpecificPackageDB packageDb
+                      ]
+                  }
+
+{------------------------------------------------------------------------------
   Aux
 ------------------------------------------------------------------------------}
 
@@ -5320,3 +5347,4 @@ mark (x:xs) = (x, True, False) : aux xs
     aux []     = error "impossible"
     aux [y]    = [(y, False, True)]
     aux (y:ys) = (y, False, False) : aux ys
+

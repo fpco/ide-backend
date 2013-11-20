@@ -139,8 +139,12 @@ initSession initParams ideConfig@SessionConfig{..} = do
              ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
              ++ ["-i" ++ ideSourcesDir]
 
-  _ideGhcServer <- forkGhcServer configGenerateModInfo ghcOpts
-                                 (Just ideDataDir) env configInProcess
+  _ideGhcServer <- forkGhcServer configGenerateModInfo
+                                 configExtraPathDirs
+                                 ghcOpts
+                                 (Just ideDataDir)
+                                 env
+                                 configInProcess
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
   -- a workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
@@ -312,9 +316,12 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
       env    <- envWithPathOverride configExtraPathDirs
       let ghcOpts = configStaticOpts
                  ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
-      server <-
-        forkGhcServer
-          configGenerateModInfo ghcOpts workingDir env configInProcess
+      server <- forkGhcServer configGenerateModInfo
+                              configExtraPathDirs
+                              ghcOpts
+                              workingDir
+                              env
+                              configInProcess
       return . IdeSessionIdle
              . (ideComputed    ^= Maybe.nothing)
              . (ideUpdatedEnv  ^= True)

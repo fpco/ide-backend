@@ -24,18 +24,13 @@ module IdeSession.GHC.Client (
   ) where
 
 import Control.Concurrent (ThreadId, killThread)
-import Control.Monad (unless)
 import qualified Data.ByteString.Char8      as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
-import System.FilePath ((</>))
-import System.Directory (doesFileExist)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.MVar (newMVar)
 import qualified Control.Exception as Ex
 import System.Exit (ExitCode)
-
-import Paths_ide_backend
 
 import IdeSession.GHC.API
 import IdeSession.RPC.Client
@@ -44,6 +39,13 @@ import qualified IdeSession.Types.Public as Public
 import IdeSession.Types.Private (RunResult(..))
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
+
+import Distribution.Verbosity (normal)
+import Distribution.Simple.Program.Find ( -- From our patched cabal
+    ProgramSearchPath
+  , findProgramOnSearchPath
+  , ProgramSearchPathEntry(..)
+  )
 
 {------------------------------------------------------------------------------
   Starting and stopping the server
@@ -54,26 +56,39 @@ type InProcess = Bool
 data GhcServer = OutProcess RpcServer
                | InProcess RpcConversation ThreadId
 
-forkGhcServer :: Bool -> [String] -> Maybe String -> Maybe [(String, String)]
-              -> InProcess -> IO GhcServer
-forkGhcServer configGenerateModInfo opts workingDir menv False = do
-  bindir <- getBinDir
-  let prog = bindir </> "ide-backend-server"
+-- | Start the ghc server
+forkGhcServer :: Bool                      -- ^ generate mod info?
+              -> [FilePath]                -- ^ extra search path components
+              -> [String]                  -- ^ ghc options
+              -> Maybe String              -- ^ working directory
+              -> Maybe [(String, String)]  -- ^ environment
+              -> InProcess                 -- ^ Run in-process? (current broken)
+              -> IO GhcServer
+forkGhcServer configGenerateModInfo
+              configExtraPathDirs
+              opts
+              workingDir
+              menv
+              False = do
+  mLoc <- findProgramOnSearchPath normal searchPath "ide-backend-server"
+  case mLoc of
+    Nothing ->
+      fail $ "Could not find ide-backend-server"
+    Just prog -> do
+      server <- forkRpcServer prog
+                              (opts ++ [ "--ghc-opts-end"
+                                       , show configGenerateModInfo
+                                       , show ideBackendApiVersion
+                                       ])
+                              workingDir
+                              menv
+      return (OutProcess server)
+  where
+    searchPath :: ProgramSearchPath
+    searchPath = ProgramSearchPathDefault
+               : map ProgramSearchPathDir configExtraPathDirs
 
-  exists <- doesFileExist prog
-  unless exists $
-    fail $ "The 'ide-backend-server' program was expected to "
-        ++ "be at location " ++ prog ++ " but it is not."
-
-  server <- forkRpcServer prog
-                          (opts ++ [ "--ghc-opts-end"
-                                   , show configGenerateModInfo
-                                   , show ideBackendApiVersion
-                                   ])
-                          workingDir
-                          menv
-  return (OutProcess server)
-forkGhcServer _ _ _ _ True =
+forkGhcServer _ _ _ _ _ True =
   fail "In-process ghc server not currently supported"
 {- TODO: Reenable in-process
 forkGhcServer configGenerateModInfo opts workingDir True = do

@@ -21,8 +21,7 @@ Flag test-pkg-dbs
   default:     False
 
 library
-  exposed-modules:    IdeSession,
-                      Paths_ide_backend
+  exposed-modules:    IdeSession
   other-modules:      IdeSession.State,
                       IdeSession.Config,
                       IdeSession.Cabal,
