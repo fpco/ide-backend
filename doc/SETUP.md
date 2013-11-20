@@ -1,5 +1,125 @@
-Sandboxes
-=========
+IDE backend requirements for ghc/package environments
+=====================================================
+
+Now that the IDE backend supports multiple versions of ghc, there is a greater
+complexity in the requirements on the various ghc and package environments
+needed to build it and run it.
+
+We will try to document here what those requirements are, both abstractly and
+a specific recipe using (one flavour of) sandboxes.
+
+
+General points
+--------------
+
+Firstly, let us look at the IDE backend components:
+
+ * ide-backend: a library, linked into the isolation-runner
+ * ide-backend-server: an exe, invoked by the ide-backend library
+ * ide-backend-rts: a library, loaded at runtime by the ide-backend-server
+
+The other important components here are ghc itself (various versions, some
+patches), and the many library packages available to the end users (stackage
+etc).
+
+The IDE backend architecture supports multiple versions of ghc by having
+multiple instances of the ide-backend-server, one instance built against each
+supported ghc. The ide-backend library can then talk to one of these
+executables.
+
+So **note**: the ide-backend library does not have to be built with the same
+version of ghc as the ide-backend-server; indeed when supporting multiple ghc
+versions that would be impossible.
+
+The ide-backend-server *must* be built with the same ghc and set of libraries
+as it will use at runtime. This is because (like ghci) it has to load these
+libraries at runtime. (Technically, it may be possible to use a set of
+libraries at runtime built by a different instance of the same version of ghc,
+however this is playing with fire.)
+
+The ide-backend-server must be built with a patched version of ghc (that
+provides some extra hooks the IDE needs).
+
+Thus we have the requirement that all the user packages also be built with this
+patched ghc. (Again, it may be possible to use a different instance of the same
+version of ghc, but we cannot guarantee ABI compatibility in such a setup.)
+
+
+Environments
+------------
+
+So we can identify three separate environments:
+
+ * build environment for ide-backend + isolation-runner
+ * user environment with ghc 7.4.x
+ * user environment with ghc 7.8.x
+
+The build environment for ide-backend + isolation-runner could be the same as
+one of the user environments, but it does not have to be. For example it could
+use a stock ghc-7.6.
+
+
+Build environment for ide-backend
+---------------------------------
+
+This environment is relatively straightforward. It can use a stock (ie
+unpatched ghc). The ide-backend does not depend on the GHC library and because
+of that it has (in principle) relatively flexible dependencies. We have of
+course been testing ide-backend with ghc-7.4, but in principle it could work
+with any other version, possibly with a little fairly ordinary porting. For
+example, if it made technical sense for the isolation-runner to use ghc-7.6,
+then that would be no problem for ide-backend.
+
+
+User environment with ghc 7.4.x
+-------------------------------
+
+The instance of the ide-backend-server used at runtime for the ghc 7.4.x user
+environment must of course be compatible with this environment, because it will
+at runtime load packages from it. The only way to guarantee this is to build it
+in this environment.
+
+Building ide-backend-server does require the patched ghc instance. So this
+implies the full environment must be built with this patched ghc instance, not
+a stock ghc 7.4.
+
+An instance of ide-backend-rts must be available in this environment so that
+the ide-backend-server instance can use it.
+
+However, the build-time dependencies of ide-backend-server do not need be
+present in the environment at runtime. In practice this means that while it
+must be built with the same ghc and global package db, its extra build time
+dependencies can live in a separate package db that is not made available at
+runtime.
+
+
+User environment with ghc 7.8.x
+-------------------------------
+
+Similar points as above apply. In addition we have the issue that ghc-7.8 as
+such is not yet released and so we must use a snapshot for now, and update to
+the 7.8 release later.
+
+This ghc 7.8 snapshot still needs some patches. The same point as above applies
+about building the user packages with this ghc instance.
+
+
+$PATH setup
+-----------
+
+At runtime, when using the ide-backend library, the library has to be able to
+find both ghc and the compatible instance of ide-backend-server.
+
+The ide-backend library can be instructed to search extra dirs in addition to
+the process $PATH. To support multiple different ghc versions this mechanism
+must be used. Set up the $PATH so that ghc and ide-backend-server are *not*
+present, and then pass the extra search dirs when initialising and IdeSession.
+This will allow multiple IdeSessions in a single isolation-runner process to
+use different ghc versions.
+
+
+More details and worked example using sandboxes
+===============================================
 
 In order to make sure that ide-backend works even when completely isolated from
 ide-backend-server (after all, we want different ide-backend-servers for
@@ -38,7 +158,7 @@ we use for ide-backend-server). For now we will assume it's a stock 7.4.
 
       library-profiling: True
 
-  in your ~/.cabal/config.    
+  in your ~/.cabal/config.
 
 * Install:
 
