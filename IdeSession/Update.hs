@@ -75,7 +75,7 @@ import System.IO.Error (isDoesNotExistError)
 import qualified Data.Text as Text
 import System.Environment (getEnv, getEnvironment)
 import Data.Version (Version(..))
-import System.Process (readProcessWithExitCode)
+-- import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
@@ -1038,17 +1038,17 @@ runGcc :: PackageDBStack -> [FilePath]
 runGcc configPackageDBStack configExtraPathDirs
        ideDistDir absC absObj pref = liftIO $ do
   -- Direct call to gcc, for testing only:
-  let gcc :: FilePath
-      gcc = "/usr/bin/gcc"
-      args :: [String]
-      args = [ "-c"
-             , "-o", absObj
-             , absC
-             ]
-      stdin :: String
-      stdin = ""
-  (_exitCode, _stdout, _stderr)
-    <- readProcessWithExitCode gcc args stdin
+  let _gcc :: FilePath
+      _gcc = "/usr/bin/gcc"
+      _args :: [String]
+      _args = [ "-c"
+              , "-o", absObj
+              , absC
+              ]
+      _stdin :: String
+      _stdin = ""
+  -- (_exitCode, _stdout, _stderr)
+  --   <- readProcessWithExitCode _gcc _args _stdin
   -- The real deal; we call gcc via ghc via cabal functions:
   (exitCode, stdout, stderr)
     <- runComponentCc configPackageDBStack configExtraPathDirs
