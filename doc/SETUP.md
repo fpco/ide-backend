@@ -63,7 +63,7 @@ Build environment for ide-backend
 ---------------------------------
 
 This environment is relatively straightforward. It can use a stock (ie
-unpatched ghc). The ide-backend does not depend on the GHC library and because
+unpatched) ghc. The ide-backend does not depend on the GHC library and because
 of that it has (in principle) relatively flexible dependencies. We have of
 course been testing ide-backend with ghc-7.4, but in principle it could work
 with any other version, possibly with a little fairly ordinary porting. For
@@ -286,6 +286,7 @@ ghc 7.4
 * Get the 7.4.2 release of the core libraries: 
 
       ./sync-all --no-dph -r git://git.haskell.org get
+      ./sync-all checkout -b ghc-7.4.2 ghc-7.4.2-release
 
 * Make sure we're still in the experimental branch of ghc:
   
@@ -295,8 +296,16 @@ ghc 7.4
 
       cp mk/build.mk.sample mk/build.mk
 
-  then make sure to select the "quick" BuildFlavour and that haddocks get
-  built (make sure there are no trailing spaces in your build.mk!)
+  select the quick BuildFlavour
+
+      BuildFlavour = quick
+
+  and make sure haddocks get built by setting
+
+      HADDOCK_DOCS = YES
+ 
+  in the section for the "quick" build flavour (make sure there are no trailing
+  spaces in your build.mk).
 
 * Build as usual
 
@@ -314,4 +323,50 @@ ghc 7.4
 ghc 7.8
 -------
 
-TODO
+The instructions for 7.8 are much as they are for 7.4; most important
+difference is that there is no official RC of 7.8 yet so we are simply checking
+out the latest version of the core libraries (TODO: ideally, we'd be using a
+specific snapshot, but this is made a bit awkward by the fact that ghc does not
+make proper use of git subrepos).
+
+* Get ghc from fpco; in ~/env/fpco-patched-7.8/local/src, run 
+
+      git clone git@github.com:fpco/ghc
+
+* Go to the ghc directory, and checkout the ide-backend branch of 7.8:
+
+      git checkout ide-backend-experimental-78
+
+* Get the latest version of the core libraries: 
+
+      ./sync-all --no-dph -r git://git.haskell.org get
+
+* Create build.mk
+
+      cp mk/build.mk.sample mk/build.mk
+
+  select the quick BuildFlavour
+
+      BuildFlavour = quick
+
+  and make sure haddocks get built by setting
+
+      HADDOCK_DOCS = YES
+ 
+  in the section for the "quick" build flavour (make sure there are no trailing
+  spaces in your build.mk).
+
+* Build as usual
+
+      perl boot && ./configure && make -j8
+
+* Make the in-place compiler available as normal; i.e. create the following
+  symlinks in ~/env/fpco-patched-7.8/local/bin:
+
+      ghc              -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-7.7.20131119 -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-pkg          -> ../src/ghc/inplace/bin/ghc-pkg
+      haddock          -> ../src/ghc/inplace/bin/haddock
+      hsc2hs           -> ../src/ghc/inplace/bin/hsc2hs
+
+  (TODO: version number will change)
