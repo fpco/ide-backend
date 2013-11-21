@@ -184,8 +184,6 @@ initSession initParams ideConfig@SessionConfig{..} = do
 -- | Set up the initial state of the session according to the given parameters
 execInitParams :: IdeStaticInfo -> SessionInitParams -> IO ()
 execInitParams staticInfo SessionInitParams{..} = do
-  -- TODO: for now, this location is safe, but when the user
-  -- is allowed to overwrite .h files, we need to create an extra dir.
   writeMacros staticInfo sessionInitCabalMacros
 
 -- | Verify configuration, and throw an exception if configuration is invalid
@@ -193,7 +191,7 @@ verifyConfig :: SessionConfig -> IO ()
 verifyConfig SessionConfig{..} = do
     unless (isValidPackageDB configPackageDBStack) $
       Ex.throw . userError $ "Invalid package DB stack: "
-                          ++ show configPackageDBStack
+                             ++ show configPackageDBStack
 
     checkPackageDbEnvVar
   where

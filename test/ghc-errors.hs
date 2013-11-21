@@ -18,6 +18,11 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Debug.Trace (traceEventIO)
 import Distribution.License (License (..))
+import Distribution.Simple.Program.Find ( -- From our patched cabal
+    ProgramSearchPath
+  , findProgramOnSearchPath
+  , ProgramSearchPathEntry(..)
+  )
 import Prelude hiding (mod, span)
 import System.Directory
 import qualified System.Environment as System.Environment
@@ -4821,25 +4826,40 @@ _ignoreFailure :: IO () -> IO ()
 _ignoreFailure io = Ex.catch io $ \(HUnitFailure err) ->
   putStrLn $ "WARNING: " ++ err
 
+findExe :: String -> IO FilePath
+findExe name = do
+  extraPathDirs <- (System.Environment.getEnv "IDE_BACKEND_EXTRA_PATH_DIRS")
+                     `Ex.catch` (\(_ :: Ex.IOException) -> return "")
+  let searchPath :: ProgramSearchPath
+      searchPath = ProgramSearchPathDefault
+                   : map ProgramSearchPathDir (splitSearchPath extraPathDirs)
+  mLoc <- findProgramOnSearchPath minBound searchPath name
+  case mLoc of
+    Nothing -> fail $ "Could not find " ++ name
+    Just prog -> return prog
+
 deletePackage :: FilePath -> IO ()
 deletePackage pkgDir = do
+  ghcPkgExe <- findExe "ghc-pkg"
   forM_ [["-v0", "unregister", takeFileName pkgDir]] $ \cmd -> do
-    (_,_,_,r2) <- Process.createProcess (Process.proc "ghc-pkg" cmd)
+    (_,_,_,r2) <- Process.createProcess (Process.proc ghcPkgExe cmd)
                     { Process.cwd = Just pkgDir
                     , Process.std_err = Process.CreatePipe }
     void $ Process.waitForProcess r2
 
 installPackage :: FilePath -> IO ()
 installPackage pkgDir = do
+  cabalExe <- findExe "cabal"
   forM_ ["clean", "configure", "build", "copy", "register"] $ \cmd -> do
-    (_,_,_,r2) <- Process.createProcess (Process.proc "cabal" ["-v0", cmd])
+    (_,_,_,r2) <- Process.createProcess (Process.proc cabalExe ["-v0", cmd])
                     { Process.cwd = Just pkgDir }
     void $ Process.waitForProcess r2
 
 checkPackage :: FilePath -> IO String
 checkPackage pkgDir = do
+    cabalExe <- findExe "cabal"
     (_, mlocal_std_out, _, r2)
-      <- Process.createProcess (Process.proc "cabal" ["check"])
+      <- Process.createProcess (Process.proc cabalExe ["check"])
            { Process.cwd = Just pkgDir
            , Process.std_out = Process.CreatePipe }
     let local_std_out = fromJust mlocal_std_out
@@ -5347,4 +5367,3 @@ mark (x:xs) = (x, True, False) : aux xs
     aux []     = error "impossible"
     aux [y]    = [(y, False, True)]
     aux (y:ys) = (y, False, False) : aux ys
-
