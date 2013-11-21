@@ -38,11 +38,15 @@ executable ide-backend-server
                       filemanip            >= 0.3.6.2 && < 0.4,
                       haddock              >= 2.11    && < 2.14,
                       attoparsec           >= 0.10    && < 0.11, 
-                      binary-ide-backend   >= 0.7.1.0 && < 0.8,
                       old-time             >= 1.1     && < 1.2,
                       array                >= 0.4     && < 0.5,
                       utf8-string,
                       template-haskell
+
+  if impl(ghc >= 7.7)
+    build-depends: binary               >= 0.7.1.0 && < 0.8
+  else
+    build-depends: binary-ide-backend   >= 0.7.1.0 && < 0.8
 
   -- The standard macros don't give us 7.6.x granularity
   if impl(ghc == 7.6.1)
