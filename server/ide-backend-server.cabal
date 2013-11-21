@@ -36,10 +36,10 @@ executable ide-backend-server
                       mtl                  >= 2.1     && < 2.2,
                       unordered-containers >= 0.2.3   && < 0.3,
                       filemanip            >= 0.3.6.2 && < 0.4,
-                      haddock              >= 2.11    && < 2.14,
+                      haddock              >= 2.11    && < 2.15,
                       attoparsec           >= 0.10    && < 0.11, 
                       old-time             >= 1.1     && < 1.2,
-                      array                >= 0.4     && < 0.5,
+                      array                >= 0.4     && < 0.6,
                       utf8-string,
                       template-haskell
 

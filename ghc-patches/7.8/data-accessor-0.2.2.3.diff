@@ -1,0 +1,12 @@
+diff -Nur data-accessor-0.2.2.3-orig/data-accessor.cabal data-accessor-0.2.2.3/data-accessor.cabal
+--- data-accessor-0.2.2.3-orig/data-accessor.cabal	2013-11-21 12:06:57.000000000 +0000
++++ data-accessor-0.2.2.3/data-accessor.cabal	2013-11-21 12:07:04.000000000 +0000
+@@ -91,7 +91,7 @@
+     transformers >=0.2 && <0.4
+   If flag(splitBase)
+     Build-Depends:
+-      array >=0.1 && <0.5,
++      array >=0.1 && <0.6,
+       containers >=0.1 && <0.6
+     If flag(category)
+       Hs-Source-Dirs: src-4

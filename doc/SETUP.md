@@ -190,9 +190,14 @@ only a few minor differences, explained when they come up.
   - ide-backend/vendor/binary (binary-ide-backend)
     (make sure to ghc-pkg hide binary-ide-backend)
 
-  For ghc 7.8 install
+  For ghc 7.8 install (TODO: once 7.8 is properly released it should not be
+  necessary anymore to install haddock, async, data-accessor in special ways)
   
   - Branch "ide-backend-experimental-78" of ghc (see instructions below)
+  - haddock from its git repo (http://darcs.haskell.org/haddock.git)
+  - async from its git repo (https://github.com/simonmar/async.git)
+  - data-accessor from hackage, but applying the corresponding patch in
+    ghc-patches/7.8
   - (no need for ide-backend/vendor/binary)
 
   In both:

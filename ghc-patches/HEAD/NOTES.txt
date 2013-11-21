@@ -1,3 +1,0 @@
-In order to install ide-backend's dependencies for ghc HEAD, you will need to
-apply the patches in this directory; moreover, haddock should be installed from
-the repo (http://darcs.haskell.org/haddock.git).
