@@ -184,6 +184,21 @@ only a few minor differences, explained when they come up.
   (There is probably not much point in installing profiling libraries in this
   sandbox because the ghc api is not useable in profiling mode.)
 
+* Since we will want to reference tools (such as haddock) and files (such as
+  package registration files to locate the library binaries) from this sandbox
+  while another sandbox is active, we have to make sure that the "prefix"
+  picked by Cabal should not include symlinks which may point to one location
+  at installation time and another at runtime. It is therefore a good idea to
+  set  
+      
+      install-dirs user
+        prefix: /Users/dev/env/fpco-patched-7.4/dot-cabal
+
+  in your ~/.cabal/config (or whatever the absolute path is).
+
+  (See http://www.edsko.net/2013/02/10/comprehensive-haskell-sandboxes/ , the
+  last section, "Known Limitations".)
+
 * For ghc 7.4 install
 
   - Branch "ide-backend-experimental" of ghc (see instructions below)
@@ -225,26 +240,12 @@ only a few minor differences, explained when they come up.
 
       cabal install --package-db=clear \
                     --package-db=global \
-                    --package-db=/Users/dev/env/fpco-patched-7.4/dot-ghc/snippet-db \
-                    --prefix=/Users/dev/env/fpco-patched-7.4/dot-cabal
+                    --package-db=/Users/dev/env/fpco-patched-7.4/dot-ghc/snippet-db
 
   (modifying absolute paths as required, of course).  Clearing the package DB
   is necessary so that we do not rely on any dependencies in the user DB (which
-  will not be available when ide-backend-server runs); we need to use absolute
-  paths here so that we do not rely on the sandbox symlinks pointing to
-  specific locations (which may not be true at run-time; see
-  http://www.edsko.net/2013/02/10/comprehensive-haskell-sandboxes/ , the last
-  section, "Known Limitations"). 
+  will not be available when ide-backend-server runs).
   
-  Note that you need to make sure to use absolute paths *even if you do reuse
-  the user DB of this sandbox as the snippet DB*; in that case, you may want to
-  set
-
-      install-dirs user
-        prefix: /Users/dev/env/fpco-patched-7.4/dot-cabal
-
-  in ~/.cabal/config.
-
   You will want to install
 
   - ide-backend/rts (required)
@@ -255,7 +256,7 @@ only a few minor differences, explained when they come up.
     (https://github.com/fpco/ide-backend/issues/139)
   - whatever other packages you want to be available to snippets at runtime
 
-  (Of course, you could use a separate snippet DB for the test suite.)
+  (You might of course want to use a separate snippet DB for the test suite.)
 
 Running the tests
 =================
