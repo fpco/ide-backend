@@ -85,12 +85,7 @@ withSession = withSession' defaultSessionInitParams
 
 withSession' :: SessionInitParams -> SessionConfig -> (IdeSession -> IO a) -> IO a
 withSession' initParams config io = inTempDir $ \tempDir -> do
-    extraPathDirs <- (System.Environment.getEnv "IDE_BACKEND_EXTRA_PATH_DIRS")
-                      `Ex.catch` (\(_ :: Ex.IOException) -> return "")
-    let config' = config {
-            configDir           = tempDir
-          , configExtraPathDirs = splitSearchPath extraPathDirs
-          }
+    let config' = config { configDir = tempDir }
     Ex.bracket (initSession initParams config') tryShutdownSession io
   where
     tryShutdownSession session = do
@@ -5305,17 +5300,20 @@ filterIdeBackendTestH lastFile bs =
 ------------------------------------------------------------------------------}
 
 defaultSessionConfig :: SessionConfig
+{-# NOINLINE defaultSessionConfig #-}
 defaultSessionConfig = unsafePerformIO $ do
-  packageDb <- (System.Environment.getEnv "IDE_BACKEND_PACKAGE_DB")
-                `Ex.catch` (\(_ :: Ex.IOException) -> return "")
-  if null packageDb
-    then return IdeSession.defaultSessionConfig
-    else return IdeSession.defaultSessionConfig {
-                    configPackageDBStack = [
-                        GlobalPackageDB
-                      , SpecificPackageDB packageDb
-                      ]
-                  }
+  packageDb     <- (System.Environment.getEnv "IDE_BACKEND_PACKAGE_DB")
+                     `Ex.catch` (\(_ :: Ex.IOException) -> return "")
+  extraPathDirs <- (System.Environment.getEnv "IDE_BACKEND_EXTRA_PATH_DIRS")
+                     `Ex.catch` (\(_ :: Ex.IOException) -> return "")
+  let packageDbStack =
+        if null packageDb
+          then configPackageDBStack IdeSession.defaultSessionConfig
+          else [GlobalPackageDB, SpecificPackageDB packageDb]
+  return IdeSession.defaultSessionConfig {
+             configPackageDBStack = packageDbStack
+           , configExtraPathDirs  = splitSearchPath extraPathDirs
+           }
 
 {------------------------------------------------------------------------------
   Aux
