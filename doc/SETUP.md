@@ -167,10 +167,11 @@ we use for ide-backend-server). For now we will assume it's a stock 7.4.
     (make sure to ghc-pkg hide Cabal-ide-backend)
   - ide-backend and dependencies
 
-The fpco-patched-7.4 sandbox
-----------------------------
+The fpco-patched-7.4 and fpco-patched-7.8 sandboxes
+---------------------------------------------------
 
-In this sandbox we will build ide-backend-server for ghc 7.4.
+The setup instructions for these two sandboxes are almost the same; there are
+only a few minor differences, explained when they come up. 
 
 * Set
   
@@ -183,11 +184,19 @@ In this sandbox we will build ide-backend-server for ghc 7.4.
   (There is probably not much point in installing profiling libraries in this
   sandbox because the ghc api is not useable in profiling mode.)
 
-* Install
+* For ghc 7.4 install
 
   - Branch "ide-backend-experimental" of ghc (see instructions below)
   - ide-backend/vendor/binary (binary-ide-backend)
     (make sure to ghc-pkg hide binary-ide-backend)
+
+  For ghc 7.8 install
+  
+  - Branch "ide-backend-experimental-78" of ghc (see instructions below)
+  - (no need for ide-backend/vendor/binary)
+
+  In both:
+  
   - ide-backend-server and dependencies (including alex/happy)
 
 * Create package DB for snippets (the "snippet DB")
@@ -242,12 +251,6 @@ In this sandbox we will build ide-backend-server for ghc 7.4.
   - whatever other packages you want to be available to snippets at runtime
 
   (Of course, you could use a separate snippet DB for the test suite.)
-
-The fpco-patched-7.8 sandbox
-----------------------------
-
-See instructions for the fpco-patched-7.4 sandbox, but using the patched 7.8
-version of ghc instead (see below).
 
 Running the tests
 =================
