@@ -12,6 +12,7 @@ import qualified Data.ByteString.Lazy.UTF8  as BSL8
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
 import qualified Data.List as List
+import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
 import Data.Text (Text)
@@ -4841,18 +4842,36 @@ findExe name = do
 deletePackage :: FilePath -> IO ()
 deletePackage pkgDir = do
   ghcPkgExe <- findExe "ghc-pkg"
-  forM_ [["-v0", "unregister", takeFileName pkgDir]] $ \cmd -> do
-    (_,_,_,r2) <- Process.createProcess (Process.proc ghcPkgExe cmd)
-                    { Process.cwd = Just pkgDir
-                    , Process.std_err = Process.CreatePipe }
-    void $ Process.waitForProcess r2
+  packageDb  <- (System.Environment.getEnv "IDE_BACKEND_PACKAGE_DB")
+                   `Ex.catch` (\(_ :: Ex.IOException) -> return "")
+  let opts = [ "--package-conf=" ++ packageDb, "-v0", "unregister"
+             , takeFileName pkgDir ]
+  (_,_,_,r2) <- Process.createProcess (Process.proc ghcPkgExe opts)
+                  { Process.cwd = Just pkgDir
+                  , Process.std_err = Process.CreatePipe }
+  void $ Process.waitForProcess r2
 
 installPackage :: FilePath -> IO ()
 installPackage pkgDir = do
   cabalExe <- findExe "cabal"
-  forM_ ["clean", "configure", "build", "copy", "register"] $ \cmd -> do
-    (_,_,_,r2) <- Process.createProcess (Process.proc cabalExe ["-v0", cmd])
-                    { Process.cwd = Just pkgDir }
+  packageDb  <- (System.Environment.getEnv "IDE_BACKEND_PACKAGE_DB")
+                   `Ex.catch` (\(_ :: Ex.IOException) -> return "")
+  extraPathDirs <- (System.Environment.getEnv "IDE_BACKEND_EXTRA_PATH_DIRS")
+                     `Ex.catch` (\(_ :: Ex.IOException) -> return "")
+  oldEnv <- System.Environment.getEnvironment
+  let oldEnvMap = Map.fromList oldEnv
+      adjustPATH oldPATH = extraPathDirs ++ ":" ++ oldPATH
+      newEnvMap = Map.adjust adjustPATH "PATH" oldEnvMap
+      newEnv = Map.toList newEnvMap
+  forM_ [ ["clean"]
+        , ["configure", "--package-db=" ++ packageDb]
+        , ["build"]
+        , ["copy"]
+        , ["register"] ] $ \cmd -> do
+    let opts = cmd ++ ["-v0"]
+    (_,_,_,r2) <- Process.createProcess (Process.proc cabalExe opts)
+                    { Process.cwd = Just pkgDir
+                    , Process.env = Just newEnv }
     void $ Process.waitForProcess r2
 
 checkPackage :: FilePath -> IO String
