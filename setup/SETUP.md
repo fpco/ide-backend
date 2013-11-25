@@ -251,8 +251,8 @@ only a few minor differences, explained when they come up.
   - ide-backend/rts (required)
   - "parallel", "MonadCatchIO-transformers" and "MonadCatchIO-mtl" for the
     ide-backend test suite (and optionally, "yesod") 
-    NOTE: use paralllel-3.2.0.3 (https://github.com/fpco/ide-backend/issues/138)
-    NOTE: install MoandCatchIO-transformers before MonadCatchIO-tml
+    NOTE: use parallel-3.2.0.3 (https://github.com/fpco/ide-backend/issues/138)
+    NOTE: install MonadCatchIO-transformers before MonadCatchIO-mtl
     (https://github.com/fpco/ide-backend/issues/139)
   - whatever other packages you want to be available to snippets at runtime
 
