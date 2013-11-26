@@ -211,8 +211,7 @@ only a few minor differences, explained when they come up.
   - Branch "ide-backend-experimental-78" of ghc (see instructions below)
   - haddock from its git repo (http://darcs.haskell.org/haddock.git)
   - async from its git repo (https://github.com/simonmar/async.git)
-  - data-accessor from hackage, but applying the corresponding patch in
-    ghc-patches/7.8
+  - data-accessor fro its darcs repo (http://code.haskell.org/data-accessor/core/) 
   - (no need for ide-backend/vendor/binary)
 
   In both:
