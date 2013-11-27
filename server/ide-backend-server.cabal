@@ -50,7 +50,9 @@ executable ide-backend-server
 
   -- The standard macros don't give us 7.6.x granularity
   if impl(ghc == 7.6.1)
-    cpp-options:     -DGHC_761
+    cpp-options: -DGHC_761
+  if impl(ghc == 7.4.2.*)
+    cpp-options: -DGHC_742
 
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,
