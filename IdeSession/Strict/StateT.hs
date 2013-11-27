@@ -12,11 +12,16 @@ module IdeSession.Strict.StateT (
   , execState
   ) where
 
+import Control.Applicative
 import Control.Monad.State.Class
 import Control.Monad.Trans.Class
 import Data.Functor.Identity
 
 newtype StrictStateT s m a = StrictStateT { runStateT :: s -> m (a, s) }
+
+instance Monad m => Applicative (StrictStateT s m) where
+  pure    = return
+  f <*> x = do f' <- f ; x' <- x ; return (f' x')
 
 instance Monad m => Monad (StrictStateT s m) where
   return a = StrictStateT $ \s -> return (a, s)
