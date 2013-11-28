@@ -898,6 +898,24 @@ syntheticTests =
           Right (RunProgException "AsyncException: user interrupt") -> return ()
           _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
+  , ( "Interrupt runStmt many times, preferably without deadlock :) (#58)"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "Main.hs" . BSLC.pack $
+                    "main = putStrLn \"Hi!\" >> getLine")
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        replicateM_ 100 $ do
+          runActions <- runStmt session "Main" "main"
+          interrupt runActions
+          (_output, result) <- runWaitAll runActions
+          assertEqual "" (RunProgException "AsyncException: user interrupt") result
+
+        runActions <- runStmt session "Main" "main"
+        result <- runWait runActions
+        assertEqual "" (Left (BSSC.pack "Hi!\n")) result
+    )
   , ( "Capture stdout (single putStrLn)"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
