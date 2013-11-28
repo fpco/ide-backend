@@ -90,12 +90,12 @@ pkgIdent = Package.PackageIdentifier
   , pkgVersion = pkgVersionMain
   }
 
-pkgDescFromName :: String -> PackageDescription
-pkgDescFromName pkgName = PackageDescription
+pkgDescFromName :: String -> Version -> PackageDescription
+pkgDescFromName pkgName version = PackageDescription
   { -- the following are required by all packages:
     package        = Package.PackageIdentifier
                        { pkgName    = Package.PackageName pkgName
-                       , pkgVersion = pkgVersionMain
+                       , pkgVersion = version
                        }
   , license        = AllRightsReserved  -- dummy
   , licenseFile    = ""
@@ -127,18 +127,18 @@ pkgDescFromName pkgName = PackageDescription
   }
 
 pkgDesc :: PackageDescription
-pkgDesc = pkgDescFromName "main"
+pkgDesc = pkgDescFromName "main" pkgVersionMain
 
-bInfo :: FilePath -> [String] -> BuildInfo
-bInfo sourceDir ghcOpts =
+bInfo :: [FilePath] -> [String] -> BuildInfo
+bInfo sourceDirs ghcOpts =
   emptyBuildInfo
     { buildable = True
-    , hsSourceDirs = [sourceDir]
+    , hsSourceDirs = sourceDirs
     , defaultLanguage = Just Haskell2010
     , options = [(GHC, ghcOpts)]
     }
 
-exeDesc :: FilePath -> FilePath -> [String] -> (ModuleName, FilePath)
+exeDesc :: [FilePath] -> FilePath -> [String] -> (ModuleName, FilePath)
         -> IO Executable
 exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
   let exeName = Text.unpack m
@@ -159,10 +159,10 @@ exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
     return $ Executable
       { exeName
       , modulePath
-      , buildInfo = bInfo mDir ghcOpts
+      , buildInfo = bInfo [mDir] ghcOpts
       }
 
-libDesc :: FilePath -> [String] -> [Distribution.ModuleName.ModuleName]
+libDesc :: [FilePath] -> [String] -> [Distribution.ModuleName.ModuleName]
         -> Library
 libDesc ideSourcesDir ghcOpts ms =
   Library
@@ -222,7 +222,7 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   libDeps <- externalDeps pkgs
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
-  executables <- mapM (exeDesc ideSourcesDir ideDistDir ghcOpts) ms
+  executables <- mapM (exeDesc [ideSourcesDir] ideDistDir ghcOpts) ms
   callback $ Progress 2 4 Nothing Nothing
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
@@ -240,7 +240,7 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-      library = libDesc ideSourcesDir ghcOpts projectMs
+      library = libDesc [ideSourcesDir] ghcOpts projectMs
       gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -310,7 +310,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-      library = libDesc ideSourcesDir ghcOpts projectMs
+      library = libDesc [ideSourcesDir] ghcOpts projectMs
       gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -348,7 +348,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   -- or filter stdout and display progress on each good line.
 
 buildDotCabal :: FilePath -> [String] -> Computed
-              -> IO (String -> BSL.ByteString)
+              -> IO (String -> Version -> BSL.ByteString)
 buildDotCabal ideSourcesDir ghcOpts computed = do
   (loadedMs, pkgs) <- buildDeps $ just computed
   libDeps <- externalDeps pkgs
@@ -363,17 +363,17 @@ buildDotCabal ideSourcesDir ghcOpts computed = do
   let soundMs = delete (Text.pack "Main") loadedMs
       projectMs =
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-      library = (libDesc ideSourcesDir ghcOpts projectMs) {libExposed = True}
-      gpDesc libName = GenericPackageDescription
-        { packageDescription = pkgDescFromName libName
+      library = (libDesc [] ghcOpts projectMs) {libExposed = True}
+      gpDesc libName version = GenericPackageDescription
+        { packageDescription = pkgDescFromName libName version
         , genPackageFlags    = []  -- seem unused
         , condLibrary        = Just $ CondNode library libDeps []
         , condExecutables    = []
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-  return $ \libName ->
-    BSL8.pack $ showGenericPackageDescription $ gpDesc libName
+  return $ \libName version ->
+    BSL8.pack $ showGenericPackageDescription $ gpDesc libName version
 
 buildExecutable :: FilePath -> FilePath -> [FilePath]
                 -> [String] -> Bool -> PackageDBStack
