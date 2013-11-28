@@ -255,6 +255,7 @@ only a few minor differences, explained when they come up.
     * MonadCatchIO-transformers-0.3.0.0
     * MonadCatchIO-mtl-0.3.0.5
     * mtl-2.1.2
+    * yesod (optional; only required for one test)
 
     You should install these versions and in this order (the test suite is a
     bit finicky; there are some open issues about that; #138, #139).
