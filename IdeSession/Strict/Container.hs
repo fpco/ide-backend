@@ -9,7 +9,7 @@ module IdeSession.Strict.Container
   , Trie
   ) where
 
-import Control.Applicative ((<$>))
+import Control.Applicative
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import Data.Map (Map)
@@ -104,6 +104,16 @@ instance Functor (Strict Maybe) where
 
 instance PrettyVal a => PrettyVal (Strict Maybe a) where
   prettyVal = prettyVal . toLazyMaybe
+
+instance Applicative (Strict Maybe) where
+  pure    = force . pure
+  -- We need 'force' here because we need to force the result of the
+  -- function application
+  f <*> a = force $ toLazyMaybe f <*> toLazyMaybe a
+
+instance Alternative (Strict Maybe) where
+  empty   = StrictMaybe Nothing
+  a <|> b = StrictMaybe $ toLazyMaybe a <|> toLazyMaybe b
 
 {------------------------------------------------------------------------------
   Trie

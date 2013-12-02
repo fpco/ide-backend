@@ -26,7 +26,6 @@ import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import System.Time (ClockTime)
 import System.Environment (withArgs)
-import Text.Show.Pretty
 
 import IdeSession.GHC.API
 import IdeSession.RPC.Server

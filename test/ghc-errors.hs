@@ -2558,6 +2558,21 @@ syntheticTests =
         idInfo <- getSpanInfo session
         assertIdInfo idInfo "A" (4,11,4,15) "succ (VarName) :: Enum a1 => a1 -> a1 defined in base-4.5.1.0:GHC.Enum at <no location info> (home base-4.5.1.0:Prelude) (imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9)"
     )
+  , ( "Type information 20: Updated session (#142)"
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
+        let upd1 = updateSourceFile "Main.hs" (BSLC.pack "main = print foo\nfoo = 5")
+            upd2 = updateSourceFile "Main.hs" (BSLC.pack "main = print foo\n\nfoo = 5")
+
+        updateSessionD session upd1 1
+        assertNoErrors session
+        do idInfo <- getSpanInfo session
+           assertIdInfo idInfo "Main" (1,14,1,15) "foo (VarName) :: Integer defined in main:Main at Main.hs@2:1-2:4 (defined locally)"
+
+        updateSessionD session upd2 1
+        assertNoErrors session
+        do idInfo <- getSpanInfo session
+           assertIdInfo idInfo "Main" (1,14,1,15) "foo (VarName) :: Integer defined in main:Main at Main.hs@3:1-3:4 (defined locally)"
+    )
   , ( "Test internal consistency of local id markers"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateSourceFile "M.hs" . BSLC.pack . unlines $

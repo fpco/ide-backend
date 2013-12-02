@@ -5,6 +5,7 @@ module IdPropCaching (
   , recordIdPropType
   ) where
 
+import Control.Applicative ((<|>))
 import System.IO.Unsafe (unsafePerformIO)
 
 import IdeSession.Types.Private (IdPropPtr(..), IdProp(..))
@@ -36,16 +37,19 @@ instance MonadIdPropCaching Ghc where
 modifyIdPropCache :: MonadIdPropCaching m => IdPropPtr -> (IdProp -> IdProp) -> m ()
 modifyIdPropCache ptr f = do
   cache <- getIdPropCache
-  let uniq = idPropPtr ptr
-  putIdPropCache $ IntMap.adjust f uniq cache
+  putIdPropCache $ IntMap.adjust f (idPropPtr ptr) cache
 
 extendIdPropCache :: MonadIdPropCaching m => IdPropPtr -> IdProp -> m ()
 extendIdPropCache ptr prop = do
-  cache <- getIdPropCache
-  -- Don't overwrite existing entries, because we might lose type information
-  -- that we gleaned earlier
-  let uniq = idPropPtr ptr
-  putIdPropCache $ IntMap.insertWith (\_new old -> old) uniq prop cache
+    cache <- getIdPropCache
+    putIdPropCache $ IntMap.insertWith update (idPropPtr ptr) prop cache
+  where
+    -- We need to make sure not to lose information that we learned earlier
+    update :: IdProp -> IdProp -> IdProp
+    update new old
+      = new { idType       = idType       new <|> idType       old
+            , idHomeModule = idHomeModule new <|> idHomeModule old
+            }
 
 recordIdPropType :: MonadIdPropCaching m => IdPropPtr -> Type -> m ()
 recordIdPropType ptr tp =
