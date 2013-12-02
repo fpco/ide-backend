@@ -26,6 +26,7 @@ import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import System.Time (ClockTime)
 import System.Environment (withArgs)
+import Text.Show.Pretty
 
 import IdeSession.GHC.API
 import IdeSession.RPC.Server
@@ -317,10 +318,10 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
         return finalResponse
 
     cache <- liftIO $ constructExplicitSharingCache
+    let fullResponse = response { ghcCompileCache = cache }
+
     -- TODO: Should we clear the link env caches here?
-    liftIO $ put
-           . GhcCompileDone
-           $ response { ghcCompileCache = cache }
+    liftIO $ put (GhcCompileDone fullResponse)
   where
     dynOpts :: DynamicOpts
     dynOpts =

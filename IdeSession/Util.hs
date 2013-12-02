@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor #-}
+{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor, DeriveGeneric #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module IdeSession.Util (
     -- * Misc util
@@ -45,6 +45,8 @@ import System.Posix.IO.ByteString
 import qualified System.Posix.Files as Files
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import System.Posix.Env (setEnv, unsetEnv)
+import GHC.Generics (Generic)
+import Text.Show.Pretty
 
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map as StrictMap
@@ -151,7 +153,7 @@ setupEnv env = forM_ env $ \(var, mVal) ->
 ------------------------------------------------------------------------------}
 
 data Diff a = Keep | Remove | Insert a
-  deriving (Show, Functor)
+  deriving (Show, Functor, Generic)
 
 instance Binary a => Binary (Diff a) where
   put Keep       = Bin.putWord8 0
@@ -165,6 +167,8 @@ instance Binary a => Binary (Diff a) where
       1 -> return Remove
       2 -> Insert <$> Bin.get
       _ -> fail "Diff.get: invalid header"
+
+instance PrettyVal a => PrettyVal (Diff a) -- relies on Generics
 
 applyMapDiff :: forall k v. Ord k
              => Strict (Map k) (Diff v)

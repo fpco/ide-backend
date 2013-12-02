@@ -1,7 +1,7 @@
 -- | Responses from the GHC server
 --
 -- The server responds with "IdeSession.Types.Private" types
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveDataTypeable, DeriveGeneric #-}
 module IdeSession.GHC.Responses (
     GhcCompileResponse(..)
   , GhcCompileResult(..)
@@ -18,6 +18,9 @@ import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Strict.Container
 import IdeSession.Util (Diff)
+
+import Text.Show.Pretty
+import GHC.Generics
 
 data GhcCompileResponse =
     GhcCompileProgress Progress
@@ -38,7 +41,9 @@ data GhcCompileResult = GhcCompileResult {
   , ghcCompileExpTypes :: Strict (Map ModuleName) (Diff [(SourceSpan, Text)])
   , ghcCompileUseSites :: Strict (Map ModuleName) (Diff UseSites)
   }
-  deriving Typeable
+  deriving (Typeable, Generic)
+
+instance PrettyVal GhcCompileResult
 
 data GhcRunResponse =
     GhcRunOutp ByteString

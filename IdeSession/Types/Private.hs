@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, GeneralizedNewtypeDeriving, DeriveDataTypeable #-}
+{-# LANGUAGE TemplateHaskell, GeneralizedNewtypeDeriving, DeriveDataTypeable, DeriveGeneric #-}
 -- | The private types
 module IdeSession.Types.Private (
     -- * Types without a public counterpart
@@ -41,24 +41,26 @@ import Control.Applicative ((<$>), (<*>))
 import Control.Arrow (first)
 import Data.Binary (Binary(..), getWord8, putWord8)
 import Data.Typeable (Typeable)
+import GHC.Generics (Generic)
 
 import qualified IdeSession.Types.Public as Public
 import IdeSession.Strict.Container
 import IdeSession.Strict.IntervalMap (StrictIntervalMap, Interval(..))
 import qualified IdeSession.Strict.IntervalMap as IntervalMap
 import qualified IdeSession.Strict.IntMap      as IntMap
+import IdeSession.Util.PrettyVal
 
 newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
 
 newtype IdPropPtr = IdPropPtr { idPropPtr :: Int }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
 
 data IdInfo = IdInfo {
     idProp  :: {-# UNPACK #-} !IdPropPtr
   , idScope :: !IdScope
   }
-  deriving (Show, Typeable)
+  deriving (Show, Typeable, Generic)
 
 data IdProp = IdProp {
     idName       :: !Text
@@ -68,7 +70,7 @@ data IdProp = IdProp {
   , idDefSpan    :: !EitherSpan
   , idHomeModule :: !(Strict Maybe ModuleId)
   }
-  deriving Show
+  deriving (Show, Generic)
 
 data IdScope =
     -- | This is a binding occurrence (@f x = ..@, @\x -> ..@, etc.)
@@ -89,7 +91,7 @@ data IdScope =
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
-  deriving Show
+  deriving (Show, Generic)
 
 data SourceSpan = SourceSpan
   { spanFilePath   :: {-# UNPACK #-} !FilePathPtr
@@ -98,31 +100,31 @@ data SourceSpan = SourceSpan
   , spanToLine     :: {-# UNPACK #-} !Int
   , spanToColumn   :: {-# UNPACK #-} !Int
   }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
 
 data EitherSpan =
     ProperSpan {-# UNPACK #-} !SourceSpan
   | TextSpan !Text
-  deriving Show
+  deriving (Show, Generic)
 
 data SourceError = SourceError
   { errorKind :: !Public.SourceErrorKind
   , errorSpan :: !EitherSpan
   , errorMsg  :: !Text
   }
-  deriving (Show)
+  deriving (Show, Generic)
 
 data ModuleId = ModuleId
   { moduleName    :: !Public.ModuleName
   , modulePackage :: {-# UNPACK #-} !PackageId
   }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
 
 data PackageId = PackageId
   { packageName    :: !Text
   , packageVersion :: !(Strict Maybe Text)
   }
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic)
 
 -- | Used before we convert it to an IdMap
 type IdList = [(SourceSpan, SpanInfo)]
@@ -130,13 +132,13 @@ type IdList = [(SourceSpan, SpanInfo)]
 data SpanInfo =
    SpanId IdInfo
  | SpanQQ IdInfo
- deriving Show
+ deriving (Show, Generic)
 
 newtype IdMap = IdMap { idMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) SpanInfo }
-  deriving Show
+  deriving (Show, Generic)
 
 newtype ExpMap = ExpMap { expMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) Text }
-  deriving Show
+  deriving (Show, Generic)
 
 type UseSites = Strict (Map IdPropPtr) [SourceSpan]
 
@@ -144,7 +146,7 @@ data ImportEntities =
     ImportOnly   !(Strict [] Text)
   | ImportHiding !(Strict [] Text)
   | ImportAll
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
 
 data Import = Import {
     importModule    :: !ModuleId
@@ -155,7 +157,7 @@ data Import = Import {
   , importAs        :: !(Strict Maybe Public.ModuleName)
   , importEntities  :: !ImportEntities
   }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
 
 -- | The outcome of running code
 data RunResult =
@@ -167,7 +169,7 @@ data RunResult =
   | RunGhcException String
     -- | Execution was paused because of a breakpoint
   | RunBreak BreakInfo
-  deriving (Typeable, Show)
+  deriving (Typeable, Show, Generic)
 
 -- | Information about a triggered breakpoint
 data BreakInfo = BreakInfo {
@@ -176,7 +178,7 @@ data BreakInfo = BreakInfo {
   , breakInfoResultType  :: Public.Type
   , breakInfoVariableEnv :: Public.VariableEnv
   }
-  deriving (Typeable, Show)
+  deriving (Typeable, Show, Generic)
 
 {------------------------------------------------------------------------------
   Cache
@@ -190,7 +192,7 @@ data ExplicitSharingCache = ExplicitSharingCache {
     filePathCache :: !(Strict IntMap ByteString)
   , idPropCache   :: !(Strict IntMap IdProp)
   }
-  deriving Show
+  deriving (Show, Generic)
 
 unionCache :: ExplicitSharingCache -> ExplicitSharingCache -> ExplicitSharingCache
 unionCache a b = ExplicitSharingCache {
@@ -350,6 +352,29 @@ instance Binary BreakInfo where
     put breakInfoVariableEnv
 
   get = BreakInfo <$> get <*> get <*> get <*> get
+
+{------------------------------------------------------------------------------
+  PrettyVal instances (these rely on Generics)
+------------------------------------------------------------------------------}
+
+instance PrettyVal FilePathPtr
+instance PrettyVal IdPropPtr
+instance PrettyVal IdInfo
+instance PrettyVal IdProp
+instance PrettyVal IdScope
+instance PrettyVal SourceSpan
+instance PrettyVal EitherSpan
+instance PrettyVal SourceError
+instance PrettyVal ModuleId
+instance PrettyVal PackageId
+instance PrettyVal SpanInfo
+instance PrettyVal IdMap
+instance PrettyVal ExpMap
+instance PrettyVal ImportEntities
+instance PrettyVal Import
+instance PrettyVal RunResult
+instance PrettyVal BreakInfo
+instance PrettyVal ExplicitSharingCache
 
 {------------------------------------------------------------------------------
   Util

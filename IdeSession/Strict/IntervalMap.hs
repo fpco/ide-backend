@@ -11,6 +11,7 @@ module IdeSession.Strict.IntervalMap (
 
 import Data.IntervalMap.FingerTree (Interval(..), IntervalMap)
 import qualified Data.IntervalMap.FingerTree as IntervalMap
+import Text.Show.Pretty
 
 {-
   We maintain an interval spanning the entire map, in order to support a toList
@@ -24,6 +25,12 @@ data StrictIntervalMap v a = StrictIntervalMap {
 
 instance (Ord v, Show v, Show a) => Show (StrictIntervalMap v a) where
   show m = "fromList " ++ show (toList m)
+
+instance (Ord v, PrettyVal v, PrettyVal a) => PrettyVal (StrictIntervalMap v a) where
+  prettyVal m = Con "fromList" [prettyVal . map flattenIntervals . toList $ m]
+    where
+      flattenIntervals :: (Interval v, a) -> ((v, v), a)
+      flattenIntervals (Interval lo hi, a) = ((lo, hi), a)
 
 unionInterval :: Ord v => Interval v -> Maybe (Interval v) -> Maybe (Interval v)
 unionInterval i@(Interval low high) Nothing =

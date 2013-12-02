@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, DeriveDataTypeable #-}
+{-# LANGUAGE TemplateHaskell, DeriveDataTypeable, DeriveGeneric #-}
 -- | The public types
 module IdeSession.Types.Public (
     -- * Types
@@ -38,8 +38,10 @@ import qualified Data.Text as Text
 import Data.Binary (Binary(..), getWord8, putWord8)
 import Data.Aeson.TH (deriveJSON, defaultOptions)
 import Data.Typeable (Typeable)
+import GHC.Generics (Generic)
 
 import IdeSession.Util () -- Binary instance for Text
+import IdeSession.Util.PrettyVal
 
 {------------------------------------------------------------------------------
   Types
@@ -51,14 +53,14 @@ data IdNameSpace =
   | DataName   -- ^ Source data constructors
   | TvName     -- ^ Type variables
   | TcClsName  -- ^ Type constructors and classes
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
 
 -- | Information about identifiers
 data IdInfo = IdInfo {
     idProp  :: {-# UNPACK #-} !IdProp
   , idScope :: !IdScope
   }
-  deriving Eq
+  deriving (Eq, Generic)
 
 -- | Variable name
 type Name = Text
@@ -84,7 +86,7 @@ data IdProp = IdProp {
     -- | Haddock home module
   , idHomeModule :: !(Maybe ModuleId)
   }
-  deriving (Eq)
+  deriving (Eq, Generic)
 
 -- TODO: Ideally, we would have
 -- 1. SourceSpan for Local rather than EitherSpan
@@ -110,7 +112,7 @@ data IdScope =
       }
     -- | Wired into the compiler (@()@, @True@, etc.)
   | WiredIn
-  deriving (Eq)
+  deriving (Eq, Generic)
 
 data SourceSpan = SourceSpan
   { spanFilePath   :: !FilePath
@@ -119,12 +121,12 @@ data SourceSpan = SourceSpan
   , spanToLine     :: {-# UNPACK #-} !Int
   , spanToColumn   :: {-# UNPACK #-} !Int
   }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Generic)
 
 data EitherSpan =
     ProperSpan {-# UNPACK #-} !SourceSpan
   | TextSpan !Text
-  deriving (Eq)
+  deriving (Eq, Generic)
 
 -- | An error or warning in a source module.
 --
@@ -135,11 +137,11 @@ data SourceError = SourceError
   , errorSpan :: !EitherSpan
   , errorMsg  :: !Text
   }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
 
 -- | Severity of an error.
 data SourceErrorKind = KindError | KindWarning
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
 
 type ModuleName = Text
 
@@ -147,13 +149,13 @@ data ModuleId = ModuleId
   { moduleName    :: !ModuleName
   , modulePackage :: {-# UNPACK #-} !PackageId
   }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Generic)
 
 data PackageId = PackageId
   { packageName    :: !Text
   , packageVersion :: !(Maybe Text)
   }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Generic)
 
 {-
 newtype IdMap = IdMap { idMapToMap :: Map SourceSpan IdInfo }
@@ -165,7 +167,7 @@ data ImportEntities =
     ImportOnly   ![Text]
   | ImportHiding ![Text]
   | ImportAll
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic)
 
 data Import = Import {
     importModule    :: !ModuleId
@@ -176,7 +178,7 @@ data Import = Import {
   , importAs        :: !(Maybe ModuleName)
   , importEntities  :: !ImportEntities
   }
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic)
 
 -- | Returned then the IDE asks "what's at this particular location?"
 data SpanInfo =
@@ -184,6 +186,7 @@ data SpanInfo =
     SpanId IdInfo
     -- | Quasi-quote. The 'IdInfo' field gives the quasi-quoter
   | SpanQQ IdInfo
+  deriving (Generic)
 
 -- | Buffer modes for running code
 --
@@ -204,7 +207,7 @@ data RunBufferMode =
   | RunBlockBuffering { runBufferBlockSize :: Maybe Int
                       , runBufferTimeout   :: Maybe Int
                       }
-  deriving (Typeable, Show)
+  deriving (Typeable, Show, Generic)
 
 -- | The outcome of running code
 data RunResult =
@@ -218,7 +221,7 @@ data RunResult =
   | RunForceCancelled
     -- | Execution was paused because of a breakpoint
   | RunBreak
-  deriving (Typeable, Show, Eq)
+  deriving (Typeable, Show, Eq, Generic)
 
 -- | Information about a triggered breakpoint
 data BreakInfo = BreakInfo {
@@ -231,7 +234,7 @@ data BreakInfo = BreakInfo {
     -- | Local variables and their values
   , breakInfoVariableEnv :: VariableEnv
   }
-  deriving (Typeable, Show, Eq)
+  deriving (Typeable, Show, Eq, Generic)
 
 -- | We present values only in pretty-printed form
 type Value = Text
@@ -466,6 +469,27 @@ $(deriveJSON defaultOptions ''SpanInfo)
 $(deriveJSON defaultOptions ''BreakInfo)
 $(deriveJSON defaultOptions ''RunResult)
 $(deriveJSON defaultOptions ''RunBufferMode)
+
+{------------------------------------------------------------------------------
+  PrettyVal instances (these rely on Generics)
+------------------------------------------------------------------------------}
+
+instance PrettyVal IdNameSpace
+instance PrettyVal IdInfo
+instance PrettyVal IdProp
+instance PrettyVal IdScope
+instance PrettyVal SourceSpan
+instance PrettyVal EitherSpan
+instance PrettyVal SourceError
+instance PrettyVal SourceErrorKind
+instance PrettyVal ModuleId
+instance PrettyVal PackageId
+instance PrettyVal ImportEntities
+instance PrettyVal Import
+instance PrettyVal SpanInfo
+instance PrettyVal RunBufferMode
+instance PrettyVal RunResult
+instance PrettyVal BreakInfo
 
 {------------------------------------------------------------------------------
   Util

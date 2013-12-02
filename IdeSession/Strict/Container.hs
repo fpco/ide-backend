@@ -9,15 +9,16 @@ module IdeSession.Strict.Container
   , Trie
   ) where
 
+import Control.Applicative ((<$>))
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.List as List
-import Control.Applicative ((<$>))
 import Data.Trie (Trie)
 import Data.Foldable as Foldable
 import Data.Binary (Binary(..))
+import IdeSession.Util.PrettyVal
 
 class StrictContainer t where
   data Strict (t :: * -> *) :: * -> *
@@ -39,6 +40,9 @@ instance Binary v => Binary (Strict IntMap v) where
   put = put . IntMap.toList . toLazyIntMap
   get = (force . IntMap.fromList) <$> get
 
+instance PrettyVal v => PrettyVal (Strict IntMap v) where
+  prettyVal = prettyVal . toLazyIntMap
+
 {------------------------------------------------------------------------------
   Lists
 ------------------------------------------------------------------------------}
@@ -55,6 +59,9 @@ instance Binary a => Binary (Strict [] a) where
   put = put . toLazyList
   get = force <$> get
 
+instance PrettyVal a => PrettyVal (Strict [] a) where
+  prettyVal = prettyVal . toLazyList
+
 {------------------------------------------------------------------------------
   Map
 ------------------------------------------------------------------------------}
@@ -69,6 +76,9 @@ instance StrictContainer (Map k) where
 instance (Ord k, Binary k, Binary v) => Binary (Strict (Map k) v) where
   put = put . Map.toList . toLazyMap
   get = (force . Map.fromList) <$> get
+
+instance (PrettyVal k, PrettyVal v) => PrettyVal (Strict (Map k) v) where
+  prettyVal = prettyVal . toLazyMap
 
 {------------------------------------------------------------------------------
   Maybe
@@ -92,6 +102,9 @@ deriving instance Ord a => Ord (Strict Maybe a)
 instance Functor (Strict Maybe) where
   fmap f = force . fmap f . toLazyMaybe
 
+instance PrettyVal a => PrettyVal (Strict Maybe a) where
+  prettyVal = prettyVal . toLazyMaybe
+
 {------------------------------------------------------------------------------
   Trie
 ------------------------------------------------------------------------------}
@@ -102,3 +115,6 @@ instance StrictContainer Trie where
 
   force m = Foldable.foldl (flip seq) () m `seq` StrictTrie m
   project = toLazyTrie
+
+instance PrettyVal a => PrettyVal (Strict Trie a) where
+  prettyVal = prettyVal . toLazyTrie

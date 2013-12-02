@@ -41,7 +41,9 @@ executable ide-backend-server
                       old-time             >= 1.1     && < 1.2,
                       array                >= 0.4     && < 0.6,
                       utf8-string,
-                      template-haskell
+                      template-haskell,
+                      pretty-show,
+                      ghc-prim
 
   if impl(ghc >= 7.7)
     build-depends: binary               >= 0.7.1.0 && < 0.8
