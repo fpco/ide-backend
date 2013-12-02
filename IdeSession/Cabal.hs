@@ -159,17 +159,15 @@ getCSources relative [sourceDir] = do
   return $ if relative
            then map (makeRelative sourceDir) files
            else files
-getCSources _ _sourceDirs = return []
-  -- TODO: we should probably fail, but buildDotCabal calls us with []
-  --  fail $ "getCSources: wrong sourceDir: " ++ intercalate ", " _sourceDirs
+getCSources _ _sourceDirs =
+  fail $ "getCSources: wrong sourceDir: " ++ intercalate ", " _sourceDirs
 
 getCHeaders :: [FilePath] -> IO [FilePath]
 getCHeaders [sourceDir] =
   fmap (map takeFileName) $
     find always ((`elem` cHeaderExtensions) `liftM` extension) sourceDir
-getCHeaders _sourceDirs = return []
-  -- TODO: we should probably fail, but buildDotCabal calls us with []
-  -- fail $ "getCHeaders: wrong sourceDir: " ++ intercalate ", " _sourceDirs
+getCHeaders _sourceDirs =
+  fail $ "getCHeaders: wrong sourceDir: " ++ intercalate ", " _sourceDirs
 
 exeDesc :: [FilePath] -> FilePath -> [String] -> (ModuleName, FilePath)
         -> IO Executable
@@ -197,12 +195,12 @@ exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
       , buildInfo = bInfo [mDir] ghcOpts cSources cHeaders
       }
 
-libDesc :: Bool -> [FilePath] -> [String]
+libDesc :: Bool -> [FilePath] -> FilePath -> [String]
         -> [Distribution.ModuleName.ModuleName]
         -> IO Library
-libDesc relative ideSourcesDir ghcOpts ms = do
-  cSources <- getCSources relative ideSourcesDir
-  cHeaders <- getCHeaders ideSourcesDir
+libDesc relative ideSourcesDir ideSourcesDirForC ghcOpts ms = do
+  cSources <- getCSources relative [ideSourcesDirForC]
+  cHeaders <- getCHeaders [ideSourcesDirForC]
   return $ Library
     { exposedModules = ms
     , libExposed = False
@@ -278,7 +276,7 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False [ideSourcesDir] ghcOpts projectMs
+  library <- libDesc False [ideSourcesDir] ideSourcesDir ghcOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -348,7 +346,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False [ideSourcesDir] ghcOpts projectMs
+  library <- libDesc False [ideSourcesDir] ideSourcesDir ghcOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -387,7 +385,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
 
 buildDotCabal :: FilePath -> [String] -> Computed
               -> IO (String -> Version -> BSL.ByteString)
-buildDotCabal _ideSourcesDir ghcOpts computed = do
+buildDotCabal ideSourcesDir ghcOpts computed = do
   (loadedMs, pkgs) <- buildDeps $ just computed
   libDeps <- externalDeps pkgs
   -- We ignore any @Main@ modules (even in subdirectories or in @Foo.hs@)
@@ -402,7 +400,7 @@ buildDotCabal _ideSourcesDir ghcOpts computed = do
       projectMs =
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
   library <- libDesc True -- relative C files paths
-                     [] -- TODO: this causes C files to be ignored
+                     [] ideSourcesDir
                      ghcOpts projectMs
   let libE = library {libExposed = True}
       gpDesc libName version = GenericPackageDescription
