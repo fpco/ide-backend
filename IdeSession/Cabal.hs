@@ -11,7 +11,7 @@ import Control.Monad
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.Function (on)
-import Data.List (delete, sort, groupBy, nub, intersperse)
+import Data.List (delete, sort, groupBy, nub, intersperse, intercalate)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Monoid (Monoid(..))
 import Data.Time
@@ -98,12 +98,12 @@ pkgIdent = Package.PackageIdentifier
   , pkgVersion = pkgVersionMain
   }
 
-pkgDescFromName :: String -> PackageDescription
-pkgDescFromName pkgName = PackageDescription
+pkgDescFromName :: String -> Version -> PackageDescription
+pkgDescFromName pkgName version = PackageDescription
   { -- the following are required by all packages:
     package        = Package.PackageIdentifier
                        { pkgName    = Package.PackageName pkgName
-                       , pkgVersion = pkgVersionMain
+                       , pkgVersion = version
                        }
   , license        = AllRightsReserved  -- dummy
   , licenseFile    = ""
@@ -135,13 +135,13 @@ pkgDescFromName pkgName = PackageDescription
   }
 
 pkgDesc :: PackageDescription
-pkgDesc = pkgDescFromName "main"
+pkgDesc = pkgDescFromName "main" pkgVersionMain
 
-bInfo :: FilePath -> [String] -> [FilePath] -> [FilePath] -> BuildInfo
-bInfo sourceDir ghcOpts cSources installIncludes =
+bInfo :: [FilePath] -> [String] -> [FilePath] -> [FilePath] -> BuildInfo
+bInfo hsSourceDirs ghcOpts cSources installIncludes =
   emptyBuildInfo
     { buildable = True
-    , hsSourceDirs = [sourceDir]
+    , hsSourceDirs
     , defaultLanguage = Just Haskell2010
     , options = [(Simple.Compiler.GHC, ghcOpts)]
     , cSources
@@ -153,19 +153,25 @@ bInfo sourceDir ghcOpts cSources installIncludes =
 -- (and that's enough for 'cabal install', since the package dir
 -- will have both the .cabal and the C sources, unlike the directories
 -- we build exes in).
-getCSources :: Bool -> FilePath -> IO [FilePath]
-getCSources relative sourceDir = do
+getCSources :: Bool -> [FilePath] -> IO [FilePath]
+getCSources relative [sourceDir] = do
   files <- find always ((`elem` cExtensions) `liftM` extension) sourceDir
   return $ if relative
            then map (makeRelative sourceDir) files
            else files
+getCSources _ _sourceDirs = return []
+  -- TODO: we should probably fail, but buildDotCabal calls us with []
+  --  fail $ "getCSources: wrong sourceDir: " ++ intercalate ", " _sourceDirs
 
-getCHeaders :: FilePath -> IO [FilePath]
-getCHeaders sourceDir =
+getCHeaders :: [FilePath] -> IO [FilePath]
+getCHeaders [sourceDir] =
   fmap (map takeFileName) $
     find always ((`elem` cHeaderExtensions) `liftM` extension) sourceDir
+getCHeaders _sourceDirs = return []
+  -- TODO: we should probably fail, but buildDotCabal calls us with []
+  -- fail $ "getCHeaders: wrong sourceDir: " ++ intercalate ", " _sourceDirs
 
-exeDesc :: FilePath -> FilePath -> [String] -> (ModuleName, FilePath)
+exeDesc :: [FilePath] -> FilePath -> [String] -> (ModuleName, FilePath)
         -> IO Executable
 exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
   cSources <- getCSources False ideSourcesDir
@@ -188,10 +194,11 @@ exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
     return $ Executable
       { exeName
       , modulePath
-      , buildInfo = bInfo mDir ghcOpts cSources cHeaders
+      , buildInfo = bInfo [mDir] ghcOpts cSources cHeaders
       }
 
-libDesc :: Bool -> FilePath -> [String] -> [Distribution.ModuleName.ModuleName]
+libDesc :: Bool -> [FilePath] -> [String]
+        -> [Distribution.ModuleName.ModuleName]
         -> IO Library
 libDesc relative ideSourcesDir ghcOpts ms = do
   cSources <- getCSources relative ideSourcesDir
@@ -253,7 +260,7 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   libDeps <- externalDeps pkgs
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
-  executables <- mapM (exeDesc ideSourcesDir ideDistDir ghcOpts) ms
+  executables <- mapM (exeDesc [ideSourcesDir] ideDistDir ghcOpts) ms
   callback $ Progress 2 4 Nothing Nothing
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
@@ -271,7 +278,7 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False ideSourcesDir ghcOpts projectMs
+  library <- libDesc False [ideSourcesDir] ghcOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -341,7 +348,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False ideSourcesDir ghcOpts projectMs
+  library <- libDesc False [ideSourcesDir] ghcOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -379,8 +386,8 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   -- or filter stdout and display progress on each good line.
 
 buildDotCabal :: FilePath -> [String] -> Computed
-              -> IO (String -> BSL.ByteString)
-buildDotCabal ideSourcesDir ghcOpts computed = do
+              -> IO (String -> Version -> BSL.ByteString)
+buildDotCabal _ideSourcesDir ghcOpts computed = do
   (loadedMs, pkgs) <- buildDeps $ just computed
   libDeps <- externalDeps pkgs
   -- We ignore any @Main@ modules (even in subdirectories or in @Foo.hs@)
@@ -395,18 +402,19 @@ buildDotCabal ideSourcesDir ghcOpts computed = do
       projectMs =
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
   library <- libDesc True -- relative C files paths
-                     ideSourcesDir ghcOpts projectMs
+                     [] -- TODO: this causes C files to be ignored
+                     ghcOpts projectMs
   let libE = library {libExposed = True}
-      gpDesc libName = GenericPackageDescription
-        { packageDescription = pkgDescFromName libName
+      gpDesc libName version = GenericPackageDescription
+        { packageDescription = pkgDescFromName libName version
         , genPackageFlags    = []  -- seem unused
         , condLibrary        = Just $ CondNode libE libDeps []
         , condExecutables    = []
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-  return $ \libName ->
-    BSL8.pack $ showGenericPackageDescription $ gpDesc libName
+  return $ \libName version ->
+    BSL8.pack $ showGenericPackageDescription $ gpDesc libName version
 
 buildExecutable :: FilePath -> FilePath -> [FilePath]
                 -> [String] -> Bool -> PackageDBStack

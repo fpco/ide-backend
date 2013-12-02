@@ -43,6 +43,7 @@ import Prelude hiding (mod, span)
 import Data.Maybe (listToMaybe, maybeToList)
 import Data.List (isInfixOf)
 import Data.Accessor ((^.), (^:), getVal)
+import Data.Version (Version)
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
@@ -313,7 +314,7 @@ getUseSites = computedQuery $ \computed@Computed{..} mod span ->
 -- or files with different names) are ignored so that they
 -- don't get in the way when we build an executable using the library
 -- and so that the behaviour is consistent with that of @buildExe@.
-getDotCabal :: Query (String -> BSL.ByteString)
+getDotCabal :: Query (String -> Version -> BSL.ByteString)
 getDotCabal session = withComputedState session
                       $ \idleState computed@Computed{..} -> do
   let sourcesDir = ideSourcesDir $ ideStaticInfo session

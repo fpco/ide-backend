@@ -97,6 +97,9 @@ Changelog
 
      * New functionality: Generate .cabal files (#127)
 
+       - Note that library data files are not installed. This should be easy
+         to add if/when that is needed. Just let us know.
+
      * Efficiency of construction of type information (and especially
        autocompletion information) has been improved (#132).
 
