@@ -205,6 +205,8 @@ instance FoldId id => Fold (LSig id) where
     return Nothing
   fold alg (L span (SpecInstSig _)) = astMark alg (Just span) "SpecInstSig" $
     return Nothing
+  fold alg (L span (MinimalSig _)) = astMark alg (Just span) "MinimalSig" $
+    return Nothing
 
 instance FoldId id => Fold (LHsType id) where
   fold alg (L span (HsFunTy arg res)) = astMark alg (Just span) "HsFunTy" $
@@ -257,6 +259,8 @@ instance FoldId id => Fold (LHsType id) where
     fold alg typs
   fold alg (L span (HsExplicitTupleTy _postTcKind typs)) = astMark alg (Just span) "HsExplicitTupleTy" $
     fold alg typs
+  fold alg (L span (HsTyLit _hsTyLit)) = astMark alg (Just span) "HsTyLit" $
+    return Nothing
 
 instance FoldId id => Fold (Located (HsSplice id)) where
   fold alg (L span (HsSplice _id expr)) = astMark alg (Just span) "HsSplice" $ do
@@ -543,20 +547,16 @@ instance (Fold a, FoldId id) => Fold (HsRecField id a) where
 -- The meaning of the constructors of LStmt isn't so obvious; see various
 -- notes in ghc/compiler/hsSyn/HsExpr.lhs
 instance (FoldId id, Fold body) => Fold (LStmt id body) where
-{-
-  fold alg (L span (ExprStmt expr _seq _guard _postTcType)) = astMark alg (Just span) "ExprStmt" $
-    -- Neither _seq nor _guard are located
-    fold alg expr
-  fold alg (L span (LastStmt expr _return)) = astMark alg (Just span) "LastStmt" $
-    fold alg expr
--}
-
-  -- FIXME LastStmt
+  fold alg (L span (LastStmt body _syntaxExpr)) = astMark alg (Just span) "LastStmt" $ do
+    fold alg body
   fold alg (L span (BindStmt pat expr _bind _fail)) = astMark alg (Just span) "BindStmt" $ do
     -- Neither _bind or _fail are located
     fold alg pat
     fold alg expr
-  -- FIXME BodyStmt
+  fold alg (L span (BodyStmt body _seq _guard _postTcType)) = astMark alg (Just span) "BodyStmt" $ do
+    -- TODO: should we do something with _postTcType?
+    -- (Comment in HsExpr.lhs says it's for arrows)
+    fold alg body
   fold alg (L span (LetStmt binds)) = astMark alg (Just span) "LetStmt" $
     fold alg binds
   fold alg (L span stmt@(RecStmt {})) = astMark alg (Just span) "RecStmt" $ do
@@ -624,9 +624,22 @@ instance (Fold arg, Fold rec) => Fold (HsConDetails arg rec) where
 
 instance FoldId id => Fold (LTyClDecl id) where
   fold alg (L span _decl@(ForeignType {})) = astUnsupported alg (Just span) "ForeignType"
-  -- FIXME FamDecl
-  -- FIXME SynDecl
-  -- FIXME DataDecl
+  fold alg (L span (FamDecl tcdFam)) = astMark alg (Just span) "FamDecl" $ do
+    fold alg (L span tcdFam)
+  fold alg (L span (SynDecl tcdLName
+                            tcdTyVars
+                            tcdRhs
+                           _tcdFVs)) = astMark alg (Just span) "SynDecl" $ do
+    foldId alg tcdLName DefSite
+    fold alg tcdTyVars
+    fold alg tcdRhs
+  fold alg (L span (DataDecl tcdLName
+                             tcdTyVars
+                             tcdDataDefn
+                            _tcdFVs)) = astMark alg (Just span) "DataDecl" $ do
+    foldId alg tcdLName DefSite
+    fold alg tcdTyVars
+    fold alg tcdDataDefn
   fold alg (L span decl@(ClassDecl {})) = astMark alg (Just span) "ClassDecl" $ do
     fold alg (tcdCtxt decl)
     foldId alg (tcdLName decl) DefSite
@@ -637,26 +650,6 @@ instance FoldId id => Fold (LTyClDecl id) where
     fold alg (tcdATs decl)
     fold alg (tcdATDefs decl)
     fold alg (tcdDocs decl)
-
-{-
-  fold alg (L span decl@(TyData {})) = astMark alg (Just span) "TyData" $ do
-    fold alg (tcdCtxt decl)
-    foldId alg (tcdLName decl) DefSite
-    fold alg (tcdTyVars decl)
-    fold alg (tcdTyPats decl)
-    fold alg (tcdKindSig decl)
-    fold alg (tcdCons decl)
-    fold alg (tcdDerivs decl)
-  fold alg (L span decl@(TySynonym {})) = astMark alg (Just span) "TySynonym" $ do
-    foldId alg (tcdLName decl) DefSite
-    fold alg (tcdTyVars decl)
-    fold alg (tcdTyPats decl)
-    fold alg (tcdSynRhs decl)
-  fold alg (L span decl@(TyFamily {})) = astMark alg (Just span) "TyFamily" $  do
-    foldId alg (tcdLName decl) DefSite
-    fold alg (tcdTyVars decl)
-    fold alg (tcdKind decl)
--}
 
 instance FoldId id => Fold (LConDecl id) where
   fold alg (L span decl@(ConDecl {})) = astMark alg (Just span) "ConDecl" $ do
@@ -678,16 +671,12 @@ instance FoldId id => Fold (ConDeclField id) where
     fold alg typ
 
 instance FoldId id => Fold (LInstDecl id) where
-  -- FIXME: ClsInstD
-  -- FIXME: DataFamInstD
-  -- FIXME: TyFamInstD
-{-
-  fold alg (L span (InstDecl typ binds sigs accTypes)) = astMark alg (Just span) "LInstDecl" $ do
-    fold alg typ
-    fold alg binds
-    fold alg sigs
-    fold alg accTypes
--}
+  fold alg (L span (ClsInstD cid_inst)) = astMark alg (Just span) "ClsInstD" $
+    fold alg cid_inst
+  fold alg (L span (DataFamInstD dfid_inst)) = astMark alg (Just span) "DataFamInstD" $
+    fold alg dfid_inst
+  fold alg (L span (TyFamInstD tfid_inst)) = astMark alg (Just span) "TyFamInstD" $
+    fold alg tfid_inst
 
 instance FoldId id => Fold (LDerivDecl id) where
   fold alg (L span (DerivDecl deriv_type)) = astMark alg (Just span) "LDerivDecl" $ do
@@ -764,24 +753,105 @@ instance FoldId id => Fold (LHsDecl id) where
     fold alg (L span docD)
   fold alg (L span (QuasiQuoteD quasiQuoteD)) = astMark alg (Just span) "QuasiQuoteD" $
     fold alg (L span quasiQuoteD)
+  fold alg (L span (RoleAnnotD _roleAnnotDecl)) = astMark alg (Just span) "RoleAnnotD" $
+    -- TODO: Do something with roleAnnotDecl
+    return Nothing
 
-instance Fold (TyClGroup id) where
-  -- FIXME
+instance FoldId id => Fold (TyClGroup id) where
+  fold alg (TyClGroup decls _roles) = astMark alg Nothing "TyClGroup" $
+    -- TODO: deal with roles
+    fold alg decls
 
-instance Fold (LHsTyVarBndrs id) where
-  -- FIXME
+instance FoldId id => Fold (LHsTyVarBndrs id) where
+  fold alg (HsQTvs _hsq_kvs hsq_tvs) = astMark alg Nothing "HsQTvs" $ do
+    -- TODO: sadly, we get no location information about the kind variables
+    fold alg hsq_tvs
 
 instance Fold (LHsCmd id) where
-  -- FIXME
+  -- TODO: support arrows
+  fold _ _ = return Nothing
 
-instance Fold (HsWithBndrs thing) where
-  -- FIXME
+instance Fold thing => Fold (HsWithBndrs thing) where
+  fold alg (HsWB hswb_cts _hswb_kvs _hswb_tvs) = astMark alg Nothing "HsWB" $ do
+    -- TODO: sadly, we get no location information about the variables
+    fold alg hswb_cts
 
-instance Fold (LFamilyDecl id) where
-  -- FIXME
+instance FoldId id => Fold (LFamilyDecl id) where
+  fold alg (L span (FamilyDecl fdInfo fdLName fdTyVars fdKindSig)) = astMark alg (Just span) "FamilyDecl" $ do
+    fold alg fdInfo
+    foldId alg fdLName DefSite
+    fold alg fdTyVars
+    fold alg fdKindSig
 
-instance Fold (LTyFamInstDecl id) where
-  -- FIXME
+instance FoldId id => Fold (FamilyInfo id) where
+  fold alg DataFamily = astMark alg Nothing "DataFamily" $
+    return Nothing
+  fold alg OpenTypeFamily = astMark alg Nothing "OpenTypeFamily" $
+    return Nothing
+  fold alg (ClosedTypeFamily instDecls) = astMark alg Nothing "ClosedTypeFamily" $
+    fold alg instDecls
+
+instance FoldId id => Fold (LTyFamInstDecl id) where
+  fold alg (L span (TyFamInstDecl tfid_eqn _tfid_fvs)) = astMark alg (Just span) "TyFamInstDecl" $ do
+    -- TODO: sadly, tfid_fvs is unlocated
+    fold alg tfid_eqn
+
+instance FoldId id => Fold (ClsInstDecl id) where
+  fold alg (ClsInstDecl cid_poly_ty
+                        cid_binds
+                        cid_sigs
+                        cid_tyfam_insts
+                        cid_datafam_insts) = astMark alg Nothing "ClsInstDecl" $ do
+    fold alg cid_poly_ty
+    fold alg cid_binds
+    fold alg cid_sigs
+    fold alg cid_tyfam_insts
+    fold alg cid_datafam_insts
+
+instance FoldId id => Fold (DataFamInstDecl id) where
+  fold alg (DataFamInstDecl dfid_tycon
+                            dfid_pats
+                            dfid_defn
+                            _dfid_fvs) = astMark alg Nothing "DataFamInstDecl" $ do
+    -- TODO: _dfid_fvs is unlocated
+    foldId alg dfid_tycon UseSite
+    fold alg dfid_pats
+    fold alg dfid_defn
+
+instance FoldId id => Fold (TyFamInstDecl id) where
+  fold alg (TyFamInstDecl tfid_eqn _tfid_fvs) = astMark alg Nothing "TyFamInstDecl" $ do
+    -- TODO: tfid_fvs is not located
+    fold alg tfid_eqn
+
+instance FoldId id => Fold (LTyFamInstEqn id) where
+  fold alg (L span (TyFamInstEqn tfie_tycon
+                                 tfie_pats
+                                 tfie_rhs)) = astMark alg (Just span) "TyFamInstEqn" $ do
+    foldId alg tfie_tycon UseSite
+    fold alg tfie_pats
+    fold alg tfie_rhs
+
+instance FoldId id => Fold (LDataFamInstDecl id) where
+  fold alg (L span (DataFamInstDecl dfid_tycon
+                                    dfid_pats
+                                    dfid_defn
+                                   _dfid_fvs)) = astMark alg (Just span) "DataFamInstDecl" $ do
+    -- TODO: dfid_fvs is not located
+    foldId alg dfid_tycon UseSite
+    fold alg dfid_pats
+    fold alg dfid_defn
+
+instance FoldId id => Fold (HsDataDefn id) where
+  fold alg (HsDataDefn _dd_ND
+                        dd_ctxt
+                       _dd_cType
+                        dd_kindSig
+                        dd_cons
+                        dd_derivs) = astMark alg Nothing "HsDataDefn" $ do
+    fold alg dd_ctxt
+    fold alg dd_kindSig
+    fold alg dd_cons
+    fold alg dd_derivs
 
 {------------------------------------------------------------------------------
   Operations on types
