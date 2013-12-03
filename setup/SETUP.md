@@ -209,10 +209,11 @@ only a few minor differences, explained when they come up.
   necessary anymore to install haddock, async, data-accessor in special ways)
   
   - Branch "ide-backend-experimental-78" of ghc (see instructions below)
+  - ide-backend/vendor/binary (binary-ide-backend)
+    (make sure to ghc-pkg hide binary-ide-backend)
   - haddock from its git repo (http://darcs.haskell.org/haddock.git)
   - async from its git repo (https://github.com/simonmar/async.git)
   - data-accessor fro its darcs repo (http://code.haskell.org/data-accessor/core/) 
-  - (no need for ide-backend/vendor/binary)
 
   In both:
   
