@@ -904,6 +904,7 @@ syntheticTests =
         let upd = (updateCodeGeneration True)
                <> (updateSourceFile "Main.hs" . BSLC.pack $
                     "main = putStrLn \"Hi!\" >> getLine")
+               <> (updateStdoutBufferMode (RunLineBuffering Nothing))
         updateSessionD session upd 1
         assertNoErrors session
 
