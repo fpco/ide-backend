@@ -860,7 +860,7 @@ syntheticTests =
         interrupt runActions
         resOrEx <- runWait runActions
         case resOrEx of
-          Right (RunProgException "AsyncException: user interrupt") -> return ()
+          Right result -> assertBool "" (isAsyncException result)
           _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
   , ( "Interrupt runStmt (immediately)"
@@ -878,7 +878,7 @@ syntheticTests =
         interrupt runActions
         resOrEx <- runWait runActions
         case resOrEx of
-          Right (RunProgException "AsyncException: user interrupt") -> return ()
+          Right result -> assertBool "" (isAsyncException result)
           _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
   , ( "Interrupt runStmt (black hole; after 1 sec)"
@@ -896,7 +896,7 @@ syntheticTests =
         interrupt runActions
         resOrEx <- runWait runActions
         case resOrEx of
-          Right (RunProgException "AsyncException: user interrupt") -> return ()
+          Right result -> assertBool "" (isAsyncException result)
           _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
   , ( "Interrupt runStmt many times, preferably without deadlock :) (#58)"
@@ -912,7 +912,7 @@ syntheticTests =
           runActions <- runStmt session "Main" "main"
           interrupt runActions
           (_output, result) <- runWaitAll runActions
-          assertEqual "" (RunProgException "AsyncException: user interrupt") result
+          assertBool "" (isAsyncException result)
 
         runActions <- runStmt session "Main" "main"
         result <- runWait runActions
@@ -1039,10 +1039,10 @@ syntheticTests =
            assertEqual "" (Left (BSSC.pack "ECHO 2!\n")) result
 
         do interrupt runActions
-           result <- runWait runActions
-           case result of
-             Right (RunProgException "AsyncException: user interrupt") -> return ()
-             _ -> assertFailure $ "Unexpected run result: " ++ show result
+           resOrEx <- runWait runActions
+           case resOrEx of
+             Right result -> assertBool "" (isAsyncException result)
+             _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
   , ( "Two calls to runStmt"
     , withSession defaultSessionConfig $ \session -> do
@@ -1410,11 +1410,11 @@ syntheticTests =
         interrupt runActions
         resOrEx <- runWait runActions
         case resOrEx of
-          Right (RunProgException "AsyncException: user interrupt") -> return ()
+          Right result -> assertBool "" (isAsyncException result)
           _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
         resOrEx' <- runWait runActions
         case resOrEx' of
-          Right (RunProgException "AsyncException: user interrupt") -> return ()
+          Right result -> assertBool "" (isAsyncException result)
           _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show resOrEx'
     )
   , ( "Call runWait after termination (restarted session)"
@@ -1579,7 +1579,9 @@ syntheticTests =
         out2a @?= Left (BSSC.pack "hello\n")
         interrupt ra2
         out2b <- runWait ra2
-        out2b @?= Right (RunProgException "AsyncException: user interrupt")
+        case out2b of
+          Right result -> assertBool "" (isAsyncException result)
+          _ -> assertFailure $ "Unexpected run result: " ++ show out2b
 
         let updates3 = mconcat
                 [ updateCodeGeneration True
@@ -5231,6 +5233,12 @@ assertBreak session mod loc resTy vars = do
     assertEqual "var name" var (Text.unpack var')
     assertEqual "var type" typ (Text.unpack typ')
     assertEqual "var val"  val (Text.unpack val')
+
+isAsyncException :: RunResult -> Bool
+isAsyncException (RunProgException ex) =
+     (ex == "AsyncException: user interrupt")
+  || (ex == "SomeAsyncException: user interrupt")
+isAsyncException _ = False
 
 restartRun :: [String] -> ExitCode -> Assertion
 restartRun code exitCode =
