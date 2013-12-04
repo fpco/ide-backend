@@ -521,6 +521,10 @@ instance FoldId id => Fold (LHsExpr id) where
       Just postTcExpr -> fold alg (L span postTcExpr)
       Nothing         -> return Nothing
 
+  -- FIXME: Deal with the remaining case
+  fold _alg _ =
+    return Nothing
+
 instance FoldId id => Fold (ArithSeqInfo id) where
   fold alg (From expr) = astMark alg Nothing "From" $
     fold alg expr
@@ -549,6 +553,10 @@ instance FoldId id => Fold (HsBracket id) where
     return Nothing
   fold alg (DecBrL decls) = astMark alg Nothing "DecBrL" $
     fold alg decls
+
+  -- FIXME
+  fold _alg (TExpBr _) =
+    return Nothing
 
 instance FoldId id => Fold (HsTupArg id) where
   fold alg (Present arg) =
@@ -633,6 +641,10 @@ instance FoldId id => Fold (LPat id) where
 
   -- During translation only
   fold alg (L span (CoPat _ _ _)) = astMark alg (Just span) "CoPat" $
+    return Nothing
+
+  -- FIXME
+  fold _alg (L _ (SplicePat _)) =
     return Nothing
 
 instance (Fold arg, Fold rec) => Fold (HsConDetails arg rec) where
