@@ -74,18 +74,26 @@ data GhcWarnings = GhcWarnings {
     --
     -- <http://www.haskell.org/haskellwiki/Functor-Applicative-Monad_Proposal>
     ghcWarningAMP :: Maybe Bool
+
+    -- | Deprecated flags
+  , ghcWarningDeprecatedFlags :: Maybe Bool
   }
 
 -- | Leave all warnings at their ghc-default
 defaultGhcWarnings :: GhcWarnings
 defaultGhcWarnings = GhcWarnings {
-    ghcWarningAMP = Nothing
+    ghcWarningAMP             = Nothing
+  , ghcWarningDeprecatedFlags = Nothing
   }
 
 -- | We use this when we want to transmit a GhcWarnings to the ghc server;
 -- we pass the result string on the command line to the server executable
 ghcWarningsString :: GhcWarnings -> String
-ghcWarningsString (GhcWarnings{..}) = [enc ghcWarningAMP]
+ghcWarningsString (GhcWarnings warningAMP
+                               warningDeprecatedFlags) = [
+      enc warningAMP
+    , enc warningDeprecatedFlags
+    ]
   where
     enc :: Maybe Bool -> Char
     enc Nothing      = 'D'
@@ -94,8 +102,11 @@ ghcWarningsString (GhcWarnings{..}) = [enc ghcWarningAMP]
 
 -- | Inverse of 'ghcWarningsString'
 stringGhcWarnings :: String -> GhcWarnings
-stringGhcWarnings [warningAMP] = GhcWarnings {
-      ghcWarningAMP = dec warningAMP
+stringGhcWarnings [ warningAMP
+                  , warningDeprecatedFlags
+                  ] = GhcWarnings {
+      ghcWarningAMP             = dec warningAMP
+    , ghcWarningDeprecatedFlags = dec warningDeprecatedFlags
     }
   where
     dec 'D' = Nothing

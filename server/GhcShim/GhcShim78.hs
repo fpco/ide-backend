@@ -138,13 +138,15 @@ type GhcTime = UTCTime
 ------------------------------------------------------------------------------}
 
 setWarnings :: GhcWarnings -> DynFlags -> DynFlags
-setWarnings (GhcWarnings warningAMP) =
-    Opt_WarnAMP `is` warningAMP
+setWarnings (GhcWarnings warningAMP
+                         warningDeprecatedFlags) =
+      set Opt_WarnAMP             warningAMP
+    . set Opt_WarnDeprecatedFlags warningDeprecatedFlags
   where
-    is :: WarningFlag -> Maybe Bool -> DynFlags -> DynFlags
-    is _flag Nothing      = leaveAtDefault
-    is  flag (Just True)  = (`wopt_set`   flag)
-    is  flag (Just False) = (`wopt_unset` flag)
+    set :: WarningFlag -> Maybe Bool -> DynFlags -> DynFlags
+    set _flag Nothing      = leaveAtDefault
+    set  flag (Just True)  = (`wopt_set`   flag)
+    set  flag (Just False) = (`wopt_unset` flag)
 
     leaveAtDefault :: DynFlags -> DynFlags
     leaveAtDefault dflags = dflags

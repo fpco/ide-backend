@@ -146,7 +146,17 @@ type GhcTime = ClockTime
 ------------------------------------------------------------------------------}
 
 setWarnings :: GhcWarnings -> DynFlags -> DynFlags
-setWarnings (GhcWarnings _warningAMP) dflags = dflags
+setWarnings (GhcWarnings _warningAMP
+                          warningDeprecatedFlags) =
+      set Opt_WarnDeprecatedFlags warningDeprecatedFlags
+  where
+    set :: WarningFlag -> Maybe Bool -> DynFlags -> DynFlags
+    set _flag Nothing      = leaveAtDefault
+    set  flag (Just True)  = (`wopt_set`   flag)
+    set  flag (Just False) = (`wopt_unset` flag)
+
+    leaveAtDefault :: DynFlags -> DynFlags
+    leaveAtDefault dflags = dflags
 
 {------------------------------------------------------------------------------
   Traversing the AST

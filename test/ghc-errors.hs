@@ -5396,7 +5396,8 @@ defaultSessionConfig = unsafePerformIO $ do
            , configExtraPathDirs  = splitSearchPath extraPathDirs
            , configStaticOpts     = ["-hide-package monads-tf"]
            , configWarnings       = defaultGhcWarnings {
-                                        ghcWarningAMP = Just False
+                                        ghcWarningAMP             = Just False
+                                      , ghcWarningDeprecatedFlags = Just False
                                       }
            }
 
