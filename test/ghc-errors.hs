@@ -366,7 +366,7 @@ syntheticTests =
         assertEqual "" output (BSLC.pack "False\n")
     )
   , ( "Build executable from some .lhs files"
-    , withSession defaultSessionConfig $ \session -> do
+    , withSession (withOpts []) $ \session -> do
         setCurrentDirectory "test/compiler/utils"
         loadModulesFrom session "."
         setCurrentDirectory "../../../"
@@ -597,7 +597,7 @@ syntheticTests =
            assertEqual "result of ifdefed print 6" (BSLC.pack "6\n") output
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
-    , withSession (withOpts []) $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         setCurrentDirectory "test/Puns"
         loadModulesFrom session "."
         assertMoreErrors session
@@ -624,7 +624,7 @@ syntheticTests =
         assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XNamedFieldPuns -XRecordWildCards' use\n'extensions: NamedFieldPuns RecordWildCards'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\nHackage would reject this package.\n")
     )
   , ( "Build licenses from NamedFieldPuns (with errors)"
-    , withSession (withOpts []) $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         loadModulesFrom session "test/Puns"
         assertMoreErrors session
         let upd = buildLicenses "test/Puns/cabals"
@@ -643,7 +643,7 @@ syntheticTests =
         assertEqual "licenses length" 27142 (length licenses)
     )
   , ( "Build licenses with wrong cabal files and fail"
-    , withSession (withOpts []) $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         loadModulesFrom session "test/Puns"
         assertMoreErrors session
         let updL = buildLicenses "test/Puns/cabals/parse_error"
@@ -1755,7 +1755,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "main" $ Version [1, 0] []
-        assertEqual "dotCabal from Main" (filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n ") $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal from Main" (filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.4\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n ") $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "main.cabal") dotCabal
@@ -1784,7 +1784,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal from Main with explicit -package" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    ghc-options: -hide-all-packages -package base -package parallel -package old-time\n ") $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal from Main with explicit -package" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.4\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    ghc-options: -hide-all-packages -package base -package parallel -package old-time\n ") $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -1811,7 +1811,7 @@ syntheticTests =
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 7] []
-        assertEqual "dotCabal from ParFib.Main" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.7\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.3\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n ") $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal from ParFib.Main" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.7\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.4\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n ") $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -2634,7 +2634,7 @@ syntheticTests =
                 moduleName    = Text.pack mod
               , modulePackage = PackageId {
                     packageName    = Text.pack "parallel"
-                  , packageVersion = Just (Text.pack "3.2.0.3")
+                  , packageVersion = Just (Text.pack "3.2.0.4")
                   }
               }
         assertSameSet "imports: " (fromJust . imports $ Text.pack "M") $ [
@@ -3115,7 +3115,7 @@ syntheticTests =
 
         deps <- getPkgDeps session
         assertEqual "" "Just [base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]" (show (deps (Text.pack "A")))
-        assertEqual "" "Just [parallel-3.2.0.3,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]" (show (deps (Text.pack "B")))
+        assertEqual "" "Just [parallel-3.2.0.4,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]" (show (deps (Text.pack "B")))
         assertEqual "" "Just [mtl-2.1.2,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0,transformers-0.3.0.0]" (show (deps (Text.pack "C")))
      )
   , ( "Set command line arguments"
@@ -3574,18 +3574,18 @@ syntheticTests =
         updateSessionD session upd 1
         assertOneError session
     )
-  , ( "Module name visible from 2 packages --- picked from -transformers"
+  , ( "Module name visible from 2 packages --- picked from monads-tf"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"
-                        , "-package MonadCatchIO-mtl"
-                        , "-package MonadCatchIO-transformers"
+                        , "-package monads-tf"
+                        , "-package mtl"
                         ]
       in ifIdeBackendHaddockTestsEnabled (withOpts packageOpts) $ \session -> do
         let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE PackageImports #-}"
                     , "module A where"
-                    , "import \"MonadCatchIO-transformers\" Control.Monad.CatchIO"
-                    , "f x = catches (print 1) [x]"
+                    , "import \"monads-tf\" Control.Monad.Cont"
+                    , "f = runCont"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
@@ -3599,11 +3599,11 @@ syntheticTests =
                   , packageVersion = Just (Text.pack "4.5.1.0")
                   }
               }
-            monadCatchIO_transformers mod = ModuleId {
+            monads_tf mod = ModuleId {
                 moduleName    = Text.pack mod
               , modulePackage = PackageId {
-                    packageName    = Text.pack "MonadCatchIO-transformers"
-                  , packageVersion = Just (Text.pack "0.3.0.0")
+                    packageName    = Text.pack "monads-tf"
+                  , packageVersion = Just (Text.pack "0.1.0.1")
                   }
               }
         assertSameSet "imports: " (fromJust . imports $ Text.pack "A") $ [
@@ -3616,8 +3616,8 @@ syntheticTests =
               , importEntities  = ImportAll
               }
           , Import {
-                importModule    = monadCatchIO_transformers "Control.Monad.CatchIO"
-              , importPackage   = Just (Text.pack "MonadCatchIO-transformers")
+                importModule    = monads_tf "Control.Monad.Cont"
+              , importPackage   = Just (Text.pack "monads-tf")
               , importQualified = False
               , importImplicit  = False
               , importAs        = Nothing
@@ -3626,20 +3626,20 @@ syntheticTests =
           ]
 
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at <no location info> (home MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO) (imported from MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:57)"
+        assertIdInfo idInfo "A" (4,5,4,6) "runCont (VarName) :: Cont r1 a1 -> (a1 -> r1) -> r1 defined in transformers-X.Y.Z:Control.Monad.Trans.Cont at <no location info> (home monads-tf-X.Y.Z:Control.Monad.Cont) (imported from monads-tf-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:38)"
     )
-  , ( "Module name visible from 2 packages --- picked from -mtl (expected failure)"
+  , ( "Module name visible from 2 packages --- picked from mtl (expected failure)"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"
-                        , "-package MonadCatchIO-mtl"
-                        , "-package MonadCatchIO-transformers"
+                        , "-package monads-tf"
+                        , "-package mtl"
                         ]
       in ifIdeBackendHaddockTestsEnabled (withOpts packageOpts) $ \session -> do
         let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE PackageImports #-}"
                     , "module A where"
-                    , "import \"MonadCatchIO-mtl\" Control.Monad.CatchIO"
-                    , "f x = catches (print 1) [x]"
+                    , "import \"mtl\" Control.Monad.Cont"
+                    , "f = runCont"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
@@ -3653,11 +3653,11 @@ syntheticTests =
                   , packageVersion = Just (Text.pack "4.5.1.0")
                   }
               }
-            monadCatchIO_transformers mod = ModuleId {
+            mtl mod = ModuleId {
                 moduleName    = Text.pack mod
               , modulePackage = PackageId {
-                    packageName    = Text.pack "MonadCatchIO-mtl"
-                  , packageVersion = Just (Text.pack "0.3.0.5")
+                    packageName    = Text.pack "mtl"
+                  , packageVersion = Just (Text.pack "2.1.2")
                   }
               }
         assertSameSet "imports: " (fromJust . imports $ Text.pack "A") $ [
@@ -3670,8 +3670,8 @@ syntheticTests =
               , importEntities  = ImportAll
               }
           , Import {
-                importModule    = monadCatchIO_transformers "Control.Monad.CatchIO"
-              , importPackage   = Just (Text.pack "MonadCatchIO-mtl")
+                importModule    = mtl "Control.Monad.Cont"
+              , importPackage   = Just (Text.pack "mtl")
               , importQualified = False
               , importImplicit  = False
               , importAs        = Nothing
@@ -3680,10 +3680,9 @@ syntheticTests =
           ]
 
         idInfo <- getSpanInfo session
-        -- TODO: This is the IdInfo we *should* be getting
-        -- assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at <no location info> (home MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO) (imported from MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:48)"
-        -- but this is what we get instead (see #95):
-        assertIdInfo idInfo "A" (4,7,4,14) "catches (VarName) :: MonadCatchIO m => m a -> [Handler m a] -> m a defined in MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO at <no location info> (home MonadCatchIO-mtl-X.Y.Z:Control.Monad.CatchIO) (imported from MonadCatchIO-transformers-X.Y.Z:Control.Monad.CatchIO at A.hs@3:1-3:48)"
+        -- TODO: This wrong; notice the incorrect reference to monads-tf in the
+        -- "imported from" clause. See #95.
+        assertIdInfo idInfo "A" (4,5,4,6) "runCont (VarName) :: Cont r1 a1 -> (a1 -> r1) -> r1 defined in transformers-X.Y.Z:Control.Monad.Trans.Cont at <no location info> (home mtl-X.Y.Z:Control.Monad.Cont) (imported from monads-tf-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:32)"
     )
   , ("Issue #119"
     , withSession defaultSessionConfig $ \sess -> do
@@ -5387,6 +5386,7 @@ defaultSessionConfig = unsafePerformIO $ do
   return IdeSession.defaultSessionConfig {
              configPackageDBStack = packageDbStack
            , configExtraPathDirs  = splitSearchPath extraPathDirs
+           , configStaticOpts     = ["-hide-package monads-tf"]
            }
 
 {------------------------------------------------------------------------------

@@ -261,10 +261,9 @@ only a few minor differences, explained when they come up.
   - the test suite requires the following packages (you might of course want to
     use a separate snippet DB for the test suite:)
 
-    * parallel
+    * parallel-3.2.0.4
     * mtl-2.1.2
     * monads-tf-0.1.0.1
-    * yesod (optional; only required for one test
     * yesod-1.2.4 (optional; only required for one test; install with
       cabal --max-backjumps=-1; do not attempt for 7.8 for now))
 
