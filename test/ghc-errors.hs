@@ -10,12 +10,13 @@ import qualified Data.ByteString.Lazy       as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSLC
 import qualified Data.ByteString.Lazy.UTF8  as BSL8
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
+import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort, elemIndex)
 import qualified Data.List as List
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
 import Data.Text (Text)
+import Data.Char (isLower)
 import qualified Data.Text as Text
 import Debug.Trace (traceEventIO)
 import Data.Version (Version (..))
@@ -5104,7 +5105,6 @@ assertIdInfo idInfo
              expectedDefSpan
              expectedHome
              expectedScope =
- --    assertEqual "" (ignoreVersions expected) (ignoreVersions actual)
     case idInfo (Text.pack mod) span of
       (_span, SpanId actual) : _ -> compareIdInfo actual
       (_span, SpanQQ actual) : _ -> compareIdInfo actual
@@ -5123,18 +5123,13 @@ assertIdInfo idInfo
 
       case idType of
         Nothing         -> assertEqual "type" expectedType ""
-        Just actualType -> assertEqual "type" expectedType (Text.unpack actualType)
+        Just actualType -> assertEqual "type" (ignoreVarNames expectedType)
+                                              (ignoreVarNames (Text.unpack actualType))
 
       case idHomeModule of
         Nothing         -> assertEqual "home" expectedHome ""
         Just actualHome -> assertEqual "home" (ignoreVersions expectedHome)
                                               (ignoreVersions (show actualHome))
-
-    ignoreVersions :: String -> String
-    ignoreVersions s = subRegex (mkRegex versionRegexp) s "X.Y.Z"
-
-    versionRegexp :: String
-    versionRegexp = "[0-9]+(\\.[0-9]+)+"
 
     span :: SourceSpan
     span = SourceSpan { spanFilePath   = mod ++ ".hs"
@@ -5471,3 +5466,40 @@ mark (x:xs) = (x, True, False) : aux xs
     aux []     = error "impossible"
     aux [y]    = [(y, False, True)]
     aux (y:ys) = (y, False, False) : aux ys
+
+-- | Replace (type variables) with numbered type variables
+--
+-- i.e., change "b -> [c]" to "a1 -> [a2]"
+--
+-- useful for comparing types for alpha-equivalence
+ignoreVarNames :: String -> String
+ignoreVarNames = unwords . go [] [] . tokenize
+  where
+    go :: [String] -> [String] -> [String] -> [String]
+    go _vars acc [] = reverse acc
+    go  vars acc (x:xs)
+      | isVar x   = case elemIndex x vars of
+                      Just n  -> go vars (var n : acc) xs
+                      Nothing -> go (vars ++ [x]) acc (x : xs)
+      | otherwise = go vars (x : acc) xs
+
+    isVar :: String -> Bool
+    isVar []    = False
+    isVar (x:_) = isLower x
+
+    var :: Int -> String
+    var n = "a" ++ show n
+
+-- | Repeatedly call lex
+tokenize :: String -> [String]
+tokenize [] = [[]]
+tokenize xs = case lex xs of
+                [(token, xs')] -> token : tokenize xs'
+                _ -> error "tokenize failed"
+
+-- | Replace everything that looks like a version number by @X.Y.Z@
+ignoreVersions :: String -> String
+ignoreVersions s = subRegex (mkRegex versionRegexp) s "X.Y.Z"
+  where
+    versionRegexp :: String
+    versionRegexp = "[0-9]+(\\.[0-9]+)+"
