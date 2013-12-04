@@ -1,12 +1,15 @@
 module IdeSession.Config (
     SessionConfig(..)
+  , InProcess
   , defaultSessionConfig
   ) where
 
 import Distribution.Simple (PackageDB(..), PackageDBStack)
 import Distribution.License (License (..))
 
-import IdeSession.GHC.Client (InProcess)
+import IdeSession.GHC.API (GhcWarnings, defaultGhcWarnings)
+
+type InProcess = Bool
 
 -- | Configuration parameters for a session. These remain the same throughout
 -- the whole session's lifetime.
@@ -45,6 +48,8 @@ data SessionConfig = SessionConfig {
     -- | Delete temporary files when session finishes?
     -- (Defaults to True; mostly for internal debugging purposes)
   , configDeleteTempFiles :: Bool
+    -- | GHC warnings
+  , configWarnings :: GhcWarnings
   }
 
 -- | Default session configuration
@@ -87,4 +92,5 @@ defaultSessionConfig = SessionConfig {
     ]
   , configLog             = const $ return ()
   , configDeleteTempFiles = True
+  , configWarnings        = defaultGhcWarnings
   }

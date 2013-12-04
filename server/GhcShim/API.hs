@@ -1,4 +1,10 @@
-module GhcShim.API where
+module GhcShim.API (
+    -- * Traversing the AST
+    IsBinder(..)
+  , AstAlg(..)
+  , FoldId(..)
+  , Fold(..)
+  ) where
 
 import Type   (Type)
 import SrcLoc (SrcSpan, Located)

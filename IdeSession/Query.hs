@@ -61,7 +61,6 @@ import IdeSession.GHC.API (cabalMacrosLocation)
 import IdeSession.Types.Translation
 import IdeSession.Types.Public
 import qualified IdeSession.Types.Private as Private
-import IdeSession.GHC.Client (GhcServer)
 import IdeSession.RPC.Client (ExternalException)
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map    as StrictMap

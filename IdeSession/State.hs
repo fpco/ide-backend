@@ -10,6 +10,8 @@ module IdeSession.State
   , LogicalTimestamp
   , IdeIdleState(..)
   , ManagedFilesInternal(..)
+  , GhcServer(..)
+  , RunActions(..)
     -- * Util
   , internalFile
     -- * Accessors
@@ -36,18 +38,19 @@ module IdeSession.State
   , managedData
   ) where
 
+import Control.Concurrent (ThreadId)
 import Data.Digest.Pure.MD5 (MD5Digest)
 import Data.Accessor (Accessor, accessor)
+import qualified Data.ByteString as BSS
 import System.Exit (ExitCode)
 import System.FilePath ((</>))
 import System.Posix.Types (EpochTime)
 import IdeSession.Types.Private hiding (RunResult)
 import qualified IdeSession.Types.Public as Public
 import IdeSession.Config
-import IdeSession.GHC.Client (RunActions, GhcServer)
 import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
-import IdeSession.RPC.Client (ExternalException)
+import IdeSession.RPC.Client (RpcServer, RpcConversation, ExternalException)
 
 data Computed = Computed {
     -- | Last compilation and run errors
@@ -164,6 +167,35 @@ data ManagedFilesInternal = ManagedFilesInternal
 
 -- | Mapping from C files to the corresponding .o files and their timestamps
 type ObjectFiles = [(FilePath, (FilePath, LogicalTimestamp))]
+
+data GhcServer = OutProcess RpcServer
+               | InProcess RpcConversation ThreadId
+
+-- | Handles to the running code, through which one can interact with the code.
+data RunActions a = RunActions {
+    -- | Wait for the code to output something or terminate
+    runWait :: IO (Either BSS.ByteString a)
+    -- | Send a UserInterrupt exception to the code
+    --
+    -- A call to 'interrupt' after the snippet has terminated has no effect.
+  , interrupt :: IO ()
+    -- | Make data available on the code's stdin
+    --
+    -- A call to 'supplyStdin' after the snippet has terminated has no effect.
+  , supplyStdin :: BSS.ByteString -> IO ()
+    -- | Register a callback to be invoked when the program terminates
+    -- The callback will only be invoked once.
+    --
+    -- A call to 'registerTerminationCallback' after the snippet has terminated
+    -- has no effect. The termination handler is NOT called when the the
+    -- 'RunActions' is 'forceCancel'ed.
+  , registerTerminationCallback :: (a -> IO ()) -> IO ()
+    -- | Force terminate the runaction
+    -- (The server will be useless after this -- for internal use only).
+    --
+    -- Guranteed not to block.
+  , forceCancel :: IO ()
+  }
 
 {------------------------------------------------------------------------------
   Util

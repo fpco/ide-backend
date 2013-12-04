@@ -50,7 +50,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Applicative (Applicative, (<$>), (<*>))
 import qualified Control.Exception as Ex
 import qualified Control.Monad.State as St
-import Data.List (delete, elemIndices, intercalate)
+import Data.List (delete, elemIndices)
 import Data.Monoid (Monoid(..))
 import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
@@ -63,8 +63,6 @@ import System.FilePath (
     takeDirectory
   , makeRelative
   , (</>)
-  , splitSearchPath
-  , searchPathSeparator
   , takeExtension
   , replaceExtension
   , dropFileName
@@ -73,9 +71,7 @@ import System.Posix.Files (setFileTimes)
 import System.IO.Temp (createTempDirectory)
 import System.IO.Error (isDoesNotExistError)
 import qualified Data.Text as Text
-import System.Environment (getEnv, getEnvironment)
-import Data.Version (Version(..))
--- import System.Process (readProcessWithExitCode)
+import System.Environment (getEnv)
 import System.Exit (ExitCode(..))
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
@@ -132,19 +128,12 @@ initSession initParams ideConfig@SessionConfig{..} = do
   ideSourcesDir  <- createTempDirectory configDirCanon "src."
   ideDataDir     <- createTempDirectory configDirCanon "data."
   ideDistDir     <- createTempDirectory configDirCanon "dist."
-  env            <- envWithPathOverride configExtraPathDirs
 
-  -- TODO: Don't hardcode ghc version
-  let ghcOpts = configStaticOpts
-             ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
-             ++ ["-i" ++ ideSourcesDir]
+  let ideStaticInfo = IdeStaticInfo{..}
 
-  _ideGhcServer <- forkGhcServer configGenerateModInfo
-                                 configExtraPathDirs
-                                 ghcOpts
-                                 (Just ideDataDir)
-                                 env
-                                 configInProcess
+  -- Start the GHC server (as a separate process)
+  _ideGhcServer <- forkGhcServer ideStaticInfo
+
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
   -- a workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
@@ -174,7 +163,6 @@ initSession initParams ideConfig@SessionConfig{..} = do
                         , _ideGhcServer
                         , _ideTargets          = Nothing
                         }
-  let ideStaticInfo = IdeStaticInfo{..}
   let session = IdeSession{..}
 
   execInitParams ideStaticInfo initParams
@@ -216,16 +204,6 @@ checkPackageDbEnvVar = do
 
     catchIO :: IO a -> (IOError -> IO a) -> IO a
     catchIO = Ex.catch
-
-envWithPathOverride :: [FilePath] -> IO (Maybe [(String, String)])
-envWithPathOverride []            = return Nothing
-envWithPathOverride extraPathDirs = do
-    env <- getEnvironment
-    let path  = fromMaybe "" (lookup "PATH" env)
-        path' = intercalate [searchPathSeparator]
-                  (splitSearchPath path ++ extraPathDirs)
-        env'  = ("PATH", path') : filter (\(var, _) -> var /= "PATH") env
-    return (Just env')
 
 -- | Write per-package CPP macros.
 writeMacros :: IdeStaticInfo -> Maybe BSL.ByteString -> IO ()
@@ -311,15 +289,7 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
     restart :: IdeIdleState -> IO IdeSessionState
     restart idleState = do
       forceShutdownGhcServer $ _ideGhcServer idleState
-      env    <- envWithPathOverride configExtraPathDirs
-      let ghcOpts = configStaticOpts
-                 ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
-      server <- forkGhcServer configGenerateModInfo
-                              configExtraPathDirs
-                              ghcOpts
-                              workingDir
-                              env
-                              configInProcess
+      server <- forkGhcServer ideStaticInfo
       return . IdeSessionIdle
              . (ideComputed    ^= Maybe.nothing)
              . (ideUpdatedEnv  ^= True)
@@ -327,9 +297,6 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
              . (ideUpdatedCode ^= True)
              . (ideGhcServer   ^= server)
              $ idleState
-
-    workingDir = Just (ideDataDir ideStaticInfo)
-    SessionConfig{..} = ideConfig ideStaticInfo
 
 {------------------------------------------------------------------------------
   Session updates

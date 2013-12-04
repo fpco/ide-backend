@@ -14,6 +14,8 @@ module GhcShim.GhcShim78
   , setBreak
     -- * Time
   , GhcTime
+    -- * Warnings
+  , setWarnings
     -- * Folding
   , AstAlg(..)
   , fold
@@ -57,6 +59,7 @@ import BreakArray (BreakArray)
 import qualified BreakArray
 
 import GhcShim.API
+import IdeSession.GHC.API (GhcWarnings(..))
 
 {------------------------------------------------------------------------------
   Pretty-printing
@@ -129,6 +132,22 @@ setBreak array index value = do
 ------------------------------------------------------------------------------}
 
 type GhcTime = UTCTime
+
+{------------------------------------------------------------------------------
+  Warnings
+------------------------------------------------------------------------------}
+
+setWarnings :: GhcWarnings -> DynFlags -> DynFlags
+setWarnings (GhcWarnings warningAMP) =
+    Opt_WarnAMP `is` warningAMP
+  where
+    is :: WarningFlag -> Maybe Bool -> DynFlags -> DynFlags
+    is _flag Nothing      = leaveAtDefault
+    is  flag (Just True)  = (`wopt_set`   flag)
+    is  flag (Just False) = (`wopt_unset` flag)
+
+    leaveAtDefault :: DynFlags -> DynFlags
+    leaveAtDefault dflags = dflags
 
 {------------------------------------------------------------------------------
   Traversing the AST

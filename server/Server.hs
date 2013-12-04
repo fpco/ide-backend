@@ -54,19 +54,24 @@ import GhcShim
 -- | Start the RPC server. Used from within the server executable.
 ghcServer :: [String] -> IO ()
 ghcServer fdsAndOpts = do
-  let (opts, "--ghc-opts-end" : configGenerateModInfo : clientApiVersion : fds) =
-        List.span (/= "--ghc-opts-end") fdsAndOpts
+  let (opts,   "--ghc-opts-end"
+             : configGenerateModInfo
+             : clientApiVersion
+             : warningsString
+             : fds) = List.span (/= "--ghc-opts-end") fdsAndOpts
   rpcServer fds $ ghcServerEngine (read configGenerateModInfo)
                                   (read clientApiVersion)
+                                  (stringGhcWarnings warningsString)
                                   opts
 
 -- | The GHC server engine proper.
 --
 -- This function runs in end endless loop inside the @Ghc@ monad, making
 -- incremental compilation possible.
-ghcServerEngine :: Bool -> Int -> [String] -> RpcConversation -> IO ()
+ghcServerEngine :: Bool -> Int -> GhcWarnings -> [String] -> RpcConversation -> IO ()
 ghcServerEngine configGenerateModInfo
                 clientApiVersion
+                warnings
                 staticOpts
                 conv@RpcConversation{..} = do
   -- Check API versions
@@ -101,7 +106,7 @@ ghcServerEngine configGenerateModInfo
           sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins flags
         }
                  | otherwise = flags
-    void $ setSessionDynFlags dynFlags
+    void $ setSessionDynFlags (setWarnings warnings dynFlags)
 
     -- Start handling RPC calls
     let go args = do

@@ -23,15 +23,22 @@ module IdeSession.GHC.Client (
   , rpcLoad
   ) where
 
-import Control.Concurrent (ThreadId, killThread)
-import qualified Data.ByteString.Char8      as BSS
-import qualified Data.ByteString.Lazy.Char8 as BSL
+import Control.Monad (when)
+import Control.Concurrent (killThread)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.MVar (newMVar)
+import Data.Maybe (fromMaybe)
+import Data.List (intercalate)
+import Data.Version (Version(..))
 import qualified Control.Exception as Ex
+import qualified Data.ByteString.Char8      as BSS
+import qualified Data.ByteString.Lazy.Char8 as BSL
 import System.Exit (ExitCode)
+import System.Environment (getEnvironment)
+import System.FilePath (splitSearchPath, searchPathSeparator)
 
+import IdeSession.Config
 import IdeSession.GHC.API
 import IdeSession.RPC.Client
 import IdeSession.Types.Progress
@@ -39,6 +46,8 @@ import qualified IdeSession.Types.Public as Public
 import IdeSession.Types.Private (RunResult(..))
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
+import IdeSession.State
+import IdeSession.Cabal (packageDbArgs)
 
 import Distribution.Verbosity (normal)
 import Distribution.Simple.Program.Find ( -- From our patched cabal
@@ -51,45 +60,37 @@ import Distribution.Simple.Program.Find ( -- From our patched cabal
   Starting and stopping the server
 ------------------------------------------------------------------------------}
 
-type InProcess = Bool
-
-data GhcServer = OutProcess RpcServer
-               | InProcess RpcConversation ThreadId
-
 -- | Start the ghc server
-forkGhcServer :: Bool                      -- ^ generate mod info?
-              -> [FilePath]                -- ^ extra search path components
-              -> [String]                  -- ^ ghc options
-              -> Maybe String              -- ^ working directory
-              -> Maybe [(String, String)]  -- ^ environment
-              -> InProcess                 -- ^ Run in-process? (current broken)
-              -> IO GhcServer
-forkGhcServer configGenerateModInfo
-              configExtraPathDirs
-              opts
-              workingDir
-              menv
-              False = do
+forkGhcServer :: IdeStaticInfo -> IO GhcServer
+forkGhcServer IdeStaticInfo{..} = do
+  when configInProcess $
+    fail "In-process ghc server not currently supported"
+
   mLoc <- findProgramOnSearchPath normal searchPath "ide-backend-server"
   case mLoc of
     Nothing ->
       fail $ "Could not find ide-backend-server"
     Just prog -> do
-      server <- forkRpcServer prog
-                              (opts ++ [ "--ghc-opts-end"
-                                       , show configGenerateModInfo
-                                       , show ideBackendApiVersion
-                                       ])
-                              workingDir
-                              menv
+      let opts = configStaticOpts
+                 -- TODO: don't hardcode GHC version
+              ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
+              ++ [
+                   "-i" ++ ideSourcesDir
+                 , "--ghc-opts-end"
+                 , show configGenerateModInfo
+                 , show ideBackendApiVersion
+                 , ghcWarningsString configWarnings
+                 ]
+      env    <- envWithPathOverride configExtraPathDirs
+      server <- forkRpcServer prog opts (Just ideDataDir) env
       return (OutProcess server)
   where
     searchPath :: ProgramSearchPath
     searchPath = ProgramSearchPathDefault
                : map ProgramSearchPathDir configExtraPathDirs
 
-forkGhcServer _ _ _ _ _ True =
-  fail "In-process ghc server not currently supported"
+    SessionConfig{..} = ideConfig
+
 {- TODO: Reenable in-process
 forkGhcServer configGenerateModInfo opts workingDir True = do
   let conv a b = RpcConversation {
@@ -104,6 +105,17 @@ forkGhcServer configGenerateModInfo opts workingDir True = do
   tid <- forkIO $ ghcServerEngine configGenerateModInfo opts (conv a b)
   return $ InProcess (conv b a) tid
 -}
+
+envWithPathOverride :: [FilePath] -> IO (Maybe [(String, String)])
+envWithPathOverride []            = return Nothing
+envWithPathOverride extraPathDirs = do
+    env <- getEnvironment
+    let path  = fromMaybe "" (lookup "PATH" env)
+        path' = intercalate [searchPathSeparator]
+                  (splitSearchPath path ++ extraPathDirs)
+        env'  = ("PATH", path') : filter (\(var, _) -> var /= "PATH") env
+    return (Just env')
+
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer (OutProcess server) = shutdown server
@@ -122,32 +134,6 @@ getGhcExitCode (InProcess _ _) =
 {------------------------------------------------------------------------------
   Interacting with the server
 ------------------------------------------------------------------------------}
-
--- | Handles to the running code, through which one can interact with the code.
-data RunActions a = RunActions {
-    -- | Wait for the code to output something or terminate
-    runWait :: IO (Either BSS.ByteString a)
-    -- | Send a UserInterrupt exception to the code
-    --
-    -- A call to 'interrupt' after the snippet has terminated has no effect.
-  , interrupt :: IO ()
-    -- | Make data available on the code's stdin
-    --
-    -- A call to 'supplyStdin' after the snippet has terminated has no effect.
-  , supplyStdin :: BSS.ByteString -> IO ()
-    -- | Register a callback to be invoked when the program terminates
-    -- The callback will only be invoked once.
-    --
-    -- A call to 'registerTerminationCallback' after the snippet has terminated
-    -- has no effect. The termination handler is NOT called when the the
-    -- 'RunActions' is 'forceCancel'ed.
-  , registerTerminationCallback :: (a -> IO ()) -> IO ()
-    -- | Force terminate the runaction
-    -- (The server will be useless after this -- for internal use only).
-    --
-    -- Guranteed not to block.
-  , forceCancel :: IO ()
-  }
 
 -- | Repeatedly call 'runWait' until we receive a 'Right' result, while
 -- collecting all 'Left' results

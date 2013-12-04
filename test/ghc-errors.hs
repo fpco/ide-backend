@@ -5387,6 +5387,9 @@ defaultSessionConfig = unsafePerformIO $ do
              configPackageDBStack = packageDbStack
            , configExtraPathDirs  = splitSearchPath extraPathDirs
            , configStaticOpts     = ["-hide-package monads-tf"]
+           , configWarnings       = defaultGhcWarnings {
+                                        ghcWarningAMP = Just False
+                                      }
            }
 
 {------------------------------------------------------------------------------

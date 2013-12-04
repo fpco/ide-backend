@@ -102,7 +102,9 @@
 module IdeSession (
     -- * Configuration
     SessionConfig(..)
+  , GhcWarnings(..)
   , defaultSessionConfig
+  , defaultGhcWarnings
   , InProcess
     -- * Updating the session
     -- ** Starting and stopping
