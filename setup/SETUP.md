@@ -130,14 +130,14 @@ the approach below.  It is of course not required to follow that approach; if
 using a different approach, these instructions can still help settings things
 up, mutatis mutandis.
 
-We have various "sandboxes" (build environments) represented by directories 
+We have various "sandboxes" (build environments) represented by directories
 
     ~/env/fpco-stock-7.4
     ~/env/fpco-patched-7.4
     ~/env/fpco-patched-7.8
 
 a symlink
-    
+
     ~/env/active -> ~/env/fpco-stock-7.4
 
 (or whichever sandbox is "active"). Then we have (non-changing) symlinks
@@ -154,7 +154,7 @@ infrastructure surrounding it. The version of ghc here is not so important;
 this could be ghc 7.6 for instance (i.e., it is unrelated to the version that
 we use for ide-backend-server). For now we will assume it's a stock 7.4.
 
-* If you want to profile, you may want to set 
+* If you want to profile, you may want to set
 
       library-profiling: True
 
@@ -171,11 +171,11 @@ The fpco-patched-7.4 and fpco-patched-7.8 sandboxes
 ---------------------------------------------------
 
 The setup instructions for these two sandboxes are almost the same; there are
-only a few minor differences, explained when they come up. 
+only a few minor differences, explained when they come up.
 
 * Set
-  
-      documentation: True 
+
+      documentation: True
 
   in ~/.cabal/config so that .haddock files are created (these are necessary to
   so that ide-backend-server can create more informative identifier
@@ -189,8 +189,8 @@ only a few minor differences, explained when they come up.
   while another sandbox is active, we have to make sure that the "prefix"
   picked by Cabal should not include symlinks which may point to one location
   at installation time and another at runtime. It is therefore a good idea to
-  set  
-      
+  set
+
       install-dirs user
         prefix: /Users/dev/env/fpco-patched-7.4/dot-cabal
 
@@ -207,23 +207,24 @@ only a few minor differences, explained when they come up.
 
   For ghc 7.8 install (TODO: once 7.8 is properly released it should not be
   necessary anymore to install haddock, async, data-accessor in special ways)
-  
+
   - Branch "ide-backend-experimental-78" of ghc (see instructions below)
   - make sure to use the newest cabal, since 7.8 requires dynamic libraries
   - remember to do "cabal update", since very new versions of packages
     are needed for 7.8
   - update alex and happy to the newest version on hackage
-  - package pretty-show does not currently compile from hackage with 7.8,
-    due to happy output included in the sources. One either needs to clone 
-    from github and cabal clean or cabal-local-upack and cabal-clean.
+  - install pretty-show; it does not currently compile from hackage with 7.8,
+    due to happy output included in the sources. One either needs to clone
+    from github (https://github.com/yav/pretty-show) and then do cabal clea
+    or use hackage and do cabal-local-upack and cabal-clean
   - ide-backend/vendor/binary (binary-ide-backend)
     (make sure to ghc-pkg hide binary-ide-backend)
   - haddock from its git repo (http://darcs.haskell.org/haddock.git)
   - async from its git repo (https://github.com/simonmar/async.git)
-  - data-accessor fro its darcs repo (http://code.haskell.org/data-accessor/core/) 
+  - data-accessor from its darcs repo (http://code.haskell.org/data-accessor/core/)
 
   In both:
-  
+
   - ide-backend-server and dependencies (including alex/happy)
 
 * Create package DB for snippets (the "snippet DB")
@@ -239,7 +240,7 @@ only a few minor differences, explained when they come up.
   different instance of the same ghc version may work but you're playing with
   fire).
 
-  To initialize the snippet DB use 
+  To initialize the snippet DB use
 
       ghc-pkg init /Users/dev/env/fpco-patched-7.4/dot-ghc/snippet-db
 
@@ -252,7 +253,7 @@ only a few minor differences, explained when they come up.
   (modifying absolute paths as required, of course).  Clearing the package DB
   is necessary so that we do not rely on any dependencies in the user DB (which
   will not be available when ide-backend-server runs).
-  
+
   You will want to install
 
   - ide-backend/rts (required)
@@ -262,7 +263,9 @@ only a few minor differences, explained when they come up.
     * parallel
     * mtl-2.1.2
     * monads-tf-0.1.0.1
-    * yesod (optional; only required for one test, do not attempt for 7.8 for now)
+    * yesod (optional; only required for one test
+    * yesod-1.2.4 (optional; only required for one test; install with
+      cabal --max-backjumps=-1; do not attempt for 7.8 for now))
 
     You should install these versions and in this order (the test suite is a
     bit finicky; there are some open issues about that; #138, #139).
@@ -278,7 +281,7 @@ long as we specify the right paths:
 
     IDE_BACKEND_EXTRA_PATH_DIRS=~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin \
     IDE_BACKEND_PACKAGE_DB=~/env/fpco-patched-7.4/dot-ghc/snippet-db \
-    dist/build/ghc-errors/ghc-errors 
+    dist/build/ghc-errors/ghc-errors
 
 (These environment variables are translated by the test-suite to the
 corresponding options in SessionConfig, they are *not* part of the ide-backend
@@ -294,22 +297,22 @@ active that contains a stock 7.4 compiler (fpco-stock-7.4 will do).
 ghc 7.4
 -------
 
-* Get ghc from fpco; in ~/env/fpco-patched-7.4/local/src, run 
+* Get ghc from fpco; in ~/env/fpco-patched-7.4/local/src, run
 
       git clone git@github.com:fpco/ghc
 
 * Go to the ghc directory, and checkout the ide-backend branch of 7.4.2:
 
-      git checkout ide-backend-experimental
+      git checkout ide-backend-experimental-74
 
-* Get the 7.4.2 release of the core libraries: 
+* Get the 7.4.2 release of the core libraries:
 
       ./sync-all --no-dph -r git://git.haskell.org get
       ./sync-all checkout -b ghc-7.4.2 ghc-7.4.2-release
 
 * Make sure we're still in the experimental branch of ghc:
-  
-      git checkout ide-backend-experimental
+
+      git checkout ide-backend-experimental-74
 
 * Create build.mk
 
@@ -322,7 +325,7 @@ ghc 7.4
   and make sure haddocks get built by setting
 
       HADDOCK_DOCS = YES
- 
+
   in the section for the "quick" build flavour (make sure there are no trailing
   spaces in your build.mk).
 
@@ -348,7 +351,7 @@ out the latest version of the core libraries (TODO: ideally, we'd be using a
 specific snapshot, but this is made a bit awkward by the fact that ghc does not
 make proper use of git subrepos).
 
-* Get ghc from fpco; in ~/env/fpco-patched-7.8/local/src, run 
+* Get ghc from fpco; in ~/env/fpco-patched-7.8/local/src, run
 
       git clone git@github.com:fpco/ghc
 
@@ -356,7 +359,7 @@ make proper use of git subrepos).
 
       git checkout ide-backend-experimental-78
 
-* Get the latest version of the core libraries: 
+* Get the latest version of the core libraries:
 
       ./sync-all --no-dph -r git://git.haskell.org get
 
@@ -371,7 +374,7 @@ make proper use of git subrepos).
   and make sure haddocks get built by setting
 
       HADDOCK_DOCS = YES
- 
+
   in the section for the "quick" build flavour (make sure there are no trailing
   spaces in your build.mk).
 
