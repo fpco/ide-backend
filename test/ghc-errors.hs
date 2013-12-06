@@ -2772,7 +2772,7 @@ syntheticTests =
 
         autocomplete <- getAutocompletion session
         let completeTru = autocomplete (Text.pack "A") "Tru"
-        assertEqual "" "[True (DataName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)]" (show completeTru)
+        assertEqual "" (ignoreVersions "[True (DataName) defined in ghc-prim-0.2.0.0:GHC.Types at <wired into compiler> (home base-4.5.1.0:Data.Bool) (wired in to the compiler)]") (ignoreVersions $ show completeTru)
     )
   , ( "Autocomplete 4: fpco issue #2518"
     , withSession (withOpts ["-XPackageImports"]) $ \session -> do
@@ -3119,9 +3119,9 @@ syntheticTests =
         assertNoErrors session
 
         deps <- getPkgDeps session
-        assertEqual "" "Just [base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]" (show (deps (Text.pack "A")))
-        assertEqual "" "Just [parallel-3.2.0.4,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]" (show (deps (Text.pack "B")))
-        assertEqual "" "Just [mtl-2.1.2,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0,transformers-0.3.0.0]" (show (deps (Text.pack "C")))
+        assertEqual "" (ignoreVersions "Just [base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]") (ignoreVersions $ show (deps (Text.pack "A")))
+        assertEqual "" (ignoreVersions "Just [parallel-3.2.0.4,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0]") (ignoreVersions $ show (deps (Text.pack "B")))
+        assertEqual "" (ignoreVersions "Just [mtl-2.1.2,base-4.5.1.0,ghc-prim-0.2.0.0,integer-gmp-0.4.0.0,transformers-0.3.0.0]") (ignoreVersions $ show (deps (Text.pack "C")))
      )
   , ( "Set command line arguments"
     , withSession defaultSessionConfig $ \session -> do
