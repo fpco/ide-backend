@@ -213,10 +213,6 @@ only a few minor differences, explained when they come up.
   - remember to do "cabal update", since very new versions of packages
     are needed for 7.8
   - update alex and happy to the newest version on hackage
-  - install pretty-show; it does not currently compile from hackage with 7.8,
-    due to happy output included in the sources. One either needs to clone
-    from github (https://github.com/yav/pretty-show) and then do cabal clea
-    or use hackage and do cabal-local-upack and cabal-clean
   - ide-backend/vendor/binary (binary-ide-backend)
     (make sure to ghc-pkg hide binary-ide-backend)
   - haddock from its git repo (http://darcs.haskell.org/haddock.git)
