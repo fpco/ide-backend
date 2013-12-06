@@ -4051,7 +4051,7 @@ syntheticTests =
 
           , "main :: IO ()"
           , "main = do"
-          , "    (_,Just maybeOut,_,pr) <- createProcess $ CreateProcess"
+          , "    (_,Just maybeOut,_,pr) <- createProcess $ (shell \"foo\")"
           , "        { cmdspec      = ShellCommand \"echo 123\""
           , "        , cwd          = Nothing"
           , "        , env          = Nothing"
