@@ -1881,7 +1881,7 @@ syntheticTests =
         updateSessionD session upd 99
         distDir <- getDistDir session
         licensesErrs <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licensesErrs length" 507 (length licensesErrs)
+        assertBool "licensesErrs length" $ length licensesErrs <= 576
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
         licensesWarns <- readFile $ distDir </> "licenses.stdout"
