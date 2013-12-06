@@ -5389,7 +5389,7 @@ testBufferMode bufferMode =
 filterIdeBackendTest :: BSLC.ByteString -> BSSC.ByteString
 filterIdeBackendTest bsLazy =
   let toStrict = BSSC.concat . BSLC.toChunks  -- not in our old bytestring pkg
-      bs = toStrict bsLazy
+      bs = BSSC.pack $ ignoreVersions $ BSSC.unpack $ toStrict bsLazy
       (bs1, rest1) = BSSC.breakSubstring (BSSC.pack "hs-source-dirs:") bs
       (_, bs2) = BSSC.breakSubstring (BSSC.pack "\n") rest1
   in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
