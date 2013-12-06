@@ -3546,39 +3546,6 @@ syntheticTests =
         updateSessionD session upd2 1
         assertNoErrors session
     )
-  , ( "Module name visible from 2 packages"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package base"
-                        , "-package MonadCatchIO-mtl"
-                        , "-package MonadCatchIO-transformers"
-                        ]
-      in withSession (withOpts packageOpts) $ \session -> do
-        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
-                    [ "{-# LANGUAGE PackageImports #-}"
-                    , "module A where"
-                    , "import Control.Monad.CatchIO"
-                    ])
-        updateSessionD session upd 1
-        assertOneError session
-    )
-  , ( "Module name visible from 2 packages --- w/o configGenerateModInfo"
-    , let packageOpts = [ "-hide-all-packages"
-                        , "-package base"
-                        , "-package MonadCatchIO-mtl"
-                        , "-package MonadCatchIO-transformers"
-                        ]
-          config      = defaultSessionConfig {
-                            configGenerateModInfo = False
-                          , configStaticOpts      = packageOpts
-                          }
-      in withSession config $ \session -> do
-        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
-                    [ "module A where"
-                    , "import Control.Monad.CatchIO"
-                    ])
-        updateSessionD session upd 1
-        assertOneError session
-    )
   , ( "Module name visible from 2 packages --- picked from monads-tf"
     , let packageOpts = [ "-hide-all-packages"
                         , "-package base"
