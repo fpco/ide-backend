@@ -85,8 +85,8 @@ instance ExceptionMonad IO where
 instance ExceptionMonad IO where
   gcatch    = catch
   gmask f   = mask (\x -> f x)
-  gblock    = block
-  gunblock  = unblock
+  gblock    = undefined
+  gunblock  = undefined
 #endif
 
 gtry :: (ExceptionMonad m, Exception e) => m a -> m (Either e a)

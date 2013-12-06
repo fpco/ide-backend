@@ -533,10 +533,10 @@ syntheticTests =
         let update = updateSourceFile "M.hs" ( BSLC.pack $ unlines
               [ "module M where"
               , "#include \"cabal_macros.h\""
-              , "main = print $ VERSION_base == \"foo\""
+              , "main = print $ MY_VERSION_base == \"foo\""
               ])
               <> updateSourceFile "cabal_macros.h" (BSLC.pack $ unlines
-              [ "#define VERSION_base \"4.5.1.0\""
+              [ "#define MY_VERSION_base \"4.5.1.0\""
               ])
         updateSessionD session (update <> updateCodeGeneration True) 1
         assertNoErrors session
@@ -1211,7 +1211,7 @@ syntheticTests =
                     , "loop = loop"
                     ])
         updateSessionD session upd 1
-        assertSourceErrors' session ["Warning: Top-level binding with no type signature"]
+        assertSourceErrors' session ["Top-level binding with no type signature"]
 
         msgs1 <- getSourceErrors session
         _ract <- runStmt session "M" "loop"

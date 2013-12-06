@@ -153,7 +153,7 @@ import System.Directory
     , findExecutable )
 import System.Environment
     ( getProgName )
-import System.Cmd
+import System.Process
     ( rawSystem )
 import System.Exit
     ( exitWith, ExitCode(..) )
@@ -192,7 +192,7 @@ import System.Process (runProcess)
 import Control.Concurrent (forkIO)
 import System.Process (runInteractiveProcess, waitForProcess)
 #else
-import System.Cmd (system)
+import System.Process (system)
 import System.Directory (getTemporaryDirectory)
 #endif
 
