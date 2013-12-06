@@ -209,6 +209,13 @@ only a few minor differences, explained when they come up.
   necessary anymore to install haddock, async, data-accessor in special ways)
   
   - Branch "ide-backend-experimental-78" of ghc (see instructions below)
+  - make sure to use the newest cabal, since 7.8 requires dynamic libraries
+  - remember to do "cabal update", since very new versions of packages
+    are needed for 7.8
+  - update alex and happy to the newest version on hackage
+  - package pretty-show does not currently compile from hackage with 7.8,
+    due to happy output included in the sources. One either needs to clone 
+    from github and cabal clean or cabal-local-upack and cabal-clean.
   - ide-backend/vendor/binary (binary-ide-backend)
     (make sure to ghc-pkg hide binary-ide-backend)
   - haddock from its git repo (http://darcs.haskell.org/haddock.git)
@@ -252,11 +259,10 @@ only a few minor differences, explained when they come up.
   - the test suite requires the following packages (you might of course want to
     use a separate snippet DB for the test suite:)
 
-    * parallel-3.2.0.3
-    * MonadCatchIO-transformers-0.3.0.0
-    * MonadCatchIO-mtl-0.3.0.5
+    * parallel
     * mtl-2.1.2
-    * yesod (optional; only required for one test)
+    * monads-tf-0.1.0.1
+    * yesod (optional; only required for one test, do not attempt for 7.8 for now)
 
     You should install these versions and in this order (the test suite is a
     bit finicky; there are some open issues about that; #138, #139).
