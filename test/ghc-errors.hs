@@ -5179,7 +5179,7 @@ assertErrorOneOf (SourceError _ loc actual) potentialExpected =
           Left "Expected location"
 
     matchesError expectedErr =
-      if expectedErr `isInfixOf` Text.unpack actual
+      if ignoreQuotes expectedErr `isInfixOf` ignoreQuotes (Text.unpack actual)
         then Right ()
         else Left $ "Unexpected error: " ++ Text.unpack actual
 
@@ -5470,3 +5470,10 @@ ignoreVersions s = subRegex (mkRegex versionRegexp) s "X.Y.Z"
   where
     versionRegexp :: String
     versionRegexp = "[0-9]+(\\.[0-9]+)+"
+
+-- | Replace everything that looks like a version number by @X.Y.Z@
+ignoreQuotes :: String -> String
+ignoreQuotes s = subRegex (mkRegex versionRegexp) s "'"
+  where
+    versionRegexp :: String
+    versionRegexp = "[‛’`\"]"
