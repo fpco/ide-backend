@@ -670,7 +670,7 @@ instance FoldId id => Fold (LTyClDecl id) where
                              tcdTyVars
                              tcdDataDefn
                             _tcdFVs)) = astMark alg (Just span) "DataDecl" $ do
-    foldId alg tcdLName DefSite
+    -- foldId alg tcdLName DefSite -- FIXME (#8607)
     fold alg tcdTyVars
     fold alg tcdDataDefn
   fold alg (L span decl@(ClassDecl {})) = astMark alg (Just span) "ClassDecl" $ do

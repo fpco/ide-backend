@@ -1976,7 +1976,8 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (2,6,2,7) "T" TcClsName "" "main:A" "A.hs@2:6-2:7" "" "binding occurrence"
+        -- Here and elsewhere: we temporarily disabled id info for ADT type names (#8607)
+        -- FIXME assertIdInfo idInfo "A" (2,6,2,7) "T" TcClsName "" "main:A" "A.hs@2:6-2:7" "" "binding occurrence"
         assertIdInfo idInfo "A" (2,10,2,13) "MkT" DataName "T" "main:A" "A.hs@2:10-2:13" "" "binding occurrence"
     )
   , ( "Type information 3: Polymorphism"
@@ -2002,7 +2003,7 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (2,6,2,12) "TMaybe" TcClsName "" "main:A" "A.hs@2:6-2:12" "" "binding occurrence"
+        -- FIXME assertIdInfo idInfo "A" (2,6,2,12) "TMaybe" TcClsName "" "main:A" "A.hs@2:6-2:12" "" "binding occurrence"
         assertIdInfo idInfo "A" (2,13,2,14) "a" TvName "" "main:A" "A.hs@2:13-2:14" "" "binding occurrence"
         assertIdInfo idInfo "A" (2,17,2,25) "TNothing" DataName "TMaybe a" "main:A" "A.hs@2:17-2:25" "" "binding occurrence"
         assertIdInfo idInfo "A" (2,28,2,33) "TJust" DataName "a -> TMaybe a" "main:A" "A.hs@2:28-2:33" "" "binding occurrence"
@@ -2055,7 +2056,7 @@ syntheticTests =
         updateSessionD session upd 2
         assertNoErrors session
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (2,6,2,7) "T" TcClsName "" "main:A" "A.hs@2:6-2:7" "" "binding occurrence"
+        -- FIXME assertIdInfo idInfo "A" (2,6,2,7) "T" TcClsName "" "main:A" "A.hs@2:6-2:7" "" "binding occurrence"
         assertIdInfo idInfo "A" (2,10,2,13) "MkT" DataName "T" "main:A" "A.hs@2:10-2:13" "" "binding occurrence"
         assertIdInfo idInfo "B" (3,1,3,4) "foo" VarName "T" "main:B" "B.hs@3:1-3:4" "" "binding occurrence"
         assertIdInfo idInfo "B" (3,7,3,10) "MkT" DataName "T" "main:A" "A.hs@2:10-2:13" "" "imported from main:A at B.hs@2:1-2:9"
@@ -2095,8 +2096,9 @@ syntheticTests =
         assertIdInfo idInfo "A" (3,10,3,16) "pseq" VarName "a -> b -> b" "parallel-3.2.0.3:Control.Parallel" "<no location info>" "parallel-3.2.0.3:Control.Parallel" "imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24"
         assertIdInfo idInfo "A" (3,17,3,22) "False" DataName "" "ghc-prim-0.2.0.0:GHC.Types" "<wired into compiler>" "base-4.5.1.0:Data.Bool" "wired in to the compiler"
         assertIdInfo idInfo "A" (4,1,4,2) "f" VarName "a -> a" "main:A" "A.hs@5:1-5:2" "" "defined locally"
-        assertIdInfo idInfo "A" (4,6,4,7) "a" TvName "" "main:A" "A.hs@4:6-4:7" "" "defined locally"
-        assertIdInfo idInfo "A" (4,11,4,12) "a" TvName "" "main:A" "A.hs@4:6-4:7" "" "defined locally"
+        -- GHC 7.4 reports the first occurrence of 'a' as the def site; 7.7 reports the entire type sig
+        -- FIXME assertIdInfo idInfo "A" (4,6,4,7) "a" TvName "" "main:A" "A.hs@4:6-4:7" "" "defined locally"
+        -- FIXME assertIdInfo idInfo "A" (4,11,4,12) "a" TvName "" "main:A" "A.hs@4:6-4:7" "" "defined locally"
         assertIdInfo idInfo "A" (5,1,5,2) "f" VarName "a -> a" "main:A" "A.hs@5:1-5:2" "" "binding occurrence"
         assertIdInfo idInfo "A" (5,3,5,4) "x" VarName "a" "main:A" "A.hs@5:3-5:4" "" "binding occurrence"
         assertIdInfo idInfo "A" (5,7,5,8) "x" VarName "a" "main:A" "A.hs@5:3-5:4" "" "defined locally"
@@ -2445,7 +2447,9 @@ syntheticTests =
         assertIdInfo idInfo "A" (4,10,4,12) "Eq" TcClsName "" "ghc-prim-0.2.0.0:GHC.Classes" "<no location info>" "base-4.5.1.0:Data.Eq" "imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9"
         assertIdInfo idInfo "A" (5,18,5,23) "const" VarName "a -> b -> a" "base-4.5.1.0:GHC.Base" "<no location info>" "base-4.5.1.0:Prelude" "imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9"
         assertIdInfo idInfo "A" (6,19,6,23) "Show" TcClsName "" "base-4.5.1.0:GHC.Show" "<no location info>" "base-4.5.1.0:Text.Show" "imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9"
-        assertIdInfo idInfo "A" (6,24,6,27) "MkT" TcClsName "" "main:A" "A.hs@3:6-3:9" "" "defined locally"
+        -- GHC 7.4 reports the location of MkT type name as the location, while
+        -- GHC 7.7 reports the location of the entire type definition
+        -- FIXME assertIdInfo idInfo "A" (6,24,6,27) "MkT" TcClsName "" "main:A" "A.hs@3:6-3:9" "" "defined locally"
         assertIdInfo idInfo "A" (8,10,8,13) "+++" VarName "[a] -> [a] -> [a]" "main:A" "A.hs@7:1-7:6" "" "defined locally"
         assertIdInfo idInfo "A" (9,10,9,13) "Int" TcClsName "" "ghc-prim-0.2.0.0:GHC.Types" "<wired into compiler>" "base-4.5.1.0:Data.Int" "wired in to the compiler"
         assertIdInfo idInfo "A" (17,13,17,14) "x" VarName "Int" "main:A" "A.hs@17:3-17:4" "" "defined locally"
@@ -2504,11 +2508,14 @@ syntheticTests =
         assertNoErrors session
         idInfo <- getSpanInfo session
         -- TODO: we get very strange types for some of the constructors
-        assertIdInfo idInfo "A" (4,3,4,6) "Num" DataName "GHC.Prim.~# * ($a) Int -> Int -> Expr ($a)" "main:A" "A.hs@4:3-4:6" "" "binding occurrence"
+        -- FIXME: We get this weird type only in 7.4. In 7.7 we get something else
+        -- assertIdInfo idInfo "A" (4,3,4,6) "Num" DataName "GHC.Prim.~# * ($a) Int -> Int -> Expr ($a)" "main:A" "A.hs@4:3-4:6" "" "binding occurrence"
         assertIdInfo idInfo "A" (4,23,4,26) "Int" TcClsName "" "ghc-prim-0.2.0.0:GHC.Types" "<wired into compiler>" "base-4.5.1.0:Data.Int" "wired in to the compiler"
         assertIdInfo idInfo "A" (7,3,7,7) "Cond" DataName "Expr Bool -> Expr a -> Expr a -> Expr a" "main:A" "A.hs@7:3-7:7" "" "binding occurrence"
         assertIdInfo idInfo "A" (7,18,7,19) "a" TvName "" "main:A" "A.hs@7:18-7:19" "" "binding occurrence"
-        assertIdInfo idInfo "A" (7,54,7,58) "Expr" TcClsName "" "main:A" "A.hs@3:6-3:10" "" "defined locally"
+        -- GHC 7.4 reports the location of 'Expr', while 7.7 reports the site of the entire definition
+        -- Note that this happens only for GADTs, not for regular ADTs
+        -- FIXME assertIdInfo idInfo "A" (7,54,7,58) "Expr" TcClsName "" "main:A" "A.hs@3:6-3:10" "" "defined locally"
         assertIdInfo idInfo "A" (7,59,7,60) "a" TvName "" "main:A" "A.hs@7:18-7:19" "" "defined locally"
     )
   , ( "Type information 18: Other types"
@@ -2533,9 +2540,13 @@ syntheticTests =
         idInfo <- getSpanInfo session
         -- TODO: we don't get location info for the fundeps
         -- (this is missing from GHC's AST)
-        assertIdInfo idInfo "A" (3,7,3,8) "C" TcClsName "" "main:A" "A.hs@3:7-3:8" "" "binding occurrence"
-        assertIdInfo idInfo "A" (3,9,3,10) "a" TvName "" "main:A" "A.hs@3:9-3:10" "" "binding occurrence"
-        assertIdInfo idInfo "A" (4,3,4,4) "f" VarName "" "main:A" "A.hs@4:3-4:4" "" "defined locally"
+        -- GHC 7.4 reports 'C' as the defsite, while 7.7 reports the
+        -- entire class definition
+        -- FIXME assertIdInfo idInfo "A" (3,7,3,8) "C" TcClsName "" "main:A" "A.hs@3:7-3:8" "" "binding occurrence"
+        -- See above: type vars without an explicit forall are reported differently in different versions of ghc
+        -- FIXME assertIdInfo idInfo "A" (3,9,3,10) "a" TvName "" "main:A" "A.hs@3:9-3:10" "" "binding occurrence"
+        -- GHC 7.7 reports the entire class definition as the defsite for f. (I would consider that a ghc bug)
+        -- FIXME assertIdInfo idInfo "A" (4,3,4,4) "f" VarName "" "main:A" "A.hs@4:3-4:4" "" "defined locally"
         assertIdInfo idInfo "A" (4,8,4,11) "Int" TcClsName "" "ghc-prim-0.2.0.0:GHC.Types" "<wired into compiler>" "base-4.5.1.0:Data.Int" "wired in to the compiler"
         assertIdInfo idInfo "A" (4,15,4,16) "a" TvName "" "main:A" "A.hs@3:9-3:10" "" "defined locally"
         assertIdInfo idInfo "A" (5,7,5,8) "D" TcClsName "" "main:A" "A.hs@5:7-5:8" "" "binding occurrence"
@@ -5123,7 +5134,8 @@ assertIdInfo' idInfo
     case idInfo (Text.pack mod) givenSpan of
       (actualSpan, SpanId actualInfo) : _ -> compareIdInfo actualSpan actualInfo
       (actualSpan, SpanQQ actualInfo) : _ -> compareIdInfo actualSpan actualInfo
-      _ -> assertFailure "No id info found"
+      _ -> assertFailure $ "No id info found for " ++ show expectedName
+                        ++ " at " ++ show mod ++ ":" ++ show givenLocation
   where
     givenSpan, expectedSpan :: SourceSpan
     (_givenMod,    givenSpan)    = mkSpan mod givenLocation
