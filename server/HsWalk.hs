@@ -20,7 +20,7 @@ module HsWalk
 #define DEBUG 0
 
 import Control.Monad (liftM)
-import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
+import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT, local)
 import Control.Monad.State.Class (MonadState(..))
 import Control.Applicative (Applicative, (<$>))
 import Data.Text (Text)
@@ -230,6 +230,9 @@ data ExtractIdsEnv = ExtractIdsEnv {
   , eIdsPprStyle :: !PprStyle
   , eIdsCurrent  :: !Module.Module
   , eIdsLinkEnv  :: !LinkEnv
+#if DEBUG
+  , eIdsStackTrace    :: [String]
+#endif
   }
 
 data ExtractIdsState = ExtractIdsState {
@@ -270,6 +273,18 @@ instance TraceMonad ExtractIdsM where
 instance HasDynFlags ExtractIdsM where
   getDynFlags = asks eIdsDynFlags
 
+#if DEBUG
+debugLog :: FilePath -> String -> ExtractIdsM ()
+debugLog path str = do
+    st <- get
+    put $ go st
+  where
+    go :: a -> a
+    go x = unsafePerformIO $ do
+             appendFile path (str ++ "\n")
+             return x
+#endif
+
 execExtractIdsT :: MonadIO m
                 => DynFlags
                 -> TcGblEnv
@@ -291,11 +306,14 @@ execExtractIdsT dynFlags env idList current (ExtractIdsM m) = do
   let rdrEnv  = tcg_rdr_env env
       qual    = mkPrintUnqualified dynFlags rdrEnv
       eIdsEnv = ExtractIdsEnv {
-                    eIdsDynFlags = dynFlags
-                  , eIdsRdrEnv   = rdrEnv
-                  , eIdsPprStyle = mkUserStyle qual AllTheWay
-                  , eIdsCurrent  = current
-                  , eIdsLinkEnv  = linkEnv
+                    eIdsDynFlags   = dynFlags
+                  , eIdsRdrEnv     = rdrEnv
+                  , eIdsPprStyle   = mkUserStyle qual AllTheWay
+                  , eIdsCurrent    = current
+                  , eIdsLinkEnv    = linkEnv
+#if DEBUG
+                  , eIdsStackTrace = []
+#endif
                   }
       eIdsSt  = ExtractIdsState {
                     eIdsTidyEnv       = emptyTidyEnv
@@ -378,8 +396,7 @@ recordExpType _ Nothing = return Nothing
 ast :: Maybe SrcSpan -> String -> ExtractIdsM a -> ExtractIdsM a
 ast _mspan _info cont = do
 #if DEBUG
-  logIndented _info
-  indent $ do
+  local (\env -> env { eIdsStackTrace = _info : eIdsStackTrace env }) $ do
 #endif
     -- Restore the tideEnv after cont
     stBefore <- get
@@ -387,25 +404,6 @@ ast _mspan _info cont = do
     stAfter  <- get
     put $ stAfter { eIdsTidyEnv = eIdsTidyEnv stBefore }
     return r
-
-#if DEBUG
-astIndent :: StrictIORef Int
-{-# NOINLINE astIndent #-}
-astIndent = unsafePerformIO $ newIORef 0
-
-indent :: ExtractIdsM a -> ExtractIdsM a
-indent act = do
-  oldIndentation <- liftIO $ readIORef astIndent
-  liftIO $ writeIORef astIndent (oldIndentation + 2)
-  result <- act
-  liftIO $ writeIORef astIndent oldIndentation
-  return result
-
-logIndented :: MonadIO m => String -> m ()
-logIndented msg = liftIO $ do
-  indentation <- readIORef astIndent
-  appendFile "/tmp/ghc.log" $ replicate indentation ' ' ++ msg ++ "\n"
-#endif
 
 unsupported :: Maybe SrcSpan -> String -> ExtractIdsM (Maybe Type)
 #if DEBUG

@@ -2224,7 +2224,7 @@ syntheticTests =
         assertNoErrors session
         idInfo <- getSpanInfo session
 
-        let checkPrint span = assertIdInfo idInfo "A" span "print" VarName "Show a => a -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9"
+        let checkPrint span = assertIdInfo' idInfo "A" span (2, 8, 2, 13) "print" VarName "Show a => a -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9"
 
         checkPrint (2,8,2,13)
         checkPrint (2,8,2,8)
@@ -2573,12 +2573,12 @@ syntheticTests =
         updateSessionD session upd1 1
         assertNoErrors session
         do idInfo <- getSpanInfo session
-           assertIdInfo idInfo "Main" (1,14,1,15) "foo" VarName "Integer" "main:Main" "Main.hs@2:1-2:4" "" "defined locally"
+           assertIdInfo idInfo "Main" (1,14,1,17) "foo" VarName "Integer" "main:Main" "Main.hs@2:1-2:4" "" "defined locally"
 
         updateSessionD session upd2 1
         assertNoErrors session
         do idInfo <- getSpanInfo session
-           assertIdInfo idInfo "Main" (1,14,1,15) "foo" VarName "Integer" "main:Main" "Main.hs@3:1-3:4" "" "defined locally"
+           assertIdInfo idInfo "Main" (1,14,1,17) "foo" VarName "Integer" "main:Main" "Main.hs@3:1-3:4" "" "defined locally"
     )
   , ( "Test internal consistency of local id markers"
     , withSession defaultSessionConfig $ \session -> do
@@ -3324,64 +3324,69 @@ syntheticTests =
         update $ updateStdoutBufferMode (RunLineBuffering Nothing)
         update $ updateStderrBufferMode (RunLineBuffering Nothing)
 
-        update $ updMod "Foo.hs"
-            "module Foo where\n\
-            \\n\
-            \import Bar\n\
-            \\n\
-            \foo = bar >> bar\n\
-            \\n\
-            \foobar = putStrLn \"Baz\"\n"
+        update $ updMod "Foo.hs" $ unlines [
+            "module Foo where"
+          , ""
+          , "import Bar"
+          , ""
+          , "foo = bar >> bar"
+          , ""
+          , "foobar = putStrLn \"Baz\""
+          ]
 
-        update $ updMod "Bar.hs"
-            "module Bar where\n\
-            \\n\
-            \bar = putStrLn \"Hello, world!\"\n"
+        update $ updMod "Bar.hs" $ unlines [
+            "module Bar where"
+          , ""
+          , "bar = putStrLn \"Hello, world!\""
+          ]
 
         do gif <- getSpanInfo sess
-           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
+           assertIdInfo gif "Bar" (3, 7, 3, 15) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
 
-        update $ updMod "Baz.hs"
-            "module Baz where\n\
-            \\n\
-            \import Foo\n\
-            \import Bar\n\
-            \\n\
-            \baz = foobar\n"
+        update $ updMod "Baz.hs" $ unlines [
+            "module Baz where"
+          , ""
+          , "import Foo"
+          , "import Bar"
+          , ""
+          , "baz = foobar"
+          ]
 
         assertNoErrors sess
 
         do gif <- getSpanInfo sess
-           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
-           assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar" VarName "IO ()" "main:Foo" "Foo.hs@7:1-7:7" "" "imported from main:Foo at Baz.hs@3:1-3:11"
+           assertIdInfo gif "Bar" (3, 7, 3, 15) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
+           assertIdInfo gif "Baz" (6, 7, 6, 13) "foobar" VarName "IO ()" "main:Foo" "Foo.hs@7:1-7:7" "" "imported from main:Foo at Baz.hs@3:1-3:11"
 
-        update $ updMod "Baz.hs"
-            "module Baz where\n\
-            \\n\
-            \import Foo\n\
-            \import Bar\n\
-            \\n\
-            \baz = foobar >>>> foo >> bar\n"
+        update $ updMod "Baz.hs" $ unlines [
+            "module Baz where"
+          , ""
+          , "import Foo"
+          , "import Bar"
+          , ""
+          , "baz = foobar >>>> foo >> bar"
+          ]
 
         assertOneError sess
 
         do gif <- getSpanInfo sess
-           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
+           assertIdInfo gif "Bar" (3, 7, 3, 15) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
            -- Baz is broken at this point
 
-        update $ updMod "Baz.hs"
-            "module Baz where\n\
-            \\n\
-            \import Foo\n\
-            \import Bar\n\
-            \\n\
-            \baz = foobar >> foo >> bar\n"
+        update $ updMod "Baz.hs" $ unlines [
+            "module Baz where"
+          , ""
+          , "import Foo"
+          , "import Bar"
+          , ""
+          , "baz = foobar >> foo >> bar"
+          ]
 
         assertNoErrors sess
 
         do gif <- getSpanInfo sess
-           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
-           assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar" VarName "IO ()" "main:Foo" "Foo.hs@7:1-7:7" "" "imported from main:Foo at Baz.hs@3:1-3:11"
+           assertIdInfo gif "Bar" (3, 7, 3, 15) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
+           assertIdInfo gif "Baz" (6, 7, 6, 13) "foobar" VarName "IO ()" "main:Foo" "Foo.hs@7:1-7:7" "" "imported from main:Foo at Baz.hs@3:1-3:11"
     )
   , ( "Consistency of multiple modules of the same name"
 {-
@@ -3397,60 +3402,65 @@ syntheticTests =
             update = flip (updateSession sess) cb
             updMod = \mod code -> updateSourceFile mod (BSLC.pack code)
 
-        update $ updMod "Control/Parallel.hs"
-            "module Control.Parallel where\n\
-            \\n\
-            \import Bar\n\
-            \\n\
-            \foo = bar >> bar\n\
-            \\n\
-            \foobar = putStrLn \"Baz\"\n"
+        update $ updMod "Control/Parallel.hs" $ unlines [
+            "module Control.Parallel where"
+          , ""
+          , "import Bar"
+          , ""
+          , "foo = bar >> bar"
+          , ""
+          , "foobar = putStrLn \"Baz\""
+          ]
 
-        update $ updMod "Bar.hs"
-            "module Bar where\n\
-            \\n\
-            \bar = putStrLn \"Hello, world!\"\n"
+        update $ updMod "Bar.hs" $ unlines [
+            "module Bar where"
+          , ""
+          , "bar = putStrLn \"Hello, world!\""
+          ]
 
-        update $ updMod "Baz.hs"
-            "module Baz where\n\
-            \\n\
-            \import Control.Parallel\n\
-            \import Bar\n\
-            \\n\
-            \baz = foobar\n"
+        update $ updMod "Baz.hs" $ unlines [
+            "module Baz where"
+          , ""
+          , "import Control.Parallel"
+          , "import Bar"
+          , ""
+          , "baz = foobar"
+          ]
 
         assertNoErrors sess
 
         do gif <- getSpanInfo sess
-           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
+           assertIdInfo gif "Bar" (3, 7, 3, 15) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
 -- would fail:            assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar" VarName "IO ()" "main:Control.Parallel" "Control/Parallel.hs@7:1-7:7" "" "imported from main:Control.Parallel at Baz.hs@3:1-3:24"
 
-        update $ updMod "Baz.hs"
-            "module Baz where\n\
-            \\n\
-            \import Control.Parallel\n\
-            \import Bar\n\
-            \\n\
-            \baz = foobar >>>> foo >> bar\n"
+        update $ updMod "Baz.hs" $ unlines [
+            "module Baz where"
+          , ""
+          , "import Control.Parallel"
+          , "import Bar"
+          , ""
+          , "baz = foobar >>>> foo >> bar"
+          ]
 
         assertOneError sess
 
         do gif <- getSpanInfo sess
-           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
+           assertIdInfo gif "Bar" (3, 7, 3, 15) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
            -- Baz is broken at this point
 
-        update $ updMod "Baz.hs"
-            "module Baz where\n\
-            \\n\
-            \import Control.Parallel\n\
-            \import Bar\n\
-            \\n\
-            \baz = foobar >> foo >> bar\n"
+        update $ updMod "Baz.hs" $ unlines [
+            "module Baz where"
+          , ""
+          , "import Control.Parallel"
+          , "import Bar"
+          , ""
+          , "baz = foobar >> foo >> bar"
+          ]
 
         assertNoErrors sess
 
         do gif <- getSpanInfo sess
-           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
+           assertIdInfo gif "Bar" (3, 7, 3, 15) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
 -- would fail:           assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar" VarName "IO ()" "main:Control.Parallel" "Control/Parallel.hs@7:1-7:7" "" "imported from main:Control/Parallel at Baz.hs@3:1-3:24"
     )
   , ( "Consistency of multiple modules of the same name: PackageImports"
@@ -3459,34 +3469,37 @@ syntheticTests =
             update = flip (updateSession sess) cb
             updMod = \mod code -> updateSourceFile mod (BSLC.pack code)
 
-        update $ updMod "Control/Parallel.hs"
-            "module Control.Parallel where\n\
-            \\n\
-            \import Bar\n\
-            \\n\
-            \foo = bar >> bar\n\
-            \\n\
-            \par = putStrLn \"Baz\"\n"
+        update $ updMod "Control/Parallel.hs" $ unlines [
+            "module Control.Parallel where"
+          , ""
+          , "import Bar"
+          , ""
+          , "foo = bar >> bar"
+          , ""
+          , "par = putStrLn \"Baz\""
+          ]
 
-        update $ updMod "Bar.hs"
-            "module Bar where\n\
-            \\n\
-            \bar = putStrLn \"Hello, world!\"\n"
+        update $ updMod "Bar.hs" $ unlines [
+            "module Bar where"
+          , ""
+          , "bar = putStrLn \"Hello, world!\""
+          ]
 
-        update $ updMod "Baz.hs"
-            "{-# LANGUAGE PackageImports #-}\n\
-            \module Baz where\n\
-            \\n\
-            \import \"parallel\" Control.Parallel\n\
-            \import Bar\n\
-            \\n\
-            \baz = par\n"
+        update $ updMod "Baz.hs" $ unlines [
+            "{-# LANGUAGE PackageImports #-}"
+          , "module Baz where"
+          , ""
+          , "import \"parallel\" Control.Parallel"
+          , "import Bar"
+          , ""
+          , "baz = par"
+          ]
 
         assertNoErrors sess
 
         do gif <- getSpanInfo sess
-           assertIdInfo gif "Bar" (3, 8, 3, 9) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
-           assertIdInfo gif "Baz" (7, 8, 7, 9) "par" VarName "a1 -> b1 -> b1" "parallel-X.Y.Z:Control.Parallel" "<no location info>" "parallel-X.Y.Z:Control.Parallel" "imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35"
+           assertIdInfo gif "Bar" (3, 7, 3, 15) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
+           assertIdInfo gif "Baz" (7, 7, 7, 10) "par" VarName "a1 -> b1 -> b1" "parallel-X.Y.Z:Control.Parallel" "<no location info>" "parallel-X.Y.Z:Control.Parallel" "imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35"
     )
   , ( "Quickfix for Updating static files never triggers recompilation"
     , withSession defaultSessionConfig $ \session -> do
@@ -3598,7 +3611,7 @@ syntheticTests =
           ]
 
         idInfo <- getSpanInfo session
-        assertIdInfo idInfo "A" (4,5,4,6) "runCont" VarName "Cont r1 a1 -> (a1 -> r1) -> r1" "transformers-X.Y.Z:Control.Monad.Trans.Cont" "<no location info>" "monads-tf-X.Y.Z:Control.Monad.Cont" "imported from monads-tf-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:38"
+        assertIdInfo idInfo "A" (4,5,4,12) "runCont" VarName "Cont r1 a1 -> (a1 -> r1) -> r1" "transformers-X.Y.Z:Control.Monad.Trans.Cont" "<no location info>" "monads-tf-X.Y.Z:Control.Monad.Cont" "imported from monads-tf-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:38"
     )
   , ( "Module name visible from 2 packages --- picked from mtl (expected failure)"
     , let packageOpts = [ "-hide-all-packages"
@@ -3654,7 +3667,7 @@ syntheticTests =
         idInfo <- getSpanInfo session
         -- TODO: This wrong; notice the incorrect reference to monads-tf in the
         -- "imported from" clause. See #95.
-        assertIdInfo idInfo "A" (4,5,4,6) "runCont" VarName "Cont r1 a1 -> (a1 -> r1) -> r1" "transformers-X.Y.Z:Control.Monad.Trans.Cont" "<no location info>" "mtl-X.Y.Z:Control.Monad.Cont" "imported from monads-tf-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:32"
+        assertIdInfo idInfo "A" (4,5,4,12) "runCont" VarName "Cont r1 a1 -> (a1 -> r1) -> r1" "transformers-X.Y.Z:Control.Monad.Trans.Cont" "<no location info>" "mtl-X.Y.Z:Control.Monad.Cont" "imported from monads-tf-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:32"
     )
   , ("Issue #119"
     , withSession defaultSessionConfig $ \sess -> do
@@ -5072,13 +5085,53 @@ assertIdInfo idInfo
              expectedDefSpan
              expectedHome
              expectedScope =
-    case idInfo (Text.pack mod) span of
-      (_span, SpanId actual) : _ -> compareIdInfo actual
-      (_span, SpanQQ actual) : _ -> compareIdInfo actual
+  assertIdInfo' idInfo
+                mod
+                (frLine, frCol, toLine, toCol)
+                (frLine, frCol, toLine, toCol)
+                expectedName
+                expectedNameSpace
+                expectedType
+                expectedDefModule
+                expectedDefSpan
+                expectedHome
+                expectedScope
+
+assertIdInfo' :: (ModuleName -> SourceSpan -> [(SourceSpan, SpanInfo)])
+              -> String                -- ^ Module
+              -> (Int, Int, Int, Int)  -- ^ Location
+              -> (Int, Int, Int, Int)  -- ^ Precise location
+              -> String                -- ^ Name
+              -> IdNameSpace           -- ^ Namespace
+              -> String                -- ^ Type
+              -> String                -- ^ Defining module
+              -> String                -- ^ Defining span
+              -> String                -- ^ Home module
+              -> String                -- ^ Scope
+              -> Assertion
+assertIdInfo' idInfo
+              mod
+              givenLocation
+              expectedLocation
+              expectedName
+              expectedNameSpace
+              expectedType
+              expectedDefModule
+              expectedDefSpan
+              expectedHome
+              expectedScope =
+    case idInfo (Text.pack mod) givenSpan of
+      (actualSpan, SpanId actualInfo) : _ -> compareIdInfo actualSpan actualInfo
+      (actualSpan, SpanQQ actualInfo) : _ -> compareIdInfo actualSpan actualInfo
       _ -> assertFailure "No id info found"
   where
-    compareIdInfo :: IdInfo -> Assertion
-    compareIdInfo IdInfo{idProp = IdProp{..}, idScope} = do
+    givenSpan, expectedSpan :: SourceSpan
+    (_givenMod,    givenSpan)    = mkSpan mod givenLocation
+    (_expectedMod, expectedSpan) = mkSpan mod expectedLocation
+
+    compareIdInfo :: SourceSpan -> IdInfo -> Assertion
+    compareIdInfo actualSpan IdInfo{idProp = IdProp{..}, idScope} = do
+      assertEqual "location"   expectedSpan      actualSpan
       assertEqual "name"       expectedName      (Text.unpack idName)
       assertEqual "namespace"  expectedNameSpace idSpace
       assertEqual "def span"   expectedDefSpan   (show idDefSpan)
@@ -5097,14 +5150,6 @@ assertIdInfo idInfo
         Nothing         -> assertEqual "home" expectedHome ""
         Just actualHome -> assertEqual "home" (ignoreVersions expectedHome)
                                               (ignoreVersions (show actualHome))
-
-    span :: SourceSpan
-    span = SourceSpan { spanFilePath   = mod ++ ".hs"
-                      , spanFromLine   = frLine
-                      , spanFromColumn = frCol
-                      , spanToLine     = toLine
-                      , spanToColumn   = toCol
-                      }
 
 assertExpTypes :: (ModuleName -> SourceSpan -> [(SourceSpan, Text)])
                -> String
