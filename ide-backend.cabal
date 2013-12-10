@@ -81,7 +81,7 @@ library
                       time                 >= 1.4     && < 1.5,
                       template-haskell,
                       -- our own private fork:
-                      Cabal-ide-backend    == 1.16.0.3.1,
+                      Cabal-ide-backend    >= 1.18,
                       ghc-prim,
                       pretty-show
 
