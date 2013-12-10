@@ -51,7 +51,8 @@ import qualified Distribution.Simple.Haddock as Haddock
 import Distribution.Simple (PackageDB(..), PackageDBStack)
 import qualified Distribution.Simple.Compiler as Simple.Compiler
 import Distribution.Simple.Configure (configure)
-import Distribution.Simple.GHC (getInstalledPackages, componentCcGhcOptions)
+import Distribution.Simple.GHC (getInstalledPackages, componentCcGhcOptions,
+                                ghcDynamic)
 import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo (..)
                                           , ComponentLocalBuildInfo (..)
                                           , localPkgDescr)
@@ -61,13 +62,16 @@ import qualified Distribution.Simple.Setup as Setup
 import qualified Distribution.Simple.Program as Cabal.Program
 import Distribution.Simple.Program.Builtin (ghcPkgProgram)
 import Distribution.Simple.Program.Db (configureAllKnownPrograms, requireProgram)
-import Distribution.Simple.Program.GHC (GhcOptions(..), runGHC)
+import Distribution.Simple.Program.GHC (GhcDynLinkMode(..), GhcOptions(..),
+                                        runGHC)
 import qualified Distribution.Simple.Program.HcPkg as HcPkg
+import Distribution.System (buildPlatform)
 import qualified Distribution.Text
 import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
 import Distribution.Version (anyVersion, thisVersion)
 import Distribution.Verbosity (silent)
-import Language.Haskell.Extension (Language (Haskell2010))
+import Language.Haskell.Extension (Extension(..), KnownExtension(..),
+                                   Language (Haskell2010))
 import Language.Haskell.TH.Syntax (lift, runIO)
 
 import IdeSession.GHC.API (cExtensions, cHeaderExtensions)
@@ -132,6 +136,7 @@ pkgDescFromName pkgName version = PackageDescription
   , dataDir        = ""  -- for now we don't put ideDataDir?
   , extraSrcFiles  = []
   , extraTmpFiles  = []
+  , extraDocFiles  = []
   }
 
 pkgDesc :: PackageDescription
@@ -745,13 +750,10 @@ localBuildInfo withPackageDB configExtraPathDirs = LocalBuildInfo
   , configFlags = undefined
   , extraConfigArgs = undefined
   , installDirTemplates = undefined
+  , hostPlatform = buildPlatform
   , buildDir = undefined
   , scratchDir = undefined
-  , libraryConfig = undefined
-  , executableConfigs = undefined
-  , compBuildOrder = undefined
-  , testSuiteConfigs = undefined
-  , benchmarkConfigs = undefined
+  , componentsConfigs = undefined
   , installedPkgs = undefined
   , pkgDescrFile = undefined
   , localPkgDescr = undefined
@@ -780,21 +782,24 @@ runComponentCc configPackageDBStack configExtraPathDirs
       libBi = emptyBuildInfo
                 -- of these, only includeDirs and ccOptions are used,
                 -- but we don't set them for GHC API so far
-      clbi = ComponentLocalBuildInfo []
+      clbi = LibComponentLocalBuildInfo [] []
                -- a stub, this would be expensive (lookups in pkgIndex);
                -- TODO: is it needed? e.g., for C calling into Haskell?
       vanillaCcOpts = (componentCcGhcOptions verbosity lbi
-                         libBi clbi pref absC) `mappend` mempty {
-                        ghcOptProfilingMode = Setup.toFlag (withProfLib lbi)
-                      , -- ghc ignores -odir for .o files coming from .c files
+                         libBi clbi pref absC)`mappend` mempty {
+                        -- ghc ignores -odir for .o files coming from .c files
                         ghcOptExtra = ["-o", absObj]
                       }
-      sharedCcOpts  = vanillaCcOpts `mappend` mempty {
-                        ghcOptFPic      = Setup.toFlag True,
-                        ghcOptDynamic   = Setup.toFlag True,
-                        ghcOptObjSuffix = Setup.toFlag "dyn_o"
-                      , ghcOptExtra = ["-o", replaceExtension absObj "dyn_o"]
+      profCcOpts    = vanillaCcOpts `mappend` mempty {
+                        ghcOptProfilingMode = Setup.toFlag True,
+                        ghcOptObjSuffix     = Setup.toFlag "p_o"
                       }
+      sharedCcOpts   = vanillaCcOpts `mappend` mempty {
+                         ghcOptFPic        = Setup.toFlag True,
+                         ghcOptDynLinkMode = Setup.toFlag GhcDynamicOnly,
+                         ghcOptObjSuffix   = Setup.toFlag "dyn_o",
+                         ghcOptExtra = ["-o", replaceExtension absObj "dyn_o"]
+                       }
       odir          = Setup.fromFlag (ghcOptObjDir vanillaCcOpts)
 
   let stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
@@ -812,8 +817,16 @@ runComponentCc configPackageDBStack configExtraPathDirs
                           verbosity Cabal.Program.ghcProgram (withPrograms lbi)
         let runGhcProg = runGHC verbosity ghcProg
         runGhcProg vanillaCcOpts
-        let ifSharedLib = when (withSharedLib lbi)
-        ifSharedLib (runGhcProg sharedCcOpts))
+
+        isGhcDynamic <- ghcDynamic minBound ghcProg
+        let doingTH = EnableExtension TemplateHaskell `elem` allExtensions libBi  -- TODO
+            forceSharedLib = doingTH && isGhcDynamic
+            -- TH always needs default libs, even when building for profiling
+            whenProfLib = when (withProfLib lbi)
+            whenSharedLib forceShared = when (forceShared || withSharedLib lbi)
+
+        whenSharedLib forceSharedLib (runGhcProg sharedCcOpts)
+        whenProfLib (runGhcProg profCcOpts))
   sout <- readFile stdoutLog
   serr <- readFile stderrLog
   let exitC = either id (const ExitSuccess) exitCode
