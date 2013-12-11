@@ -400,7 +400,10 @@ instance FoldId id => Fold (LHsExpr id) where
     astExpType alg span (ifPostTc (undefined :: id) (hsLitType lit))
   fold alg (L span (HsLam matches@(MG _ mg_arg_tys mg_res_ty))) = astMark alg (Just span) "HsLam" $ do
     fold alg matches
-    -- FIXME astExpType alg span (ifPostTc (undefined :: id) postTcType)
+    let lamTy = do arg_tys <- sequence $ map (ifPostTc (undefined :: id)) mg_arg_tys
+                   res_ty  <- ifPostTc (undefined :: id) mg_res_ty
+                   return (mkFunTys arg_tys res_ty)
+    astExpType alg span lamTy
   fold alg (L span (HsDo _ctxt stmts postTcType)) = astMark alg (Just span) "HsDo" $ do
     -- ctxt indicates what kind of statement it is; AFAICT there is no
     -- useful information in it for us
@@ -418,10 +421,10 @@ instance FoldId id => Fold (LHsExpr id) where
       Just postTcExpr -> do
         conTy <- fold alg (L (getLoc con) postTcExpr)
         astExpType alg span (funResN <$> conTy)
-  fold alg (L span (HsCase expr matches@(MG _ mg_arg_tys mg_res_ty))) = astMark alg (Just span) "HsCase" $ do
+  fold alg (L span (HsCase expr matches@(MG _ _mg_arg_tys mg_res_ty))) = astMark alg (Just span) "HsCase" $ do
     fold alg expr
     fold alg matches
-    -- FIXME astExpType alg span (funRes1 <$> ifPostTc (undefined :: id) postTcType)
+    astExpType alg span (ifPostTc (undefined :: id) mg_res_ty)
   fold alg (L span (ExplicitTuple args boxity)) = astMark alg (Just span) "ExplicitTuple" $ do
     argTys <- mapM (fold alg) args
     astExpType alg span (mkTupleTy (boxityNormalTupleSort boxity) <$> sequence argTys)
