@@ -55,6 +55,8 @@ cHeaderExtensions = [".h"]
 sourceExtensions :: [FilePath]
 sourceExtensions = cHeaderExtensions ++ cExtensions ++ hsExtensions
 
+-- TODO: perhaps create dist/build/autogen and put macros there so that
+-- Cabal.autogenModulesDir can use it for compilation of C files?
 cabalMacrosLocation :: FilePath -> FilePath
 cabalMacrosLocation ideDistDir = ideDistDir </> "cabal_macros.h"
 

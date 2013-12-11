@@ -738,8 +738,8 @@ defaultProgramConfiguration configExtraPathDirs =
     : map Cabal.Program.ProgramSearchPathDir configExtraPathDirs )
   Cabal.Program.defaultProgramConfiguration
 
-localBuildInfo :: PackageDBStack -> [FilePath] -> LocalBuildInfo
-localBuildInfo withPackageDB configExtraPathDirs = LocalBuildInfo
+localBuildInfo :: FilePath -> PackageDBStack -> [FilePath] -> LocalBuildInfo
+localBuildInfo buildDir withPackageDB configExtraPathDirs = LocalBuildInfo
   { withPackageDB
   , withOptimization = Simple.Compiler.NormalOptimisation
   , compiler = Simple.Compiler.Compiler
@@ -751,7 +751,7 @@ localBuildInfo withPackageDB configExtraPathDirs = LocalBuildInfo
   , extraConfigArgs = undefined
   , installDirTemplates = undefined
   , hostPlatform = buildPlatform
-  , buildDir = undefined
+  , buildDir
   , scratchDir = undefined
   , componentsConfigs = undefined
   , installedPkgs = undefined
@@ -778,7 +778,9 @@ runComponentCc :: PackageDBStack -> [FilePath]
 runComponentCc configPackageDBStack configExtraPathDirs
                ideDistDir absC absObj pref = do
   let verbosity = silent
-      lbi = localBuildInfo configPackageDBStack configExtraPathDirs
+      -- TODO: create dist.23412/build? see cabalMacrosLocation
+      buildDir = ideDistDir
+      lbi = localBuildInfo buildDir configPackageDBStack configExtraPathDirs
       libBi = emptyBuildInfo
                 -- of these, only includeDirs and ccOptions are used,
                 -- but we don't set them for GHC API so far
