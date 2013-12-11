@@ -5169,7 +5169,7 @@ assertExpTypes :: (ModuleName -> SourceSpan -> [(SourceSpan, Text)])
                -> [(Int, Int, Int, Int, String)]
                -> Assertion
 assertExpTypes expTypes mod loc expected =
-    assertEqual "" expected actual
+    assertEqual "" (map ignoreVarNames' expected) (map ignoreVarNames' actual)
   where
     actual = flip map (uncurry expTypes $ mkSpan mod loc) $ \(span, typ) ->
       ( spanFromLine   span
@@ -5178,6 +5178,8 @@ assertExpTypes expTypes mod loc expected =
       , spanToColumn   span
       , Text.unpack    typ
       )
+
+    ignoreVarNames' (a, b, c, d, typ) = (a, b, c, d, ignoreVarNames typ)
 
 assertUseSites :: (ModuleName -> SourceSpan -> [SourceSpan])
                -> String
@@ -5284,11 +5286,11 @@ assertBreak session mod loc resTy vars = do
   Just BreakInfo{..} <- getBreakInfo session
   assertEqual "module name" mod   (Text.unpack breakInfoModule)
   assertEqual "location"    loc   (show breakInfoSpan)
-  assertEqual "result type" resTy (Text.unpack breakInfoResultType)
+  assertEqual "result type" (ignoreVarNames resTy) (ignoreVarNames (Text.unpack breakInfoResultType))
   assertEqual "number of local vars" (length vars) (length breakInfoVariableEnv)
   forM_ (zip vars breakInfoVariableEnv) $ \((var, typ, val), (var', typ', val')) -> do
     assertEqual "var name" var (Text.unpack var')
-    assertEqual "var type" typ (Text.unpack typ')
+    assertEqual "var type" (ignoreVarNames typ) (ignoreVarNames (Text.unpack typ'))
     assertEqual "var val"  val (Text.unpack val')
 
 isAsyncException :: RunResult -> Bool
