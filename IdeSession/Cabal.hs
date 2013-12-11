@@ -151,6 +151,7 @@ bInfo hsSourceDirs ghcOpts cSources installIncludes =
     , options = [(Simple.Compiler.GHC, ghcOpts)]
     , cSources
     , installIncludes
+    , otherExtensions = [EnableExtension TemplateHaskell]  -- TODO: specify in SessionConfig?
     }
 
 -- @relative@ is a hack, because when building, we need an absolute path
