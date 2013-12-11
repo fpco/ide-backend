@@ -1829,12 +1829,16 @@ syntheticTests =
         assertNoErrors session
         setCurrentDirectory "../../"
         let m = "Main"
-            upd = buildExe [(Text.pack m, "foooooooooooooooo")]
+            upd = buildExe [(Text.pack m, "foooooooooooooooo.hs")]
         status0 <- getBuildExeStatus session
         assertEqual "before exe build" Nothing status0
         updateSessionD session upd 4
         status1 <- getBuildExeStatus session
         assertEqual "failure after exe build" (Just $ ExitFailure 1) status1
+        -- TODO: either catch the exception and report it in the usual
+        -- place (build/ide-backend-exe.stderr) or let the users catch it,
+        -- and so see ASAP the filenames are wrong, without actually
+        -- waiting for cabal to run and inspecting ide-backend-exe.stderr
     )
   , ( "Build haddocks from ParFib"
     , withSession (withOpts []) $ \session -> do
