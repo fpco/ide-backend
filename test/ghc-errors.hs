@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, TypeSynonymInstances, FlexibleInstances, RecordWildCards, OverlappingInstances #-}
 module Main (main) where
 
 import Control.Concurrent (threadDelay)
@@ -2637,23 +2637,23 @@ syntheticTests =
         updateSessionD session upd 1
         assertSourceErrors' session ["parse error"]
         imports <- getImports session
-        -- TODO: This test will fail if the user happens to have installed
-        -- slightly different versions of these packages
+
         let base mod = ModuleId {
                 moduleName    = Text.pack mod
               , modulePackage = PackageId {
                     packageName    = Text.pack "base"
-                  , packageVersion = Just (Text.pack "4.5.1.0")
+                  , packageVersion = Just (Text.pack "X.Y.Z")
                   }
               }
             par mod = ModuleId {
                 moduleName    = Text.pack mod
               , modulePackage = PackageId {
                     packageName    = Text.pack "parallel"
-                  , packageVersion = Just (Text.pack "3.2.0.4")
+                  , packageVersion = Just (Text.pack "X.Y.Z")
                   }
               }
-        assertSameSet "imports: " (fromJust . imports $ Text.pack "M") $ [
+
+        assertSameSet "imports: " (ignoreVersions . fromJust . imports $ Text.pack "M") $ [
             Import {
                 importModule    = base "Prelude"
               , importPackage   = Nothing
@@ -3586,23 +3586,22 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
 
-        -- TODO: abstract away from version numbers
         imports <- getImports session
         let base mod = ModuleId {
                 moduleName    = Text.pack mod
               , modulePackage = PackageId {
                     packageName    = Text.pack "base"
-                  , packageVersion = Just (Text.pack "4.5.1.0")
+                  , packageVersion = Just (Text.pack "X.Y.Z")
                   }
               }
             monads_tf mod = ModuleId {
                 moduleName    = Text.pack mod
               , modulePackage = PackageId {
                     packageName    = Text.pack "monads-tf"
-                  , packageVersion = Just (Text.pack "0.1.0.1")
+                  , packageVersion = Just (Text.pack "X.Y.Z")
                   }
               }
-        assertSameSet "imports: " (fromJust . imports $ Text.pack "A") $ [
+        assertSameSet "imports: " (ignoreVersions . fromJust . imports $ Text.pack "A") $ [
             Import {
                 importModule    = base "Prelude"
               , importPackage   = Nothing
@@ -3640,23 +3639,22 @@ syntheticTests =
         updateSessionD session upd 1
         assertNoErrors session
 
-        -- TODO: abstract away from version numbers
         imports <- getImports session
         let base mod = ModuleId {
                 moduleName    = Text.pack mod
               , modulePackage = PackageId {
                     packageName    = Text.pack "base"
-                  , packageVersion = Just (Text.pack "4.5.1.0")
+                  , packageVersion = Just (Text.pack "X.Y.Z")
                   }
               }
             mtl mod = ModuleId {
                 moduleName    = Text.pack mod
               , modulePackage = PackageId {
                     packageName    = Text.pack "mtl"
-                  , packageVersion = Just (Text.pack "2.1.2")
+                  , packageVersion = Just (Text.pack "X.Y.Z")
                   }
               }
-        assertSameSet "imports: " (fromJust . imports $ Text.pack "A") $ [
+        assertSameSet "imports: " (ignoreVersions . fromJust . imports $ Text.pack "A") $ [
             Import {
                 importModule    = base "Prelude"
               , importPackage   = Nothing
@@ -5415,7 +5413,7 @@ testBufferMode bufferMode =
 filterIdeBackendTest :: BSLC.ByteString -> BSSC.ByteString
 filterIdeBackendTest bsLazy =
   let toStrict = BSSC.concat . BSLC.toChunks  -- not in our old bytestring pkg
-      bs = BSSC.pack $ ignoreVersions $ BSSC.unpack $ toStrict bsLazy
+      bs = ignoreVersions $ toStrict bsLazy
       (bs1, rest1) = BSSC.breakSubstring (BSSC.pack "hs-source-dirs:") bs
       (_, bs2) = BSSC.breakSubstring (BSSC.pack "\n") rest1
   in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
@@ -5524,15 +5522,53 @@ tokenize xs = case lex xs of
                 _ -> error "tokenize failed"
 
 -- | Replace everything that looks like a version number by @X.Y.Z@
-ignoreVersions :: String -> String
-ignoreVersions s = subRegex (mkRegex versionRegexp) s "X.Y.Z"
-  where
-    versionRegexp :: String
-    versionRegexp = "[0-9]+(\\.[0-9]+)+"
-
--- | Replace everything that looks like a version number by @X.Y.Z@
 ignoreQuotes :: String -> String
 ignoreQuotes s = subRegex (mkRegex versionRegexp) s "'"
   where
     versionRegexp :: String
     versionRegexp = "[‛’`\"]"
+
+-- | Abstract away versions
+class IgnoreVersions a where
+  ignoreVersions :: a -> a
+
+instance IgnoreVersions String where
+  ignoreVersions s = subRegex (mkRegex versionRegexp) s "X.Y.Z"
+    where
+      versionRegexp :: String
+      versionRegexp = "[0-9]+(\\.[0-9]+)+"
+
+instance IgnoreVersions a => IgnoreVersions [a] where
+  ignoreVersions = map ignoreVersions
+
+instance IgnoreVersions a => IgnoreVersions (Maybe a) where
+  ignoreVersions = fmap ignoreVersions
+
+instance IgnoreVersions BSSC.ByteString where
+  ignoreVersions = BSSC.pack . ignoreVersions . BSSC.unpack
+
+instance IgnoreVersions Text where
+  ignoreVersions = Text.pack . ignoreVersions . Text.unpack
+
+instance IgnoreVersions Import where
+  ignoreVersions Import{..} = Import {
+      importModule    = ignoreVersions importModule
+    , importPackage   = importPackage
+    , importQualified = importQualified
+    , importImplicit  = importImplicit
+    , importAs        = importAs
+    , importEntities  = importEntities
+    }
+
+instance IgnoreVersions ModuleId where
+  ignoreVersions ModuleId{..} = ModuleId {
+      moduleName    = moduleName
+    , modulePackage = ignoreVersions modulePackage
+    }
+
+instance IgnoreVersions PackageId where
+  ignoreVersions PackageId{..} = PackageId {
+      packageName    = packageName
+    , packageVersion = ignoreVersions packageVersion
+    }
+
