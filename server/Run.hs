@@ -26,7 +26,7 @@ module Run
   , DynamicOpts
   , submitStaticOpts
   , optsToDynFlags
-  , DynFlags(sourcePlugins)
+  , DynFlags(hooks)
   , defaultDynFlags
   , getSessionDynFlags
   , setSessionDynFlags
@@ -59,7 +59,6 @@ import qualified Data.Text as Text
 import System.FilePath.Find (find, always, extension)
 import System.Process
 import System.IO.Unsafe (unsafePerformIO)
-import Control.Concurrent (MVar, ThreadId)
 
 #if defined(GHC_761)
 -- http://hackage.haskell.org/trac/ghc/ticket/7548
@@ -75,14 +74,12 @@ import GHC hiding (
   , BreakInfo(..)
   , getBreak
   )
-import GhcMonad (liftIO, modifySession)
-import HscTypes (HscEnv(hsc_mod_graph))
+import GhcMonad (liftIO)
 import Module (mainPackageId)
 import OccName (occEnvElts)
 import Outputable (PprStyle, qualName, qualModule, mkUserStyle)
 import RdrName (GlobalRdrEnv, GlobalRdrElt, gre_name)
 import RnNames (rnImports)
-import System.Time
 import TcRnMonad (initTc)
 import TcRnTypes (RnM)
 import RtClosureInspect (Term)
@@ -149,22 +146,6 @@ ghandleJust p handler a = ghandle handler' a
                    Nothing -> liftIO $ Ex.throwIO e
                    Just b  -> handler b
 
-#if __GLASGOW_HASKELL__ < 706 || defined(GHC_761)
--- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
--- WIth some luck the fix should work for all these versions.
--- The problem is fixed for 7.6.2 onwards.
-invalidateModSummaryCache :: GhcMonad m => m ()
-invalidateModSummaryCache =
-  modifySession $ \h -> h { hsc_mod_graph = map inval (hsc_mod_graph h) }
- where
-#if __GLASGOW_HASKELL__ >= 706
-  inval ms = ms { ms_hs_date = addUTCTime (-1) (ms_hs_date ms) }
-#else
-  tdiff = TimeDiff 0 0 0 0 0 (-1) 0
-  inval ms = ms { ms_hs_date = addToClockTime tdiff (ms_hs_date ms) }
-#endif
-#endif
-
 compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this call
              -> Bool                -- ^ should we generate code
@@ -198,9 +179,6 @@ compileInGhc configSourcesDir dynOpts
     handleErrors flags $ do
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
-#if __GLASGOW_HASKELL__ < 706 || defined(GHC_761)
-        invalidateModSummaryCache
-#endif
         _ <- setSessionDynFlags flags
         liftIO (print =<< find always ((`elem` hsExtensions) `liftM` extension)
                               configSourcesDir)
@@ -335,15 +313,15 @@ autocompletion summary = do
   return $ force idIs
 
 -- | Run a snippet.
-runInGhc :: RunCmd -> MVar (Maybe ThreadId) -> Ghc RunResult
-runInGhc cmd tidMVar = do
+runInGhc :: RunCmd -> Ghc RunResult
+runInGhc cmd = do
   flags <- getSessionDynFlags
   -- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
   -- Set GHC verbosity to avoid stray GHC messages, e.g., from the linker.
   _ <- setSessionDynFlags (flags { verbosity = 0 })
   defaultCleanupHandler flags . handleErrors $ do
     handleErrors $ do
-      runRes <- runCmd cmd tidMVar
+      runRes <- runCmd cmd
       case runRes of
         GHC.RunOk _ ->
           return RunOk
@@ -363,12 +341,12 @@ runInGhc cmd tidMVar = do
                  . ghandle (handleError :: GhcException -> Ghc RunResult)
 
 -- | Auxiliary to 'runInGhc'
-runCmd :: RunCmd -> MVar (Maybe ThreadId) -> Ghc GHC.RunResult
-runCmd (RunStmt {..}) tidMVar = do
+runCmd :: RunCmd -> Ghc GHC.RunResult
+runCmd (RunStmt {..}) = do
     setContext $ [ IIDecl $ simpleImportDecl $ mkModuleName runCmdModule
                  , IIDecl $ simpleImportDecl $ mkModuleName "IdeBackendRTS"
                  ]
-    runStmt expr RunToCompletion tidMVar
+    runStmt expr RunToCompletion
   where
     expr :: String
     expr = fqn "run "
@@ -390,8 +368,7 @@ runCmd (RunStmt {..}) tidMVar = do
     fqMInt :: Maybe Int -> String
     fqMInt Nothing  = fqn "Nothing"
     fqMInt (Just n) = fqn "Just " ++ show n
-runCmd Resume _tidMVar =
-    -- TODO: by rights we should be using _tidMVar here somewhere
+runCmd Resume =
     resume (const True) RunToCompletion
 
 {------------------------------------------------------------------------------

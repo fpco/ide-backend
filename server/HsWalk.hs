@@ -9,7 +9,8 @@
 -- any modules from the ghc package and the modules should not be reexported
 -- anywhere else, with the exception of @IdeSession.GHC.Server@.
 module HsWalk
-  ( extractIdsPlugin
+  ( runHscQQ
+  , runHscPlugin
   , extractSourceSpan
   , idInfoForName
   , constructExplicitSharingCache
@@ -33,16 +34,12 @@ import qualified Data.Text as Text
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BSSC
 import Data.Maybe (fromMaybe, fromJust)
-import Prelude hiding (id, mod, span, writeFile, appendFile)
+import Prelude hiding (id, mod, span, writeFile)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import qualified Debug.Trace as Debug
 import Control.Exception (evaluate)
-
-#if DEBUG
-import System.IO.UTF8 (writeFile, appendFile)
-#endif
 
 import IdeSession.Types.Private
 import IdeSession.Strict.Container
@@ -55,7 +52,6 @@ import IdeSession.Strict.Pair
 
 import GHC hiding (PackageId, idType, moduleName, ModuleName)
 import qualified GHC
-import HscPlugin
 import qualified Module
 import MonadUtils (MonadIO (..))
 import qualified Name
@@ -65,10 +61,13 @@ import qualified RdrName
 import TcRnTypes
 import Var hiding (idInfo)
 import VarEnv (TidyEnv, emptyTidyEnv)
-import Unique (Unique, Uniquable, getUnique, getKey)
-import HscTypes (TypeEnv, HscEnv(hsc_dflags), mkPrintUnqualified)
+import Unique (Unique, getUnique, getKey)
+import HscTypes (Hsc, TypeEnv, HscEnv(hsc_dflags), mkPrintUnqualified)
 import NameEnv (nameEnvUniqueElts)
 import DataCon (dataConRepType)
+import IOEnv (getEnv)
+import DynFlags (HasDynFlags(..), getDynFlags)
+import HscMain (hscParse', tcRnModule', getHscEnv)
 
 import Conv
 import Haddock
@@ -132,85 +131,60 @@ data PluginResult = PluginResult {
   , pluginUseSites :: !UseSites
   }
 
-extractIdsPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult) -> HscPlugin
-extractIdsPlugin symbolRef = HscPlugin {..}
-  where
-    runHscQQ :: forall m. MonadIO m => Env TcGblEnv TcLclEnv
-                                    -> HsQuasiQuote Name
-                                    -> m (HsQuasiQuote Name)
-    runHscQQ env qq@(HsQuasiQuote quoter _span _str) = liftIO $ do
-#if DEBUG
-      appendFile "/tmp/ghc.qq" $ showSDoc (ppr qq)
-#endif
+runHscQQ :: HsQuasiQuote Name -> RnM (HsQuasiQuote Name)
+runHscQQ qq@(HsQuasiQuote quoter _span _str) = do
+  env <- getEnv
+  liftIO $ do
+    let dflags  =               hsc_dflags  (env_top env)
+        rdrEnv  =               tcg_rdr_env (env_gbl env)
+        current =               tcg_mod     (env_gbl env)
+        pkgDeps = imp_dep_pkgs (tcg_imports (env_gbl env))
 
-      let dflags  =               hsc_dflags  (env_top env)
-          rdrEnv  =               tcg_rdr_env (env_gbl env)
-          current =               tcg_mod     (env_gbl env)
-          pkgDeps = imp_dep_pkgs (tcg_imports (env_gbl env))
+    idInfo           <- readIORef qqRef
+    ProperSpan span' <- extractSourceSpan $ tcl_loc (env_lcl env)
+    linkEnv          <- liftIO $ linkEnvForDeps dflags pkgDeps
 
-      idInfo           <- readIORef qqRef
-      ProperSpan span' <- extractSourceSpan $ tcl_loc (env_lcl env)
-      linkEnv          <- liftIO $ linkEnvForDeps dflags pkgDeps
+    (idProp, Just idScope) <- idInfoForName dflags
+                                            quoter
+                                            UseSite
+                                            (lookupRdrEnv rdrEnv quoter)
+                                            (Just current)
+                                            (homeModuleFor dflags linkEnv)
 
-      (idProp, Just idScope) <- idInfoForName dflags
-                                              quoter
-                                              UseSite
-                                              (lookupRdrEnv rdrEnv quoter)
-                                              (Just current)
-                                              (homeModuleFor dflags linkEnv)
+    let quoterInfo = IdInfo{..}
+    let idInfo' = (span', SpanQQ quoterInfo) : idInfo
+    writeIORef qqRef idInfo'
+    return qq
 
-      let quoterInfo = IdInfo{..}
-      let idInfo' = (span', SpanQQ quoterInfo) : idInfo
-      writeIORef qqRef idInfo'
-      return qq
+runHscPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult) -> ModSummary -> Hsc TcGblEnv
+runHscPlugin symbolRef mod_summary = do
+  env      <- hscFileFrontEnd mod_summary
+  dynFlags <- getDynFlags
 
-    runHscPlugin :: forall m. MonadIO m => DynFlags -> TcGblEnv -> m TcGblEnv
-    runHscPlugin dynFlags env = do
-      let processedModule = tcg_mod env
-          processedName   = Text.pack $ moduleNameString $ GHC.moduleName processedModule
+  let processedModule = tcg_mod env
+      processedName   = Text.pack $ moduleNameString $ GHC.moduleName processedModule
 
-      qqs <- liftIO $ do
-        qqs <- readIORef qqRef
-        writeIORef qqRef [] -- Reset for the next module
-        return qqs
+  qqs <- liftIO $ do
+    qqs <- readIORef qqRef
+    writeIORef qqRef [] -- Reset for the next module
+    return qqs
 
-      pluginResult <- execExtractIdsT dynFlags env qqs processedModule $ do
-#if DEBUG
-        pretty_mod     <- pretty False processedModule
-        pretty_rdr_env <- pretty False (tcg_rdr_env env)
-        liftIO $ writeFile "/tmp/ghc.readerenv" pretty_rdr_env
-#endif
+  pluginResult <- execExtractIdsT dynFlags env qqs processedModule $ do
+    -- Information provided by the renamer
+    -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
+    -- It is important we do this *first*, because this creates the initial
+    -- cache with the IdInfo objects, which we can then update by processing
+    -- the typed AST and the global type environment.
+    extractIds (tcg_rn_decls env)
 
-        -- Information provided by the renamer
-        -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
-        -- It is important we do this *first*, because this creates the initial
-        -- cache with the IdInfo objects, which we can then update by processing
-        -- the typed AST and the global type environment.
-#if DEBUG
-        liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING RENAMED AST " ++ pretty_mod ++ ">>\n"
-#endif
-        extractIds (tcg_rn_decls env)
+    -- Information provided by the type checker
+    extractIds (tcg_binds env)
 
-        -- Information provided by the type checker
-#if DEBUG
-        liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPED AST " ++ pretty_mod ++ ">>\n"
-#endif
-        extractIds (tcg_binds env)
+    -- Type environment constructed for this module
+    extractTypesFromTypeEnv (tcg_type_env env)
 
-        -- Type environment constructed for this module
-#if DEBUG
-        liftIO $ appendFile "/tmp/ghc.log" $ "<<PROCESSING TYPE ENV FOR " ++ pretty_mod ++ ">>\n"
-#endif
-        extractTypesFromTypeEnv (tcg_type_env env)
-
-#if DEBUG
-    --  liftIO $ writeFile "/tmp/ghc.idmap" (show identMap)
-    -- liftIO $ do
-    --    cache <- readIORef idPropCacheRef
-    --    appendFile "/tmp/ghc.log" $ "Cache == " ++ show cache
-#endif
-      liftIO $ modifyIORef symbolRef (Map.insert processedName pluginResult)
-      return env
+  liftIO $ modifyIORef symbolRef (Map.insert processedName pluginResult)
+  return env
 
 extractTypesFromTypeEnv :: TypeEnv -> ExtractIdsM ()
 extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
@@ -220,6 +194,19 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
       recordType uniq (dataConRepType dataCon)
     go _ =
       return ()
+
+{------------------------------------------------------------------------------
+  Override hscFileFrontEnd so that we pass the renamer result through the
+  type checker
+------------------------------------------------------------------------------}
+
+hscFileFrontEnd :: ModSummary -> Hsc TcGblEnv
+hscFileFrontEnd mod_summary = do
+    hpm <- hscParse' mod_summary
+    hsc_env <- getHscEnv
+    let passRenamerResult = True
+    tcg_env <- tcRnModule' hsc_env mod_summary passRenamerResult hpm
+    return tcg_env
 
 {------------------------------------------------------------------------------
   ExtractIdsT adds state and en environment to whatever monad that GHC
@@ -278,9 +265,8 @@ instance TraceMonad ExtractIdsM where
 instance HasDynFlags ExtractIdsM where
   getDynFlags = asks eIdsDynFlags
 
-#if DEBUG
-debugLog :: FilePath -> String -> ExtractIdsM ()
-debugLog path str = do
+_debugLog :: FilePath -> String -> ExtractIdsM ()
+_debugLog path str = do
     st <- get
     put $ go st
   where
@@ -288,7 +274,6 @@ debugLog path str = do
     go x = unsafePerformIO $ do
              appendFile path (str ++ "\n")
              return x
-#endif
 
 execExtractIdsT :: MonadIO m
                 => DynFlags
@@ -559,5 +544,5 @@ recordName (L span name) idIsBinder = do
           -- GlobalRdrEnv.
           return ()
     TextSpan _ ->
-      return ()
+      return () -- Name without source span
   return Nothing

@@ -23,8 +23,6 @@ module GhcShim.GhcShim742
   , fold
     -- * Re-exports
   , tidyOpenType
-    -- * Only necessary for the old patched 7.4
-  , HasDynFlags(..)
   ) where
 
 import Prelude hiding (id, span)
@@ -64,18 +62,6 @@ import qualified BreakArray
 
 import GhcShim.API
 import IdeSession.GHC.API (GhcWarnings(..), GhcVersion(..))
-
-{------------------------------------------------------------------------------
-  Only necessary for the "old" patched 7.4
-
-  (i.e., ide-backend-experimental rather than ide-backend-experimental-74)
-------------------------------------------------------------------------------}
-
-class HasDynFlags m where
-  getDynFlags :: m DynFlags
-
-instance HasDynFlags Ghc where
-  getDynFlags = getSessionDynFlags
 
 {------------------------------------------------------------------------------
   Pretty-printing

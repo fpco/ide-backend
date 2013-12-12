@@ -32,7 +32,7 @@ import IdeSession.Types.Private
 import qualified IdeSession.Types.Public as Public
 import IdeSession.Types.Progress
 import IdeSession.Util
-import IdeSession.Util.BlockingOps (withMVar, wait)
+import IdeSession.Util.BlockingOps (withMVar, wait, putMVar, modifyMVar_)
 import IdeSession.Strict.IORef
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map  as StrictMap
@@ -41,6 +41,7 @@ import qualified IdeSession.Strict.List as StrictList
 import qualified GHC
 import GhcMonad(Ghc(..))
 import qualified ObjLink as Linker
+import Hooks
 
 import Run
 import HsWalk
@@ -100,7 +101,10 @@ ghcServerEngine configGenerateModInfo
     initialDynFlags <- getSessionDynFlags
     (flags, _, _) <- parseDynamicFlags initialDynFlags dOpts
     let dynFlags | configGenerateModInfo = flags {
-          sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins flags
+          hooks = (hooks flags) {
+              hscFrontendHook   = Just $ runHscPlugin pluginRef
+            , runQuasiQuoteHook = Just $ runHscQQ
+            }
         }
                  | otherwise = flags
     void $ setSessionDynFlags dynFlags
@@ -441,7 +445,10 @@ ghcHandleRun RpcConversation{..} runCmd = do
     --    'Nothing'
 
     runOutcome <- ghandle ghcException . ghandleJust isUserInterrupt return $
-      runInGhc runCmd ghcThread
+      GHC.gbracket
+        (liftIO (myThreadId >>= $putMVar ghcThread . Just))
+        (\() -> liftIO $ $modifyMVar_ ghcThread (\_ -> return Nothing))
+        (\() -> runInGhc runCmd)
 
     liftIO $ do
       -- Restore stdin and stdout
