@@ -262,6 +262,7 @@ only a few minor differences, explained when they come up.
     * monads-tf-0.1.0.1
     * yesod-1.2.4 (optional; only required for one test; install with
       cabal --max-backjumps=-1; do not attempt for 7.8 for now))
+    * parsec-3.1.3 (optional; only required for one test)
 
     You should install these versions and in this order (the test suite is a
     bit finicky; there are some open issues about that; #138, #139).

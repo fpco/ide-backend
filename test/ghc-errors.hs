@@ -17,6 +17,7 @@ import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
 import Data.Text (Text)
 import Data.Char (isLower)
+import Data.Either (lefts)
 import qualified Data.Text as Text
 import Debug.Trace (traceEventIO)
 import Data.Version (Version (..))
@@ -2578,6 +2579,56 @@ syntheticTests =
         do idInfo <- getSpanInfo session
            assertIdInfo idInfo "Main" (1,14,1,17) "foo" VarName "Integer" "main:Main" "Main.hs@3:1-3:4" "" "defined locally"
     )
+  , ( "Type information 21: spanInfo vs expTypes (#3043)"
+    , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
+        let upd = updateSourceFile "A.hs" . BSLC.pack . unlines $ [
+                "{-# LANGUAGE NoMonomorphismRestriction #-}"
+              , "{-# LANGUAGE OverloadedStrings #-}"
+              , "module A where"
+              , "import Data.ByteString"
+              , "import Text.Parsec"
+              --                  1           2         3          4          5         6
+              --         123456789012345 67 890123456789012345678 90 123456789012345678901
+              , {- 6 -} "foo = (getNum (\"x\" :: String),getNum (\"x\" :: ByteString))"
+              --                  1         2         3          4
+              --         1234567890123456789012345678901234567 890123 4
+              , {- 7 -} "  where getNum = runParserT digit () \"x.txt\""
+              ]
+
+        updateSessionD session upd 1
+        errs <- getSourceErrors session
+
+        case errs of
+          [] -> do
+            idInfo <- getSpanInfo session
+            -- Check the polymorphic type of getNum
+            assertIdInfo idInfo "A" (6,  8, 6, 14) "getNum" VarName "Stream s m2 Char => s -> m2 (Either ParseError Char)" "main:A" "A.hs@7:9-7:15" "" "defined locally"
+            assertIdInfo idInfo "A" (6, 31, 6, 37) "getNum" VarName "Stream s m2 Char => s -> m2 (Either ParseError Char)" "main:A" "A.hs@7:9-7:15" "" "defined locally"
+            assertIdInfo idInfo "A" (7,  9, 7, 15) "getNum" VarName "Stream s m2 Char => s -> m2 (Either ParseError Char)" "main:A" "A.hs@7:9-7:15" "" "binding occurrence"
+
+            -- Check the monomorphic (local) type of getNum
+            expTypes <- getExpTypes session
+            assertExpTypes expTypes "A" (6,  8, 6, 14) [
+                (6,  7, 6, 58, "(m (Either ParseError Char), m1 (Either ParseError Char))")
+              , (6,  8, 6, 14, "String -> m (Either ParseError Char)")
+              , (6,  8, 6, 14, "Stream s m2 Char => s -> m2 (Either ParseError Char)")
+              , (6,  8, 6, 30, "m (Either ParseError Char)")
+              ]
+            assertExpTypes expTypes "A" (6, 31, 6, 37) [
+                (6,  7, 6, 58, "(m (Either ParseError Char), m1 (Either ParseError Char))")
+              , (6, 31, 6, 37, "ByteString -> m1 (Either ParseError Char)")
+              , (6, 31, 6, 37, "Stream s m2 Char => s -> m2 (Either ParseError Char)")
+              , (6, 31, 6, 57, "m1 (Either ParseError Char)")
+              ]
+            assertExpTypes expTypes "A" (7,  9, 7, 15) [
+                (7,  9, 7, 15, "s -> m2 (Either ParseError Char)")
+              ]
+
+            -- For completeness' sake, check polymorphic type of foo
+            assertIdInfo idInfo "A" (6,  1, 6, 4) "foo" VarName "(Monad m1, Monad m) => (m (Either ParseError Char), m1 (Either ParseError Char))" "main:A" "A.hs@6:1-6:4" "" "binding occurrence"
+          _ ->
+            putStrLn "WARNING: Skipping due to errors (probably parsec package not installed)"
+    )
   , ( "Test internal consistency of local id markers"
     , withSession defaultSessionConfig $ \session -> do
         let upd = (updateSourceFile "M.hs" . BSLC.pack . unlines $
@@ -5127,26 +5178,27 @@ assertIdInfo' idInfo
     (_expectedMod, expectedSpan) = mkSpan mod expectedLocation
 
     compareIdInfo :: SourceSpan -> IdInfo -> Assertion
-    compareIdInfo actualSpan IdInfo{idProp = IdProp{..}, idScope} = do
-      assertEqual "name and location" (expectedName,       expectedSpan)
-                                      (Text.unpack idName, actualSpan)
+    compareIdInfo actualSpan IdInfo{idProp = IdProp{..}, idScope} =
+      collectErrors [
+          assertEqual "name"       expectedName      (Text.unpack idName)
+        , assertEqual "location"   expectedSpan      actualSpan
+        , assertEqual "namespace"  expectedNameSpace idSpace
+        , assertEqual "def span"   expectedDefSpan   (show idDefSpan)
 
-      assertEqual "namespace"  expectedNameSpace idSpace
-      assertEqual "def span"   expectedDefSpan   (show idDefSpan)
+        , assertEqual "def module" (ignoreVersions expectedDefModule)
+                                   (ignoreVersions (show idDefinedIn))
+        , assertEqual "scope"      (ignoreVersions expectedScope)
+                                   (ignoreVersions (show idScope))
 
-      assertEqual "def module" (ignoreVersions expectedDefModule)
-                               (ignoreVersions (show idDefinedIn))
-      assertEqual "scope"      (ignoreVersions expectedScope)
-                               (ignoreVersions (show idScope))
+        , case idType of
+            Nothing         -> assertEqual      "type" expectedType ""
+            Just actualType -> assertAlphaEquiv "type" expectedType (Text.unpack actualType)
 
-      case idType of
-        Nothing         -> assertEqual      "type" expectedType ""
-        Just actualType -> assertAlphaEquiv "type" expectedType (Text.unpack actualType)
-
-      case idHomeModule of
-        Nothing         -> assertEqual "home" expectedHome ""
-        Just actualHome -> assertEqual "home" (ignoreVersions expectedHome)
-                                              (ignoreVersions (show actualHome))
+        , case idHomeModule of
+            Nothing         -> assertEqual "home" expectedHome ""
+            Just actualHome -> assertEqual "home" (ignoreVersions expectedHome)
+                                                  (ignoreVersions (show actualHome))
+        ]
 
 assertExpTypes :: (ModuleName -> SourceSpan -> [(SourceSpan, Text)])
                -> String
@@ -5482,6 +5534,19 @@ ignoreQuotes s = subRegex (mkRegex versionRegexp) s "'"
   where
     versionRegexp :: String
     versionRegexp = "[‛’`\"]"
+
+collectErrors :: [Assertion] -> Assertion
+collectErrors as = do
+    es <- lefts `liftM` (sequence $ map Ex.try as)
+    if null es
+      then return ()
+      else Ex.throwIO (concatFailures es)
+
+concatFailures :: [HUnitFailure] -> HUnitFailure
+concatFailures = go []
+  where
+    go acc []                    = HUnitFailure (unlines . reverse $ acc)
+    go acc (HUnitFailure e : es) = go (e : acc) es
 
 {------------------------------------------------------------------------------
   Replace (type variables) with numbered type variables
