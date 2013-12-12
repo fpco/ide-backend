@@ -66,11 +66,15 @@ import Control.Concurrent (MVar, ThreadId)
 -- is not fixed in this version. Compilation should fail,
 -- because the problem is not minor and not easy to spot otherwise.
 #else
-import Bag (bagToList)
 import DynFlags (defaultDynFlags)
 import Exception (ghandle)
 import FastString ( unpackFS )
-import GHC hiding (flags, ModuleName, RunResult(..), BreakInfo(..))
+import GHC hiding (
+    ModuleName
+  , RunResult(..)
+  , BreakInfo(..)
+  , getBreak
+  )
 import GhcMonad (liftIO, modifySession)
 import HscTypes (HscEnv(hsc_mod_graph))
 import Module (mainPackageId)
@@ -82,9 +86,6 @@ import System.Time
 import TcRnMonad (initTc)
 import TcRnTypes (RnM)
 import RtClosureInspect (Term)
-import Pretty (showDocWith, Mode(OneLineMode))
-import PprTyThing (pprTypeForUser)
-import qualified ErrUtils
 import qualified HscTypes
 import qualified GHC           as GHC
 import qualified Config        as GHC
@@ -107,12 +108,13 @@ import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
 import qualified IdeSession.Strict.List as StrictList
 
-import HsWalk (idInfoForName, IsBinder(..))
+import HsWalk (idInfoForName)
 import Haddock
 import Debug
 import Conv
 import FilePathCaching
 import Break
+import GhcShim
 
 type DynamicOpts = [Located String]
 
@@ -260,28 +262,29 @@ compileInGhc configSourcesDir dynOpts
 
 importList :: ModSummary -> Ghc (Strict [] Import)
 importList summary = do
-    dflags  <- getSessionDynFlags
-    let goImp :: Located (ImportDecl RdrName) -> Import
-        goImp (L _ decl) = Import {
-            importModule    = importModuleId' dflags (ideclPkgQual decl) (unLoc (ideclName decl))
-          , importPackage   = force $ ((Text.pack . unpackFS) <$> ideclPkgQual decl)
-          , importQualified = ideclQualified decl
-          , importImplicit  = ideclImplicit decl
-          , importAs        = force $ ((Text.pack . moduleNameString) <$> ideclAs decl)
-          , importEntities  = mkImportEntities (ideclHiding decl)
-          }
+  dflags  <- getSessionDynFlags
 
-    return . force $ map goImp (ms_srcimps summary)
-                  ++ map goImp (ms_textual_imps summary)
-  where
-    mkImportEntities :: Maybe (Bool, [LIE RdrName]) -> ImportEntities
-    mkImportEntities Nothing               = ImportAll
-    mkImportEntities (Just (True, names))  = ImportHiding (force $ map unLIE names)
-    mkImportEntities (Just (False, names)) = ImportOnly   (force $ map unLIE names)
+  -- TODO: This is lossy. We might want a more accurate data type.
+  let unLIE :: LIE RdrName -> Text
+      unLIE (L _ name) = Text.pack $ pretty dflags GHC.defaultUserStyle name
 
-    -- TODO: This is lossy. We might want a more accurate data type.
-    unLIE :: LIE RdrName -> Text
-    unLIE (L _ name) = Text.pack $ GHC.showSDoc (GHC.ppr name)
+  let mkImportEntities :: Maybe (Bool, [LIE RdrName]) -> ImportEntities
+      mkImportEntities Nothing               = ImportAll
+      mkImportEntities (Just (True, names))  = ImportHiding (force $ map unLIE names)
+      mkImportEntities (Just (False, names)) = ImportOnly   (force $ map unLIE names)
+
+  let goImp :: Located (ImportDecl RdrName) -> Import
+      goImp (L _ decl) = Import {
+          importModule    = importModuleId' dflags (ideclPkgQual decl) (unLoc (ideclName decl))
+        , importPackage   = force $ ((Text.pack . unpackFS) <$> ideclPkgQual decl)
+        , importQualified = ideclQualified decl
+        , importImplicit  = ideclImplicit decl
+        , importAs        = force $ ((Text.pack . moduleNameString) <$> ideclAs decl)
+        , importEntities  = mkImportEntities (ideclHiding decl)
+        }
+
+  return . force $ map goImp (ms_srcimps summary)
+                ++ map goImp (ms_textual_imps summary)
 
 autocompletion :: ModSummary -> Ghc (Strict [] IdInfo)
 autocompletion summary = do
@@ -395,32 +398,32 @@ runCmd Resume _tidMVar =
   Dealing with breakpoints
 ------------------------------------------------------------------------------}
 
--- | We store PrintQualified whenever we hit a breakpoint so that we have
+-- | We store a print context whenever we hit a breakpoint so that we have
 -- sufficient context for subsequent requests for pretty-printing types
-printContext :: StrictIORef PrintUnqualified
+printContext :: StrictIORef PprStyle
 {-# NOINLINE printContext #-}
-printContext = unsafePerformIO $ newIORef alwaysQualify
+printContext = unsafePerformIO $
+  newIORef (mkUserStyle alwaysQualify GHC.AllTheWay)
 
-getPrintContext :: Ghc PrintUnqualified
+getPrintContext :: Ghc PprStyle
 getPrintContext = liftIO $ readIORef printContext
 
-setPrintContext :: PrintUnqualified -> Ghc ()
+setPrintContext :: PprStyle -> Ghc ()
 setPrintContext ctxt = liftIO $ writeIORef printContext ctxt
 
 breakFromSpan :: ModuleName        -- ^ Module containing the breakpoint
               -> Public.SourceSpan -- ^ Location of the breakpoint
               -> Bool              -- ^ New value for the breakpoint
               -> Ghc (Maybe Bool)    -- ^ Old valeu of the breakpoint (if valid)
-breakFromSpan modName span value = runMaybeT $ do
+breakFromSpan modName span newValue = runMaybeT $ do
     modInfo <- MaybeT $ getModuleInfo mod
     let ModBreaks{..} = modInfoModBreaks modInfo
-    breakIndex <- MaybeT $ return $ findBreakIndex modBreaks_locs
-    oldValue   <- MaybeT $ liftIO $ getBreak modBreaks_flags breakIndex
 
-    void . lift . liftIO $
-      if value then setBreakOn  modBreaks_flags breakIndex
-               else setBreakOff modBreaks_flags breakIndex
-    return $ oldValue == 1
+    breakIndex <- MaybeT $ return $ findBreakIndex modBreaks_locs
+    oldValue   <- MaybeT $ getBreak modBreaks_flags breakIndex
+
+    lift $ setBreak modBreaks_flags breakIndex newValue
+    return oldValue
   where
     findBreakIndex :: Array BreakIndex SrcSpan -> Maybe BreakIndex
     findBreakIndex breaks = listToMaybe
@@ -448,17 +451,24 @@ importBreakInfo :: Maybe GHC.BreakInfo
 importBreakInfo (Just GHC.BreakInfo{..}) names = runMaybeT $ do
     modInfo          <- MaybeT $ getModuleInfo breakInfo_module
     printUnqualified <- MaybeT $ mkPrintUnqualifiedForModule modInfo
-    lift $ setPrintContext printUnqualified
+
     let ModBreaks{..} = modInfoModBreaks modInfo
-    localVars <- lift (mkTerms >>= mapM (exportVar printUnqualified))
-    let srcSpan = modBreaks_locs Array.! breakInfo_number
-    ProperSpan srcSpan' <- lift . liftIO $ extractSourceSpan srcSpan
-    return BreakInfo {
-        breakInfoModule      = mod
-      , breakInfoSpan        = srcSpan'
-      , breakInfoResultType  = Text.pack $ GHC.showSDoc (GHC.ppr breakInfo_resty)
-      , breakInfoVariableEnv = localVars
-      }
+        srcSpan       = modBreaks_locs Array.! breakInfo_number
+        pprStyle      = mkUserStyle printUnqualified GHC.AllTheWay
+
+    lift $ do
+      setPrintContext pprStyle
+
+      localVars           <- mkTerms >>= mapM (exportVar pprStyle)
+      ProperSpan srcSpan' <- liftIO $ extractSourceSpan srcSpan
+      prettyResTy         <- prettyM pprStyle breakInfo_resty
+
+      return BreakInfo {
+          breakInfoModule      = mod
+        , breakInfoSpan        = srcSpan'
+        , breakInfoResultType  = Text.pack prettyResTy
+        , breakInfoVariableEnv = localVars
+        }
   where
     mkTerms :: Ghc [(Id, Term)]
     mkTerms = resolveNames names >>= evaluateIds False False
@@ -474,17 +484,14 @@ printVars vars bind forceEval =
   evaluateIds bind forceEval >>=
   mapM (exportVar unqual)
 
-exportVar :: PrintUnqualified -> (Id, Term) -> Ghc (Public.Name, Public.Type, Public.Value)
-exportVar qual (var, term) = do
-  -- Pretty-printing the type duplicates some logic from HsWalk.hs :-/
-  let pprStyle     = mkUserStyle qual GHC.AllTheWay
-      showSDoc doc = showDocWith OneLineMode
-                   $ GHC.runSDoc doc (GHC.initSDocContext pprStyle)
-      showForalls  = False
-  let nameStr = showSDoc $ GHC.ppr (GHC.idName var)
-      valStr  = showSDoc $ GHC.ppr term
-      typStr  = showSDoc $ pprTypeForUser showForalls (GHC.idType var)
-  return (Text.pack nameStr, Text.pack typStr, Text.pack valStr)
+exportVar :: PprStyle -> (Id, Term) -> Ghc (Public.Name, Public.Type, Public.Value)
+exportVar pprStyle (var, term) = do
+    nameStr <- prettyM     pprStyle             (GHC.idName var)
+    typeStr <- prettyTypeM pprStyle showForalls (GHC.idType var)
+    termStr <- prettyM     pprStyle             term
+    return (Text.pack nameStr, Text.pack typeStr, Text.pack termStr)
+  where
+    showForalls  = False
 
 -----------------------
 -- Source error conversion and collection
@@ -498,16 +505,8 @@ collectSrcError :: StrictIORef (Strict [] SourceError)
 collectSrcError errsRef handlerOutput handlerRemaining flags
                 severity srcspan style msg = do
   -- Prepare debug prints.
-  let showSeverity SevOutput  = "SevOutput"
-#if __GLASGOW_HASKELL__ >= 706
-      showSeverity SevDump    = "SevDump"
-#endif
-      showSeverity SevInfo    = "SevInfo"
-      showSeverity SevWarning = "SevWarning"
-      showSeverity SevError   = "SevError"
-      showSeverity SevFatal   = "SevFatal"
   debug dVerbosity
-   $  "Severity: "   ++ showSeverity severity
+   $  "Severity: "   ++ show severity
    ++ "  SrcSpan: "  ++ show srcspan
 -- ++ "  PprStyle: " ++ show style
    ++ "  MsgDoc: "
@@ -549,15 +548,10 @@ collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
 -- But at least the IDE could point somewhere in the code.
 -- | Convert GHC's SourceError type into ours.
 fromHscSourceError :: MonadFilePathCaching m => HscTypes.SourceError -> m SourceError
-fromHscSourceError e = case bagToList (HscTypes.srcErrorMessages e) of
-    [errMsg] -> case ErrUtils.errMsgSpans errMsg of
-      [real@RealSrcSpan{}] -> do
-        xSpan <- extractSourceSpan real
-        return $ SourceError KindError xSpan err
-      _ ->
-        return $ SourceError KindError (TextSpan noloc) err
-    _ ->
-      return $ SourceError KindError (TextSpan noloc) err
+fromHscSourceError e = case sourceErrorSpan e of
+    Just real -> do xSpan <- extractSourceSpan real
+                    return $ SourceError KindError xSpan err
+    Nothing   -> return $ SourceError KindError (TextSpan noloc) err
   where
     err   = Text.pack (show e)
     noloc = Text.pack "<no location info>"

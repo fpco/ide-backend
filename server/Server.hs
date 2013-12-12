@@ -24,7 +24,6 @@ import Data.Accessor.Monad.MTL.State (set)
 import System.IO (Handle, hFlush)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
-import System.Time (ClockTime)
 import System.Environment (withArgs)
 
 import IdeSession.GHC.API
@@ -46,6 +45,7 @@ import qualified ObjLink as Linker
 import Run
 import HsWalk
 import Debug
+import GhcShim
 
 --------------------------------------------------------------------------------
 -- Server-side operations                                                     --
@@ -145,7 +145,7 @@ data ModSummary = ModSummary {
     modImports   :: !(Strict [] Import)
     -- | We cache the file stamp to see if the file has changed at all, and
     -- hence whether we need to recompute the import list
-  , modTimestamp :: !ClockTime
+  , modTimestamp :: !GhcTime
     -- | We cache whether this module was reported as "loaded" before so that
     -- we can see which modules got unloaded
   , modIsLoaded :: !Bool

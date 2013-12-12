@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, ScopedTypeVariables, StandaloneDeriving #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind -fno-warn-orphans #-}
-module GhcShim.GhcShim742
+module GhcShim.GhcShim78
   ( -- * Pretty-printing
     showSDoc
   , pretty
@@ -19,13 +19,11 @@ module GhcShim.GhcShim742
   , fold
     -- * Re-exports
   , tidyOpenType
-    -- * Only necessary for the old patched 7.4
-  , HasDynFlags(..)
   ) where
 
 import Prelude hiding (id, span)
 import Control.Monad (void, forM_, liftM)
-import System.Time (ClockTime)
+import Data.Time (UTCTime)
 
 import Bag
 import BasicTypes
@@ -33,7 +31,7 @@ import DataCon
 import DynFlags
 import ErrUtils
 import FastString
-import GhcMonad
+import GHC (Ghc)
 import HsBinds
 import HsDecls
 import HsExpr
@@ -61,33 +59,25 @@ import qualified BreakArray
 import GhcShim.API
 
 {------------------------------------------------------------------------------
-  Only necessary for the "old" patched 7.4
-
-  (i.e., ide-backend-experimental rather than ide-backend-experimental-74)
-------------------------------------------------------------------------------}
-
-class HasDynFlags m where
-  getDynFlags :: m DynFlags
-
-instance HasDynFlags Ghc where
-  getDynFlags = getSessionDynFlags
-
-{------------------------------------------------------------------------------
   Pretty-printing
 ------------------------------------------------------------------------------}
 
 showSDoc :: DynFlags -> PprStyle -> SDoc -> String
-showSDoc _dflags pprStyle doc =
+showSDoc dflags pprStyle doc =
     showDocWith OneLineMode
   $ runSDoc doc
-  $ initSDocContext pprStyle
+  $ initSDocContext dflags pprStyle
 
 pretty :: Outputable a => DynFlags -> PprStyle -> a -> String
 pretty dynFlags pprStyle = showSDoc dynFlags pprStyle . ppr
 
 prettyType :: DynFlags -> PprStyle -> Bool -> Type -> String
 prettyType dynFlags pprStyle showForalls typ =
-  showSDoc dynFlags pprStyle (pprTypeForUser showForalls typ)
+    showSDoc dynFlags' pprStyle (pprTypeForUser typ)
+  where
+    dynFlags' :: DynFlags
+    dynFlags' | showForalls = dynFlags `gopt_set`   Opt_PrintExplicitForalls
+              | otherwise   = dynFlags `gopt_unset` Opt_PrintExplicitForalls
 
 prettyM :: (Outputable a, Monad m, HasDynFlags m) => PprStyle -> a -> m String
 prettyM pprStyle x = do
@@ -112,9 +102,9 @@ deriving instance Show Severity
 sourceErrorSpan :: SourceError -> Maybe SrcSpan
 sourceErrorSpan e =
   case bagToList (HscTypes.srcErrorMessages e) of
-    [errMsg] -> case errMsgSpans errMsg of
-      [real@RealSrcSpan{}] -> Just real
-      _                    -> Nothing
+    [errMsg] -> case errMsgSpan errMsg of
+      real@RealSrcSpan{} -> Just real
+      _                  -> Nothing
     _ ->
       Nothing
 
@@ -124,19 +114,21 @@ sourceErrorSpan e =
 
 getBreak :: BreakArray -> Int -> Ghc (Maybe Bool)
 getBreak array index = do
-  val    <- liftIO $ BreakArray.getBreak array index
+  dflags <- getDynFlags
+  val    <- liftIO $ BreakArray.getBreak dflags array index
   return ((== 1) `liftM` val)
 
 setBreak :: BreakArray -> Int -> Bool -> Ghc ()
 setBreak array index value = do
-  void . liftIO $ if value then BreakArray.setBreakOn  array index
-                           else BreakArray.setBreakOff array index
+  dflags <- getDynFlags
+  void . liftIO $ if value then BreakArray.setBreakOn  dflags array index
+                           else BreakArray.setBreakOff dflags array index
 
 {------------------------------------------------------------------------------
   Time
 ------------------------------------------------------------------------------}
 
-type GhcTime = ClockTime
+type GhcTime = UTCTime
 
 {------------------------------------------------------------------------------
   Traversing the AST
@@ -254,7 +246,7 @@ instance FoldId id => Fold (LHsType id) where
   fold alg (L span (HsIParamTy _var typ)) = astMark alg (Just span) "HsIParamTy" $
     -- _var is not located
     fold alg typ
-  fold alg (L span (HsSpliceTy splice _freevars _postTcKind)) = astMark alg (Just span) "HsSpliceTy" $
+  fold alg (L span (HsSpliceTy splice _postTcKind)) = astMark alg (Just span) "HsSpliceTy" $
     fold alg (L span splice) -- reuse location info
   fold alg (L span (HsCoreTy _)) = astMark alg (Just span) "HsCoreTy" $
     -- Not important: doesn't arise until later in the compiler pipeline
@@ -276,9 +268,9 @@ instance FoldId id => Fold (Located (HsQuasiQuote id)) where
     return Nothing
 
 instance FoldId id => Fold (LHsTyVarBndr id) where
-  fold alg (L span (UserTyVar name _postTcKind)) = astMark alg (Just span) "UserTyVar" $ do
+  fold alg (L span (UserTyVar name)) = astMark alg (Just span) "UserTyVar" $ do
     foldId alg (L span name) DefSite
-  fold alg (L span (KindedTyVar name kind _postTcKind)) = astMark alg (Just span) "KindedTyVar" $ do
+  fold alg (L span (KindedTyVar name kind)) = astMark alg (Just span) "KindedTyVar" $ do
     foldId alg (L span name) DefSite
     fold alg kind
 
@@ -308,22 +300,22 @@ instance FoldId id => Fold (LHsBind id) where
 typecheckOnly :: SrcSpan
 typecheckOnly = mkGeneralSrcSpan (fsLit "<typecheck only>")
 
-instance FoldId id => Fold (MatchGroup id) where
+instance (FoldId id, Fold body) => Fold (MatchGroup id body) where
   -- We ignore the postTcType, as it doesn't have location information
-  fold alg (MatchGroup matches _postTcType) = astMark alg Nothing "MatchGroup" $
-    fold alg matches
+  fold alg (MG mg_alts _mg_arg_tys _mg_res_ty) = astMark alg Nothing "MG" $
+    fold alg mg_alts
 
-instance FoldId id => Fold (LMatch id) where
+instance (FoldId id, Fold body) => Fold (LMatch id body) where
   fold alg (L span (Match pats _type rhss)) = astMark alg (Just span) "Match" $ do
     fold alg pats
     fold alg rhss
 
-instance FoldId id => Fold (GRHSs id) where
+instance (FoldId id, Fold body) => Fold (GRHSs id body) where
   fold alg (GRHSs rhss binds) = astMark alg Nothing "GRHSs" $ do
     fold alg rhss
     fold alg binds
 
-instance FoldId id => Fold (LGRHS id) where
+instance (FoldId id, Fold body) => Fold (LGRHS id body) where
   fold alg (L span (GRHS _guards rhs)) = astMark alg (Just span) "GRHS" $
     fold alg rhs
 
@@ -381,15 +373,15 @@ instance FoldId id => Fold (LHsExpr id) where
     -- the original "assert". This means that the <span> (represented as an
     -- HsLit) might override "assertError" in the IdMap.
     astExpType alg span (ifPostTc (undefined :: id) (hsLitType lit))
-  fold alg (L span (HsLam matches@(MatchGroup _ postTcType))) = astMark alg (Just span) "HsLam" $ do
+  fold alg (L span (HsLam matches@(MG _ mg_arg_tys mg_res_ty))) = astMark alg (Just span) "HsLam" $ do
     fold alg matches
-    astExpType alg span (ifPostTc (undefined :: id) postTcType)
+    -- FIXME astExpType alg span (ifPostTc (undefined :: id) postTcType)
   fold alg (L span (HsDo _ctxt stmts postTcType)) = astMark alg (Just span) "HsDo" $ do
     -- ctxt indicates what kind of statement it is; AFAICT there is no
     -- useful information in it for us
     fold alg stmts
     astExpType alg span (ifPostTc (undefined :: id) postTcType)
-  fold alg (L span (ExplicitList postTcType exprs)) = astMark alg (Just span) "ExplicitList" $ do
+  fold alg (L span (ExplicitList postTcType _mSyntaxExpr exprs)) = astMark alg (Just span) "ExplicitList" $ do
     fold alg exprs
     astExpType alg span (mkListTy <$> ifPostTc (undefined :: id) postTcType)
   fold alg (L span (RecordCon con mPostTcExpr recordBinds)) = astMark alg (Just span) "RecordCon" $ do
@@ -401,10 +393,10 @@ instance FoldId id => Fold (LHsExpr id) where
       Just postTcExpr -> do
         conTy <- fold alg (L (getLoc con) postTcExpr)
         astExpType alg span (funResN <$> conTy)
-  fold alg (L span (HsCase expr matches@(MatchGroup _ postTcType))) = astMark alg (Just span) "HsCase" $ do
+  fold alg (L span (HsCase expr matches@(MG _ mg_arg_tys mg_res_ty))) = astMark alg (Just span) "HsCase" $ do
     fold alg expr
     fold alg matches
-    astExpType alg span (funRes1 <$> ifPostTc (undefined :: id) postTcType)
+    -- FIXME astExpType alg span (funRes1 <$> ifPostTc (undefined :: id) postTcType)
   fold alg (L span (ExplicitTuple args boxity)) = astMark alg (Just span) "ExplicitTuple" $ do
     argTys <- mapM (fold alg) args
     astExpType alg span (mkTupleTy (boxityNormalTupleSort boxity) <$> sequence argTys)
@@ -435,6 +427,7 @@ instance FoldId id => Fold (LHsExpr id) where
     astExpType alg span ty
   fold alg (L span (HsBracket th)) = astMark alg (Just span) "HsBracket" $
     fold alg th
+  {- FIXME
   fold alg (L span (HsBracketOut th pendingSplices)) = astMark alg (Just span) "HsBracketOut" $ do
     -- Given something like
     --
@@ -452,6 +445,7 @@ instance FoldId id => Fold (LHsExpr id) where
     forM_ pendingSplices $ \(_name, splice) ->
       fold alg splice
     fold alg th
+    -}
   fold alg (L span (RecordUpd expr binds _dataCons _postTcTypeInp _postTcTypeOutp)) = astMark alg (Just span) "RecordUpd" $ do
     recordTy <- fold alg expr
     fold alg binds
@@ -474,7 +468,7 @@ instance FoldId id => Fold (LHsExpr id) where
     fold alg expr
   fold alg (L span (HsCoreAnn _string expr)) = astMark alg (Just span) "HsCoreAnn" $ do
     fold alg expr
-  fold alg (L span (HsSpliceE splice)) = astMark alg (Just span) "HsSpliceE" $ do
+  fold alg (L span (HsSpliceE _isTyped splice)) = astMark alg (Just span) "HsSpliceE" $ do
     fold alg (L span splice) -- reuse span
   fold alg (L span (HsQuasiQuoteE qquote)) = astMark alg (Just span) "HsQuasiQuoteE" $ do
     fold alg (L span qquote) -- reuse span
@@ -496,7 +490,7 @@ instance FoldId id => Fold (LHsExpr id) where
     return Nothing
   fold alg (L span (HsType _ )) = astMark alg (Just span) "HsType" $
     return Nothing
-  fold alg (L span (ArithSeq mPostTcExpr seqInfo)) = astMark alg (Just span) "ArithSeq" $ do
+  fold alg (L span (ArithSeq mPostTcExpr _mSyntaxExpr seqInfo)) = astMark alg (Just span) "ArithSeq" $ do
     fold alg seqInfo
     case ifPostTc (undefined :: id) mPostTcExpr of
       Just postTcExpr -> fold alg (L span postTcExpr)
@@ -548,23 +542,28 @@ instance (Fold a, FoldId id) => Fold (HsRecField id a) where
 
 -- The meaning of the constructors of LStmt isn't so obvious; see various
 -- notes in ghc/compiler/hsSyn/HsExpr.lhs
-instance FoldId id => Fold (LStmt id) where
+instance (FoldId id, Fold body) => Fold (LStmt id body) where
+{-
   fold alg (L span (ExprStmt expr _seq _guard _postTcType)) = astMark alg (Just span) "ExprStmt" $
     -- Neither _seq nor _guard are located
     fold alg expr
+  fold alg (L span (LastStmt expr _return)) = astMark alg (Just span) "LastStmt" $
+    fold alg expr
+-}
+
+  -- FIXME LastStmt
   fold alg (L span (BindStmt pat expr _bind _fail)) = astMark alg (Just span) "BindStmt" $ do
     -- Neither _bind or _fail are located
     fold alg pat
     fold alg expr
+  -- FIXME BodyStmt
   fold alg (L span (LetStmt binds)) = astMark alg (Just span) "LetStmt" $
     fold alg binds
-  fold alg (L span (LastStmt expr _return)) = astMark alg (Just span) "LastStmt" $
-    fold alg expr
   fold alg (L span stmt@(RecStmt {})) = astMark alg (Just span) "RecStmt" $ do
     fold alg (recS_stmts stmt)
 
-  fold alg (L span (TransStmt {}))     = astUnsupported alg (Just span) "TransStmt"
-  fold alg (L span (ParStmt _ _ _ _))  = astUnsupported alg (Just span) "ParStmt"
+  fold alg (L span (TransStmt {}))  = astUnsupported alg (Just span) "TransStmt"
+  fold alg (L span (ParStmt _ _ _)) = astUnsupported alg (Just span) "ParStmt"
 
 instance FoldId id => Fold (LPat id) where
   fold alg (L span (WildPat postTcType)) = astMark alg (Just span) "WildPat" $
@@ -580,7 +579,7 @@ instance FoldId id => Fold (LPat id) where
     fold alg pat
   fold alg (L span (BangPat pat)) = astMark alg (Just span) "BangPat" $
     fold alg pat
-  fold alg (L span (ListPat pats _postTcType)) = astMark alg (Just span) "ListPat" $
+  fold alg (L span (ListPat pats _postTcType _mSyntaxExpr)) = astMark alg (Just span) "ListPat" $
     fold alg pats
   fold alg (L span (TuplePat pats _boxity _postTcType)) = astMark alg (Just span) "TuplePat" $
     fold alg pats
@@ -624,14 +623,10 @@ instance (Fold arg, Fold rec) => Fold (HsConDetails arg rec) where
     fold alg [a, b]
 
 instance FoldId id => Fold (LTyClDecl id) where
-  fold alg (L span decl@(TyData {})) = astMark alg (Just span) "TyData" $ do
-    fold alg (tcdCtxt decl)
-    foldId alg (tcdLName decl) DefSite
-    fold alg (tcdTyVars decl)
-    fold alg (tcdTyPats decl)
-    fold alg (tcdKindSig decl)
-    fold alg (tcdCons decl)
-    fold alg (tcdDerivs decl)
+  fold alg (L span _decl@(ForeignType {})) = astUnsupported alg (Just span) "ForeignType"
+  -- FIXME FamDecl
+  -- FIXME SynDecl
+  -- FIXME DataDecl
   fold alg (L span decl@(ClassDecl {})) = astMark alg (Just span) "ClassDecl" $ do
     fold alg (tcdCtxt decl)
     foldId alg (tcdLName decl) DefSite
@@ -642,6 +637,16 @@ instance FoldId id => Fold (LTyClDecl id) where
     fold alg (tcdATs decl)
     fold alg (tcdATDefs decl)
     fold alg (tcdDocs decl)
+
+{-
+  fold alg (L span decl@(TyData {})) = astMark alg (Just span) "TyData" $ do
+    fold alg (tcdCtxt decl)
+    foldId alg (tcdLName decl) DefSite
+    fold alg (tcdTyVars decl)
+    fold alg (tcdTyPats decl)
+    fold alg (tcdKindSig decl)
+    fold alg (tcdCons decl)
+    fold alg (tcdDerivs decl)
   fold alg (L span decl@(TySynonym {})) = astMark alg (Just span) "TySynonym" $ do
     foldId alg (tcdLName decl) DefSite
     fold alg (tcdTyVars decl)
@@ -651,7 +656,7 @@ instance FoldId id => Fold (LTyClDecl id) where
     foldId alg (tcdLName decl) DefSite
     fold alg (tcdTyVars decl)
     fold alg (tcdKind decl)
-  fold alg (L span _decl@(ForeignType {})) = astUnsupported alg (Just span) "ForeignType"
+-}
 
 instance FoldId id => Fold (LConDecl id) where
   fold alg (L span decl@(ConDecl {})) = astMark alg (Just span) "ConDecl" $ do
@@ -661,11 +666,11 @@ instance FoldId id => Fold (LConDecl id) where
     fold alg (con_details decl)
     fold alg (con_res decl)
 
-instance FoldId id => Fold (ResType id) where
+instance Fold ty => Fold (ResType ty) where
   fold alg ResTyH98 = astMark alg Nothing "ResTyH98" $ do
     return Nothing -- Nothing to do
-  fold alg (ResTyGADT typ) = astMark alg Nothing "ResTyGADT" $ do
-    fold alg typ
+  fold alg (ResTyGADT ty) = astMark alg Nothing "ResTyGADT" $ do
+    fold alg ty
 
 instance FoldId id => Fold (ConDeclField id) where
   fold alg (ConDeclField name typ _doc) = do
@@ -673,11 +678,16 @@ instance FoldId id => Fold (ConDeclField id) where
     fold alg typ
 
 instance FoldId id => Fold (LInstDecl id) where
+  -- FIXME: ClsInstD
+  -- FIXME: DataFamInstD
+  -- FIXME: TyFamInstD
+{-
   fold alg (L span (InstDecl typ binds sigs accTypes)) = astMark alg (Just span) "LInstDecl" $ do
     fold alg typ
     fold alg binds
     fold alg sigs
     fold alg accTypes
+-}
 
 instance FoldId id => Fold (LDerivDecl id) where
   fold alg (L span (DerivDecl deriv_type)) = astMark alg (Just span) "LDerivDecl" $ do
@@ -754,6 +764,24 @@ instance FoldId id => Fold (LHsDecl id) where
     fold alg (L span docD)
   fold alg (L span (QuasiQuoteD quasiQuoteD)) = astMark alg (Just span) "QuasiQuoteD" $
     fold alg (L span quasiQuoteD)
+
+instance Fold (TyClGroup id) where
+  -- FIXME
+
+instance Fold (LHsTyVarBndrs id) where
+  -- FIXME
+
+instance Fold (LHsCmd id) where
+  -- FIXME
+
+instance Fold (HsWithBndrs thing) where
+  -- FIXME
+
+instance Fold (LFamilyDecl id) where
+  -- FIXME
+
+instance Fold (LTyFamInstDecl id) where
+  -- FIXME
 
 {------------------------------------------------------------------------------
   Operations on types

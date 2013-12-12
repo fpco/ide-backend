@@ -38,19 +38,26 @@ executable ide-backend-server
                       filemanip            >= 0.3.6.2 && < 0.4,
                       haddock              >= 2.11    && < 2.15,
                       attoparsec           >= 0.10    && < 0.11, 
-                      old-time             >= 1.1     && < 1.2,
                       array                >= 0.4     && < 0.6,
                       binary-ide-backend   >= 0.7.1.0 && < 0.8,
-                      utf8-string,
+                      utf8-string          >= 0.3     && < 0.4,
+                      pretty-show          >= 1.6     && < 1.7,
                       template-haskell,
-                      pretty-show,
                       ghc-prim
 
   -- The standard macros don't give us 7.6.x granularity
   if impl(ghc == 7.6.1)
     cpp-options: -DGHC_761
+
   if impl(ghc == 7.4.2.*)
+    build-depends: old-time >= 1.1 && < 1.2
     cpp-options: -DGHC_742
+  if impl(ghc == 7.7.*)
+    build-depends: time >= 1.4 && < 1.5 
+    cpp-options: -DGHC_78
+  if impl(ghc == 7.8.*)
+    build-depends: time >= 1.4 && < 1.5 
+    cpp-options: -DGHC_78
 
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,

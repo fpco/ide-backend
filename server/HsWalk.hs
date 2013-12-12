@@ -22,7 +22,7 @@ module HsWalk
 import Control.Monad (liftM)
 import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.State.Class (MonadState(..))
-import Control.Applicative ((<$>))
+import Control.Applicative (Applicative, (<$>))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.ByteString (ByteString)
@@ -58,15 +58,12 @@ import OccName
 import Outputable hiding (trace)
 import qualified RdrName
 import TcRnTypes
-import TcType (tidyOpenType)
 import Var hiding (idInfo)
 import VarEnv (TidyEnv, emptyTidyEnv)
 import Unique (Unique, Uniquable, getUnique, getKey)
 import HscTypes (TypeEnv, HscEnv(hsc_dflags), mkPrintUnqualified)
 import NameEnv (nameEnvUniqueElts)
 import DataCon (dataConRepType)
-import Pretty (showDocWith, Mode(OneLineMode))
-import PprTyThing (pprTypeForUser)
 
 import Conv
 import Haddock
@@ -215,7 +212,7 @@ extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
   where
     go :: (Unique, TyThing) -> ExtractIdsM ()
     go (uniq, ADataCon dataCon) =
-      recordType ("ADataCon: " ++ showSDoc (ppr dataCon)) uniq (dataConRepType dataCon)
+      recordType uniq (dataConRepType dataCon)
     go _ =
       return ()
 
@@ -247,8 +244,13 @@ data ExtractIdsState = ExtractIdsState {
 newtype ExtractIdsM a = ExtractIdsM (
       ReaderT ExtractIdsEnv (StrictState ExtractIdsState) a
     )
-  deriving
-    (Functor, Monad, MonadState ExtractIdsState, MonadReader ExtractIdsEnv)
+  deriving (
+      Functor
+    , Applicative
+    , Monad
+    , MonadState ExtractIdsState
+    , MonadReader ExtractIdsEnv
+    )
 
 instance MonadFilePathCaching ExtractIdsM where
   getFilePathCache = eIdsFilePathCache <$> get
@@ -264,6 +266,9 @@ instance TraceMonad ExtractIdsM where
     -- so we can use the state to make sure the event gets evaluated
     st <- get
     put $ Debug.traceEvent str st
+
+instance HasDynFlags ExtractIdsM where
+  getDynFlags = asks eIdsDynFlags
 
 execExtractIdsT :: MonadIO m
                 => DynFlags
@@ -356,28 +361,6 @@ recordExpType span (Just typ) = do
   return (Just typ)
 recordExpType _ Nothing = return Nothing
 
-#if DEBUG
--- In ghc 7.4 showSDoc does not take the dynflags argument; for 7.6 and up
--- it does
-pretty :: (Outputable a) => Bool -> a -> ExtractIdsM String
-pretty debugShow val = do
-  _dynFlags <- asks eIdsDynFlags
-#if __GLASGOW_HASKELL__ >= 706
-  return $ (if debugShow then showSDocDebug else showSDoc) _dynFlags (ppr val)
-#else
-  return $ (if debugShow then showSDocDebug else showSDoc) (ppr val)
-#endif
-#endif
-
-debugPP :: (Outputable a) => String -> a -> ExtractIdsM ()
-#if DEBUG
-debugPP header val = do
-  val' <- pretty True val
-  liftIO $ appendFile "/tmp/ghc.log" (header ++ ": " ++ val' ++ "\n")
-#else
-debugPP _ _ = return ()
-#endif
-
 -- We mark every node in the AST with 'ast'. This is necessary so that we can
 -- restore the TidyEnv at every node, so that we can reuse type variables. For
 -- instance
@@ -427,9 +410,8 @@ logIndented msg = liftIO $ do
 unsupported :: Maybe SrcSpan -> String -> ExtractIdsM (Maybe Type)
 #if DEBUG
 unsupported mspan c = ast mspan c $ do
-  prettySpan <- pretty False mspan
-  liftIO . appendFile "/tmp/ghc.log" $ "extractIds: logUnsupported " ++ c ++ " at " ++ prettySpan ++ "\n"
-  return Nothing
+  prettySpan <- prettyM defaultUserStyle mspan
+  fail $ "extractIds: unsupported " ++ c ++ " at " ++ prettySpan ++ "\n"
 #else
 unsupported _ _ = return Nothing
 #endif
@@ -447,8 +429,8 @@ idInfoForName
   -> (Name -> Strict Maybe ModuleId)  -- ^ Home modules
   -> m (IdPropPtr, Maybe IdScope)     -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt mCurrent home = do
-    scope     <- constructScope
-    idDefSpan <- extractSourceSpan (Name.nameSrcSpan name)
+    scope      <- constructScope
+    idDefSpan  <- extractSourceSpan (Name.nameSrcSpan name)
 
     let mod          = if isLocal scope
                          then fromJust mCurrent
@@ -511,22 +493,21 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       isLocal _             = False
 
       missingModule :: a
-      missingModule = error $ "No module for " ++ showSDocDebug (ppr name)
+      missingModule = error $ "No module for "
+                           ++ pretty dflags defaultUserStyle name
 
-recordType :: String -> Unique -> Type -> ExtractIdsM ()
-recordType _header uniq typ = do
+recordType :: Unique -> Type -> ExtractIdsM ()
+recordType uniq typ = do
   typStr <- tidyType typ >>= showTypeForUser
   recordIdPropType (IdPropPtr $ getKey uniq) typStr
 
 showTypeForUser :: Type -> ExtractIdsM Text
 showTypeForUser typ = do
-  pprStyle <- asks eIdsPprStyle
-  -- We don't want line breaks in the types
-  let showForalls = False
-      typStr      = showDocWith OneLineMode
-                      (runSDoc (pprTypeForUser showForalls typ)
-                               (initSDocContext pprStyle))
-  return $ Text.pack typStr
+    pprStyle  <- asks eIdsPprStyle
+    prettyTyp <- prettyTypeM pprStyle showForalls typ
+    return $ Text.pack prettyTyp
+  where
+    showForalls = False
 
 extractIds :: Fold a => a -> ExtractIdsM (Maybe Type)
 extractIds = fold AstAlg {
@@ -539,7 +520,7 @@ extractIds = fold AstAlg {
 
 recordId :: Located Id -> IsBinder -> ExtractIdsM (Maybe Type)
 recordId (L span id) _idIsBinder = do
-    recordType (showSDocDebug (ppr id)) (getUnique id) typ
+    recordType (getUnique id) typ
     recordExpType span (Just typ)
   where
     typ = Var.varType id
@@ -549,7 +530,7 @@ recordName (L span name) idIsBinder = do
   span' <- extractSourceSpan span
   case span' of
     ProperSpan sourceSpan -> do
-      dflags  <- asks eIdsDynFlags
+      dflags  <- getDynFlags
       rdrEnv  <- asks eIdsRdrEnv
       current <- asks eIdsCurrent
       linkEnv <- asks eIdsLinkEnv
@@ -575,5 +556,5 @@ recordName (L span name) idIsBinder = do
           -- GlobalRdrEnv.
           return ()
     TextSpan _ ->
-      debugPP "Name without source span" name
+      return ()
   return Nothing

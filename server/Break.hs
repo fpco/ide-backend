@@ -18,7 +18,13 @@ import Name
 import Var hiding ( varName )
 import VarSet
 import UniqSupply
-import TcType
+import TcType (
+    emptyTvSubst
+  , TvSubst
+  , substTy
+  , isUnliftedTypeKind
+  , unionTvSubst
+  )
 import GHC
 import MonadUtils
 
@@ -26,6 +32,8 @@ import Control.Monad
 import Data.List
 import Data.Maybe
 import Data.IORef
+
+import GhcShim
 
 -------------------------------------
 -- | The :print & friends commands

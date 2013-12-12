@@ -222,6 +222,7 @@ only a few minor differences, explained when they come up.
   - haddock from its git repo (http://darcs.haskell.org/haddock.git)
   - async from its git repo (https://github.com/simonmar/async.git)
   - data-accessor from its darcs repo (http://code.haskell.org/data-accessor/core/)
+  - pretty-show from its git repo (https://github.com/yav/pretty-show)
 
   In both:
 

@@ -28,11 +28,11 @@ import GHC (
   , ImportDecl(..)
   , Located
   )
-import Outputable (ppr, showSDoc)
 import qualified GHC
 import qualified Packages as GHC
 import qualified Name     as GHC
 import MonadUtils (MonadIO(..)) -- ghc's MonadIO
+import Outputable (defaultUserStyle)
 
 -- Haddock imports
 import qualified Documentation.Haddock as Hk
@@ -46,6 +46,7 @@ import qualified IdeSession.Strict.Maybe as StrictMaybe
 
 -- Our imports
 import Conv
+import GhcShim
 
 {------------------------------------------------------------------------------
   Package dependencies
@@ -78,14 +79,14 @@ haddockInterfaceFilePath dflags pkg = do
   case GHC.lookupPackage pkgIdMap pkg of
     Nothing ->
       Left $ "Package configuration for "
-          ++ showSDoc (ppr pkg)
+          ++ pretty dflags defaultUserStyle pkg
           ++ " not found"
     Just cfg | null (GHC.haddockInterfaces cfg) -> do
       Left $ "No haddock interfaces found for package "
-          ++ showSDoc (ppr pkg)
+          ++ pretty dflags defaultUserStyle pkg
     Just cfg | length (GHC.haddockInterfaces cfg) > 1 -> do
       Left $ "Too many haddock interfaces found for package "
-          ++ showSDoc (ppr pkg)
+          ++ pretty dflags defaultUserStyle pkg
     Just cfg ->
       Right . head . GHC.haddockInterfaces $ cfg
 
@@ -118,9 +119,6 @@ haddockInterfaceFor dflags cache pkg = do
 ------------------------------------------------------------------------------}
 
 type LinkEnv = Strict (Map (GHC.Module, GHC.OccName)) GHC.Module
-
-_showLinkEnv :: LinkEnv -> String
-_showLinkEnv = unlines . map (showSDoc . ppr) . StrictMap.toList
 
 mkLinkEnv :: Map GHC.Name GHC.Module -> LinkEnv
 mkLinkEnv m = foldr (.) (\x -> x) (map aux (LazyMap.toList m)) StrictMap.empty
