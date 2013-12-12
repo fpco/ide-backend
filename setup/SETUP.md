@@ -264,8 +264,9 @@ only a few minor differences, explained when they come up.
       cabal --max-backjumps=-1; do not attempt for 7.8 for now))
     * parsec-3.1.3 (optional; only required for one test)
 
-    You should install these versions and in this order (the test suite is a
-    bit finicky; there are some open issues about that; #138, #139).
+    The tests are no longer as picky as they used to be about the versions of
+    these packages; if you are getting test failures with different versions,
+    you should file a bug.
   - whatever other packages you want to be available to snippets at runtime
 
 Running the tests
