@@ -885,8 +885,7 @@ buildDoc = do
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     ghcNewOpts        <- get ideNewOpts
-    let SessionConfig{ configDynLink
-                     , configPackageDBStack
+    let SessionConfig{ configPackageDBStack
                      , configGenerateModInfo
                      , configStaticOpts
                      , configExtraPathDirs } = ideConfig
@@ -899,7 +898,7 @@ buildDoc = do
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
                   buildHaddock ideSourcesDir ideDistDir configExtraPathDirs
-                               ghcOpts configDynLink configPackageDBStack
+                               ghcOpts configPackageDBStack
                                mcomputed callback)
     set ideBuildDocStatus (Just exitCode)
 

@@ -242,7 +242,6 @@ mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra =
     { Setup.configDistPref = Setup.Flag ideDistDir
     , Setup.configUserInstall = Setup.Flag False
     , Setup.configVerbosity = Setup.Flag minBound
-    , Setup.configSharedLib = Setup.Flag dynlink
     , Setup.configDynExe = Setup.Flag dynlink
       -- @Nothing@ wipes out default, initial DBs.
     , Setup.configPackageDBs = Nothing : map Just configPackageDBStack
@@ -333,11 +332,10 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
                                else Ex.throwIO e
 
 configureAndHaddock :: FilePath -> FilePath -> [FilePath]
-                    -> [String] -> Bool
-                    -> PackageDBStack -> [PackageId]
+                    -> [String] -> PackageDBStack -> [PackageId]
                     -> [ModuleName] -> (Progress -> IO ())
                     -> IO ExitCode
-configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
+configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts
                     configPackageDBStack pkgs loadedMs callback = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
@@ -360,7 +358,8 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra
+      confFlags =
+        mkConfFlags ideDistDir False configPackageDBStack progPathExtra
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       haddockFlags = Setup.defaultHaddockFlags
@@ -432,14 +431,14 @@ buildExecutable ideSourcesDir ideDistDir progPathExtra
                     configPackageDBStack pkgs loadedMs callback ms
 
 buildHaddock :: FilePath -> FilePath -> [FilePath]
-             -> [String] -> Bool -> PackageDBStack
+             -> [String] -> PackageDBStack
              -> Strict Maybe Computed -> (Progress -> IO ())
              -> IO ExitCode
 buildHaddock ideSourcesDir ideDistDir progPathExtra
-             ghcOpts dynlink configPackageDBStack
+             ghcOpts configPackageDBStack
              mcomputed callback = do
   (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
+  configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts
                       configPackageDBStack pkgs loadedMs callback
 
 lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
