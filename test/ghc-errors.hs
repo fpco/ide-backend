@@ -3254,20 +3254,20 @@ syntheticTests = [
            assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
     )
   , ( "Register a package, don't restart session, don't see the package"
-    , withSession (withOpts ["-package simple-lib17"]) $ \session -> do
-        deletePackage "test/simple-lib17"
-        restartSession session (Just defaultSessionInitParams)
-        let upd = updateSourceFile "Main.hs" . BSLC.pack . unlines $
-                    [ "module Main where"
-                    , "import SimpleLib (simpleLib)"
-                    , "main = print simpleLib"
-                    ]
-        installPackage "test/simple-lib17"
-        -- No restartSession yet, hence the exception at session init.
-        let expected = "<command line>: cannot satisfy -package simple-lib17"
-        updateSessionD session upd 1
-        assertSourceErrors' session [expected]
-        deletePackage "test/simple-lib17"
+    , do deletePackage "test/simple-lib17"
+         withSession defaultSessionConfig $ \session -> do
+           let upd = (updateGhcOptions (Just ["-package simple-lib17"]))
+                  <> (updateSourceFile "Main.hs" . BSLC.pack . unlines $
+                       [ "module Main where"
+                       , "import SimpleLib (simpleLib)"
+                       , "main = print simpleLib"
+                       ])
+           installPackage "test/simple-lib17"
+           -- No restartSession yet, hence the exception at session init.
+           let expected = "<command line>: cannot satisfy -package simple-lib17"
+           updateSessionD session upd 1
+           assertSourceErrors' session [expected]
+           deletePackage "test/simple-lib17"
     )
   , ( "Register a package, restart session, see the package and check for cabal macros"
     , withSession (withOpts ["-XCPP"]) $ \session -> do
