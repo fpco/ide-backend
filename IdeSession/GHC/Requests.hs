@@ -1,7 +1,7 @@
 -- | GHC requests
 --
 -- GHC requests use "IdeSession.Types.Public" types.
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveDataTypeable, DeriveGeneric #-}
 module IdeSession.GHC.Requests (
     GhcRequest(..)
   , GhcRunRequest(..)
@@ -12,6 +12,9 @@ import Data.Binary
 import Data.ByteString (ByteString)
 import Data.Typeable (Typeable)
 import Control.Applicative ((<$>), (<*>))
+
+import Text.Show.Pretty (PrettyVal(..))
+import GHC.Generics
 
 import IdeSession.Types.Public
 
@@ -51,7 +54,7 @@ data GhcRequest
   | ReqCrash {
         reqCrashDelay :: Maybe Int
       }
-  deriving Typeable
+  deriving (Typeable, Generic)
 
 data RunCmd =
     RunStmt {
@@ -61,6 +64,10 @@ data RunCmd =
       , runCmdStderr   :: RunBufferMode
       }
   | Resume
+  deriving (Typeable, Generic)
+
+instance PrettyVal GhcRequest
+instance PrettyVal RunCmd
 
 data GhcRunRequest =
     GhcRunInput ByteString

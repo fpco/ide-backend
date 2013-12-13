@@ -1,7 +1,7 @@
 -- | Client interface to the `ide-backend-server` process
 --
 -- It is important that none of the types here rely on the GHC library.
-{-# LANGUAGE TemplateHaskell, ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, TupleSections #-}
 module IdeSession.GHC.Client (
     -- * Starting and stopping the server
     InProcess
@@ -62,7 +62,7 @@ import Distribution.Simple.Program.Find ( -- From our patched cabal
 ------------------------------------------------------------------------------}
 
 -- | Start the ghc server
-forkGhcServer :: IdeStaticInfo -> IO (GhcServer, GhcVersion)
+forkGhcServer :: IdeStaticInfo -> IO (Either ExternalException (GhcServer, GhcVersion))
 forkGhcServer IdeStaticInfo{..} = do
   when configInProcess $
     fail "In-process ghc server not currently supported"
@@ -84,8 +84,8 @@ forkGhcServer IdeStaticInfo{..} = do
                  ]
       env     <- envWithPathOverride configExtraPathDirs
       server  <- OutProcess <$> forkRpcServer prog opts (Just ideDataDir) env
-      version <- rpcGetVersion server
-      return (server, version)
+      version <- Ex.try $ rpcGetVersion server
+      return ((server,) <$> version)
   where
     searchPath :: ProgramSearchPath
     searchPath = ProgramSearchPathDefault

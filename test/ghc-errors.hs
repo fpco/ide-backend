@@ -3327,6 +3327,23 @@ syntheticTests = [
           , (Nothing, expected2)
           ]]
     )
+  , ( "Make sure package DB is passed to ghc (detect problem immediately)"
+    , let packageOpts = ["-package parallel"]
+          config      = defaultSessionConfig {
+                            configGenerateModInfo = False
+                          , configPackageDBStack  = [GlobalPackageDB]
+                          , configStaticOpts      = packageOpts
+                          }
+      in withSession config $ \session -> do
+        -- We should be able to see these errors without doing an
+        -- updateSession first
+        let expected1 = "cannot satisfy -package ide-backend-rts"
+            expected2 = "cannot satisfy -package parallel"
+        assertSourceErrors session [[
+            (Nothing, expected1)
+          , (Nothing, expected2)
+          ]]
+    )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo True)"
     , let packageOpts = ["-package parallel"]
           config      = defaultSessionConfig {

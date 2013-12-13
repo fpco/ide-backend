@@ -131,8 +131,14 @@ initSession initParams ideConfig@SessionConfig{..} = do
 
   let ideStaticInfo = IdeStaticInfo{..}
 
+  -- Local initialization
+  execInitParams ideStaticInfo initParams
+
   -- Start the GHC server (as a separate process)
-  (_ideGhcServer, _ideGhcVersion) <- forkGhcServer ideStaticInfo
+  mServer <- forkGhcServer ideStaticInfo
+  let (state, server, version) = case mServer of
+         Right (s, v) -> (IdeSessionIdle,         s,          v)
+         Left e       -> (IdeSessionServerDied e, Ex.throw e, Ex.throw e)
 
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
@@ -140,35 +146,32 @@ initSession initParams ideConfig@SessionConfig{..} = do
   -- We have to make sure that file times never reach 0, because this will
   -- trigger an exception (http://hackage.haskell.org/trac/ghc/ticket/7567).
   -- We rather arbitrary start at Jan 2, 1970.
-  ideState <- newMVar $ IdeSessionIdle IdeIdleState {
-                          _ideLogicalTimestamp = 86400
-                        , _ideComputed         = Maybe.nothing
-                        , _ideNewOpts          = Nothing
-                        , _ideGenerateCode     = False
-                        , _ideManagedFiles     = ManagedFilesInternal [] []
-                        , _ideObjectFiles      = []
-                        , _ideBuildExeStatus   = Nothing
-                        , _ideBuildDocStatus   = Nothing
-                        , _ideBuildLicensesStatus = Nothing
-                        , _ideEnv              = []
-                        , _ideArgs             = []
-                        , _ideUpdatedEnv       = False
-                        , _ideUpdatedArgs      = False -- Server default is []
-                          -- Make sure 'ideComputed' is set on first call
-                          -- to updateSession
-                        , _ideUpdatedCode      = True
-                        , _ideStdoutBufferMode = RunNoBuffering
-                        , _ideStderrBufferMode = RunNoBuffering
-                        , _ideBreakInfo        = Maybe.nothing
-                        , _ideGhcServer
-                        , _ideGhcVersion
-                        , _ideTargets          = Nothing
-                        }
-  let session = IdeSession{..}
-
-  execInitParams ideStaticInfo initParams
-
-  return session
+  let idleState = IdeIdleState {
+                      _ideLogicalTimestamp = 86400
+                    , _ideComputed         = Maybe.nothing
+                    , _ideNewOpts          = Nothing
+                    , _ideGenerateCode     = False
+                    , _ideManagedFiles     = ManagedFilesInternal [] []
+                    , _ideObjectFiles      = []
+                    , _ideBuildExeStatus   = Nothing
+                    , _ideBuildDocStatus   = Nothing
+                    , _ideBuildLicensesStatus = Nothing
+                    , _ideEnv              = []
+                    , _ideArgs             = []
+                    , _ideUpdatedEnv       = False
+                    , _ideUpdatedArgs      = False -- Server default is []
+                      -- Make sure 'ideComputed' is set on first call
+                      -- to updateSession
+                    , _ideUpdatedCode      = True
+                    , _ideStdoutBufferMode = RunNoBuffering
+                    , _ideStderrBufferMode = RunNoBuffering
+                    , _ideBreakInfo        = Maybe.nothing
+                    , _ideGhcServer        = server
+                    , _ideGhcVersion       = version
+                    , _ideTargets          = Nothing
+                    }
+  ideState <- newMVar (state idleState)
+  return IdeSession{..}
 
 -- | Set up the initial state of the session according to the given parameters
 execInitParams :: IdeStaticInfo -> SessionInitParams -> IO ()
@@ -289,16 +292,23 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
   where
     restart :: IdeIdleState -> IO IdeSessionState
     restart idleState = do
-      forceShutdownGhcServer $ _ideGhcServer idleState
-      (server, version) <- forkGhcServer ideStaticInfo
-      return . IdeSessionIdle
-             . (ideComputed    ^= Maybe.nothing)
-             . (ideUpdatedEnv  ^= True)
-             . (ideUpdatedArgs ^= True)
-             . (ideUpdatedCode ^= True)
-             . (ideGhcServer   ^= server)
-             . (ideGhcVersion  ^= version)
-             $ idleState
+      ignoreAllExceptions $ forceShutdownGhcServer $ _ideGhcServer idleState
+      mServer  <- forkGhcServer ideStaticInfo
+      case mServer of
+        Right (server, version) ->
+          return . IdeSessionIdle
+                 . (ideComputed    ^= Maybe.nothing)
+                 . (ideUpdatedEnv  ^= True)
+                 . (ideUpdatedArgs ^= True)
+                 . (ideUpdatedCode ^= True)
+                 . (ideGhcServer   ^= server)
+                 . (ideGhcVersion  ^= version)
+                 $ idleState
+        Left e ->
+          return . IdeSessionServerDied e
+                 . (ideGhcServer   ^= Ex.throw e)
+                 . (ideGhcVersion  ^= Ex.throw e)
+                 $ idleState
 
 {------------------------------------------------------------------------------
   Session updates
@@ -352,85 +362,89 @@ instance Monoid a => Monoid (IdeSessionUpdate a) where
 -- The update can be a long running operation, so we support a callback
 -- which can be used to monitor progress of the operation.
 updateSession :: IdeSession -> IdeSessionUpdate () -> (Progress -> IO ()) -> IO ()
-updateSession session@IdeSession{ideStaticInfo, ideState} update callback = do
-    -- We don't want to call 'restartSession' while we hold the lock
-    shouldRestart <- modifyMVar ideState $ \state -> case state of
-      IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
-        ((numActions, cErrors), idleState') <-
-          runSessionUpdate (update >> recompileObjectFiles)
-                           ideStaticInfo
-                           callback
-                           idleState
-
-        let callback' p = callback p {
-                progressStep     = progressStep     p + numActions
-              , progressNumSteps = progressNumSteps p + numActions
-              }
-
-        -- Update environment
-        when (idleState' ^. ideUpdatedEnv) $
-          rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
-
-        when (idleState' ^. ideUpdatedArgs) $
-          rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
-
-        -- Recompile
-        computed <- if (idleState' ^. ideUpdatedCode)
-          then do
-            GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
-                                               (idleState' ^. ideNewOpts)
-                                               (ideSourcesDir ideStaticInfo)
-                                               (ideDistDir    ideStaticInfo)
-                                               (idleState' ^. ideGenerateCode)
-                                               (idleState' ^. ideTargets)
-                                               callback'
-
-            let applyDiff :: Strict (Map ModuleName) (Diff v)
-                          -> (Computed -> Strict (Map ModuleName) v)
-                          -> Strict (Map ModuleName) v
-                applyDiff diff f = applyMapDiff diff
-                                 $ Maybe.maybe Map.empty f
-                                 $ idleState' ^. ideComputed
-
-            let diffSpan  = Map.map (fmap mkIdMap)  ghcCompileSpanInfo
-                diffTypes = Map.map (fmap mkExpMap) ghcCompileExpTypes
-                diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
-
-            return $ Maybe.just Computed {
-                computedErrors        = force cErrors List.++ ghcCompileErrors
-              , computedLoadedModules = ghcCompileLoaded
-              , computedImports       = ghcCompileImports  `applyDiff` computedImports
-              , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
-              , computedSpanInfo      = diffSpan           `applyDiff` computedSpanInfo
-              , computedExpTypes      = diffTypes          `applyDiff` computedExpTypes
-              , computedUseSites      = ghcCompileUseSites `applyDiff` computedUseSites
-              , computedPkgDeps       = ghcCompilePkgDeps  `applyDiff` computedPkgDeps
-              , computedCache         = mkRelative ghcCompileCache
-              }
-          else return $ idleState' ^. ideComputed
-
-        -- Update state
-        return ( IdeSessionIdle
-               . (ideComputed    ^= computed)
-               . (ideUpdatedEnv  ^= False)
-               . (ideUpdatedCode ^= False)
-               . (ideUpdatedArgs ^= False)
-               $ idleState'
-               , False
-               )
-
-      IdeSessionServerDied _ _ ->
-        return (state, True)
-
-      IdeSessionRunning _ _ ->
-        Ex.throwIO (userError "Cannot update session in running mode")
-      IdeSessionShutdown ->
-        Ex.throwIO (userError "Session already shut down.")
-
-    when shouldRestart $ do
-      restartSession session Nothing
-      updateSession session update callback
+updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
+    go False
   where
+    go :: Bool -> IO ()
+    go alreadyRestarted = do
+      -- We don't want to call 'restartSession' while we hold the lock
+      shouldRestart <- modifyMVar ideState $ \state -> case state of
+        IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
+          ((numActions, cErrors), idleState') <-
+            runSessionUpdate (update >> recompileObjectFiles)
+                             ideStaticInfo
+                             callback
+                             idleState
+
+          let callback' p = callback p {
+                  progressStep     = progressStep     p + numActions
+                , progressNumSteps = progressNumSteps p + numActions
+                }
+
+          -- Update environment
+          when (idleState' ^. ideUpdatedEnv) $
+            rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
+
+          when (idleState' ^. ideUpdatedArgs) $
+            rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
+
+          -- Recompile
+          computed <- if (idleState' ^. ideUpdatedCode)
+            then do
+              GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
+                                                 (idleState' ^. ideNewOpts)
+                                                 (ideSourcesDir ideStaticInfo)
+                                                 (ideDistDir    ideStaticInfo)
+                                                 (idleState' ^. ideGenerateCode)
+                                                 (idleState' ^. ideTargets)
+                                                 callback'
+
+              let applyDiff :: Strict (Map ModuleName) (Diff v)
+                            -> (Computed -> Strict (Map ModuleName) v)
+                            -> Strict (Map ModuleName) v
+                  applyDiff diff f = applyMapDiff diff
+                                   $ Maybe.maybe Map.empty f
+                                   $ idleState' ^. ideComputed
+
+              let diffSpan  = Map.map (fmap mkIdMap)  ghcCompileSpanInfo
+                  diffTypes = Map.map (fmap mkExpMap) ghcCompileExpTypes
+                  diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
+
+              return $ Maybe.just Computed {
+                  computedErrors        = force cErrors List.++ ghcCompileErrors
+                , computedLoadedModules = ghcCompileLoaded
+                , computedImports       = ghcCompileImports  `applyDiff` computedImports
+                , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
+                , computedSpanInfo      = diffSpan           `applyDiff` computedSpanInfo
+                , computedExpTypes      = diffTypes          `applyDiff` computedExpTypes
+                , computedUseSites      = ghcCompileUseSites `applyDiff` computedUseSites
+                , computedPkgDeps       = ghcCompilePkgDeps  `applyDiff` computedPkgDeps
+                , computedCache         = mkRelative ghcCompileCache
+                }
+            else return $ idleState' ^. ideComputed
+
+          -- Update state
+          return ( IdeSessionIdle
+                 . (ideComputed    ^= computed)
+                 . (ideUpdatedEnv  ^= False)
+                 . (ideUpdatedCode ^= False)
+                 . (ideUpdatedArgs ^= False)
+                 $ idleState'
+                 , False
+                 )
+
+        IdeSessionServerDied _ _ ->
+          return (state, not alreadyRestarted)
+
+        IdeSessionRunning _ _ ->
+          Ex.throwIO (userError "Cannot update session in running mode")
+        IdeSessionShutdown ->
+          Ex.throwIO (userError "Session already shut down.")
+
+      when shouldRestart $ do
+        restartSession session Nothing
+        go True
+
     mkRelative :: ExplicitSharingCache -> ExplicitSharingCache
     mkRelative ExplicitSharingCache{..} =
       let aux :: BSS.ByteString -> BSS.ByteString
@@ -1063,3 +1077,10 @@ modifyIdleState IdeSession{..} act = modifyMVar ideState $ \state -> case state 
 -- | Variaton on 'tell' for the State monad rather than writer monad
 tellSt :: (Monoid w, MonadState w m) => w -> m ()
 tellSt w = St.modify (`mappend` w)
+
+-- | Silently ignore all exceptions
+ignoreAllExceptions :: IO () -> IO ()
+ignoreAllExceptions = Ex.handle ignore
+  where
+    ignore :: Ex.SomeException -> IO ()
+    ignore _ = return ()

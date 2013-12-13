@@ -142,9 +142,9 @@ data IdeIdleState = IdeIdleState {
     -- | Command line arguments for snippets (expected value of `getArgs`)
   , _ideArgs             :: ![String]
     -- | The GHC server (this is replaced in 'restartSession')
-  , _ideGhcServer        :: !GhcServer
+  , _ideGhcServer        :: GhcServer -- Intentionally lazy
     -- | GHC version
-  , _ideGhcVersion       :: !GhcVersion
+  , _ideGhcVersion       :: GhcVersion -- Intentionally lazy
     -- | Buffer mode for standard output for 'runStmt'
   , _ideStdoutBufferMode :: !Public.RunBufferMode
     -- | Buffer mode for standard error for 'runStmt'
