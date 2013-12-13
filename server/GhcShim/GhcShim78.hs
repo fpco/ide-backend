@@ -455,8 +455,10 @@ instance FoldId id => Fold (LHsExpr id) where
     astExpType alg span ty
   fold alg (L span (HsBracket th)) = astMark alg (Just span) "HsBracket" $
     fold alg th
-  {- FIXME
-  fold alg (L span (HsBracketOut th pendingSplices)) = astMark alg (Just span) "HsBracketOut" $ do
+  fold alg (L span (HsRnBracketOut _th _pendingSplices)) = astMark alg (Just span) "HsRnBracketOut" $ do
+    -- See comments for HsTcBracketOut
+    return Nothing
+  fold alg (L span (HsTcBracketOut th pendingSplices)) = astMark alg (Just span) "HsTcBracketOut" $ do
     -- Given something like
     --
     -- > \x xs -> [| x : xs |]
@@ -470,10 +472,8 @@ instance FoldId id => Fold (LHsExpr id) where
     -- Sadly, however, ghc attaches <no location info> to these splices.
     -- Moreover, we don't get any type information about the whole bracket
     -- expression either :(
-    forM_ pendingSplices $ \(_name, splice) ->
-      fold alg splice
+    forM_ pendingSplices $ \(_name, splice) -> fold alg splice
     fold alg th
-    -}
   fold alg (L span (RecordUpd expr binds _dataCons _postTcTypeInp _postTcTypeOutp)) = astMark alg (Just span) "RecordUpd" $ do
     recordTy <- fold alg expr
     fold alg binds
@@ -524,8 +524,14 @@ instance FoldId id => Fold (LHsExpr id) where
       Just postTcExpr -> fold alg (L span postTcExpr)
       Nothing         -> return Nothing
 
-  -- FIXME: Deal with the remaining case
-  fold _alg _ =
+  -- New expressions
+  fold _ (L _ (HsLamCase _ _)) =
+    return Nothing -- FIXME
+  fold _ (L _ (HsMultiIf _ _)) =
+    return Nothing -- FIXME
+
+  -- Unbound variables are errors?
+  fold _alg (L _span (HsUnboundVar _rdrName)) =
     return Nothing
 
 instance FoldId id => Fold (ArithSeqInfo id) where
@@ -556,10 +562,8 @@ instance FoldId id => Fold (HsBracket id) where
     return Nothing
   fold alg (DecBrL decls) = astMark alg Nothing "DecBrL" $
     fold alg decls
-
-  -- FIXME
-  fold _alg (TExpBr _) =
-    return Nothing
+  fold alg (TExpBr expr) = astMark alg Nothing "TExpBr" $
+    fold alg expr
 
 instance FoldId id => Fold (HsTupArg id) where
   fold alg (Present arg) =
@@ -641,13 +645,11 @@ instance FoldId id => Fold (LPat id) where
     fold alg pat
   fold alg (L span (QuasiQuotePat qquote)) = astMark alg (Just span) "QuasiQuotePat" $
     fold alg (L span qquote) -- reuse span
+  fold alg (L span (SplicePat splice)) = astMark alg (Just span) "SplicePat" $
+    fold alg (L span splice) -- reuse span
 
   -- During translation only
   fold alg (L span (CoPat _ _ _)) = astMark alg (Just span) "CoPat" $
-    return Nothing
-
-  -- FIXME
-  fold _alg (L _ (SplicePat _)) =
     return Nothing
 
 instance (Fold arg, Fold rec) => Fold (HsConDetails arg rec) where
@@ -815,7 +817,7 @@ instance Fold thing => Fold (HsWithBndrs thing) where
 instance FoldId id => Fold (LFamilyDecl id) where
   fold alg (L span (FamilyDecl fdInfo fdLName fdTyVars fdKindSig)) = astMark alg (Just span) "FamilyDecl" $ do
     fold alg fdInfo
-    -- FIXME #8607 foldId alg fdLName DefSite
+    -- foldId alg fdLName DefSite -- FIXME (#8607)
     fold alg fdTyVars
     fold alg fdKindSig
 

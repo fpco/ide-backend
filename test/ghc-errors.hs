@@ -2349,18 +2349,18 @@ syntheticTests =
         assertIdInfo idInfo "A" (4,8,4,9) "Q" TcClsName "" "template-haskell-2.7.0.0:Language.Haskell.TH.Syntax" "<no location info>" "template-haskell-2.7.0.0:Language.Haskell.TH.Syntax" "imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27"
         assertIdInfo idInfo "A" (4,10,4,13) "Exp" TcClsName "" "template-haskell-2.7.0.0:Language.Haskell.TH.Syntax" "<no location info>" "template-haskell-2.7.0.0:Language.Haskell.TH.Syntax" "imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27"
         assertIdInfo idInfo "A" (5,1,5,4) "ex1" VarName "Q Exp" "main:A" "A.hs@5:1-5:4" "" "binding occurrence"
-        _fixme "TH" $ assertIdInfo idInfo "A" (5,11,5,12) "x" VarName "" "main:A" "A.hs@5:11-5:12" "" "binding occurrence"
-        _fixme "TH" $ assertIdInfo idInfo "A" (5,16,5,17) "x" VarName "" "main:A" "A.hs@5:11-5:12" "" "defined locally"
+        assertIdInfo idInfo "A" (5,11,5,12) "x" VarName "" "main:A" "A.hs@5:11-5:12" "" "binding occurrence"
+        assertIdInfo idInfo "A" (5,16,5,17) "x" VarName "" "main:A" "A.hs@5:11-5:12" "" "defined locally"
         assertIdInfo idInfo "A" (6,1,6,4) "ex2" VarName "Q Type" "main:A" "A.hs@7:1-7:4" "" "defined locally"
         assertIdInfo idInfo "A" (6,8,6,9) "Q" TcClsName "" "template-haskell-2.7.0.0:Language.Haskell.TH.Syntax" "<no location info>" "template-haskell-2.7.0.0:Language.Haskell.TH.Syntax" "imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27"
         assertIdInfo idInfo "A" (6,10,6,14) "Type" TcClsName "" "template-haskell-2.7.0.0:Language.Haskell.TH.Syntax" "<no location info>" "template-haskell-2.7.0.0:Language.Haskell.TH.Syntax" "imported from template-haskell-2.7.0.0:Language.Haskell.TH at A.hs@3:1-3:27"
         assertIdInfo idInfo "A" (7,1,7,4) "ex2" VarName "Q Type" "main:A" "A.hs@7:1-7:4" "" "binding occurrence"
-        _fixme "TH" $ assertIdInfo idInfo "A" (7,11,7,17) "String" TcClsName "" "base-4.5.1.0:GHC.Base" "<no location info>" "base-4.5.1.0:Data.String" "imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9"
-        _fixme "TH" $ assertIdInfo idInfo "A" (7,21,7,27) "String" TcClsName "" "base-4.5.1.0:GHC.Base" "<no location info>" "base-4.5.1.0:Data.String" "imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9"
+        assertIdInfo idInfo "A" (7,11,7,17) "String" TcClsName "" "base-4.5.1.0:GHC.Base" "<no location info>" "base-4.5.1.0:Data.String" "imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9"
+        assertIdInfo idInfo "A" (7,21,7,27) "String" TcClsName "" "base-4.5.1.0:GHC.Base" "<no location info>" "base-4.5.1.0:Data.String" "imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9"
         assertIdInfo idInfo "B" (4,1,4,4) "ex3" VarName "String -> String" "main:B" "B.hs@5:1-5:4" "" "defined locally"
-        _fixme "TH" $ assertIdInfo idInfo "B" (4,8,4,12) "ex2" VarName "Q Type" "main:A" "A.hs@7:1-7:4" "" "imported from main:A at B.hs@3:1-3:9"
+        assertIdInfo idInfo "B" (4,8,4,12) "ex2" VarName "Q Type" "main:A" "A.hs@7:1-7:4" "" "imported from main:A at B.hs@3:1-3:9"
         assertIdInfo idInfo "B" (5,1,5,4) "ex3" VarName "String -> String" "main:B" "B.hs@5:1-5:4" "" "binding occurrence"
-        _fixme "TH" $ assertIdInfo idInfo "B" (5,7,5,11) "ex1" VarName "Q Exp" "main:A" "A.hs@5:1-5:4" "" "imported from main:A at B.hs@3:1-3:9"
+        assertIdInfo idInfo "B" (5,7,5,11) "ex1" VarName "Q Exp" "main:A" "A.hs@5:1-5:4" "" "imported from main:A at B.hs@3:1-3:9"
     )
   , ( "Type information 11: Take advantage of scope (1)"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
@@ -5668,10 +5668,13 @@ instance IgnoreVersions PackageId where
   "GADTs"  In GHC 7.4 we get strange types in GADTs (using explicit equality
            coercions); we still get strange types in HEAD, but slightly
            differents strange types ;)
-  "TH"     We don't traverse TH splices etc. yet in the new AST in HEAD.
   "use"    For some reason we don't report all use sites correctly, I'm not
            yet completely sure why (this *might* be related to #8607)
 ------------------------------------------------------------------------------}
+
+warnExpectedFailures, warnUnexpectedSuccesses :: Bool
+warnExpectedFailures    = False
+warnUnexpectedSuccesses = True
 
 _fixme :: String -> IO () -> IO ()
 _fixme bug io = do
@@ -5680,7 +5683,8 @@ _fixme bug io = do
               Just (HUnitFailure err) -> return (Just err)
               Nothing -> return (Just $ show e)
   case mErr of
-    Just err -> putStrLn $ "\tExpected failure (" ++ bug ++ "): " ++ List.intercalate " " (lines err)
-    Nothing  -> -- putStrLn $ "\tWarning: unexpected success (expected " ++ bug ++ ")"
-                -- Silently accept unexpectedly fixed bugs
-                return ()
+    Just err -> when warnExpectedFailures $
+                  putStrLn $ "\tExpected failure (" ++ bug ++ "): "
+                          ++ List.intercalate " " (lines err)
+    Nothing  -> when warnUnexpectedSuccesses $
+                  putStrLn $ "\tWarning: unexpected success (expected " ++ bug ++ ")"
