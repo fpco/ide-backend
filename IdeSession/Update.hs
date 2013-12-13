@@ -132,7 +132,7 @@ initSession initParams ideConfig@SessionConfig{..} = do
   let ideStaticInfo = IdeStaticInfo{..}
 
   -- Start the GHC server (as a separate process)
-  _ideGhcServer <- forkGhcServer ideStaticInfo
+  (_ideGhcServer, _ideGhcVersion) <- forkGhcServer ideStaticInfo
 
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
@@ -161,6 +161,7 @@ initSession initParams ideConfig@SessionConfig{..} = do
                         , _ideStderrBufferMode = RunNoBuffering
                         , _ideBreakInfo        = Maybe.nothing
                         , _ideGhcServer
+                        , _ideGhcVersion
                         , _ideTargets          = Nothing
                         }
   let session = IdeSession{..}
@@ -289,13 +290,14 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
     restart :: IdeIdleState -> IO IdeSessionState
     restart idleState = do
       forceShutdownGhcServer $ _ideGhcServer idleState
-      server <- forkGhcServer ideStaticInfo
+      (server, version) <- forkGhcServer ideStaticInfo
       return . IdeSessionIdle
              . (ideComputed    ^= Maybe.nothing)
              . (ideUpdatedEnv  ^= True)
              . (ideUpdatedArgs ^= True)
              . (ideUpdatedCode ^= True)
              . (ideGhcServer   ^= server)
+             . (ideGhcVersion  ^= version)
              $ idleState
 
 {------------------------------------------------------------------------------

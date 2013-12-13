@@ -16,6 +16,8 @@ module GhcShim.GhcShim78
   , GhcTime
     -- * Warnings
   , setWarnings
+    -- * Version information
+  , ghcGetVersion
     -- * Folding
   , AstAlg(..)
   , fold
@@ -59,7 +61,7 @@ import BreakArray (BreakArray)
 import qualified BreakArray
 
 import GhcShim.API
-import IdeSession.GHC.API (GhcWarnings(..))
+import IdeSession.GHC.API (GhcWarnings(..), GhcVersion(..))
 
 {------------------------------------------------------------------------------
   Pretty-printing
@@ -132,6 +134,13 @@ setBreak array index value = do
 ------------------------------------------------------------------------------}
 
 type GhcTime = UTCTime
+
+{------------------------------------------------------------------------------
+  Version information
+------------------------------------------------------------------------------}
+
+ghcGetVersion :: GhcVersion
+ghcGetVersion = GHC78
 
 {------------------------------------------------------------------------------
   Warnings

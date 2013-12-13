@@ -1,6 +1,7 @@
 -- | Types for the messages to and fro the GHC server
 --
 -- It is important that none of the types here rely on the GHC library.
+{-# LANGUAGE DeriveDataTypeable #-}
 module IdeSession.GHC.API (
     -- * Requests
     module IdeSession.GHC.Requests
@@ -18,9 +19,13 @@ module IdeSession.GHC.API (
   , defaultGhcWarnings
   , ghcWarningsString
   , stringGhcWarnings
+    -- * Version info
+  , GhcVersion(..)
   ) where
 
 import System.FilePath ((</>))
+import Data.Typeable
+import Data.Binary
 
 import IdeSession.GHC.Requests
 import IdeSession.GHC.Responses
@@ -116,3 +121,22 @@ stringGhcWarnings [ warningAMP
     dec 'N' = Just False
     dec _   = error "stringGhcWarnings: invalid string"
 stringGhcWarnings _ = error "stringGhcWarnings: invalid string (wrong length)"
+
+{------------------------------------------------------------------------------
+  Version info
+------------------------------------------------------------------------------}
+
+-- | GHC version
+data GhcVersion = GHC742 | GHC78
+  deriving (Typeable, Show, Eq)
+
+instance Binary GhcVersion where
+  put GHC742 = putWord8 0
+  put GHC78  = putWord8 1
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return GHC742
+      1 -> return GHC78
+      _ -> fail "GhcVersion.get: invalid header"

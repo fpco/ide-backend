@@ -27,6 +27,7 @@ module IdeSession.State
   , ideEnv
   , ideArgs
   , ideGhcServer
+  , ideGhcVersion
   , ideStdoutBufferMode
   , ideStderrBufferMode
   , ideUpdatedEnv
@@ -51,6 +52,7 @@ import IdeSession.Config
 import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
 import IdeSession.RPC.Client (RpcServer, RpcConversation, ExternalException)
+import IdeSession.GHC.API (GhcVersion)
 
 data Computed = Computed {
     -- | Last compilation and run errors
@@ -141,6 +143,8 @@ data IdeIdleState = IdeIdleState {
   , _ideArgs             :: ![String]
     -- | The GHC server (this is replaced in 'restartSession')
   , _ideGhcServer        :: !GhcServer
+    -- | GHC version
+  , _ideGhcVersion       :: !GhcVersion
     -- | Buffer mode for standard output for 'runStmt'
   , _ideStdoutBufferMode :: !Public.RunBufferMode
     -- | Buffer mode for standard error for 'runStmt'
@@ -220,6 +224,7 @@ ideBuildLicensesStatus :: Accessor IdeIdleState (Maybe ExitCode)
 ideEnv                 :: Accessor IdeIdleState [(String, Maybe String)]
 ideArgs                :: Accessor IdeIdleState [String]
 ideGhcServer           :: Accessor IdeIdleState GhcServer
+ideGhcVersion          :: Accessor IdeIdleState GhcVersion
 ideStdoutBufferMode    :: Accessor IdeIdleState Public.RunBufferMode
 ideStderrBufferMode    :: Accessor IdeIdleState Public.RunBufferMode
 ideUpdatedEnv          :: Accessor IdeIdleState Bool
@@ -241,6 +246,7 @@ ideBuildLicensesStatus =
 ideEnv              = accessor _ideEnv              $ \x s -> s { _ideEnv              = x }
 ideArgs             = accessor _ideArgs             $ \x s -> s { _ideArgs             = x }
 ideGhcServer        = accessor _ideGhcServer        $ \x s -> s { _ideGhcServer        = x }
+ideGhcVersion       = accessor _ideGhcVersion       $ \x s -> s { _ideGhcVersion       = x }
 ideStdoutBufferMode = accessor _ideStdoutBufferMode $ \x s -> s { _ideStdoutBufferMode = x }
 ideStderrBufferMode = accessor _ideStderrBufferMode $ \x s -> s { _ideStderrBufferMode = x }
 ideUpdatedEnv       = accessor _ideUpdatedEnv       $ \x s -> s { _ideUpdatedEnv       = x }

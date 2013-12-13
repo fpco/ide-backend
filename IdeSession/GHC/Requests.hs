@@ -46,6 +46,7 @@ data GhcRequest
         reqLoadPath   :: FilePath
       , reqLoadUnload :: Bool
       }
+  | ReqGetVersion
     -- | For debugging only! :)
   | ReqCrash {
         reqCrashDelay :: Maybe Int
@@ -98,6 +99,8 @@ instance Binary GhcRequest where
     putWord8 6
     put reqLoadPath
     put reqLoadUnload
+  put ReqGetVersion =
+    putWord8 7
   put ReqCrash{..} = do
     putWord8 255
     put reqCrashDelay
@@ -112,6 +115,7 @@ instance Binary GhcRequest where
       4   -> ReqBreakpoint <$> get <*> get <*> get
       5   -> ReqPrint      <$> get <*> get <*> get
       6   -> ReqLoad       <$> get <*> get
+      7   -> return ReqGetVersion
       255 -> ReqCrash      <$> get
       _   -> fail "GhcRequest.get: invalid header"
 

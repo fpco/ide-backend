@@ -138,6 +138,9 @@ ghcServerEngine configGenerateModInfo
             ReqCrash delay -> do
               ghcHandleCrash delay
               return args
+            ReqGetVersion -> do
+              ghcHandleGetVersion conv
+              return args
           go args'
 
     go []
@@ -548,6 +551,11 @@ ghcHandleCrash delay = liftIO $ do
                     void . forkIO $ threadDelay i >> throwTo tid crash
   where
     crash = userError "Intentional crash"
+
+-- | Handle a get-version request
+ghcHandleGetVersion :: RpcConversation -> Ghc ()
+ghcHandleGetVersion RpcConversation{put} = liftIO $ do
+  put ghcGetVersion
 
 --------------------------------------------------------------------------------
 -- Auxiliary                                                                  --

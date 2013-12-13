@@ -20,7 +20,12 @@ module HsWalk
 #define DEBUG 0
 
 import Control.Monad (liftM)
-import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT, local)
+import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
+
+#if DEBUG
+import Control.Monad.Reader (local)
+#endif
+
 import Control.Monad.State.Class (MonadState(..))
 import Control.Applicative (Applicative, (<$>))
 import Data.Text (Text)

@@ -24,6 +24,7 @@ module IdeSession.GHC.Client (
   ) where
 
 import Control.Monad (when)
+import Control.Applicative ((<$>))
 import Control.Concurrent (killThread)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.Async (async, cancel, withAsync)
@@ -61,7 +62,7 @@ import Distribution.Simple.Program.Find ( -- From our patched cabal
 ------------------------------------------------------------------------------}
 
 -- | Start the ghc server
-forkGhcServer :: IdeStaticInfo -> IO GhcServer
+forkGhcServer :: IdeStaticInfo -> IO (GhcServer, GhcVersion)
 forkGhcServer IdeStaticInfo{..} = do
   when configInProcess $
     fail "In-process ghc server not currently supported"
@@ -81,9 +82,10 @@ forkGhcServer IdeStaticInfo{..} = do
                  , show ideBackendApiVersion
                  , ghcWarningsString configWarnings
                  ]
-      env    <- envWithPathOverride configExtraPathDirs
-      server <- forkRpcServer prog opts (Just ideDataDir) env
-      return (OutProcess server)
+      env     <- envWithPathOverride configExtraPathDirs
+      server  <- OutProcess <$> forkRpcServer prog opts (Just ideDataDir) env
+      version <- rpcGetVersion server
+      return (server, version)
   where
     searchPath :: ProgramSearchPath
     searchPath = ProgramSearchPathDefault
@@ -295,6 +297,12 @@ rpcLoad server path unload = conversation server $ \RpcConversation{..} -> do
 rpcCrash :: GhcServer -> Maybe Int -> IO ()
 rpcCrash server delay = conversation server $ \RpcConversation{..} ->
   put (ReqCrash delay)
+
+-- | Get ghc version
+rpcGetVersion :: GhcServer -> IO GhcVersion
+rpcGetVersion server = conversation server $ \RpcConversation{..} -> do
+  put ReqGetVersion
+  get
 
 {------------------------------------------------------------------------------
   Internal

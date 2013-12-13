@@ -20,6 +20,7 @@ module IdeSession.Query (
   , getCodeGeneration
   , getEnv
   , getGhcServer
+  , getGhcVersion
   , getManagedFiles
   , getBuildExeStatus
   , getBuildDocStatus
@@ -57,7 +58,7 @@ import qualified Data.Text as Text (pack, unpack)
 import IdeSession.Cabal
 import IdeSession.Config
 import IdeSession.State
-import IdeSession.GHC.API (cabalMacrosLocation)
+import IdeSession.GHC.API (cabalMacrosLocation, GhcVersion)
 import IdeSession.Types.Translation
 import IdeSession.Types.Public
 import qualified IdeSession.Types.Private as Private
@@ -148,6 +149,10 @@ getEnv = simpleQuery $ getVal ideEnv
 -- | Get the RPC server used by the session.
 getGhcServer :: Query GhcServer
 getGhcServer = simpleQuery $ getVal ideGhcServer
+
+-- | Which GHC version is `ide-backend-server` using?
+getGhcVersion :: Query GhcVersion
+getGhcVersion = simpleQuery $ getVal ideGhcVersion
 
 -- | Get the collection of files submitted by the user and not deleted yet.
 -- The module names are those supplied by the user as the first

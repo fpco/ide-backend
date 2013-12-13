@@ -149,6 +149,7 @@ module IdeSession (
     -- ** Types
   , Query
   , ManagedFiles(..)
+  , GhcVersion(..)
     -- ** Queries that rely on the static part of the state only
   , getSessionConfig
   , getSourcesDir
@@ -162,6 +163,7 @@ module IdeSession (
   , getCodeGeneration
   , getEnv
   , getGhcServer
+  , getGhcVersion
   , getManagedFiles
   , getBreakInfo
     -- ** Queries that rely on computed state
