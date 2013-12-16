@@ -6,6 +6,7 @@ module IdeSession.GHC.Responses (
     GhcCompileResponse(..)
   , GhcCompileResult(..)
   , GhcRunResponse(..)
+  , GhcVersion(..)
   ) where
 
 import Data.Binary
@@ -25,7 +26,7 @@ import GHC.Generics
 data GhcCompileResponse =
     GhcCompileProgress Progress
   | GhcCompileDone GhcCompileResult
-  deriving Typeable
+  deriving (Typeable, Generic)
 
 data GhcCompileResult = GhcCompileResult {
     ghcCompileErrors   :: Strict [] SourceError
@@ -43,12 +44,19 @@ data GhcCompileResult = GhcCompileResult {
   }
   deriving (Typeable, Generic)
 
-instance PrettyVal GhcCompileResult
-
 data GhcRunResponse =
     GhcRunOutp ByteString
   | GhcRunDone RunResult
-  deriving Typeable
+  deriving (Typeable, Generic)
+
+-- | GHC version
+data GhcVersion = GHC742 | GHC78
+  deriving (Typeable, Show, Eq, Generic)
+
+instance PrettyVal GhcCompileResponse
+instance PrettyVal GhcCompileResult
+instance PrettyVal GhcRunResponse
+instance PrettyVal GhcVersion
 
 instance Binary GhcCompileResponse where
   put (GhcCompileProgress progress) = putWord8 0 >> put progress
@@ -87,3 +95,14 @@ instance Binary GhcRunResponse where
       0 -> GhcRunOutp <$> get
       1 -> GhcRunDone <$> get
       _ -> fail "GhcRunResponse.get: invalid header"
+
+instance Binary GhcVersion where
+  put GHC742 = putWord8 0
+  put GHC78  = putWord8 1
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return GHC742
+      1 -> return GHC78
+      _ -> fail "GhcVersion.get: invalid header"

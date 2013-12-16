@@ -6,6 +6,8 @@ module IdeSession.GHC.Requests (
     GhcRequest(..)
   , GhcRunRequest(..)
   , RunCmd(..)
+  , GhcWarnings(..)
+  , defaultGhcWarnings
   ) where
 
 import Data.Binary
@@ -48,6 +50,9 @@ data GhcRequest
   | ReqLoad {
         reqLoadPath   :: FilePath
       , reqLoadUnload :: Bool
+      }
+  | ReqSetWarnings {
+        reqSetWarnings :: GhcWarnings
       }
   | ReqGetVersion
     -- | For debugging only! :)
@@ -108,6 +113,9 @@ instance Binary GhcRequest where
     put reqLoadUnload
   put ReqGetVersion =
     putWord8 7
+  put ReqSetWarnings{..} = do
+    putWord8 8
+    put reqSetWarnings
   put ReqCrash{..} = do
     putWord8 255
     put reqCrashDelay
@@ -115,15 +123,16 @@ instance Binary GhcRequest where
   get = do
     header <- getWord8
     case header of
-      0   -> ReqCompile    <$> get <*> get <*> get <*> get <*> get
-      1   -> ReqRun        <$> get
-      2   -> ReqSetEnv     <$> get
-      3   -> ReqSetArgs    <$> get
-      4   -> ReqBreakpoint <$> get <*> get <*> get
-      5   -> ReqPrint      <$> get <*> get <*> get
-      6   -> ReqLoad       <$> get <*> get
+      0   -> ReqCompile     <$> get <*> get <*> get <*> get <*> get
+      1   -> ReqRun         <$> get
+      2   -> ReqSetEnv      <$> get
+      3   -> ReqSetArgs     <$> get
+      4   -> ReqBreakpoint  <$> get <*> get <*> get
+      5   -> ReqPrint       <$> get <*> get <*> get
+      6   -> ReqLoad        <$> get <*> get
       7   -> return ReqGetVersion
-      255 -> ReqCrash      <$> get
+      8   -> ReqSetWarnings <$> get
+      255 -> ReqCrash       <$> get
       _   -> fail "GhcRequest.get: invalid header"
 
 instance Binary RunCmd where
@@ -155,3 +164,42 @@ instance Binary GhcRunRequest where
       1 -> return GhcRunInterrupt
       2 -> return GhcRunAckDone
       _ -> fail "GhcRunRequest.get: invalid header"
+
+{------------------------------------------------------------------------------
+  Warnings
+------------------------------------------------------------------------------}
+
+-- | Enable/disable warnings. We introduce this separate from configStaticOpts
+-- because some warnings are introduced only in later versions of GHC; setting
+-- or unsetting these warnings in earlier GHC versions simply has no effect
+-- (whilst specifying the corresponding option in configStaticOpts would
+-- result in an unrecognized flag error).
+--
+-- A "Nothing" value leaves the default.
+data GhcWarnings = GhcWarnings {
+    -- | AMP warning (GHC >= 7.8)
+    --
+    -- <http://www.haskell.org/haskellwiki/Functor-Applicative-Monad_Proposal>
+    ghcWarningAMP :: Maybe Bool
+
+    -- | Deprecated flags
+  , ghcWarningDeprecatedFlags :: Maybe Bool
+  }
+  deriving (Typeable, Generic)
+
+-- | Leave all warnings at their ghc-default
+defaultGhcWarnings :: GhcWarnings
+defaultGhcWarnings = GhcWarnings {
+    ghcWarningAMP             = Nothing
+  , ghcWarningDeprecatedFlags = Nothing
+  }
+
+instance PrettyVal GhcWarnings
+
+instance Binary GhcWarnings where
+  put (GhcWarnings{..}) = do
+    put ghcWarningAMP
+    put ghcWarningDeprecatedFlags
+  get =
+    GhcWarnings <$> get
+                <*> get

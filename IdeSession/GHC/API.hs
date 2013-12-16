@@ -14,18 +14,9 @@ module IdeSession.GHC.API (
   , cHeaderExtensions
   , sourceExtensions
   , cabalMacrosLocation
-    -- * Warnings
-  , GhcWarnings(..)
-  , defaultGhcWarnings
-  , ghcWarningsString
-  , stringGhcWarnings
-    -- * Version info
-  , GhcVersion(..)
   ) where
 
 import System.FilePath ((</>))
-import Data.Typeable
-import Data.Binary
 
 import IdeSession.GHC.Requests
 import IdeSession.GHC.Responses
@@ -35,7 +26,7 @@ import IdeSession.GHC.Responses
 -- We use a Unix timestamp for this so that these API versions have some
 -- semantics (http://www.epochconverter.com/, GMT).
 ideBackendApiVersion :: Int
-ideBackendApiVersion = 1386165289
+ideBackendApiVersion = 1384867202
 
 {------------------------------------------------------------------------------
   Configuration
@@ -64,79 +55,3 @@ sourceExtensions = cHeaderExtensions ++ cExtensions ++ hsExtensions
 -- Cabal.autogenModulesDir can use it for compilation of C files?
 cabalMacrosLocation :: FilePath -> FilePath
 cabalMacrosLocation ideDistDir = ideDistDir </> "cabal_macros.h"
-
-{------------------------------------------------------------------------------
-  Warnings
-------------------------------------------------------------------------------}
-
--- | Enable/disable warnings. We introduce this separate from configStaticOpts
--- because some warnings are introduced only in later versions of GHC; setting
--- or unsetting these warnings in earlier GHC versions simply has no effect
--- (whilst specifying the corresponding option in configStaticOpts would
--- result in an unrecognized flag error).
---
--- A "Nothing" value leaves the default.
-data GhcWarnings = GhcWarnings {
-    -- | AMP warning (GHC >= 7.8)
-    --
-    -- <http://www.haskell.org/haskellwiki/Functor-Applicative-Monad_Proposal>
-    ghcWarningAMP :: Maybe Bool
-
-    -- | Deprecated flags
-  , ghcWarningDeprecatedFlags :: Maybe Bool
-  }
-
--- | Leave all warnings at their ghc-default
-defaultGhcWarnings :: GhcWarnings
-defaultGhcWarnings = GhcWarnings {
-    ghcWarningAMP             = Nothing
-  , ghcWarningDeprecatedFlags = Nothing
-  }
-
--- | We use this when we want to transmit a GhcWarnings to the ghc server;
--- we pass the result string on the command line to the server executable
-ghcWarningsString :: GhcWarnings -> String
-ghcWarningsString (GhcWarnings warningAMP
-                               warningDeprecatedFlags) = [
-      enc warningAMP
-    , enc warningDeprecatedFlags
-    ]
-  where
-    enc :: Maybe Bool -> Char
-    enc Nothing      = 'D'
-    enc (Just True)  = 'Y'
-    enc (Just False) = 'N'
-
--- | Inverse of 'ghcWarningsString'
-stringGhcWarnings :: String -> GhcWarnings
-stringGhcWarnings [ warningAMP
-                  , warningDeprecatedFlags
-                  ] = GhcWarnings {
-      ghcWarningAMP             = dec warningAMP
-    , ghcWarningDeprecatedFlags = dec warningDeprecatedFlags
-    }
-  where
-    dec 'D' = Nothing
-    dec 'Y' = Just True
-    dec 'N' = Just False
-    dec _   = error "stringGhcWarnings: invalid string"
-stringGhcWarnings _ = error "stringGhcWarnings: invalid string (wrong length)"
-
-{------------------------------------------------------------------------------
-  Version info
-------------------------------------------------------------------------------}
-
--- | GHC version
-data GhcVersion = GHC742 | GHC78
-  deriving (Typeable, Show, Eq)
-
-instance Binary GhcVersion where
-  put GHC742 = putWord8 0
-  put GHC78  = putWord8 1
-
-  get = do
-    header <- getWord8
-    case header of
-      0 -> return GHC742
-      1 -> return GHC78
-      _ -> fail "GhcVersion.get: invalid header"

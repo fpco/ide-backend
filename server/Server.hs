@@ -57,21 +57,18 @@ ghcServer fdsAndOpts = do
   let (opts,   "--ghc-opts-end"
              : configGenerateModInfo
              : clientApiVersion
-             : warningsString
              : fds) = List.span (/= "--ghc-opts-end") fdsAndOpts
   rpcServer fds $ ghcServerEngine (read configGenerateModInfo)
                                   (read clientApiVersion)
-                                  (stringGhcWarnings warningsString)
                                   opts
 
 -- | The GHC server engine proper.
 --
 -- This function runs in end endless loop inside the @Ghc@ monad, making
 -- incremental compilation possible.
-ghcServerEngine :: Bool -> Int -> GhcWarnings -> [String] -> RpcConversation -> IO ()
+ghcServerEngine :: Bool -> Int -> [String] -> RpcConversation -> IO ()
 ghcServerEngine configGenerateModInfo
                 clientApiVersion
-                warnings
                 staticOpts
                 conv@RpcConversation{..} = do
   -- Check API versions
@@ -106,7 +103,7 @@ ghcServerEngine configGenerateModInfo
           sourcePlugins = extractIdsPlugin pluginRef : sourcePlugins flags
         }
                  | otherwise = flags
-    void $ setSessionDynFlags (setWarnings warnings dynFlags)
+    void $ setSessionDynFlags dynFlags
 
     -- Start handling RPC calls
     let go args = do
@@ -140,6 +137,9 @@ ghcServerEngine configGenerateModInfo
               return args
             ReqGetVersion -> do
               ghcHandleGetVersion conv
+              return args
+            ReqSetWarnings warnings -> do
+              ghcHandleSetWarnings conv warnings
               return args
           go args'
 
@@ -556,6 +556,13 @@ ghcHandleCrash delay = liftIO $ do
 ghcHandleGetVersion :: RpcConversation -> Ghc ()
 ghcHandleGetVersion RpcConversation{put} = liftIO $ do
   put ghcGetVersion
+
+-- | Set warnings
+ghcHandleSetWarnings :: RpcConversation -> GhcWarnings -> Ghc ()
+ghcHandleSetWarnings RpcConversation{put} warnings = do
+  dynFlags <- getSessionDynFlags
+  _ <- setSessionDynFlags $ setWarnings warnings dynFlags
+  liftIO $ put ()
 
 --------------------------------------------------------------------------------
 -- Auxiliary                                                                  --

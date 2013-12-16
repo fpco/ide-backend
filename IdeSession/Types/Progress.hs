@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 module IdeSession.Types.Progress (
     Progress(..)
   ) where
@@ -6,7 +7,10 @@ import Control.Applicative ((<$>), (<*>), (<|>))
 import Data.Binary (Binary(..))
 import Data.Text (Text)
 import Data.Maybe (fromJust)
+import GHC.Generics (Generic)
 import qualified Data.Text as Text
+import Text.Show.Pretty (PrettyVal)
+
 import IdeSession.Util () -- instance Binary Text
 
 -- | This type represents intermediate progress information during compilation.
@@ -33,7 +37,9 @@ data Progress = Progress {
     -- | The full original message (see 'progressMsg')
   , progressOrigMsg :: Maybe Text
   }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Generic)
+
+instance PrettyVal Progress
 
 instance Binary Progress where
   put (Progress {..}) = do put progressStep

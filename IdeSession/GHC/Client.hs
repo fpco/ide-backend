@@ -80,11 +80,12 @@ forkGhcServer IdeStaticInfo{..} = do
                  , "--ghc-opts-end"
                  , show configGenerateModInfo
                  , show ideBackendApiVersion
-                 , ghcWarningsString configWarnings
                  ]
       env     <- envWithPathOverride configExtraPathDirs
       server  <- OutProcess <$> forkRpcServer prog opts (Just ideDataDir) env
-      version <- Ex.try $ rpcGetVersion server
+      version <- Ex.try $ do
+        rpcSetWarnings server configWarnings
+        rpcGetVersion  server
       return ((server,) <$> version)
   where
     searchPath :: ProgramSearchPath
@@ -302,6 +303,12 @@ rpcCrash server delay = conversation server $ \RpcConversation{..} ->
 rpcGetVersion :: GhcServer -> IO GhcVersion
 rpcGetVersion server = conversation server $ \RpcConversation{..} -> do
   put ReqGetVersion
+  get
+
+-- | Set warnings
+rpcSetWarnings :: GhcServer -> GhcWarnings -> IO ()
+rpcSetWarnings server warnings = conversation server $ \RpcConversation{..} -> do
+  put (ReqSetWarnings warnings)
   get
 
 {------------------------------------------------------------------------------
