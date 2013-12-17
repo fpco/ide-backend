@@ -243,8 +243,10 @@ instance FoldId id => Fold (LHsType id) where
     fold alg [arg, res]
   fold alg (L span (HsTyVar name)) = astMark alg (Just span) "HsTyVar" $
     foldId alg (L span name) UseSite
-  fold alg (L span (HsForAllTy _explicitFlag tyVars ctxt body)) = astMark alg (Just span) "hsForAllTy" $ do
-    fold alg tyVars
+  fold alg (L span (HsForAllTy explicitFlag tyVars ctxt body)) = astMark alg (Just span) "hsForAllTy" $ do
+    case explicitFlag of
+      Explicit -> fold alg tyVars
+      Implicit -> return Nothing
     fold alg ctxt
     fold alg body
   fold alg (L span (HsAppTy fun arg)) = astMark alg (Just span) "HsAppTy" $

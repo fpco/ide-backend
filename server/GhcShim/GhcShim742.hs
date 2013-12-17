@@ -248,8 +248,10 @@ instance FoldId id => Fold (LHsType id) where
     fold alg [arg, res]
   fold alg (L span (HsTyVar name)) = astMark alg (Just span) "HsTyVar" $
     foldId alg (L span name) UseSite
-  fold alg (L span (HsForAllTy _explicitFlag tyVars ctxt body)) = astMark alg (Just span) "hsForAllTy" $ do
-    fold alg tyVars
+  fold alg (L span (HsForAllTy explicitFlag tyVars ctxt body)) = astMark alg (Just span) "hsForAllTy" $ do
+    case explicitFlag of
+      Explicit -> fold alg tyVars
+      Implicit -> return Nothing
     fold alg ctxt
     fold alg body
   fold alg (L span (HsAppTy fun arg)) = astMark alg (Just span) "HsAppTy" $
@@ -672,7 +674,10 @@ instance FoldId id => Fold (LTyClDecl id) where
     fold alg (tcdATDefs decl)
     fold alg (tcdDocs decl)
   fold alg (L span decl@(TySynonym {})) = astMark alg (Just span) "TySynonym" $ do
-    foldId alg (tcdLName decl) DefSite
+    -- See "Representation of indexed types" in compiler/hsSyn/HsDecls.lhs
+    foldId alg (tcdLName decl) (case tcdTyPats decl of
+                                  Nothing -> DefSite
+                                  Just _  -> UseSite)
     fold alg (tcdTyVars decl)
     fold alg (tcdTyPats decl)
     fold alg (tcdSynRhs decl)
