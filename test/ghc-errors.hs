@@ -2336,6 +2336,9 @@ syntheticTests = [
                     , "import A"
                     , "ex3 :: $ex2"
                     , "ex3 = $ex1"
+                      -- Just to test slightly larger expressions
+                    , "ex4 :: $(return =<< ex2)"
+                    , "ex4 = $(ex1 >>= return)"
                     ])
         updateSessionD session upd 2
         assertNoErrors session
@@ -2352,9 +2355,12 @@ syntheticTests = [
         assertIdInfo session "A" (7,11,7,17) "String" TcClsName "" "base-4.5.1.0:GHC.Base" "<no location info>" "base-4.5.1.0:Data.String" "imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9"
         assertIdInfo session "A" (7,21,7,27) "String" TcClsName "" "base-4.5.1.0:GHC.Base" "<no location info>" "base-4.5.1.0:Data.String" "imported from base-4.5.1.0:Prelude at A.hs@2:8-2:9"
         assertIdInfo session "B" (4,1,4,4) "ex3" VarName "String -> String" "main:B" "B.hs@5:1-5:4" "" "defined locally"
-        _fixme session "#148" $ assertIdInfo session "B" (4,8,4,12) "ex2" VarName "Q Type" "main:A" "A.hs@7:1-7:4" "" "imported from main:A at B.hs@3:1-3:9"
+        assertIdInfo session "B" (4,8,4,12) "ex2" VarName "Q Type" "main:A" "A.hs@7:1-7:4" "" "imported from main:A at B.hs@3:1-3:9"
         assertIdInfo session "B" (5,1,5,4) "ex3" VarName "String -> String" "main:B" "B.hs@5:1-5:4" "" "binding occurrence"
-        _fixme session "#148" $ assertIdInfo session "B" (5,7,5,11) "ex1" VarName "Q Exp" "main:A" "A.hs@5:1-5:4" "" "imported from main:A at B.hs@3:1-3:9"
+        assertIdInfo session "B" (5,7,5,11) "ex1" VarName "Q Exp" "main:A" "A.hs@5:1-5:4" "" "imported from main:A at B.hs@3:1-3:9"
+
+        assertIdInfo session "B" (6,21,6,24) "ex2" VarName "Q Type" "main:A" "A.hs@7:1-7:4" "" "imported from main:A at B.hs@3:1-3:9"
+        assertIdInfo session "B" (7,9,7,12) "ex1" VarName "Q Exp" "main:A" "A.hs@5:1-5:4" "" "imported from main:A at B.hs@3:1-3:9"
     )
   , ( "Type information 11: Take advantage of scope (1)"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
@@ -5670,8 +5676,6 @@ knownProblems = [
   , ("use", [GHC78])
     -- https://github.com/fpco/ide-backend/issues/146
   , ("#146", [])
-    -- https://github.com/fpco/ide-backend/issues/148
-  , ("#148", [GHC78])
   ]
 
 _fixme :: IdeSession -> String -> IO () -> IO ()

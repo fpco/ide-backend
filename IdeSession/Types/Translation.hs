@@ -207,8 +207,9 @@ instance ExplicitSharing Public.Import where
 
 instance ExplicitSharing Public.SpanInfo where
   removeExplicitSharing cache spanInfo = case spanInfo of
-    Private.SpanId idInfo -> Public.SpanId (removeExplicitSharing cache idInfo)
-    Private.SpanQQ idInfo -> Public.SpanQQ (removeExplicitSharing cache idInfo)
+    Private.SpanId       idInfo -> Public.SpanId (removeExplicitSharing cache idInfo)
+    Private.SpanQQ       idInfo -> Public.SpanQQ (removeExplicitSharing cache idInfo)
+    Private.SpanInSplice idInfo -> Public.SpanId (removeExplicitSharing cache idInfo)
 
 instance ExplicitSharing Public.BreakInfo where
   removeExplicitSharing cache Private.BreakInfo{..} = Public.BreakInfo {

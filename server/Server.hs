@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, CPP #-}
 -- | Implementation of the server that controls the long-running GHC instance.
 -- This interacts with the ide-backend library through serialized data only.
 module Server (ghcServer) where
@@ -84,6 +84,7 @@ ghcServerEngine configGenerateModInfo
   -- Set up references for the current session of Ghc monad computations.
   pluginRef  <- newIORef StrictMap.empty
   importsRef <- newIORef StrictMap.empty
+  stRef      <- newIORef initExtractIdsSuspendedState
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
@@ -102,8 +103,12 @@ ghcServerEngine configGenerateModInfo
     (flags, _, _) <- parseDynamicFlags initialDynFlags dOpts
     let dynFlags | configGenerateModInfo = flags {
           hooks = (hooks flags) {
-              hscFrontendHook   = Just $ runHscPlugin pluginRef
-            , runQuasiQuoteHook = Just $ runHscQQ
+              hscFrontendHook   = Just $ runHscPlugin pluginRef stRef
+            , runQuasiQuoteHook = Just $ runHscQQ stRef
+-- TODO: it'd be nice if we could move this #if to the shim modules
+#if GHC_78
+            , runRnSpliceHook   = Just $ runRnSplice stRef
+#endif
             }
         }
                  | otherwise = flags

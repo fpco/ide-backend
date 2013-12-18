@@ -8,6 +8,7 @@ module IdeSession.Strict.StateT (
   , execStateT
     -- * As base monad
   , StrictState
+  , runState
   , evalState
   , execState
   ) where
@@ -54,8 +55,11 @@ execStateT m s = do (_, s') <- runStateT m s ; return s'
 
 type StrictState s = StrictStateT s Identity
 
+runState :: StrictState s a -> s -> (a, s)
+runState m s = runIdentity $ runStateT m s
+
 evalState :: StrictState s a -> s -> a
-evalState m s = runIdentity $ evalStateT m s
+evalState m = fst . runState m
 
 execState :: StrictState s a -> s -> s
-execState m s = runIdentity $ execStateT m s
+execState m = snd . runState m

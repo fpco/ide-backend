@@ -11,11 +11,13 @@
 module HsWalk
   ( runHscQQ
   , runHscPlugin
+  , runRnSplice
   , extractSourceSpan
   , idInfoForName
   , constructExplicitSharingCache
   , PluginResult(..)
   , IsBinder(..)
+  , initExtractIdsSuspendedState
   ) where
 
 #define DEBUG 0
@@ -39,7 +41,8 @@ import System.IO.Unsafe (unsafePerformIO)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import qualified Debug.Trace as Debug
-import Control.Exception (evaluate)
+import Data.Accessor (Accessor, accessor, (.>))
+import qualified Data.Accessor.Monad.MTL.State as AccState
 
 import IdeSession.Types.Private
 import IdeSession.Strict.Container
@@ -118,11 +121,6 @@ fromGhcNameSpace ns
   Extract an IdMap from information returned by the ghc type checker
 ------------------------------------------------------------------------------}
 
--- | We collect quasi quotes as the type checker expands them
-qqRef :: StrictIORef IdList
-{-# NOINLINE qqRef #-}
-qqRef = unsafePerformIO $ newIORef []
-
 data PluginResult = PluginResult {
     -- TODO: Why aren't we using strict types for the first two fields?
     pluginIdList   :: !IdList
@@ -131,60 +129,70 @@ data PluginResult = PluginResult {
   , pluginUseSites :: !UseSites
   }
 
-runHscQQ :: HsQuasiQuote Name -> RnM (HsQuasiQuote Name)
-runHscQQ qq@(HsQuasiQuote quoter _span _str) = do
-  env <- getEnv
-  liftIO $ do
-    let dflags  =               hsc_dflags  (env_top env)
-        rdrEnv  =               tcg_rdr_env (env_gbl env)
-        current =               tcg_mod     (env_gbl env)
-        pkgDeps = imp_dep_pkgs (tcg_imports (env_gbl env))
-
-    idInfo           <- readIORef qqRef
-    ProperSpan span' <- extractSourceSpan $ tcl_loc (env_lcl env)
-    linkEnv          <- liftIO $ linkEnvForDeps dflags pkgDeps
-
-    (idProp, Just idScope) <- idInfoForName dflags
-                                            quoter
-                                            UseSite
-                                            (lookupRdrEnv rdrEnv quoter)
-                                            (Just current)
-                                            (homeModuleFor dflags linkEnv)
-
-    let quoterInfo = IdInfo{..}
-    let idInfo' = (span', SpanQQ quoterInfo) : idInfo
-    writeIORef qqRef idInfo'
+runHscQQ :: StrictIORef ExtractIdsSuspendedState
+         -> HsQuasiQuote Name -> RnM (HsQuasiQuote Name)
+runHscQQ stRef qq@(HsQuasiQuote quoter _span _str) = do
+    span <- (tcl_loc . env_lcl) `liftM` getEnv
+    extractIdsResumeTc stRef $ go span
     return qq
+  where
+    go :: SrcSpan -> ExtractIdsM ()
+    go span = do
+      ProperSpan span'       <- extractSourceSpan span
+      dflags                 <- asks eIdsDynFlags
+      linkEnv                <- asks eIdsLinkEnv
+      rdrEnv                 <- asks eIdsRdrEnv
+      current                <- asks eIdsCurrent
+      (idProp, Just idScope) <- idInfoForName dflags
+                                              quoter
+                                              UseSite
+                                              (lookupRdrEnv rdrEnv quoter)
+                                              (Just current)
+                                              (homeModuleFor dflags linkEnv)
+      extendIdMap span' $ SpanQQ IdInfo{..}
 
-runHscPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult) -> ModSummary -> Hsc TcGblEnv
-runHscPlugin symbolRef mod_summary = do
-  env      <- hscFileFrontEnd mod_summary
+runRnSplice :: StrictIORef ExtractIdsSuspendedState
+            -> HsSplice Name -> RnM (HsSplice Name)
+runRnSplice stRef splice@(HsSplice _ expr) = do
+  extractIdsResumeTc stRef $ extractIds SpanInSplice expr
+  return splice
+
+runHscPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult)
+             -> StrictIORef ExtractIdsSuspendedState
+             -> ModSummary
+             -> Hsc TcGblEnv
+runHscPlugin symbolRef stRef mod_summary = do
   dynFlags <- getDynFlags
+  tcEnv    <- hscFileFrontEnd mod_summary
+  eIdsEnv  <- extractIdsEnvFromTc dynFlags tcEnv
 
-  let processedModule = tcg_mod env
-      processedName   = Text.pack $ moduleNameString $ GHC.moduleName processedModule
-
-  qqs <- liftIO $ do
-    qqs <- readIORef qqRef
-    writeIORef qqRef [] -- Reset for the next module
-    return qqs
-
-  pluginResult <- execExtractIdsT dynFlags env qqs processedModule $ do
+  extractIdsResumeIO stRef eIdsEnv $ do
     -- Information provided by the renamer
     -- See http://www.haskell.org/pipermail/ghc-devs/2013-February/000540.html
     -- It is important we do this *first*, because this creates the initial
     -- cache with the IdInfo objects, which we can then update by processing
     -- the typed AST and the global type environment.
-    extractIds (tcg_rn_decls env)
+    extractIds SpanId (tcg_rn_decls tcEnv)
 
     -- Information provided by the type checker
-    extractIds (tcg_binds env)
+    extractIds SpanId (tcg_binds tcEnv)
 
     -- Type environment constructed for this module
-    extractTypesFromTypeEnv (tcg_type_env env)
+    extractTypesFromTypeEnv (tcg_type_env tcEnv)
+
+  eIdsSt' <- liftIO $ extractIdsReset stRef
+  let processedModule = tcg_mod tcEnv
+      processedName   = Text.pack $ moduleNameString $ GHC.moduleName processedModule
+      pkgDeps         = imp_dep_pkgs (tcg_imports tcEnv)
+      pluginResult    = PluginResult {
+           pluginIdList   = _eIdsIdList   eIdsSt'
+         , pluginExpTypes = _eIdsExpTypes eIdsSt'
+         , pluginPkgDeps  = force $ map (importPackageId dynFlags) pkgDeps
+         , pluginUseSites = _eIdsUseSites eIdsSt'
+         }
 
   liftIO $ modifyIORef symbolRef (Map.insert processedName pluginResult)
-  return env
+  return tcEnv
 
 extractTypesFromTypeEnv :: TypeEnv -> ExtractIdsM ()
 extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
@@ -223,27 +231,54 @@ data ExtractIdsEnv = ExtractIdsEnv {
   , eIdsCurrent  :: !Module.Module
   , eIdsLinkEnv  :: !LinkEnv
 #if DEBUG
-  , eIdsStackTrace    :: [String]
+  , eIdsStackTrace :: [String]
 #endif
   }
 
-data ExtractIdsState = ExtractIdsState {
-    eIdsTidyEnv       :: !TidyEnv
-  , eIdsIdList        :: !IdList
-  , eIdsExpTypes      :: [(SourceSpan, Text)] -- TODO: explicit sharing?
-  , eIdsUseSites      :: !UseSites
-  , eIdsFilePathCache :: !(StrictPair (HashMap FilePath Int) Int)
-  , eIdsIdPropCache   :: !(Strict IntMap IdProp)
+data ExtractIdsSuspendedState = ExtractIdsSuspendedState {
+    _eIdsTidyEnv  :: !TidyEnv
+  , _eIdsIdList   :: !IdList
+  , _eIdsExpTypes :: [(SourceSpan, Text)] -- TODO: explicit sharing?
+  , _eIdsUseSites :: !UseSites
   }
 
+data ExtractIdsRunningState = ExtractIdsRunningState {
+    _eIdsSuspendedState :: !ExtractIdsSuspendedState
+  ,  eIdsFilePathCache  :: !(StrictPair (HashMap FilePath Int) Int)
+  ,  eIdsIdPropCache    :: !(Strict IntMap IdProp)
+  }
+
+eIdsTidyEnv'  :: Accessor ExtractIdsSuspendedState TidyEnv
+eIdsIdList'   :: Accessor ExtractIdsSuspendedState IdList
+eIdsExpTypes' :: Accessor ExtractIdsSuspendedState [(SourceSpan, Text)]
+eIdsUseSites' :: Accessor ExtractIdsSuspendedState UseSites
+
+eIdsTidyEnv'  = accessor _eIdsTidyEnv  $ \x s -> s { _eIdsTidyEnv  = x }
+eIdsIdList'   = accessor _eIdsIdList   $ \x s -> s { _eIdsIdList   = x }
+eIdsExpTypes' = accessor _eIdsExpTypes $ \x s -> s { _eIdsExpTypes = x }
+eIdsUseSites' = accessor _eIdsUseSites $ \x s -> s { _eIdsUseSites = x }
+
+eIdsSuspendedState :: Accessor ExtractIdsRunningState ExtractIdsSuspendedState
+eIdsSuspendedState = accessor _eIdsSuspendedState $ \x s -> s { _eIdsSuspendedState = x }
+
+eIdsTidyEnv  :: Accessor ExtractIdsRunningState TidyEnv
+eIdsIdList   :: Accessor ExtractIdsRunningState IdList
+eIdsExpTypes :: Accessor ExtractIdsRunningState [(SourceSpan, Text)]
+eIdsUseSites :: Accessor ExtractIdsRunningState UseSites
+
+eIdsTidyEnv  = eIdsSuspendedState .> eIdsTidyEnv'
+eIdsIdList   = eIdsSuspendedState .> eIdsIdList'
+eIdsExpTypes = eIdsSuspendedState .> eIdsExpTypes'
+eIdsUseSites = eIdsSuspendedState .> eIdsUseSites'
+
 newtype ExtractIdsM a = ExtractIdsM (
-      ReaderT ExtractIdsEnv (StrictState ExtractIdsState) a
+      ReaderT ExtractIdsEnv (StrictState ExtractIdsRunningState) a
     )
   deriving (
       Functor
     , Applicative
     , Monad
-    , MonadState ExtractIdsState
+    , MonadState ExtractIdsRunningState
     , MonadReader ExtractIdsEnv
     )
 
@@ -265,6 +300,66 @@ instance TraceMonad ExtractIdsM where
 instance HasDynFlags ExtractIdsM where
   getDynFlags = asks eIdsDynFlags
 
+extractIdsResumeIO :: MonadIO m
+                   => StrictIORef ExtractIdsSuspendedState
+                   -> ExtractIdsEnv
+                   -> ExtractIdsM a
+                   -> m a
+extractIdsResumeIO stRef env (ExtractIdsM act) = do
+  filePathCache <- liftIO $ getFilePathCache
+  idPropCache   <- liftIO $ getIdPropCache
+  st            <- liftIO $ readIORef stRef
+
+  let (a, st') = runState (runReaderT act env) ExtractIdsRunningState {
+                     _eIdsSuspendedState = st
+                   ,  eIdsFilePathCache  = filePathCache
+                   ,  eIdsIdPropCache    = idPropCache
+                   }
+
+  liftIO $ do
+    writeIORef stRef (_eIdsSuspendedState st')
+    putFilePathCache ( eIdsFilePathCache  st')
+    putIdPropCache   ( eIdsIdPropCache    st')
+
+  return a
+
+extractIdsResumeTc :: StrictIORef ExtractIdsSuspendedState
+                   -> ExtractIdsM a
+                   -> TcRn a
+extractIdsResumeTc stRef act = do
+  tcEnv   <- getEnv
+  eIdsEnv <- extractIdsEnvFromTc (hsc_dflags (env_top tcEnv)) (env_gbl tcEnv)
+  liftIO $ extractIdsResumeIO stRef eIdsEnv act
+
+extractIdsEnvFromTc :: MonadIO m => DynFlags -> TcGblEnv -> m ExtractIdsEnv
+extractIdsEnvFromTc eIdsDynFlags env = liftIO $ do
+    eIdsLinkEnv <- linkEnvForDeps eIdsDynFlags pkgDeps
+    return ExtractIdsEnv{..}
+  where
+    eIdsRdrEnv     = tcg_rdr_env env
+    eIdsCurrent    = tcg_mod env
+    pkgDeps        = imp_dep_pkgs (tcg_imports env)
+    qual           = mkPrintUnqualified eIdsDynFlags eIdsRdrEnv
+    eIdsPprStyle   = mkUserStyle qual AllTheWay
+#if DEBUG
+    eIdsStackTrace = []
+#endif
+
+extractIdsReset :: StrictIORef ExtractIdsSuspendedState -> IO ExtractIdsSuspendedState
+extractIdsReset stRef = do
+  oldState <- readIORef stRef
+  writeIORef stRef initExtractIdsSuspendedState
+  return oldState
+
+initExtractIdsSuspendedState :: ExtractIdsSuspendedState
+initExtractIdsSuspendedState =
+  ExtractIdsSuspendedState {
+      _eIdsTidyEnv       = emptyTidyEnv
+    , _eIdsIdList        = []
+    , _eIdsExpTypes      = []
+    , _eIdsUseSites      = Map.empty
+    }
+
 _debugLog :: FilePath -> String -> ExtractIdsM ()
 _debugLog path str = do
     st <- get
@@ -275,75 +370,22 @@ _debugLog path str = do
              appendFile path (str ++ "\n")
              return x
 
-execExtractIdsT :: MonadIO m
-                => DynFlags
-                -> TcGblEnv
-                -> IdList
-                -> Module.Module
-                -> ExtractIdsM ()
-                -> m PluginResult
-execExtractIdsT dynFlags env idList current (ExtractIdsM m) = do
-  -- Construct LinkEnv for finding home modules
-  -- The order of the package dependencies is important! (See comment for
-  -- linkEnvFor.) We assume that ghc gives us the package dependencies in the
-  -- right order.
-  let pkgDeps = (imp_dep_pkgs (tcg_imports env))
-  linkEnv <- liftIO $ linkEnvForDeps dynFlags pkgDeps
-
-  filePathCache <- liftIO $ getFilePathCache
-  idPropCache   <- liftIO $ getIdPropCache
-
-  let rdrEnv  = tcg_rdr_env env
-      qual    = mkPrintUnqualified dynFlags rdrEnv
-      eIdsEnv = ExtractIdsEnv {
-                    eIdsDynFlags   = dynFlags
-                  , eIdsRdrEnv     = rdrEnv
-                  , eIdsPprStyle   = mkUserStyle qual AllTheWay
-                  , eIdsCurrent    = current
-                  , eIdsLinkEnv    = linkEnv
-#if DEBUG
-                  , eIdsStackTrace = []
-#endif
-                  }
-      eIdsSt  = ExtractIdsState {
-                    eIdsTidyEnv       = emptyTidyEnv
-                  , eIdsIdList        = idList
-                  , eIdsExpTypes      = []
-                  , eIdsUseSites      = Map.empty
-                  , eIdsFilePathCache = filePathCache
-                  , eIdsIdPropCache   = idPropCache
-                  }
-
-  eIdsSt' <- liftIO $ evaluate $ execState (runReaderT m eIdsEnv) eIdsSt
-
-  liftIO $ putFilePathCache (eIdsFilePathCache eIdsSt')
-  liftIO $ putIdPropCache   (eIdsIdPropCache   eIdsSt')
-
-  return PluginResult {
-      pluginIdList   = eIdsIdList   eIdsSt'
-    , pluginExpTypes = eIdsExpTypes eIdsSt'
-    , pluginPkgDeps  = force $ map (importPackageId dynFlags) pkgDeps
-    , pluginUseSites = eIdsUseSites eIdsSt'
-    }
-
 extendIdMap :: SourceSpan -> SpanInfo -> ExtractIdsM ()
-extendIdMap span info = modify $ \st -> st {
-    eIdsIdList = (span, info) : eIdsIdList st
-  }
+extendIdMap span info =
+    AccState.modify eIdsIdList ((span, info) :)
 
 recordUseSite :: IdPropPtr -> SourceSpan -> ExtractIdsM ()
-recordUseSite ptr span = modify $ \st -> st {
-      eIdsUseSites = Map.alter insertSpan ptr (eIdsUseSites st)
-    }
+recordUseSite ptr span =
+    AccState.modify eIdsUseSites (Map.alter insertSpan ptr)
   where
     insertSpan Nothing   = Just [span]
     insertSpan (Just ss) = Just (span : ss)
 
 tidyType :: Type -> ExtractIdsM Type
 tidyType typ = do
-  st <- get
-  let (tidyEnv', typ') = tidyOpenType (eIdsTidyEnv st) typ
-  put $ st { eIdsTidyEnv = tidyEnv' }
+  tidyEnv <- AccState.get eIdsTidyEnv
+  let (tidyEnv', typ') = tidyOpenType tidyEnv typ
+  AccState.set eIdsTidyEnv tidyEnv'
   return typ'
 
 lookupRdrEnv :: RdrName.GlobalRdrEnv -> Name -> Maybe RdrName.GlobalRdrElt
@@ -361,9 +403,7 @@ recordExpType span (Just typ) = do
   case eitherSpan of
     ProperSpan properSpan -> do
       prettyTyp <- tidyType typ >>= showTypeForUser
-      modify $ \st -> st {
-          eIdsExpTypes = (properSpan, prettyTyp) : eIdsExpTypes st
-        }
+      AccState.modify eIdsExpTypes ((properSpan, prettyTyp) :)
     TextSpan _ ->
       return () -- Ignore
   return (Just typ)
@@ -389,11 +429,10 @@ ast _mspan _info cont = do
   local (\env -> env { eIdsStackTrace = _info : eIdsStackTrace env }) $ do
 #endif
     -- Restore the tideEnv after cont
-    stBefore <- get
-    r        <- cont
-    stAfter  <- get
-    put $ stAfter { eIdsTidyEnv = eIdsTidyEnv stBefore }
-    return r
+    tidyEnv <- AccState.get eIdsTidyEnv
+    result  <- cont
+    AccState.set eIdsTidyEnv tidyEnv
+    return result
 
 unsupported :: Maybe SrcSpan -> String -> ExtractIdsM (Maybe Type)
 #if DEBUG
@@ -497,12 +536,12 @@ showTypeForUser typ = do
   where
     showForalls = False
 
-extractIds :: Fold a => a -> ExtractIdsM (Maybe Type)
-extractIds = fold AstAlg {
+extractIds :: Fold a => (IdInfo -> SpanInfo) -> a -> ExtractIdsM (Maybe Type)
+extractIds mkSpanInfo = fold AstAlg {
     astMark        = ast
   , astUnsupported = unsupported
   , astExpType     = recordExpType
-  , astName        = recordName
+  , astName        = recordName mkSpanInfo
   , astVar         = recordId
   }
 
@@ -513,8 +552,10 @@ recordId (L span id) _idIsBinder = do
   where
     typ = Var.varType id
 
-recordName :: Located Name -> IsBinder -> ExtractIdsM (Maybe Type)
-recordName (L span name) idIsBinder = do
+recordName :: (IdInfo -> SpanInfo)
+           -> Located Name -> IsBinder
+           -> ExtractIdsM (Maybe Type)
+recordName mkSpanInfo (L span name) idIsBinder = do
   span' <- extractSourceSpan span
   case span' of
     ProperSpan sourceSpan -> do
@@ -533,7 +574,7 @@ recordName (L span name) idIsBinder = do
 
       case info of
         (idProp, Just idScope) -> do
-          extendIdMap sourceSpan $ SpanId IdInfo{..}
+          extendIdMap sourceSpan $ mkSpanInfo IdInfo{..}
           case idIsBinder of
             UseSite -> recordUseSite idProp sourceSpan
             _       -> return ()

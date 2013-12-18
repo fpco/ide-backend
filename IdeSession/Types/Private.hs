@@ -132,6 +132,9 @@ type IdList = [(SourceSpan, SpanInfo)]
 data SpanInfo =
    SpanId IdInfo
  | SpanQQ IdInfo
+   -- We use 'SpanInSplice' for prioritization only (see 'internalGetSpanInfo').
+   -- It gets translated to 'Public.SpanId'
+ | SpanInSplice IdInfo
  deriving (Show, Generic)
 
 newtype IdMap = IdMap { idMapToMap :: StrictIntervalMap (FilePathPtr, Int, Int) SpanInfo }
@@ -319,14 +322,16 @@ instance Binary ExplicitSharingCache where
   get = ExplicitSharingCache <$> get <*> get
 
 instance Binary SpanInfo where
-  put (SpanId idInfo) = putWord8 0 >> put idInfo
-  put (SpanQQ idInfo) = putWord8 1 >> put idInfo
+  put (SpanId idInfo)       = putWord8 0 >> put idInfo
+  put (SpanQQ idInfo)       = putWord8 1 >> put idInfo
+  put (SpanInSplice idInfo) = putWord8 2 >> put idInfo
 
   get = do
     header <- getWord8
     case header of
-      0 -> SpanId <$> get
-      1 -> SpanQQ <$> get
+      0 -> SpanId       <$> get
+      1 -> SpanQQ       <$> get
+      2 -> SpanInSplice <$> get
       _ -> fail "SpanInfo.get: invalid header"
 
 instance Binary RunResult where

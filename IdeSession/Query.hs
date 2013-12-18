@@ -42,7 +42,7 @@ module IdeSession.Query (
 
 import Prelude hiding (mod, span)
 import Data.Maybe (listToMaybe, maybeToList)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, sortBy)
 import Data.Accessor ((^.), (^:), getVal)
 import Data.Version (Version)
 import qualified System.FilePath.Find as Find
@@ -215,8 +215,8 @@ getLoadedModules = computedQuery $ \Computed{..} ->
 getSpanInfo :: Query (ModuleName -> SourceSpan -> [(SourceSpan, SpanInfo)])
 getSpanInfo = computedQuery $ \computed@Computed{..} mod span ->
   let aux (a, b) = ( removeExplicitSharing computedCache a
-                 , removeExplicitSharing computedCache b
-                 )
+                   , removeExplicitSharing computedCache b
+                   )
   in map aux . maybeToList $ internalGetSpanInfo computed mod span
 
 internalGetSpanInfo :: Computed -> ModuleName -> SourceSpan
@@ -224,16 +224,21 @@ internalGetSpanInfo :: Computed -> ModuleName -> SourceSpan
 internalGetSpanInfo Computed{..} mod span = case (mSpan, mIdMap) of
     (Just span', Just (Private.IdMap idMap)) ->
       let doms = Private.dominators span' idMap
-      in case filter isQQ doms of
-           qq : _ -> Just qq
-           _      -> listToMaybe doms
+      in listToMaybe (prioritize doms)
     _ -> Nothing
   where
     mSpan  = introduceExplicitSharing computedCache span
     mIdMap = StrictMap.lookup mod computedSpanInfo
 
-    isQQ (_, Private.SpanQQ _) = True
-    isQQ _                     = False
+    prioritize :: [(Private.SourceSpan, Private.SpanInfo)]
+               -> [(Private.SourceSpan, Private.SpanInfo)]
+    prioritize = sortBy $ \(_, a) (_, b) ->
+      case (a, b) of
+        (Private.SpanQQ _,       Private.SpanId _)       -> LT
+        (Private.SpanInSplice _, Private.SpanId _)       -> LT
+        (Private.SpanId _,       Private.SpanQQ _)       -> GT
+        (Private.SpanId _,       Private.SpanInSplice _) -> GT
+        (_, _) -> EQ
 
 -- | Get information the type of a subexpressions and the subexpressions
 -- around it
@@ -296,8 +301,9 @@ getUseSites = computedQuery $ \computed@Computed{..} mod span ->
   maybeListToList $ do
     (_, spanId)        <- internalGetSpanInfo computed mod span
     Private.IdInfo{..} <- case spanId of
-                            Private.SpanId idInfo -> return idInfo
-                            Private.SpanQQ _      -> Nothing
+                            Private.SpanId       idInfo -> return idInfo
+                            Private.SpanQQ       _      -> Nothing
+                            Private.SpanInSplice idInfo -> return idInfo
     return $ map (removeExplicitSharing computedCache)
            . concatMap (maybeListToList . StrictMap.lookup idProp)
            $ StrictMap.elems computedUseSites
