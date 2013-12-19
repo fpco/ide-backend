@@ -2844,7 +2844,15 @@ syntheticTests = [
     , withSession defaultSessionConfig $ \session -> do
         crashGhcServer session Nothing
         updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
-        assertSourceErrors' session ["Intentional crash"]
+        actualErrs <- getSourceErrors session
+        let expectedErrs = [
+                SourceError {
+                    errorKind = KindServerDied
+                  , errorSpan = TextSpan (Text.pack "<<server died>>")
+                  , errorMsg  = Text.pack ("user error (Intentional crash)")
+                  }
+              ]
+        assertEqual "" expectedErrs actualErrs
     )
   , ( "GHC crash 3: Delay, follow up request"
     , withSession defaultSessionConfig $ \session -> do

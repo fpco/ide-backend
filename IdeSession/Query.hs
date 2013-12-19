@@ -62,7 +62,7 @@ import IdeSession.GHC.API (cabalMacrosLocation, GhcVersion)
 import IdeSession.Types.Translation
 import IdeSession.Types.Public
 import qualified IdeSession.Types.Private as Private
-import IdeSession.RPC.Client (ExternalException)
+import IdeSession.RPC.Client (ExternalException(..))
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map    as StrictMap
 import qualified IdeSession.Strict.List   as StrictList
@@ -366,11 +366,11 @@ withIdleState IdeSession{ideState} f =
       StrictMaybe.just . updateComputed e . StrictMaybe.fromMaybe emptyComputed
 
     updateComputed :: ExternalException -> Computed -> Computed
-    updateComputed e c =
+    updateComputed (ExternalException remote _local) c =
       let err = Private.SourceError {
-              Private.errorKind = Private.KindError
+              Private.errorKind = Private.KindServerDied
             , Private.errorSpan = Private.TextSpan (Text.pack "<<server died>>")
-            , Private.errorMsg  = Text.pack (show e)
+            , Private.errorMsg  = Text.pack remote
             }
       in c { computedErrors = StrictList.singleton err }
 
