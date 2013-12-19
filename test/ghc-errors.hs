@@ -4859,6 +4859,19 @@ syntheticTests = [
            assertEqual "autocompletion info for C cleared" 0 $
              length (autocomplete (Text.pack "C") "sp")
     )
+  , ( "Paths in type errors (#32)"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
+                    [ "module A where"
+                    , "f x = show . read"
+                    ])
+        updateSessionD session upd 1
+        errs <- getSourceErrors session
+        let none p = all (not . p)
+        let containsFullPath e =
+              "ide-backend-test" `isInfixOf` Text.unpack (errorMsg e)
+        _fixme session "#32" $ assertBool "" (none containsFullPath errs)
+    )
   ]
 
 modAn, modBn, modCn :: String -> IdeSessionUpdate ()
@@ -5684,6 +5697,8 @@ knownProblems = [
   , ("use", [GHC78])
     -- https://github.com/fpco/ide-backend/issues/146
   , ("#146", [])
+    -- https://github.com/fpco/ide-backend/issues/32
+  , ("#32", [])
   ]
 
 _fixme :: IdeSession -> String -> IO () -> IO ()
