@@ -19,7 +19,7 @@ import Data.Time
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
-import System.Exit (ExitCode (ExitSuccess, ExitFailure))
+import System.Exit (ExitCode (ExitSuccess, ExitFailure), exitFailure)
 import System.FilePath ( (</>), takeFileName, makeRelative
                        , takeDirectory, replaceExtension )
 import System.FilePath.Find (find, always, extension)
@@ -29,8 +29,8 @@ import System.Directory (
   , removeDirectoryRecursive
   )
 import System.IO.Temp (createTempDirectory)
-import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr, hPutStrLn)
-import System.IO.Error (isDoesNotExistError)
+import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr, hPutStrLn, stderr)
+import System.IO.Error (isDoesNotExistError, isUserError, catchIOError)
 
 import Distribution.InstalledPackageInfo
   (InstalledPackageInfo_ ( InstalledPackageInfo
@@ -304,6 +304,15 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   ignoreDoesNotExist $ removeDirectoryRecursive $ ideDistDir </> "build"
 
   createDirectoryIfMissing False $ ideDistDir </> "build"
+  let confAndBuild = do
+        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+        -- Setting @withPackageDB@ here is too late, @configure@ would fail
+        -- already. Hence we set it in @mkConfFlags@ (can be reverted,
+        -- when/if we construct @lbi@ without @configure@).
+        callback $ Progress 3 4 Nothing Nothing
+        Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
+        callback $ Progress 4 4 Nothing Nothing
+  -- Handle various exceptions and stderr/stdout printouts.
   let stdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
       stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
   exitCode :: Either ExitCode () <- Ex.bracket
@@ -313,14 +322,18 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
     (\(stdOutputBackup, stdErrorBackup) -> do
         restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
-    (\_ -> Ex.try $ do
-        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
-        -- Setting @withPackageDB@ here is too late, @configure@ would fail
-        -- already. Hence we set it in @mkConfFlags@ (can be reverted,
-        -- when/if we construct @lbi@ without @configure@).
-        callback $ Progress 3 4 Nothing Nothing
-        Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
-        callback $ Progress 4 4 Nothing Nothing)
+    (\_ -> Ex.try $ catchIOError confAndBuild
+                      (\e -> if isUserError e
+                             then do
+                               -- In the new cabal code some exceptions
+                               -- are handled with 'die', raising a user error,
+                               -- while some still do 'exit 1' and print
+                               -- to stderr. For uniformity, we redirect
+                               -- user errors to stderr, as well.
+                               hPutStrLn stderr $ "Exception caught:"
+                               hPutStrLn stderr $ show e
+                               exitFailure
+                             else ioError e))
   return $! either id (const ExitSuccess) exitCode
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API,

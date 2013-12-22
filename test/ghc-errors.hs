@@ -1828,7 +1828,7 @@ syntheticTests = [
         checkWarns <- checkPackage pkgDir
         assertCheckWarns checkWarns
     )
-  , ( "Build executable and fail"
+  , ( "Build executable with a wrong filename and fail"
     , withSession (withOpts []) $ \session -> do
         setCurrentDirectory "test/MainModule"
         loadModulesFrom session "."
@@ -1838,14 +1838,37 @@ syntheticTests = [
             upd = buildExe [(Text.pack m, "foooooooooooooooo.hs")]
         status0 <- getBuildExeStatus session
         assertEqual "before exe build" Nothing status0
-        _fixme session "#146" $ updateSessionD session upd 4
+        updateSessionD session upd 4
         status1 <- getBuildExeStatus session
---        assertEqual "failure after exe build" (Just $ ExitFailure 1) status1
-        assertEqual "failure after exe build" Nothing status1
-        -- TODO: either catch the exception and report it in the usual
-        -- place (build/ide-backend-exe.stderr) or let the users catch it,
-        -- and so see ASAP the filenames are wrong, without actually
-        -- waiting for cabal to run and inspecting ide-backend-exe.stderr
+        assertEqual "failure after exe build" (Just $ ExitFailure 1) status1
+    )
+  , ( "Build .cabal from TH with a wrong libname and don't fail"
+    , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
+        setCurrentDirectory "test"
+        (originalUpdate, lm) <- getModulesFrom session "TH"
+        let update = originalUpdate <> updateCodeGeneration True
+        updateSessionD session update (length lm)
+        setCurrentDirectory "../"
+        assertNoErrors session
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "--///fo/name" $ Version [-1, -9] []
+        assertBool ".cabal not empty" $ not $ BSLC.null dotCabal
+    )
+  , ( "Build licenses from TH with a wrong cabals dir and don't fail"
+    , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
+        setCurrentDirectory "test"
+        (originalUpdate, lm) <- getModulesFrom session "TH"
+        let update = originalUpdate <> updateCodeGeneration True
+        updateSessionD session update (length lm)
+        setCurrentDirectory "../"
+        assertNoErrors session
+        let upd = buildLicenses "--/fooo /fooo/foo"
+        updateSessionD session upd 99
+        distDir <- getDistDir session
+        licensesErrs <- readFile $ distDir </> "licenses.stderr"
+        assertBool "licensesErrs length" $ length licensesErrs > 0
+        status <- getBuildLicensesStatus session
+        assertEqual "after license build" (Just ExitSuccess) status
     )
   , ( "Build haddocks from ParFib"
     , withSession (withOpts []) $ \session -> do
