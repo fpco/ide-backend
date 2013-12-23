@@ -96,12 +96,6 @@ pkgNameMain = Package.PackageName "main"  -- matches the import default
 pkgVersionMain :: Version
 pkgVersionMain = Version [1, 0] []
 
-pkgIdent :: Package.PackageIdentifier
-pkgIdent = Package.PackageIdentifier
-  { pkgName    = pkgNameMain
-  , pkgVersion = pkgVersionMain
-  }
-
 pkgDescFromName :: String -> Version -> PackageDescription
 pkgDescFromName pkgName version = PackageDescription
   { -- the following are required by all packages:
@@ -377,6 +371,8 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts
       preprocessors = []
       haddockFlags = Setup.defaultHaddockFlags
         { Setup.haddockDistPref = Setup.Flag ideDistDir
+        , Setup.haddockHtml = Setup.Flag True
+        , Setup.haddockHoogle = Setup.Flag True
         , Setup.haddockVerbosity = Setup.Flag minBound
         }
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks

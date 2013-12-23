@@ -439,6 +439,8 @@ syntheticTests = [
         distDir <- getDistDir session
         indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
         assertBool ".lhs haddock files" indexExists
+        hoogleExists <- doesFileExist $ distDir </> "doc/html/main/main-1.0.txt"
+        assertBool ".lhs hoogle files" hoogleExists
     )
   , ( "Build haddocks and fail"
     , withSession defaultSessionConfig $ \session -> do
@@ -810,7 +812,8 @@ syntheticTests = [
         distDir <- getDistDir session
         indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
         assertBool "TH.TH haddock files" indexExists
-
+        hoogleExists <- doesFileExist $ distDir </> "doc/html/main/main-1.0.txt"
+        assertBool "TH.TH hoogle files" hoogleExists
     )
   , ( "Test CPP: ifdefed module header"
     , withSession (withOpts ["-XCPP"]) $ \session -> do
@@ -1881,6 +1884,8 @@ syntheticTests = [
         distDir <- getDistDir session
         indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
         assertBool "ParFib haddock files" indexExists
+        hoogleExists <- doesFileExist $ distDir </> "doc/html/main/main-1.0.txt"
+        assertBool "ParFib hoogle files" hoogleExists
     )
   , ( "Fail on empty package DB"
     , let config = defaultSessionConfig { configPackageDBStack  = [] }
