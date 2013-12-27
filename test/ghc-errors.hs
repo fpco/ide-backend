@@ -5723,7 +5723,11 @@ knownProblems = [
     -- https://github.com/fpco/ide-backend/issues/146
     ("#146", [])
     -- https://github.com/fpco/ide-backend/issues/32
-  , ("#32", [])
+    -- TODO: In 7.8 the error message does not include a filepath at all,
+    -- so the error does not crop up. I don't know if this is true for _all_
+    -- errors or just for this particular one (I tried a few but didn't see
+    -- filepaths in any of them).
+  , ("#32", [GHC742])
     -- https://github.com/fpco/ide-backend/issues/150
   , ("#150", [GHC742, GHC78])
   ]
