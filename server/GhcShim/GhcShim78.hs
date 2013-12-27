@@ -679,19 +679,19 @@ instance FoldId id => Fold (LTyClDecl id) where
                             tcdTyVars
                             tcdRhs
                            _tcdFVs)) = astMark alg (Just span) "SynDecl" $ do
-    -- foldId alg tcdLName DefSite
+    foldId alg tcdLName DefSite
     fold alg tcdTyVars
     fold alg tcdRhs
   fold alg (L span (DataDecl tcdLName
                              tcdTyVars
                              tcdDataDefn
                             _tcdFVs)) = astMark alg (Just span) "DataDecl" $ do
-    -- foldId alg tcdLName DefSite -- FIXME (#8607)
+    foldId alg tcdLName DefSite
     fold alg tcdTyVars
     fold alg tcdDataDefn
   fold alg (L span decl@(ClassDecl {})) = astMark alg (Just span) "ClassDecl" $ do
     fold alg (tcdCtxt decl)
-    -- foldId alg (tcdLName decl) DefSite -- FIXME (#8607)
+    foldId alg (tcdLName decl) DefSite
     fold alg (tcdTyVars decl)
     -- Sadly, we don't get location info for the functional dependencies
     fold alg (tcdSigs decl)
@@ -828,7 +828,7 @@ instance Fold thing => Fold (HsWithBndrs thing) where
 instance FoldId id => Fold (LFamilyDecl id) where
   fold alg (L span (FamilyDecl fdInfo fdLName fdTyVars fdKindSig)) = astMark alg (Just span) "FamilyDecl" $ do
     fold alg fdInfo
-    -- foldId alg fdLName DefSite -- FIXME (#8607)
+    foldId alg fdLName DefSite
     fold alg fdTyVars
     fold alg fdKindSig
 
