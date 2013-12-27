@@ -94,8 +94,13 @@ lookup' key =
 --
 -- Returns the hash of the file; we are careful not to force the entire input
 -- bytestring into memory (we compute the hash as we write the file).
-writeFileAtomic :: FilePath -> BSL.ByteString -> IO MD5Digest
-writeFileAtomic targetPath content = do
+--
+-- We give the user a chance to avoid writing the file given the computed hash.
+writeFileAtomic :: FilePath
+                -> BSL.ByteString
+                -> (MD5Digest -> Bool)
+                -> IO MD5Digest
+writeFileAtomic targetPath content shouldWrite = do
   let (targetDir, targetFile) = splitFileName targetPath
   createDirectoryIfMissing True targetDir
   Ex.bracketOnError
@@ -105,7 +110,9 @@ writeFileAtomic targetPath content = do
         let bits :: Tagged MD5Digest BitLength ; bits = blockLength
         hash <- go handle initialCtx $ makeBlocks (untag bits `div` 8) content
         hClose handle
-        renameFile tmpPath targetPath
+        if shouldWrite hash
+          then renameFile tmpPath targetPath
+          else removeFile tmpPath
         return hash)
   where
     go :: Handle -> MD5Context -> [BSS.ByteString] -> IO MD5Digest

@@ -26,11 +26,9 @@ import System.FilePath.Find (find, always, extension)
 import System.Directory (
     doesFileExist
   , createDirectoryIfMissing
-  , removeDirectoryRecursive
   )
 import System.IO.Temp (createTempDirectory)
 import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr, hPutStrLn)
-import System.IO.Error (isDoesNotExistError)
 
 import Distribution.InstalledPackageInfo
   (InstalledPackageInfo_ ( InstalledPackageInfo
@@ -299,10 +297,6 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
       preprocessors = []
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
 
-  -- Delete the build directory completely so that we trigger a full
-  -- recompilation. This is a workaround for #119.
-  ignoreDoesNotExist $ removeDirectoryRecursive $ ideDistDir </> "build"
-
   createDirectoryIfMissing False $ ideDistDir </> "build"
   let stdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
       stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
@@ -325,11 +319,6 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   -- TODO: add a callback hook to Cabal that is applied to GHC messages
   -- as they are emitted, similarly as log_action in GHC API,
   -- or filter stdout and display progress on each good line.
-  where
-    ignoreDoesNotExist :: IO () -> IO ()
-    ignoreDoesNotExist = Ex.handle $ \e ->
-      if isDoesNotExistError e then return ()
-                               else Ex.throwIO e
 
 configureAndHaddock :: FilePath -> FilePath -> [FilePath]
                     -> [String] -> PackageDBStack -> [PackageId]

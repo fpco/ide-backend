@@ -307,19 +307,34 @@ syntheticTests = [
     )
   , ( "Maintain list of compiled modules III"
     , withSession defaultSessionConfig $ \session -> do
+        let delay = 0
+        threadDelay delay
         updateSessionD session (loadModule "A.hs" "a = 5") 1
+        threadDelay delay
         assertLoadedModules session "1 [A]" ["A"]
+        threadDelay delay
         updateSessionD session (loadModule "A.hs" "a = 5 + True") 1
+        threadDelay delay
         assertLoadedModules session "1 []" []
+        threadDelay delay
         updateSessionD session (loadModule "A.hs" "a = 5") 1
+        threadDelay delay
         assertLoadedModules session "2 [A]" ["A"]
+        threadDelay delay
         updateSessionD session (loadModule "A.hs" "a = 5 + wrong") 1
+        threadDelay delay
         assertLoadedModules session "2 []" []
+        threadDelay delay
         updateSessionD session (loadModule "A.hs" "a = 5") 1
+        threadDelay delay
         assertLoadedModules session "3 [A]" ["A"]
+        threadDelay delay
         updateSessionD session (loadModule "A.hs" "import WRONG\na = 5") 1
+        threadDelay delay
         assertLoadedModules session "3 [A]; wrong imports do not unload old modules" ["A"]
+        threadDelay delay
         updateSessionD session (loadModule "A.hs" "a = 5 + True") 1
+        threadDelay delay
         assertLoadedModules session "3 []" []
     )
   , ( "Duplicate shutdown"

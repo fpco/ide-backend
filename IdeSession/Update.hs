@@ -41,7 +41,7 @@ module IdeSession.Update (
   where
 
 import Prelude hiding (mod, span)
-import Control.Monad (when, void, forM, unless)
+import Control.Monad (when, void, unless)
 import Control.Monad.State (MonadState, StateT, execStateT, runStateT)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
 import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
@@ -68,6 +68,7 @@ import System.FilePath (
   , dropFileName
   )
 import System.Posix.Files (setFileTimes)
+import System.Posix.Time (epochTime)
 import System.IO.Temp (createTempDirectory)
 import System.IO.Error (isDoesNotExistError)
 import qualified Data.Text as Text
@@ -140,19 +141,11 @@ initSession initParams ideConfig@SessionConfig{..} = do
          Right (s, v) -> (IdeSessionIdle,         s,          v)
          Left e       -> (IdeSessionServerDied e, Ex.throw e, Ex.throw e)
 
-  -- The value of _ideLogicalTimestamp field is a workaround for
-  -- the problems with 'invalidateModSummaryCache', which itself is
-  -- a workaround for http://hackage.haskell.org/trac/ghc/ticket/7478.
-  -- We have to make sure that file times never reach 0, because this will
-  -- trigger an exception (http://hackage.haskell.org/trac/ghc/ticket/7567).
-  -- We rather arbitrary start at Jan 2, 1970.
   let idleState = IdeIdleState {
-                      _ideLogicalTimestamp = 86400
-                    , _ideComputed         = Maybe.nothing
+                      _ideComputed         = Maybe.nothing
                     , _ideNewOpts          = Nothing
                     , _ideGenerateCode     = False
                     , _ideManagedFiles     = ManagedFilesInternal [] []
-                    , _ideObjectFiles      = []
                     , _ideBuildExeStatus   = Nothing
                     , _ideBuildDocStatus   = Nothing
                     , _ideBuildLicensesStatus = Nothing
@@ -507,9 +500,9 @@ recompileObjectFiles = do
       staticInfo   <- asks ideSessionUpdateStaticInfo
       managedFiles <- get (ideManagedFiles .> managedSource)
 
-      let cFiles :: [(FilePath, LogicalTimestamp)]
-          cFiles = filter ((`elem` cExtensions) . takeExtension . fst)
-                 $ map (\(fp, (_, ts)) -> (fp, ts))
+      let cFiles :: [FilePath]
+          cFiles = filter ((`elem` cExtensions) . takeExtension)
+                 $ map fst
                  $ managedFiles
 
           srcDir, objDir :: FilePath
@@ -525,44 +518,33 @@ recompileObjectFiles = do
           unloading obj = "Unloading " ++ makeRelative objDir obj
           skipped   obj = "Skipped loading " ++ makeRelative objDir obj
 
-      forM_ cFiles $ \(fp, ts) -> do
+      forM_ cFiles $ \fp -> do
         let absC     = srcDir </> fp
             absObj   = objDir </> replaceExtension fp ".o"
 
-        mObjFile <- get (ideObjectFiles .> lookup' fp)
+        cIsMoreRecent <- checkIsMoreRecent absC absObj
 
         -- Unload the old object (if necessary)
-        case mObjFile of
-          Just (objFile, ts') | ts' < ts -> do
-            delay $ \callback -> do
-              callback (unloading objFile)
-              lift $ unloadObject objFile
-          _ ->
-            return ()
+        when (cIsMoreRecent == Just True) $ delay $ \callback -> do
+          callback (unloading absObj)
+          lift $ unloadObject absObj
 
         -- Recompile (if necessary)
-        case mObjFile of
-          Just (_objFile, ts') | ts' > ts ->
+        if cIsMoreRecent == Just False
+          then
             -- The object is newer than the C file. Recompilation unnecessary
             return ()
-          _ -> do
-            -- TODO: We need to deal with errors in the C code
+          else do
             delay $ \callback -> do
               callback (compiling fp)
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
-              errs <- lift $ do
-                errs <- runGcc configPackageDBStack configExtraPathDirs
-                               distDir absC absObj objDir
-                --  errs <- _runGccTest absC absObj
-                when (null errs) $ do
-                  ts' <- updateFileTimes absObj
-                  set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
-                return errs
+              errs <- lift $ runGcc configPackageDBStack configExtraPathDirs
+                                    distDir absC absObj objDir
               if null errs then tellSt ([fp], [])
                            else tellSt ([], errs)
             delay $ \callback -> do
               (compiled, _errs) <- St.get
-              if (fp `elem` compiled)
+              if fp `elem` compiled
                 then do callback (loading absObj)
                         lift $ loadObject absObj
                 else callback (skipped absObj)
@@ -610,18 +592,12 @@ updateSourceFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
 updateSourceFile m bs = do
   IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
   let internal = internalFile ideSourcesDir m
-  old <- get (ideManagedFiles .> managedSource .> lookup' m)
-  -- We always overwrite the file, and then later set the timestamp back
-  -- to what it was if it turns out the hash was the same. If we compute
-  -- the hash first, we would force the entire lazy bytestring into memory
-  newHash <- liftIO $ writeFileAtomic internal bs
-  case old of
-    Just (oldHash, oldTS) | oldHash == newHash ->
-      liftIO $ setFileTimes internal oldTS oldTS
-    _ -> do
-      newTS <- updateFileTimes internal
-      set (ideManagedFiles .> managedSource .> lookup' m) (Just (newHash, newTS))
-      set ideUpdatedCode True
+  oldHash <- get (ideManagedFiles .> managedSource .> lookup' m)
+  -- Only change the file if the hash is changed
+  -- (avoid recompilation on updates that don't change the file contents)
+  newHash <- liftIO $ writeFileAtomic internal bs ((/= oldHash) . Just)
+  set (ideManagedFiles .> managedSource .> lookup' m) (Just newHash)
+  set ideUpdatedCode True
 
 -- | Like 'updateSourceFile' except that instead of passing the source by
 -- value, it's given by reference to an existing file, which will be copied.
@@ -668,7 +644,9 @@ updateCodeGeneration b = do
 updateDataFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
 updateDataFile n bs = do
   IdeStaticInfo{ideDataDir} <- asks ideSessionUpdateStaticInfo
-  liftIO $ writeFileAtomic (ideDataDir </> n) bs
+  -- TODO: Why don't we record hashes here to avoid overwriting files when
+  -- their contents don't change?
+  liftIO $ writeFileAtomic (ideDataDir </> n) bs (const True)
   modify (ideManagedFiles .> managedData) (n :)
   set ideUpdatedCode True
 
@@ -995,28 +973,16 @@ unloadObject path = do
 markAsUpdated :: (FilePath -> Bool) -> IdeSessionUpdate ()
 markAsUpdated shouldMark = do
   IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
-  sources  <- get (ideManagedFiles .> managedSource)
-  sources' <- forM sources $ \(path, (digest, oldTS)) ->
-    if shouldMark path
-      then do set ideUpdatedCode True
-              newTS <- updateFileTimes (internalFile ideSourcesDir path)
-              return (path, (digest, newTS))
-      else return (path, (digest, oldTS))
-  set (ideManagedFiles .> managedSource) sources'
+  sources <- map fst <$> get (ideManagedFiles .> managedSource)
+  forM_ (filter shouldMark sources) $ \path -> do
+    set ideUpdatedCode True
+    updateFileTimes (internalFile ideSourcesDir path)
 
--- | Update the file times of the given file with the next logical timestamp
-updateFileTimes :: FilePath -> IdeSessionUpdate LogicalTimestamp
-updateFileTimes path = do
-  ts <- nextLogicalTimestamp
+-- | Update the given file with current clock time, to mark for recompilation
+updateFileTimes :: FilePath -> IdeSessionUpdate ()
+updateFileTimes path = liftIO $ do
+  ts <- epochTime
   liftIO $ setFileTimes path ts ts
-  return ts
-
--- | Get the next available logical timestamp
-nextLogicalTimestamp :: MonadState IdeIdleState m => m LogicalTimestamp
-nextLogicalTimestamp = do
-  newTS <- get ideLogicalTimestamp
-  modify ideLogicalTimestamp (+ 1)
-  return newTS
 
 -- | Call gcc via ghc, with the same parameters cabal uses.
 runGcc :: PackageDBStack -> [FilePath]
@@ -1053,7 +1019,6 @@ runGcc configPackageDBStack configExtraPathDirs
     , errorMsg  = Text.pack (stdout ++ stderr)
     }]
 
-
 {------------------------------------------------------------------------------
   Aux
 ------------------------------------------------------------------------------}
@@ -1084,3 +1049,19 @@ ignoreAllExceptions = Ex.handle ignore
   where
     ignore :: Ex.SomeException -> IO ()
     ignore _ = return ()
+
+-- | @checkIsMoreRecent a b@ checks if @a@ is more recent than @b@; returns
+-- @Nothing@ if either does not exist.
+checkIsMoreRecent :: MonadIO m => FilePath -> FilePath -> m (Maybe Bool)
+checkIsMoreRecent a b = liftIO $ do
+    mModA <- handleDoesNotExistError $ Dir.getModificationTime a
+    mModB <- handleDoesNotExistError $ Dir.getModificationTime b
+    return $ case (mModA, mModB) of
+               (Just modA, Just modB) -> Just (modA > modB)
+               _                      -> Nothing
+  where
+    handleDoesNotExistError :: IO a -> IO (Maybe a)
+    handleDoesNotExistError act =
+      Ex.catchJust (\e -> if isDoesNotExistError e then Just e else Nothing)
+                   (Just <$> act)
+                   (\_ -> return Nothing)

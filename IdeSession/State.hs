@@ -7,7 +7,6 @@ module IdeSession.State
   , IdeSession(..)
   , IdeStaticInfo(..)
   , IdeSessionState(..)
-  , LogicalTimestamp
   , IdeIdleState(..)
   , ManagedFilesInternal(..)
   , GhcServer(..)
@@ -15,12 +14,10 @@ module IdeSession.State
     -- * Util
   , internalFile
     -- * Accessors
-  , ideLogicalTimestamp
   , ideComputed
   , ideNewOpts
   , ideGenerateCode
   , ideManagedFiles
-  , ideObjectFiles
   , ideBuildExeStatus
   , ideBuildDocStatus
   , ideBuildLicensesStatus
@@ -45,7 +42,6 @@ import Data.Accessor (Accessor, accessor)
 import qualified Data.ByteString as BSS
 import System.Exit (ExitCode)
 import System.FilePath ((</>))
-import System.Posix.Types (EpochTime)
 import IdeSession.Types.Private hiding (RunResult)
 import qualified IdeSession.Types.Public as Public
 import IdeSession.Config
@@ -113,15 +109,10 @@ data IdeSessionState =
   | IdeSessionShutdown
   | IdeSessionServerDied ExternalException IdeIdleState
 
-type LogicalTimestamp = EpochTime
-
 data IdeIdleState = IdeIdleState {
-    -- | A workaround for http://hackage.haskell.org/trac/ghc/ticket/7473.
-    -- Logical timestamps (used to force ghc to recompile files)
-    _ideLogicalTimestamp :: !LogicalTimestamp
     -- | The result computed by the GHC API typing/compilation invocation
     -- in the last call to 'updateSession' invocation.
-  , _ideComputed         :: !(Strict Maybe Computed)
+    _ideComputed         :: !(Strict Maybe Computed)
     -- | Compiler dynamic options. If they are not set, the options from
     -- SessionConfig are used.
   , _ideNewOpts          :: !(Maybe [String])
@@ -129,8 +120,6 @@ data IdeIdleState = IdeIdleState {
   , _ideGenerateCode     :: !Bool
     -- | Files submitted by the user and not deleted yet.
   , _ideManagedFiles     :: !ManagedFilesInternal
-    -- | Object files created from .c files
-  , _ideObjectFiles      :: !ObjectFiles
     -- | Exit status of the last invocation of 'buildExe', if any.
   , _ideBuildExeStatus   :: !(Maybe ExitCode)
     -- | Exit status of the last invocation of 'buildDoc', if any.
@@ -165,12 +154,9 @@ data IdeIdleState = IdeIdleState {
 
 -- | The collection of source and data files submitted by the user.
 data ManagedFilesInternal = ManagedFilesInternal
-  { _managedSource :: [(FilePath, (MD5Digest, LogicalTimestamp))]
+  { _managedSource :: [(FilePath, MD5Digest)]
   , _managedData   :: [FilePath]
   }
-
--- | Mapping from C files to the corresponding .o files and their timestamps
-type ObjectFiles = [(FilePath, (FilePath, LogicalTimestamp))]
 
 data GhcServer = OutProcess RpcServer
                | InProcess RpcConversation ThreadId
@@ -212,12 +198,10 @@ internalFile ideSourcesDir m = ideSourcesDir </> m
   Accessors
 ------------------------------------------------------------------------------}
 
-ideLogicalTimestamp    :: Accessor IdeIdleState LogicalTimestamp
 ideComputed            :: Accessor IdeIdleState (Strict Maybe Computed)
 ideNewOpts             :: Accessor IdeIdleState (Maybe [String])
 ideGenerateCode        :: Accessor IdeIdleState Bool
 ideManagedFiles        :: Accessor IdeIdleState ManagedFilesInternal
-ideObjectFiles         :: Accessor IdeIdleState ObjectFiles
 ideBuildExeStatus      :: Accessor IdeIdleState (Maybe ExitCode)
 ideBuildDocStatus      :: Accessor IdeIdleState (Maybe ExitCode)
 ideBuildLicensesStatus :: Accessor IdeIdleState (Maybe ExitCode)
@@ -233,12 +217,10 @@ ideUpdatedArgs         :: Accessor IdeIdleState Bool
 ideBreakInfo           :: Accessor IdeIdleState (Strict Maybe Public.BreakInfo)
 ideTargets             :: Accessor IdeIdleState (Maybe [ModuleName])
 
-ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
 ideNewOpts          = accessor _ideNewOpts          $ \x s -> s { _ideNewOpts          = x }
 ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCode     = x }
 ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }
-ideObjectFiles      = accessor _ideObjectFiles      $ \x s -> s { _ideObjectFiles      = x }
 ideBuildExeStatus   = accessor _ideBuildExeStatus   $ \x s -> s { _ideBuildExeStatus   = x }
 ideBuildDocStatus   = accessor _ideBuildDocStatus   $ \x s -> s { _ideBuildDocStatus   = x }
 ideBuildLicensesStatus =
@@ -255,7 +237,7 @@ ideUpdatedArgs      = accessor _ideUpdatedArgs      $ \x s -> s { _ideUpdatedArg
 ideBreakInfo        = accessor _ideBreakInfo        $ \x s -> s { _ideBreakInfo        = x }
 ideTargets          = accessor _ideTargets          $ \x s -> s { _ideTargets          = x }
 
-managedSource :: Accessor ManagedFilesInternal [(FilePath, (MD5Digest, LogicalTimestamp))]
+managedSource :: Accessor ManagedFilesInternal [(FilePath, MD5Digest)]
 managedData   :: Accessor ManagedFilesInternal [FilePath]
 
 managedSource = accessor _managedSource $ \x s -> s { _managedSource = x }
