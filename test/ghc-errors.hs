@@ -4902,6 +4902,39 @@ syntheticTests = [
               "ide-backend-test" `isInfixOf` Text.unpack (errorMsg e)
         _fixme session "#32" $ assertBool "" (none containsFullPath errs)
     )
+  , ( "Updating dependent data files multiple times per second (#134)"
+    , withSession defaultSessionConfig $ \session -> do
+        let cb     = \_ -> return ()
+            update = flip (updateSession session) cb
+            str i  = BSLC.pack $ show (i :: Int) ++ "\n"
+
+        let mainContents = BSLC.pack $ unlines
+                [ "{-# LANGUAGE TemplateHaskell #-}"
+                , "import Language.Haskell.TH.Syntax"
+                , "main = print ($(do"
+                , "  qAddDependentFile \"foo.hamlet\""
+                , "  s <- qRunIO $ readFile \"foo.hamlet\""
+                , "  lift $ (read s :: Int)"
+                , "  ) :: Int)"
+                ]
+
+        update $ mconcat
+            [ updateSourceFile "Main.hs" mainContents
+            , updateDataFile "foo.hamlet" (str 1)
+            , updateCodeGeneration True
+            ]
+        assertNoErrors session
+
+        do runActions <- runStmt session "Main" "main"
+           (output, _result) <- runWaitAll runActions
+           assertEqual "" (str 1) output
+
+        forM_ [2 .. 99] $ \i -> do
+          update $ updateDataFile "foo.hamlet" (str i)
+          runActions <- runStmt session "Main" "main"
+          (output, _result) <- runWaitAll runActions
+          assertEqual "" (str i) output
+    )
   ]
 
 modAn, modBn, modCn :: String -> IdeSessionUpdate ()
