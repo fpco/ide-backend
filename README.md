@@ -25,6 +25,32 @@ Changelog
 
  *  Version 0.8
 
+     * New functionality: support for GHC 7.8, and make sure that a single
+       ide-backend client library, compiled with a stock ghc, can talk to
+       multiple ide-backend-servers (one for ghc 7.4, one for ghc 7.8) (#147,
+       #148, #149, #151, ghc #8006, ghc #8067, ghc Hooks proposal).
+
+       NOTE: This requires new versions of both ghc 7.4 and ghc 7.8. 
+
+       - For ghc 7.4: commit 902efc3 (branch ide-backend-experimental-74).
+         Differences from the official release: backported Hooks; backported
+         fixes to #1381, #7040, #7231, #7478, #8006. Also applied patch for
+         #4900, although that patch is not accepted in HEAD yet (necessary for
+         #118).
+
+       - For ghc 7.8: commit 5e52cc9 (branch ide-backend-experimental-78).
+         Since there is no official release of ghc yet, this picks a
+         semi-random snapshot of the ghc tree (df2dd64). Our branch differs
+         from this snapshot by only a single patch (for #118/ghc #4900); we
+         have made various other patches, but they have all been included in
+         the official tree.
+
+       Note that we now use ghc's standard non-release version numbering
+       (7.4.2.<date> and 7.7.<date>). ide-backend supports a higher level query
+       (getGhcVersion :: Query GhcVersion) where
+
+           data GhcVersion = GHC742 | GHC78
+
      * New functionality: debugging API (#131).
 
        Breakpoints can be set/cleared using
@@ -73,9 +99,64 @@ Changelog
        ghci's :print vs :sprint) and whether the value should be forced (:print
        vs :force). This is only valid during an active breakpoint.
 
-       Known issues with debugging:
+       Not all of ghci's debugging funtionality is yet supported; this is
+       documented in more detail in the ticket (#131). Note also that the API
+       may not be entirely stable yet. In particular, having printVar
+       independent of RunActions is unsatisfactory; fixing this _may_ change
+       the runStmt API too. This is documented in great detail in a new ticket
+       (#153).
 
-       - Resumed (:continue) snippets cannot be interrupted (#133)
+     * New functionality: generate Hoogle/Haddock (#70)
+
+       - TODO: Can we close this?
+
+     * New functionality: distinguish between KindError and KindServerDied, and
+       hide the "internal exception" when showing external exceptions (#135)
+
+     * New functionality: a new field (configWarnings :: GhcWarnings) in the
+       session config makes it possible to enable/disable certain warnings in
+       a ghc version-independent manner. 
+
+     * New functionality: allow to set compilation targets 
+       
+           updateTargets :: Maybe [ModuleName] -> IdeSessionUpdate ()
+
+       Note that buildExe and co do not yet take these targets into account
+       (#152).
+
+       Also, fixed bug where we would not pass -i to the ghc server on session
+       restart (this bug was mostly invisible when we were providing all source
+       files explicitly).
+
+     * New functionality: support C files, both through the API (where
+       ide-backend-server compiles the .c files into .o files and dynamically
+       loads/unloads these object files) and in executable generation.
+
+     * Bugfix: detect server startup failure. ghc initialization might fail
+       immediately, but we previously only detected this on the first call to
+       updateSession. We now detect this immediately, and also deal with a
+       potential infinite restart cycle (we only attempt to restart once on
+       updateSession). Note that this means that getSourceErrors may return a
+       non-empty list even before the first session update (for instance, when
+       some flags that are passed to ghc are invalid).
+
+     * Bugfix: Make sure ID info is updated on code changes (fixed a caching
+       problem) (#142)
+
+     * Bugfix: Make sure that updating static files triggers recompilation
+       (#118). This is fixed by means of a ghc patch (in both 7.4 and 7.8; ghc
+       issue #4900).
+
+     * Better way to deal with async exceptions in snippet interrupts in ghc
+       (#58, ghc issue #8006).  The new solution works in both 7.4 and 7.8, and
+       in both "regular" execution of snippets and in execution with
+       breakpoints enabled/resumed execution. The new approach is now in the
+       official GHC tree. 
+
+     * Upgraded to Cabal 1.18.1.2 (necessary to support GHC 7.8), and set
+       things up so that it generates the necessary dynlibs when using 7.8.
+       Although Cabal 1.18 reports from problems slightly differently to Cabal
+       1.16; ide-backend attempts to hide this difference (#146).
 
      * Minor API changes:
 
@@ -85,6 +166,24 @@ Changelog
         - IdeSessionUpdate now has kind * -> * ; what was previously just
           "IdeSessionUpdate" is now "IdeSessionUpdate ()". IdeSessionUpdate
           has been given a Monad instance.
+        - updateModule* is now called updateSourceFile* (because it is used for
+          more than just Haskell modules).
+
+     * Merged pull requests
+       
+        - Use binary-ide-backend throughout (#144)
+
+     * Test-suite modificatons: 
+
+        - Test for #134: multiple changes to TH dependent files in one second 
+        - Test for #150: no ID info for top-level splices (both 7.4 and 7.8)
+        - Test for #32: Internal paths in error messages 
+        - Test for #50: Async problem with snippet interrupt
+        - Test for fpco/fpco/#3043: constraints in monotypes
+        - Fixed non-deterministic failure of test for #58 (#143)
+        - Updated tests to support for 7.4 and 7.8 (mark allowable differences,
+          use alpha-equivalence rather than syntactic identity to compare
+          types, etc.), and be less picky about package versions
 
  *  Version 0.7.1
 
