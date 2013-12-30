@@ -95,7 +95,7 @@ Changelog
                     -> Bool
                     -> IO Public.VariableEnv
 
-       The two booleans indicate whether new variables should be found (cf.
+       The two booleans indicate whether new variables should be bound (cf.
        ghci's :print vs :sprint) and whether the value should be forced (:print
        vs :force). This is only valid during an active breakpoint.
 
