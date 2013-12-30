@@ -26,7 +26,7 @@ data GhcRequest
       , reqCompileSourceDir :: FilePath
       , reqCompileDistDir   :: FilePath
       , reqCompileGenCode   :: Bool
-      , reqCompileTargets   :: Maybe [ModuleName]
+      , reqCompileTargets   :: Maybe [FilePath]
       }
   | ReqRun {
         reqRunCmd :: RunCmd

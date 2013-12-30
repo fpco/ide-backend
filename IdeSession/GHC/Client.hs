@@ -163,13 +163,13 @@ rpcSetArgs (InProcess _ _) _ =
   error "rpcSetArgs not supposed for in-process server"
 
 -- | Compile or typecheck
-rpcCompile :: GhcServer                  -- ^ GHC server
-           -> Maybe [String]             -- ^ Options
-           -> FilePath                   -- ^ Source directory
-           -> FilePath                   -- ^ Cabal's dist directory
-           -> Bool                       -- ^ Should we generate code?
-           -> Maybe [Public.ModuleName]  -- ^ Targets
-           -> (Progress -> IO ())        -- ^ Progress callback
+rpcCompile :: GhcServer           -- ^ GHC server
+           -> Maybe [String]      -- ^ Options
+           -> FilePath            -- ^ Source directory
+           -> FilePath            -- ^ Cabal's dist directory
+           -> Bool                -- ^ Should we generate code?
+           -> Maybe [FilePath]    -- ^ Targets
+           -> (Progress -> IO ()) -- ^ Progress callback
            -> IO GhcCompileResult
 rpcCompile server opts dir distDir genCode targets callback =
   conversation server $ \RpcConversation{..} -> do

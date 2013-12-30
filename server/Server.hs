@@ -180,7 +180,7 @@ ghcHandleCompile
   -> FilePath            -- ^ source directory
   -> FilePath            -- ^ cabal's dist directory
   -> Bool                -- ^ should we generate code
-  -> Maybe [ModuleName]  -- ^ targets
+  -> Maybe [FilePath]    -- ^ targets
   -> Bool                -- ^ should we generate per-module info
   -> Ghc ()
 ghcHandleCompile RpcConversation{..} ideNewOpts

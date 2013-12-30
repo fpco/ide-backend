@@ -119,10 +119,10 @@ Changelog
 
      * New functionality: allow to set compilation targets 
        
-           updateTargets :: Maybe [ModuleName] -> IdeSessionUpdate ()
+           updateTargets :: Maybe [FilePath] -> IdeSessionUpdate ()
 
        Note that buildExe and co do not yet take these targets into account
-       (#152).
+       (#154).
 
        Also, fixed bug where we would not pass -i to the ghc server on session
        restart (this bug was mostly invisible when we were providing all source

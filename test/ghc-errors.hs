@@ -4706,90 +4706,90 @@ syntheticTests = [
         update $ updateDataFile "foo.hamlet" (BSLC.pack "invalid")
         assertOneError session
     )
-  , ( "setTargets  1: [{} < A, {A} < B, {A} < C], require [A]"
+  , ( "updateTargets  1: [{} < A, {A} < B, {A} < C], require [A]"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just [Text.pack "A"])
+          , updateTargets (Just ["A.hs"])
           ]) 1
         assertNoErrors session
         assertLoadedModules session "" ["A"]
     )
-  , ( "setTargets  2: [{} < A, {A} < B, {A} < C], require [A], error in B"
+  , ( "updateTargets  2: [{} < A, {A} < B, {A} < C], require [A], error in B"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "0"
           , modBn "invalid"
           , modCn "0"
-          , updateTargets (Just [Text.pack "A"])
+          , updateTargets (Just ["A.hs"])
           ]) 1
         assertNoErrors session
         assertLoadedModules session "" ["A"]
     )
-  , ( "setTargets  3: [{} < A, {A} < B, {A} < C], require [B]"
+  , ( "updateTargets  3: [{} < A, {A} < B, {A} < C], require [B]"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just [Text.pack "B"])
+          , updateTargets (Just ["B.hs"])
           ]) 2
         assertNoErrors session
         assertLoadedModules session "" ["A", "B"]
     )
-  , ( "setTargets  4: [{} < A, {A} < B, {A} < C], require [B], error in C"
+  , ( "updateTargets  4: [{} < A, {A} < B, {A} < C], require [B], error in C"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "0"
           , modBn "0"
           , modCn "invalid"
-          , updateTargets (Just [Text.pack "B"])
+          , updateTargets (Just ["B.hs"])
           ]) 2
         assertNoErrors session
         assertLoadedModules session "" ["A", "B"]
     )
-  , ( "setTargets  5: [{} < A, {A} < B, {A} < C], require [A], error in A"
+  , ( "updateTargets  5: [{} < A, {A} < B, {A} < C], require [A], error in A"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "invalid"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just [Text.pack "A"])
+          , updateTargets (Just ["A.hs"])
           ]) 1
         assertOneError session
         assertLoadedModules session "" []
     )
-  , ( "setTargets  6: [{} < A, {A} < B, {A} < C], require [B], error in A"
+  , ( "updateTargets  6: [{} < A, {A} < B, {A} < C], require [B], error in A"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "invalid"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just [Text.pack "B"])
+          , updateTargets (Just ["B.hs"])
           ]) 2
         assertOneError session
         assertLoadedModules session "" []
     )
-  , ( "setTargets  7: [{} < A, {A} < B, {A} < C], require [B], error in B"
+  , ( "updateTargets  7: [{} < A, {A} < B, {A} < C], require [B], error in B"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "0"
           , modBn "invalid"
           , modCn "0"
-          , updateTargets (Just [Text.pack "B"])
+          , updateTargets (Just ["B.hs"])
           ]) 2
         assertOneError session
         assertLoadedModules session "" ["A"]
     )
-  , ( "setTargets  8: [{} < A, {A} < B, {A} < C], require [B, C]"
+  , ( "updateTargets  8: [{} < A, {A} < B, {A} < C], require [B, C]"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just [Text.pack "B", Text.pack "C"])
+          , updateTargets (Just ["B.hs", "C.hs"])
           ]) 3
         assertNoErrors session
         assertLoadedModules session "" ["A", "B", "C"]
@@ -4797,13 +4797,13 @@ syntheticTests = [
         assertEqual "we have autocompletion info for C" 2 $
           length (autocomplete (Text.pack "C") "sp") -- span, split
     )
-  , ( "setTargets  9: [{} < A, {A} < B, {A} < C], require [B, C], then [B]"
+  , ( "updateTargets  9: [{} < A, {A} < B, {A} < C], require [B, C], then [B]"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just [Text.pack "B", Text.pack "C"])
+          , updateTargets (Just ["B.hs", "C.hs"])
           ]) 3
         assertNoErrors session
         assertLoadedModules session "" ["A", "B", "C"]
@@ -4812,20 +4812,20 @@ syntheticTests = [
              length (autocomplete (Text.pack "C") "sp") -- span, split
 
         updateSessionD session (mconcat [
-            updateTargets (Just [Text.pack "B"])
+            updateTargets (Just ["B.hs"])
           ]) 0
         assertLoadedModules session "" ["A", "B", "C"]
         do autocomplete <- getAutocompletion session
            assertEqual "we still have autocompletion info for C" 2 $
              length (autocomplete (Text.pack "C") "sp") -- span, split
     )
-  , ( "setTargets 10: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with modified B"
+  , ( "updateTargets 10: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with modified B"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just [Text.pack "B", Text.pack "C"])
+          , updateTargets (Just ["B.hs", "C.hs"])
           ]) 3
         assertNoErrors session
         assertLoadedModules session "" ["A", "B", "C"]
@@ -4835,20 +4835,20 @@ syntheticTests = [
 
         updateSessionD session (mconcat [
             modBn "1"
-          , updateTargets (Just [Text.pack "B"])
+          , updateTargets (Just ["B.hs"])
           ]) 1
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
              length (autocomplete (Text.pack "C") "sp")
     )
-  , ( "setTargets 11: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with modified B and error in C"
+  , ( "updateTargets 11: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with modified B and error in C"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just [Text.pack "B", Text.pack "C"])
+          , updateTargets (Just ["B.hs", "C.hs"])
           ]) 3
         assertNoErrors session
         assertLoadedModules session "" ["A", "B", "C"]
@@ -4859,20 +4859,20 @@ syntheticTests = [
         updateSessionD session (mconcat [
             modBn "1"
           , modCn "invalid"
-          , updateTargets (Just [Text.pack "B"])
+          , updateTargets (Just ["B.hs"])
           ]) 1
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
              length (autocomplete (Text.pack "C") "sp")
     )
-  , ( "setTargets 12: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with error in C"
+  , ( "updateTargets 12: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with error in C"
     , withSession defaultSessionConfig $ \session -> do
         updateSessionD session (mconcat [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just [Text.pack "B", Text.pack "C"])
+          , updateTargets (Just ["B.hs", "C.hs"])
           ]) 3
         assertNoErrors session
         assertLoadedModules session "" ["A", "B", "C"]
@@ -4882,7 +4882,7 @@ syntheticTests = [
 
         updateSessionD session (mconcat [
             modCn "invalid"
-          , updateTargets (Just [Text.pack "B"])
+          , updateTargets (Just ["B.hs"])
           ]) 1
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session

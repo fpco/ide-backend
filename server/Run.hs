@@ -149,7 +149,7 @@ ghandleJust p handler a = ghandle handler' a
 compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this call
              -> Bool                -- ^ should we generate code
-             -> Maybe [ModuleName]  -- ^ targets
+             -> Maybe [FilePath]    -- ^ targets
              -> Int                 -- ^ verbosity level
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
@@ -195,7 +195,7 @@ compileInGhc configSourcesDir dynOpts
     computeTargets :: Ghc [Target]
     computeTargets = do
       targetIds <- case mTargets of
-        Just targets -> return (map targetIdFromModule targets)
+        Just targets -> return (map targetIdFromFile targets)
         Nothing      -> liftIO $ do
           paths <- find always ((`elem` hsExtensions) `liftM` extension)
                                configSourcesDir
@@ -211,9 +211,6 @@ compileInGhc configSourcesDir dynOpts
 
     targetIdFromFile :: FilePath -> TargetId
     targetIdFromFile path = TargetFile path Nothing
-
-    targetIdFromModule :: ModuleName -> TargetId
-    targetIdFromModule = TargetModule . mkModuleName . Text.unpack
 
     sourceErrorHandler :: DynFlags -> HscTypes.SourceError -> Ghc ()
     sourceErrorHandler _flags e = liftIO $ do

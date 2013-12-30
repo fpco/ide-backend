@@ -722,8 +722,10 @@ updateStderrBufferMode :: RunBufferMode -> IdeSessionUpdate ()
 updateStderrBufferMode = set ideStderrBufferMode
 
 -- | Set compilation targets
-updateTargets :: Maybe [ModuleName] -> IdeSessionUpdate ()
-updateTargets = set ideTargets
+updateTargets :: Maybe [FilePath] -> IdeSessionUpdate ()
+updateTargets targets = do
+  IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
+  set ideTargets (map (internalFile ideSourcesDir) <$> targets)
 
 -- | Run a given function in a given module (the name of the module
 -- is the one between @module ... end@, which may differ from the file name).
