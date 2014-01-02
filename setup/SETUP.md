@@ -201,7 +201,7 @@ only a few minor differences, explained when they come up.
 
 * For ghc 7.4 install
 
-  - Branch "ide-backend-experimental" of ghc (see instructions below)
+  - Branch "ide-backend-experimental-74" of ghc (see instructions below)
   - ide-backend/vendor/binary (binary-ide-backend)
     (make sure to ghc-pkg hide binary-ide-backend)
 
