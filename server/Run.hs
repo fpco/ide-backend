@@ -180,8 +180,6 @@ compileInGhc configSourcesDir dynOpts
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
         _ <- setSessionDynFlags flags
-        liftIO (print =<< find always ((`elem` hsExtensions) `liftM` extension)
-                              configSourcesDir)
         setTargets =<< computeTargets
         void $ load LoadAllTargets
 
