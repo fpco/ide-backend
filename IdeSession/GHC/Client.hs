@@ -72,21 +72,24 @@ forkGhcServer IdeStaticInfo{..} = do
     Nothing ->
       fail $ "Could not find ide-backend-server"
     Just prog -> do
-      let opts = configStaticOpts
-                 -- TODO: don't hardcode GHC version
-              ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
-              ++ map (\path -> "-i" ++ ideSourcesDir </> path) configRelativeIncludes
-              ++ [ "--ghc-opts-end"
-                 , show configGenerateModInfo
-                 , show ideBackendApiVersion
-                 ]
       env     <- envWithPathOverride configExtraPathDirs
-      server  <- OutProcess <$> forkRpcServer prog opts (Just ideDataDir) env
+      server  <- OutProcess <$> forkRpcServer prog [] (Just ideDataDir) env
       version <- Ex.try $ do
-        rpcSetWarnings server configWarnings
-        rpcGetVersion  server
+        GhcInitResponse{..} <- rpcInit server GhcInitRequest {
+            ghcInitClientApiVersion = ideBackendApiVersion
+          , ghcInitGenerateModInfo  = configGenerateModInfo
+          , ghcInitWarnings         = configWarnings
+          , ghcInitStaticOpts       = opts
+          }
+        return ghcInitVersion
       return ((server,) <$> version)
   where
+    opts :: [String]
+    opts = configStaticOpts
+           -- TODO: don't hardcode GHC version
+        ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
+        ++ map (\path -> "-i" ++ ideSourcesDir </> path) configRelativeIncludes
+
     searchPath :: ProgramSearchPath
     searchPath = ProgramSearchPathDefault
                : map ProgramSearchPathDir configExtraPathDirs
@@ -298,16 +301,10 @@ rpcCrash :: GhcServer -> Maybe Int -> IO ()
 rpcCrash server delay = conversation server $ \RpcConversation{..} ->
   put (ReqCrash delay)
 
--- | Get ghc version
-rpcGetVersion :: GhcServer -> IO GhcVersion
-rpcGetVersion server = conversation server $ \RpcConversation{..} -> do
-  put ReqGetVersion
-  get
-
--- | Set warnings
-rpcSetWarnings :: GhcServer -> GhcWarnings -> IO ()
-rpcSetWarnings server warnings = conversation server $ \RpcConversation{..} -> do
-  put (ReqSetWarnings warnings)
+-- | Handshake with the server
+rpcInit :: GhcServer -> GhcInitRequest -> IO GhcInitResponse
+rpcInit server req = conversation server $ \RpcConversation{..} -> do
+  put req
   get
 
 {------------------------------------------------------------------------------

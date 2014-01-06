@@ -3,7 +3,8 @@
 -- GHC requests use "IdeSession.Types.Public" types.
 {-# LANGUAGE DeriveDataTypeable, DeriveGeneric #-}
 module IdeSession.GHC.Requests (
-    GhcRequest(..)
+    GhcInitRequest(..)
+  , GhcRequest(..)
   , GhcRunRequest(..)
   , RunCmd(..)
   , GhcWarnings(..)
@@ -19,6 +20,14 @@ import Text.Show.Pretty (PrettyVal(..))
 import GHC.Generics
 
 import IdeSession.Types.Public
+
+data GhcInitRequest = GhcInitRequest {
+    ghcInitClientApiVersion :: Int
+  , ghcInitGenerateModInfo  :: Bool
+  , ghcInitWarnings         :: GhcWarnings
+  , ghcInitStaticOpts       :: [String]
+  }
+  deriving (Typeable, Generic)
 
 data GhcRequest
   = ReqCompile {
@@ -51,10 +60,6 @@ data GhcRequest
         reqLoadPath   :: FilePath
       , reqLoadUnload :: Bool
       }
-  | ReqSetWarnings {
-        reqSetWarnings :: GhcWarnings
-      }
-  | ReqGetVersion
     -- | For debugging only! :)
   | ReqCrash {
         reqCrashDelay :: Maybe Int
@@ -71,6 +76,7 @@ data RunCmd =
   | Resume
   deriving (Typeable, Generic)
 
+instance PrettyVal GhcInitRequest
 instance PrettyVal GhcRequest
 instance PrettyVal RunCmd
 
@@ -79,6 +85,21 @@ data GhcRunRequest =
   | GhcRunInterrupt
   | GhcRunAckDone
   deriving Typeable
+
+instance Binary GhcInitRequest where
+  put (GhcInitRequest{..}) = do
+    -- Note: we intentionally write the API version first. This makes it
+    -- possible (in theory at least) to have some form of backwards API
+    -- compatibility.
+    put ghcInitClientApiVersion
+    put ghcInitGenerateModInfo
+    put ghcInitWarnings
+    put ghcInitStaticOpts
+
+  get = GhcInitRequest <$> get
+                       <*> get
+                       <*> get
+                       <*> get
 
 instance Binary GhcRequest where
   put ReqCompile{..} = do
@@ -111,11 +132,6 @@ instance Binary GhcRequest where
     putWord8 6
     put reqLoadPath
     put reqLoadUnload
-  put ReqGetVersion =
-    putWord8 7
-  put ReqSetWarnings{..} = do
-    putWord8 8
-    put reqSetWarnings
   put ReqCrash{..} = do
     putWord8 255
     put reqCrashDelay
@@ -130,8 +146,6 @@ instance Binary GhcRequest where
       4   -> ReqBreakpoint  <$> get <*> get <*> get
       5   -> ReqPrint       <$> get <*> get <*> get
       6   -> ReqLoad        <$> get <*> get
-      7   -> return ReqGetVersion
-      8   -> ReqSetWarnings <$> get
       255 -> ReqCrash       <$> get
       _   -> fail "GhcRequest.get: invalid header"
 

@@ -54,33 +54,20 @@ import GhcShim
 
 -- | Start the RPC server. Used from within the server executable.
 ghcServer :: [String] -> IO ()
-ghcServer fdsAndOpts = do
-  let (opts,   "--ghc-opts-end"
-             : configGenerateModInfo
-             : clientApiVersion
-             : fds) = List.span (/= "--ghc-opts-end") fdsAndOpts
-  rpcServer fds $ ghcServerEngine (read configGenerateModInfo)
-                                  (read clientApiVersion)
-                                  opts
+ghcServer = rpcServer ghcServerEngine
 
 -- | The GHC server engine proper.
 --
 -- This function runs in end endless loop inside the @Ghc@ monad, making
 -- incremental compilation possible.
-ghcServerEngine :: Bool -> Int -> [String] -> RpcConversation -> IO ()
-ghcServerEngine configGenerateModInfo
-                clientApiVersion
-                staticOpts
-                conv@RpcConversation{..} = do
-  -- Check API versions
-  unless (clientApiVersion == ideBackendApiVersion) $
-    Ex.throwIO . userError $ "API version mismatch between ide-backend "
-                          ++ "(" ++ show clientApiVersion ++ ") "
-                          ++ "and ide-backend-server "
-                          ++ "(" ++ show ideBackendApiVersion ++ ")"
+ghcServerEngine :: RpcConversation -> IO ()
+ghcServerEngine conv@RpcConversation{..} = do
+  -- The initial handshake with the client
+  (configGenerateModInfo, staticOpts, initDynFlags) <- handleInit conv
 
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts staticOpts
+
   -- Set up references for the current session of Ghc monad computations.
   pluginRef  <- newIORef StrictMap.empty
   importsRef <- newIORef StrictMap.empty
@@ -99,10 +86,10 @@ ghcServerEngine configGenerateModInfo
     -- TODO: options like "-hide-all-packages" or "-package foo"
     -- are suspect as well, even though they work on subsequent invocations
     -- of @updateGhcOptions@, because they nullify and replace cabal commands.
-    initialDynFlags <- getSessionDynFlags
-    (flags, _, _) <- parseDynamicFlags initialDynFlags dOpts
-    let dynFlags | configGenerateModInfo = flags {
-          hooks = (hooks flags) {
+    flags0         <- initDynFlags `fmap` getSessionDynFlags
+    (flags1, _, _) <- parseDynamicFlags flags0 dOpts
+    let dynFlags | configGenerateModInfo = flags1 {
+          hooks = (hooks flags1) {
               hscFrontendHook   = Just $ runHscPlugin pluginRef stRef
             , runQuasiQuoteHook = Just $ runHscQQ stRef
 -- TODO: it'd be nice if we could move this #if to the shim modules
@@ -111,7 +98,7 @@ ghcServerEngine configGenerateModInfo
 #endif
             }
         }
-                 | otherwise = flags
+                 | otherwise = flags1
     void $ setSessionDynFlags dynFlags
 
     -- Start handling RPC calls
@@ -144,12 +131,6 @@ ghcServerEngine configGenerateModInfo
             ReqCrash delay -> do
               ghcHandleCrash delay
               return args
-            ReqGetVersion -> do
-              ghcHandleGetVersion conv
-              return args
-            ReqSetWarnings warnings -> do
-              ghcHandleSetWarnings conv warnings
-              return args
           go args'
 
     go []
@@ -167,6 +148,29 @@ data ModSummary = ModSummary {
     -- we can see which modules got unloaded
   , modIsLoaded :: !Bool
   }
+
+-- | Client handshake
+handleInit :: RpcConversation -> IO (Bool, [String], DynFlags -> DynFlags)
+handleInit RpcConversation{..} = do
+  GhcInitRequest{..} <- get
+
+  -- Check API versions
+  unless (ghcInitClientApiVersion == ideBackendApiVersion) $
+    Ex.throwIO . userError $ "API version mismatch between ide-backend "
+                          ++ "(" ++ show ghcInitClientApiVersion ++ ") "
+                          ++ "and ide-backend-server "
+                          ++ "(" ++ show ideBackendApiVersion ++ ")"
+
+  -- Return initialization result to the client
+  put GhcInitResponse {
+      ghcInitVersion = ghcGetVersion
+    }
+
+  -- Setup parameters for the server
+  return ( ghcInitGenerateModInfo
+         , ghcInitStaticOpts
+         , setWarnings ghcInitWarnings
+         )
 
 -- | Handle a compile or type check request
 ghcHandleCompile
@@ -563,18 +567,6 @@ ghcHandleCrash delay = liftIO $ do
                     void . forkIO $ threadDelay i >> throwTo tid crash
   where
     crash = userError "Intentional crash"
-
--- | Handle a get-version request
-ghcHandleGetVersion :: RpcConversation -> Ghc ()
-ghcHandleGetVersion RpcConversation{put} = liftIO $ do
-  put ghcGetVersion
-
--- | Set warnings
-ghcHandleSetWarnings :: RpcConversation -> GhcWarnings -> Ghc ()
-ghcHandleSetWarnings RpcConversation{put} warnings = do
-  dynFlags <- getSessionDynFlags
-  _ <- setSessionDynFlags $ setWarnings warnings dynFlags
-  liftIO $ put ()
 
 --------------------------------------------------------------------------------
 -- Auxiliary                                                                  --

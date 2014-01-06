@@ -34,10 +34,10 @@ import IdeSession.RPC.Stream
 
 -- Start the RPC server. For an explanation of the command line arguments, see
 -- 'forkRpcServer'. This function does not return unless there is an error.
-rpcServer :: [String]                   -- ^ Command line args
-          -> (RpcConversation -> IO ()) -- ^ Request server
+rpcServer :: (RpcConversation -> IO ()) -- ^ Request server
+          -> [String]                   -- ^ Command line args
           -> IO ()
-rpcServer fds handler = do
+rpcServer handler fds = do
   let readFd :: String -> Fd
       readFd fd = fromIntegral (read fd :: Int)
 

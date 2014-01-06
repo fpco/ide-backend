@@ -101,7 +101,6 @@ forkRpcServer path args workingDir menv = do
                                  , errorsR,   errorsW
                                  ]
 
-
   fullPath <- pathToExecutable path
   (Nothing, Nothing, Nothing, ph) <- createProcess (proc fullPath args') {
                                          cwd = workingDir,

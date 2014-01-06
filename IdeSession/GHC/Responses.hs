@@ -3,7 +3,8 @@
 -- The server responds with "IdeSession.Types.Private" types
 {-# LANGUAGE DeriveDataTypeable, DeriveGeneric #-}
 module IdeSession.GHC.Responses (
-    GhcCompileResponse(..)
+    GhcInitResponse(..)
+  , GhcCompileResponse(..)
   , GhcCompileResult(..)
   , GhcRunResponse(..)
   , GhcVersion(..)
@@ -22,6 +23,11 @@ import IdeSession.Util (Diff)
 
 import Text.Show.Pretty
 import GHC.Generics
+
+data GhcInitResponse = GhcInitResponse {
+    ghcInitVersion :: GhcVersion
+  }
+  deriving (Typeable, Generic)
 
 data GhcCompileResponse =
     GhcCompileProgress Progress
@@ -53,10 +59,16 @@ data GhcRunResponse =
 data GhcVersion = GHC742 | GHC78
   deriving (Typeable, Show, Eq, Generic)
 
+instance PrettyVal GhcInitResponse
 instance PrettyVal GhcCompileResponse
 instance PrettyVal GhcCompileResult
 instance PrettyVal GhcRunResponse
 instance PrettyVal GhcVersion
+
+instance Binary GhcInitResponse where
+  put (GhcInitResponse{..}) = do
+    put ghcInitVersion
+  get = GhcInitResponse <$> get
 
 instance Binary GhcCompileResponse where
   put (GhcCompileProgress progress) = putWord8 0 >> put progress
