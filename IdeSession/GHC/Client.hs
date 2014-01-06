@@ -37,7 +37,7 @@ import qualified Data.ByteString.Char8      as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import System.Exit (ExitCode)
 import System.Environment (getEnvironment)
-import System.FilePath (splitSearchPath, searchPathSeparator)
+import System.FilePath (splitSearchPath, searchPathSeparator, (</>))
 
 import IdeSession.Config
 import IdeSession.GHC.API
@@ -75,9 +75,8 @@ forkGhcServer IdeStaticInfo{..} = do
       let opts = configStaticOpts
                  -- TODO: don't hardcode GHC version
               ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
-              ++ [
-                   "-i" ++ ideSourcesDir
-                 , "--ghc-opts-end"
+              ++ map (\path -> "-i" ++ ideSourcesDir </> path) configRelativeIncludes
+              ++ [ "--ghc-opts-end"
                  , show configGenerateModInfo
                  , show ideBackendApiVersion
                  ]

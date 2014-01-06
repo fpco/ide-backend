@@ -212,7 +212,6 @@ module IdeSession (
   , forceRecompile
   , dumpIdInfo
   , crashGhcServer
-  , hsExtensions
   , sourceExtensions
   , ideBackendApiVersion
   , buildLicsFromPkgs

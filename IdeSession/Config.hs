@@ -50,6 +50,12 @@ data SessionConfig = SessionConfig {
   , configDeleteTempFiles :: Bool
     -- | GHC warnings
   , configWarnings :: GhcWarnings
+    -- | Include paths (equivalent of GHC's @-i@ parameter) relative to the
+    -- temporary directory where we store the session's source files.
+    --
+    -- By default this is the singleton list @[""]@ -- i.e., we include the
+    -- sources dir but nothing else.
+  , configRelativeIncludes :: [FilePath]
   }
 
 -- | Default session configuration
@@ -74,23 +80,24 @@ data SessionConfig = SessionConfig {
 -- >   }
 defaultSessionConfig :: SessionConfig
 defaultSessionConfig = SessionConfig {
-    configDir             = "."
-  , configExtraPathDirs   = []
-  , configStaticOpts      = []
-  , configInProcess       = False
-  , configGenerateModInfo = True
-  , configDynLink         = False
-  , configPackageDBStack  = [GlobalPackageDB, UserPackageDB]
+    configDir              = "."
+  , configExtraPathDirs    = []
+  , configStaticOpts       = []
+  , configInProcess        = False
+  , configGenerateModInfo  = True
+  , configDynLink          = False
+  , configPackageDBStack   = [GlobalPackageDB, UserPackageDB]
     -- ghc-prim, integer-gmp, etc., all have their own licenses specified
     -- in their .cabal files.
-  , configLicenseExc      = ["rts"]
-  , configLicenseFixed    =
+  , configLicenseExc       = ["rts"]
+  , configLicenseFixed     =
     [ ("bin-package-db", (Just BSD3, Nothing, Nothing))
     , ("ghc", (Just BSD3, Just "../LICENSE", Just "The GHC Team"))
     , ("ghc-prim", (Just BSD3, Just "LICENSE", Nothing))
     , ("integer-gmp", (Just BSD3, Just "LICENSE", Nothing))
     ]
-  , configLog             = const $ return ()
-  , configDeleteTempFiles = True
-  , configWarnings        = defaultGhcWarnings
+  , configLog              = const $ return ()
+  , configDeleteTempFiles  = True
+  , configWarnings         = defaultGhcWarnings
+  , configRelativeIncludes = [""]
   }

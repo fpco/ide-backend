@@ -10,6 +10,7 @@ module IdeSession.GHC.API (
     -- * Configuration
   , ideBackendApiVersion
   , hsExtensions
+  , hsBootExtensions
   , cExtensions
   , cHeaderExtensions
   , sourceExtensions
@@ -32,24 +33,28 @@ ideBackendApiVersion = 1388408415
   Configuration
 ------------------------------------------------------------------------------}
 
--- | These source files are type-checked.
+-- | Haskell source files
 hsExtensions :: [FilePath]
 hsExtensions = [".hs", ".lhs"]
--- Boot files are not so simple. They should probably be copied to the src dir,
--- but not made proper targets. This is probably similar to .h files.
--- hsExtentions = [".hs", ".lhs", ".hs-boot", ".lhs-boot", ".hi-boot"]
 
--- | Extensions of files to compile using the C compiler.
+-- | Haskell @.boot@ files
+hsBootExtensions :: [FilePath]
+hsBootExtensions = [".hs-boot", ".lhs-boot"]
+
+-- | C source files
 cExtensions :: [FilePath]
 cExtensions = [".c"]
 
--- | Extensions of C header files (for inclusion in .c and .hs files).
+-- | C header files
 cHeaderExtensions :: [FilePath]
 cHeaderExtensions = [".h"]
 
 -- | Extensions of all source files we keep in our source directory.
 sourceExtensions :: [FilePath]
-sourceExtensions = cHeaderExtensions ++ cExtensions ++ hsExtensions
+sourceExtensions = hsExtensions
+                ++ hsBootExtensions
+                ++ cExtensions
+                ++ cHeaderExtensions
 
 -- TODO: perhaps create dist/build/autogen and put macros there so that
 -- Cabal.autogenModulesDir can use it for compilation of C files?

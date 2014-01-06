@@ -76,9 +76,13 @@ getModules session = do
   getModulesFrom session sourcesDir
 
 loadModulesFrom :: IdeSession -> FilePath -> IO ()
-loadModulesFrom session originalSourcesDir = do
+loadModulesFrom session originalSourcesDir =
+  loadModulesFrom' session originalSourcesDir Nothing
+
+loadModulesFrom' :: IdeSession -> FilePath -> Maybe [FilePath] -> IO ()
+loadModulesFrom' session originalSourcesDir targets = do
   (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
-  updateSessionD session originalUpdate (length lm)
+  updateSessionD session (originalUpdate <> updateTargets targets) (length lm)
 
 ifIdeBackendHaddockTestsEnabled :: SessionConfig -> (IdeSession -> IO ()) -> IO ()
 ifIdeBackendHaddockTestsEnabled sessionConfig io = do
@@ -122,6 +126,12 @@ withOpts :: [String] -> SessionConfig
 withOpts opts =
   defaultSessionConfig {
       configStaticOpts = opts
+    }
+
+withIncludes :: FilePath -> SessionConfig
+withIncludes path =
+  defaultSessionConfig {
+      configRelativeIncludes = [path]
     }
 
 -- Set of api calls and checks to perform on each project.
@@ -753,12 +763,9 @@ syntheticTests = [
           (runStmt session "Main" "main")
     )
   , ( "Test recursive modules"
-    , withSession defaultSessionConfig $ \session -> do
+    , withSession (withIncludes "test/bootMods") $ \session -> do
         loadModulesFrom session "test/bootMods"
-        -- Fails, because special support is needed, similar to .h files.
-        -- Proabably, the .hs-boot files should be copied to the src dir,
-        -- but not made GHC.load targets.
-        assertOneError session
+        assertNoErrors session
     )
   , ( "Test TH; code generation on"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
@@ -4934,6 +4941,78 @@ syntheticTests = [
           runActions <- runStmt session "Main" "main"
           (output, _result) <- runWaitAll runActions
           assertEqual "" (str i) output
+    )
+  , ( "Support for hs-boot files (#155)"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "A.hs" $ BSLC.pack $ unlines [
+                      "module A where"
+
+                    , "import {-# SOURCE #-} B"
+
+                    , "f :: Int -> Int"
+                    , "f 0 = 1"
+                    , "f 1 = 1"
+                    , "f n = g (n - 1) + g (n - 2)"
+
+                    , "main :: IO ()"
+                    , "main = print $ map f [0..9]"
+                    ])
+               <> (updateSourceFile "B.hs" $ BSLC.pack $ unlines [
+                      "module B where"
+
+                    , "import A"
+
+                    , "g :: Int -> Int"
+                    , "g = f"
+                    ])
+               <> (updateSourceFile "B.hs-boot" $ BSLC.pack $ unlines [
+                      "module B where"
+
+                    , "g :: Int -> Int"
+                    ])
+        updateSessionD session upd 3
+        assertNoErrors session
+    )
+  , ( "Support for lhs-boot files (#155)"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "A.lhs" $ BSLC.pack $ unlines [
+                      "> module A where"
+
+                    , "> import {-# SOURCE #-} B"
+
+                    , "> f :: Int -> Int"
+                    , "> f 0 = 1"
+                    , "> f 1 = 1"
+                    , "> f n = g (n - 1) + g (n - 2)"
+
+                    , "> main :: IO ()"
+                    , "> main = print $ map f [0..9]"
+                    ])
+               <> (updateSourceFile "B.lhs" $ BSLC.pack $ unlines [
+                      "> module B where"
+
+                    , "> import A"
+
+                    , "> g :: Int -> Int"
+                    , "> g = f"
+                    ])
+               <> (updateSourceFile "B.lhs-boot" $ BSLC.pack $ unlines [
+                      "> module B where"
+
+                    , "> g :: Int -> Int"
+                    ])
+        updateSessionD session upd 3
+        assertNoErrors session
+    )
+  , ( "Relative include paths (#156)"
+    , withSession (withIncludes "test/ABnoError") $ \session -> do
+        -- Since we set the target explicitly, ghc will need to be able to find
+        -- the other module (B) on its own; that means it will need an include
+        -- path to <ideSourcesDir>/test/ABnoError
+        loadModulesFrom' session "test/ABnoError" (Just ["test/ABnoError/A.hs"])
+        assertNoErrors session
     )
   ]
 
