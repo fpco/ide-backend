@@ -5018,6 +5018,28 @@ syntheticTests = [
         loadModulesFrom' session "test/ABnoError" (Just ["test/ABnoError/A.hs"])
         assertNoErrors session
     )
+  , ( "Dynamically setting/unsetting -Werror (#115)"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd1 = (updateGhcOptions $ Just ["-Wall", "-Werror"])
+                <> (updateSourceFile "src/Main.hs" . BSLC.pack $ unlines [
+                       "module Main where"
+                     , "main = putStrLn \"Hello 1\""
+                     ])
+
+        updateSessionD session upd1 1
+        do [noTypeSig, _failingDueToWerror] <- getSourceErrors session
+           assertEqual "" KindError (errorKind noTypeSig)
+
+        let upd2 = (updateGhcOptions $ Just ["-Wwarn"])
+                <> (updateSourceFile "src/Main.hs" . BSLC.pack $ unlines [
+                       "module Main where"
+                     , "main = putStrLn \"Hello 2\""
+                     ])
+
+        updateSessionD session upd2 1
+        do [noTypeSig] <- getSourceErrors session
+           assertEqual "" KindWarning (errorKind noTypeSig)
+    )
   ]
 
 modAn, modBn, modCn :: String -> IdeSessionUpdate ()
