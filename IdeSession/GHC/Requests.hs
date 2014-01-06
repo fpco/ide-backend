@@ -22,10 +22,12 @@ import GHC.Generics
 import IdeSession.Types.Public
 
 data GhcInitRequest = GhcInitRequest {
-    ghcInitClientApiVersion :: Int
-  , ghcInitGenerateModInfo  :: Bool
-  , ghcInitWarnings         :: GhcWarnings
-  , ghcInitStaticOpts       :: [String]
+    ghcInitClientApiVersion   :: Int
+  , ghcInitGenerateModInfo    :: Bool
+  , ghcInitWarnings           :: GhcWarnings
+  , ghcInitStaticOpts         :: [String]
+  , ghcInitUserPackageDB      :: Bool
+  , ghcInitSpecificPackageDBs :: [String]
   }
   deriving (Typeable, Generic)
 
@@ -95,8 +97,12 @@ instance Binary GhcInitRequest where
     put ghcInitGenerateModInfo
     put ghcInitWarnings
     put ghcInitStaticOpts
+    put ghcInitUserPackageDB
+    put ghcInitSpecificPackageDBs
 
   get = GhcInitRequest <$> get
+                       <*> get
+                       <*> get
                        <*> get
                        <*> get
                        <*> get

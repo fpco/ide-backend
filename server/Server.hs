@@ -168,7 +168,8 @@ handleInit RpcConversation{..} = do
 
   -- Setup parameters for the server
   return ( ghcInitGenerateModInfo
-         , ghcInitStaticOpts
+         , ghcInitStaticOpts ++
+           packageDBFlags ghcInitUserPackageDB ghcInitSpecificPackageDBs
          , setWarnings ghcInitWarnings
          )
 

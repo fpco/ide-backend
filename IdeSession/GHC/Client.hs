@@ -31,7 +31,6 @@ import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.MVar (newMVar)
 import Data.Maybe (fromMaybe)
 import Data.List (intercalate)
-import Data.Version (Version(..))
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Char8      as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -48,9 +47,9 @@ import IdeSession.Types.Private (RunResult(..))
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
 import IdeSession.State
-import IdeSession.Cabal (packageDbArgs)
 
 import Distribution.Verbosity (normal)
+import Distribution.Simple (PackageDB(..), PackageDBStack)
 import Distribution.Simple.Program.Find ( -- From our patched cabal
     ProgramSearchPath
   , findProgramOnSearchPath
@@ -76,18 +75,20 @@ forkGhcServer IdeStaticInfo{..} = do
       server  <- OutProcess <$> forkRpcServer prog [] (Just ideDataDir) env
       version <- Ex.try $ do
         GhcInitResponse{..} <- rpcInit server GhcInitRequest {
-            ghcInitClientApiVersion = ideBackendApiVersion
-          , ghcInitGenerateModInfo  = configGenerateModInfo
-          , ghcInitWarnings         = configWarnings
-          , ghcInitStaticOpts       = opts
+            ghcInitClientApiVersion   = ideBackendApiVersion
+          , ghcInitGenerateModInfo    = configGenerateModInfo
+          , ghcInitWarnings           = configWarnings
+          , ghcInitStaticOpts         = opts
+          , ghcInitUserPackageDB      = userDB
+          , ghcInitSpecificPackageDBs = specificDBs
           }
         return ghcInitVersion
       return ((server,) <$> version)
   where
+    (userDB, specificDBs) = splitPackageDBStack configPackageDBStack
+
     opts :: [String]
     opts = configStaticOpts
-           -- TODO: don't hardcode GHC version
-        ++ packageDbArgs (Version [7,4,2] []) configPackageDBStack
         ++ map (\path -> "-i" ++ ideSourcesDir </> path) configRelativeIncludes
 
     searchPath :: ProgramSearchPath
@@ -110,6 +111,19 @@ forkGhcServer configGenerateModInfo opts workingDir True = do
   tid <- forkIO $ ghcServerEngine configGenerateModInfo opts (conv a b)
   return $ InProcess (conv b a) tid
 -}
+
+splitPackageDBStack :: PackageDBStack -> (Bool, [String])
+splitPackageDBStack dbstack = case dbstack of
+  (GlobalPackageDB:UserPackageDB:dbs) -> (True,  map specific dbs)
+  (GlobalPackageDB:dbs)               -> (False, map specific dbs)
+  _                                   -> ierror
+  where
+    specific (SpecificPackageDB db) = db
+    specific _                      = ierror
+
+    ierror :: a
+    ierror = error $ "internal error: unexpected package db stack: "
+                  ++ show dbstack
 
 envWithPathOverride :: [FilePath] -> IO (Maybe [(String, String)])
 envWithPathOverride []            = return Nothing

@@ -3354,6 +3354,9 @@ syntheticTests = [
           , (Nothing, expected2)
           ]]
     )
+    {-
+     -- DISABLED: We no longer detect the problem immediately because we no
+     -- longer send an initial RPC request after starting the GHC server
   , ( "Make sure package DB is passed to ghc (detect problem immediately)"
     , let packageOpts = ["-package parallel"]
           config      = defaultSessionConfig {
@@ -3371,6 +3374,7 @@ syntheticTests = [
           , (Nothing, expected2)
           ]]
     )
+    -}
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo True)"
     , let packageOpts = ["-package parallel"]
           config      = defaultSessionConfig {

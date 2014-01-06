@@ -14,10 +14,10 @@ module GhcShim.GhcShim742
   , setBreak
     -- * Time
   , GhcTime
-    -- * Warnings
-  , setWarnings
-    -- * Version information
+    -- * Setup
   , ghcGetVersion
+  , packageDBFlags
+  , setWarnings
     -- * Folding
   , AstAlg(..)
   , fold
@@ -130,15 +130,16 @@ setBreak array index value = do
 type GhcTime = ClockTime
 
 {------------------------------------------------------------------------------
-  Version information
+  Setup
 ------------------------------------------------------------------------------}
 
 ghcGetVersion :: GhcVersion
 ghcGetVersion = GHC742
 
-{------------------------------------------------------------------------------
-  Warnings
-------------------------------------------------------------------------------}
+packageDBFlags :: Bool -> [String] -> [String]
+packageDBFlags userDB specificDBs =
+     ["-no-user-package-conf" | userDB]
+  ++ concat [["-package-conf", db] | db <- specificDBs]
 
 setWarnings :: GhcWarnings -> DynFlags -> DynFlags
 setWarnings (GhcWarnings _warningAMP

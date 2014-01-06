@@ -2,7 +2,7 @@
 {-# LANGUAGE TemplateHaskell     #-}
 module IdeSession.Cabal (
     buildExecutable, buildHaddock, buildLicenseCatenation
-  , packageDbArgs, generateMacros, buildDotCabal, runComponentCc
+  , generateMacros, buildDotCabal, runComponentCc
   , buildLicsFromPkgs  -- for testing only
   ) where
 
@@ -48,7 +48,7 @@ import Distribution.ParseUtils ( parseFields, simpleField, ParseResult (..)
 import qualified Distribution.Simple.Build as Build
 import Distribution.Simple.Build.Macros
 import qualified Distribution.Simple.Haddock as Haddock
-import Distribution.Simple (PackageDB(..), PackageDBStack)
+import Distribution.Simple (PackageDBStack)
 import qualified Distribution.Simple.Compiler as Simple.Compiler
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.GHC (getInstalledPackages, componentCcGhcOptions,
@@ -708,27 +708,6 @@ getYear = do
   let l = utcToLocalTime z u
       (y, _, _) = toGregorian $ localDay l
   return y
-
--- | Translate a DB stack to an argument to arguments for GHC
---
--- Copied directly from Cabal 1.16.0.3
-packageDbArgs :: Version -> PackageDBStack -> [String]
-packageDbArgs (Version ver _) dbstack = case dbstack of
-  (GlobalPackageDB:UserPackageDB:dbs) -> concatMap specific dbs
-  (GlobalPackageDB:dbs)               -> ("-no-user-" ++ packageDbFlag)
-                                       : concatMap specific dbs
-  _ -> ierror
-  where
-    specific (SpecificPackageDB db) = [ '-':packageDbFlag , db ]
-    specific _ = ierror
-    ierror     = error $ "internal error: unexpected package db stack: "
-                      ++ show dbstack
-
-    packageDbFlag
-      | ver < [7,5]
-      = "package-conf"
-      | otherwise
-      = "package-db"
 
 generateMacros :: PackageDBStack -> [FilePath] -> IO String
 generateMacros configPackageDBStack configExtraPathDirs = do
