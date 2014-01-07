@@ -5040,6 +5040,32 @@ syntheticTests = [
         do [noTypeSig] <- getSourceErrors session
            assertEqual "" KindWarning (errorKind noTypeSig)
     )
+  , ( "GHC bug #8333 (#145)"
+    , withSession (withOpts ["-XScopedTypeVariables"]) $ \session -> do
+        let upd1 = (updateCodeGeneration True)
+                <> (updateGhcOptions $ Just ["-O"])
+                <> (updateSourceFile "Main.hs" . BSLC.pack $
+                     "main = let (x :: String) = \"hello\" in putStrLn x")
+        updateSessionD session upd1 1
+        _fixme session "#8333" $ assertNoErrors session
+    )
+  , ( "buildExe on code with type errors (#160)"
+    -- TODO: right now this tests simply exposes the problem. Once the problem
+    -- is fixed, we should modify the test to test for the right behaviour.
+    , withSession defaultSessionConfig $ \session -> do
+        let upd1 = (updateCodeGeneration True)
+                <> (updateSourceFile "Main.hs" . BSLC.pack $
+                     "main = foo")
+        updateSessionD session upd1 1
+        assertOneError session
+
+        let upd2 = buildExe [(Text.pack "Main", "Main.hs")]
+        updateSessionD session upd2 4
+
+        distDir <- getDistDir session
+        print =<< getBuildExeStatus session
+        print =<< (readFile $ distDir </> "build/ide-backend-exe.stderr")
+    )
   ]
 
 modAn, modBn, modCn :: String -> IdeSessionUpdate ()
@@ -5866,6 +5892,8 @@ knownProblems = [
     ("#32", [GHC742])
     -- https://github.com/fpco/ide-backend/issues/150
   , ("#150", [GHC742, GHC78])
+    -- https://ghc.haskell.org/trac/ghc/ticket/8333
+  , ("#8333", [GHC742])
   ]
 
 _fixme :: IdeSession -> String -> IO () -> IO ()
