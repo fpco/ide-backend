@@ -92,10 +92,7 @@ ghcServerEngine conv@RpcConversation{..} = do
           hooks = (hooks flags1) {
               hscFrontendHook   = Just $ runHscPlugin pluginRef stRef
             , runQuasiQuoteHook = Just $ runHscQQ stRef
--- TODO: it'd be nice if we could move this #if to the shim modules
-#if GHC_78
             , runRnSpliceHook   = Just $ runRnSplice stRef
-#endif
             }
         }
                  | otherwise = flags1

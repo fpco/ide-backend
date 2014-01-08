@@ -152,10 +152,10 @@ runHscQQ stRef qq@(HsQuasiQuote quoter _span _str) = do
       extendIdMap span' $ SpanQQ IdInfo{..}
 
 runRnSplice :: StrictIORef ExtractIdsSuspendedState
-            -> HsSplice Name -> RnM (HsSplice Name)
-runRnSplice stRef splice@(HsSplice _ expr) = do
+            -> LHsExpr Name -> RnM (LHsExpr Name)
+runRnSplice stRef expr = do
   extractIdsResumeTc stRef $ extractIds SpanInSplice expr
-  return splice
+  return expr
 
 runHscPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult)
              -> StrictIORef ExtractIdsSuspendedState

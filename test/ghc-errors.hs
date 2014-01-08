@@ -2400,7 +2400,7 @@ syntheticTests = [
 
         assertIdInfo session "B" (6,21,6,24) "ex2" VarName "Q Type" "main:A" "A.hs@7:1-7:4" "" "imported from main:A at B.hs@3:1-3:9"
         assertIdInfo session "B" (7,9,7,12) "ex1" VarName "Q Exp" "main:A" "A.hs@5:1-5:4" "" "imported from main:A at B.hs@3:1-3:9"
-        _fixme session "#150" $ assertIdInfo session "B" (8,2,8,5) "ex3" VarName "Q [Dec]" "main:A" "A.hs@9:1-9:4" "" "imported from main:A at B.hs@3:1-3:9"
+        assertIdInfo session "B" (8,1,8,5) "ex3" VarName "Q [Dec]" "main:A" "A.hs@9:1-9:4" "" "imported from main:A at B.hs@3:1-3:9"
     )
   , ( "Type information 11: Take advantage of scope (1)"
     , ifIdeBackendHaddockTestsEnabled defaultSessionConfig $ \session -> do
@@ -5047,7 +5047,7 @@ syntheticTests = [
                 <> (updateSourceFile "Main.hs" . BSLC.pack $
                      "main = let (x :: String) = \"hello\" in putStrLn x")
         updateSessionD session upd1 1
-        _fixme session "#8333" $ assertNoErrors session
+        assertNoErrors session
     )
   , ( "buildExe on code with type errors (#160)"
     -- TODO: right now this tests simply exposes the problem. Once the problem
@@ -5890,10 +5890,6 @@ knownProblems = [
     -- errors or just for this particular one (I tried a few but didn't see
     -- filepaths in any of them).
     ("#32", [GHC742])
-    -- https://github.com/fpco/ide-backend/issues/150
-  , ("#150", [GHC742, GHC78])
-    -- https://ghc.haskell.org/trac/ghc/ticket/8333
-  , ("#8333", [GHC742])
   ]
 
 _fixme :: IdeSession -> String -> IO () -> IO ()
