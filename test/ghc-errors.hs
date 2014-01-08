@@ -5027,8 +5027,8 @@ syntheticTests = [
                      ])
 
         updateSessionD session upd1 1
-        do [noTypeSig, _failingDueToWerror] <- getSourceErrors session
-           assertEqual "" KindError (errorKind noTypeSig)
+        errs1 <- getSourceErrors session
+        assertBool "" $ any (== KindError) $ map errorKind errs1
 
         let upd2 = (updateGhcOptions $ Just ["-Wwarn"])
                 <> (updateSourceFile "src/Main.hs" . BSLC.pack $ unlines [
@@ -5037,8 +5037,8 @@ syntheticTests = [
                      ])
 
         updateSessionD session upd2 1
-        do [noTypeSig] <- getSourceErrors session
-           assertEqual "" KindWarning (errorKind noTypeSig)
+        errs2 <- getSourceErrors session
+        assertBool "" $ not $ any (== KindError) $ map errorKind errs2
     )
   , ( "GHC bug #8333 (#145)"
     , withSession (withOpts ["-XScopedTypeVariables"]) $ \session -> do
