@@ -74,6 +74,7 @@ import Language.Haskell.Extension (Extension(..), KnownExtension(..),
                                    Language (Haskell2010))
 import Language.Haskell.TH.Syntax (lift, runIO)
 
+import IdeSession.Config
 import IdeSession.GHC.API (cExtensions, cHeaderExtensions)
 import IdeSession.Licenses ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
 import IdeSession.State
@@ -242,21 +243,19 @@ mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra =
     , Setup.configProgramPathExtra = progPathExtra
     }
 
-configureAndBuild :: FilePath -> FilePath -> [FilePath]
-                  -> [String] -> Bool
-                  -> PackageDBStack -> [PackageId]
-                  -> [ModuleName] -> (Progress -> IO ())
+configureAndBuild :: SessionConfig -> FilePath -> FilePath -> [String]
+                  -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
-configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
-                  configPackageDBStack pkgs loadedMs callback ms = do
+configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
+                  pkgs loadedMs callback ms = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
   callback $ Progress 1 4 Nothing Nothing
   libDeps <- externalDeps pkgs
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
-  executables <- mapM (exeDesc [ideSourcesDir] ideDistDir ghcOpts) ms
+  executables <- mapM (exeDesc [ideSourcesDir] ideDistDir ghcNewOpts) ms
   callback $ Progress 2 4 Nothing Nothing
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
@@ -274,7 +273,7 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False [ideSourcesDir] ideSourcesDir ghcOpts projectMs
+  library <- libDesc False [ideSourcesDir] ideSourcesDir ghcNewOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -283,7 +282,7 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra
+      confFlags = mkConfFlags ideDistDir configDynLink configPackageDBStack configExtraPathDirs
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
                      { Setup.buildDistPref = Setup.Flag ideDistDir
@@ -338,12 +337,11 @@ configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
       if isDoesNotExistError e then return ()
                                else Ex.throwIO e
 
-configureAndHaddock :: FilePath -> FilePath -> [FilePath]
-                    -> [String] -> PackageDBStack -> [PackageId]
-                    -> [ModuleName] -> (Progress -> IO ())
+configureAndHaddock :: SessionConfig -> FilePath -> FilePath -> [String]
+                    -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
                     -> IO ExitCode
-configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts
-                    configPackageDBStack pkgs loadedMs callback = do
+configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
+                    pkgs loadedMs callback = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
   callback $ Progress 1 4 Nothing Nothing
@@ -356,7 +354,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False [ideSourcesDir] ideSourcesDir ghcOpts projectMs
+  library <- libDesc False [ideSourcesDir] ideSourcesDir ghcNewOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -366,7 +364,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts
         , condBenchmarks     = []
         }
       confFlags =
-        mkConfFlags ideDistDir False configPackageDBStack progPathExtra
+        mkConfFlags ideDistDir False configPackageDBStack configExtraPathDirs
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       haddockFlags = Setup.defaultHaddockFlags
@@ -398,7 +396,7 @@ configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts
 
 buildDotCabal :: FilePath -> [String] -> Computed
               -> IO (String -> Version -> BSL.ByteString)
-buildDotCabal ideSourcesDir ghcOpts computed = do
+buildDotCabal ideSourcesDir ghcNewOpts computed = do
   (loadedMs, pkgs) <- buildDeps $ just computed
   libDeps <- externalDeps pkgs
   -- We ignore any @Main@ modules (even in subdirectories or in @Foo.hs@)
@@ -414,7 +412,7 @@ buildDotCabal ideSourcesDir ghcOpts computed = do
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
   library <- libDesc True -- relative C files paths
                      [] ideSourcesDir
-                     ghcOpts projectMs
+                     ghcNewOpts projectMs
   let libE = library {libExposed = True}
       gpDesc libName version = GenericPackageDescription
         { packageDescription = pkgDescFromName libName version
@@ -427,28 +425,24 @@ buildDotCabal ideSourcesDir ghcOpts computed = do
   return $ \libName version ->
     BSL8.pack $ showGenericPackageDescription $ gpDesc libName version
 
-buildExecutable :: FilePath -> FilePath -> [FilePath]
-                -> [String] -> Bool -> PackageDBStack
+buildExecutable :: SessionConfig -> FilePath -> FilePath -> [String]
                 -> Strict Maybe Computed -> (Progress -> IO ())
                 -> [(ModuleName, FilePath)]
                 -> IO ExitCode
-buildExecutable ideSourcesDir ideDistDir progPathExtra
-                ghcOpts dynlink configPackageDBStack
+buildExecutable ideConfig ideSourcesDir ideDistDir ghcNewOpts
                 mcomputed callback ms = do
   (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndBuild ideSourcesDir ideDistDir progPathExtra ghcOpts dynlink
-                    configPackageDBStack pkgs loadedMs callback ms
+  configureAndBuild ideConfig ideSourcesDir ideDistDir ghcNewOpts
+                    pkgs loadedMs callback ms
 
-buildHaddock :: FilePath -> FilePath -> [FilePath]
-             -> [String] -> PackageDBStack
+buildHaddock :: SessionConfig -> FilePath -> FilePath -> [String]
              -> Strict Maybe Computed -> (Progress -> IO ())
              -> IO ExitCode
-buildHaddock ideSourcesDir ideDistDir progPathExtra
-             ghcOpts configPackageDBStack
+buildHaddock ideConfig ideSourcesDir ideDistDir ghcNewOpts
              mcomputed callback = do
   (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndHaddock ideSourcesDir ideDistDir progPathExtra ghcOpts
-                      configPackageDBStack pkgs loadedMs callback
+  configureAndHaddock ideConfig ideSourcesDir ideDistDir ghcNewOpts
+                      pkgs loadedMs callback
 
 lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
 lFieldDescrs =
@@ -464,46 +458,32 @@ lFieldDescrs =
  ]
 
 -- | Build the concatenation of all licence files. See 'buildLicenses'.
-buildLicenseCatenation :: Strict Maybe Computed  -- ^ compilation state
+buildLicenseCatenation :: SessionConfig          -- ^ session configuration
+                       -> Strict Maybe Computed  -- ^ compilation state
                        -> FilePath               -- ^ the directory with all the .cabal files
                        -> FilePath               -- ^ the working directory; the resulting file is written there
-                       -> [FilePath]             -- ^ see 'configExtraPathDirs'
-                       -> PackageDBStack         -- ^ see 'configPackageDBStack'
-                       -> [String]               -- ^ see 'configLicenseExc'
-                       -> [( String
-                           , (Maybe License, Maybe FilePath, Maybe String)
-                           )]                    -- ^ see 'configLicenseFixed'
                        -> (Progress -> IO ())    -- ^ progress callback
                        -> IO ExitCode
-buildLicenseCatenation mcomputed
-                       cabalsDir ideDistDir configExtraPathDirs
-                       configPackageDBStack
-                       configLicenseExc configLicenseFixed
-                       callback = do
+buildLicenseCatenation ideConfig mcomputed cabalsDir ideDistDir callback = do
   (_, pkgs) <- buildDeps mcomputed
-  buildLicsFromPkgs pkgs
-                    cabalsDir ideDistDir configExtraPathDirs
-                    configPackageDBStack
-                    configLicenseExc configLicenseFixed
-                    callback
+  buildLicsFromPkgs ideConfig pkgs cabalsDir ideDistDir
+                    (configLicenseFixed ideConfig) callback
 
 -- | Build the concatenation of all licence files from a given list
 -- of packages.
-buildLicsFromPkgs :: [PackageId]           -- ^ the list of packages to process
-                  -> FilePath              -- ^ the directory with all the .cabal files
+buildLicsFromPkgs :: SessionConfig          -- ^ session configuration
+                  -> [PackageId]            -- ^ the list of packages to process
+                  -> FilePath               -- ^ the directory with all the .cabal files
                   -> FilePath               -- ^ the working directory; the resulting file is written there
-                  -> [FilePath]             -- ^ see 'configExtraPathDirs'
-                  -> PackageDBStack         -- ^ see 'configPackageDBStack'
-                  -> [String]               -- ^ see 'configLicenseExc'
                   -> [( String
                       , (Maybe License, Maybe FilePath, Maybe String)
                       )]                    -- ^ see 'configLicenseFixed'
                   -> (Progress -> IO ())    -- ^ progress callback
                   -> IO ExitCode
-buildLicsFromPkgs pkgs cabalsDir ideDistDir configExtraPathDirs
-                  configPackageDBStack
-                  configLicenseExc configLicenseFixed
-                  callback = do
+buildLicsFromPkgs SessionConfig{ configExtraPathDirs
+                               , configPackageDBStack
+                               , configLicenseExc }
+                  pkgs cabalsDir ideDistDir licenseFixed callback = do
   -- The following computations are very expensive, so should be done once,
   -- instead of at each invocation of @findLicense@ that needs to perform
   -- @lookupSourcePackageId@.
@@ -544,7 +524,7 @@ buildLicsFromPkgs pkgs cabalsDir ideDistDir configExtraPathDirs
           let parseResult =
                 parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS
           findLicense parseResult nameString version packageFile
-        else case lookup nameString configLicenseFixed of
+        else case lookup nameString licenseFixed of
           Just fixedLicence -> do
             hPutStrLn licensesFile $ "\nLicense for " ++ nameString ++ ":\n"
             let fakeParseResult = ParseOk undefined fixedLicence

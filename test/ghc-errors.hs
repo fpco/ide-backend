@@ -1963,10 +1963,8 @@ syntheticTests = [
                          PackageId{ packageName = Text.pack name
                                   , packageVersion = Just $ Text.pack "1.0" }
                        ) lics
-        let dbStack = configPackageDBStack defaultSessionConfig
-            paths   = configExtraPathDirs defaultSessionConfig
-        status <- buildLicsFromPkgs
-                    pkgs "test" distDir paths dbStack [] lics (\_ -> return ())
+        status <- buildLicsFromPkgs defaultSessionConfig
+                    pkgs "test" distDir lics (\_ -> return ())
         assertEqual "after license build" ExitSuccess status
         licensesErrs <- readFile $ distDir </> "licenses.stderr"
         assertEqual "licensesErrs length" 0 (length licensesErrs)
@@ -1989,10 +1987,8 @@ syntheticTests = [
                          PackageId{ packageName = Text.pack name
                                   , packageVersion = Just $ Text.pack "1.0" }
                        ) lics
-        let dbStack = configPackageDBStack defaultSessionConfig
-            paths   = configExtraPathDirs defaultSessionConfig
-        status <- buildLicsFromPkgs
-                    pkgs "test" distDir paths dbStack [] lics (\_ -> return ())
+        status <- buildLicsFromPkgs defaultSessionConfig
+                    pkgs "test" distDir lics (\_ -> return ())
         assertEqual "after license build" ExitSuccess status
         licensesWarns <- readFile $ distDir </> "licenses.stdout"
         assertEqual "licensesWarns length" 0 (length licensesWarns)

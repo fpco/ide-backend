@@ -867,13 +867,8 @@ buildExe ms = do
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     ghcNewOpts        <- get ideNewOpts
-    let SessionConfig{ configDynLink
-                     , configPackageDBStack
-                     , configGenerateModInfo
-                     , configStaticOpts
-                     , configExtraPathDirs } = ideConfig
+    let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
         -- Note that these do not contain the @packageDbArgs@ options.
-        ghcOpts = fromMaybe configStaticOpts ghcNewOpts
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
@@ -895,8 +890,7 @@ buildExe ms = do
           Dir.setCurrentDirectory
           (const $
              do Dir.setCurrentDirectory ideDataDir
-                buildExecutable ideSourcesDir ideDistDir configExtraPathDirs
-                                ghcOpts configDynLink configPackageDBStack
+                buildExecutable ideConfig ideSourcesDir ideDistDir (fromMaybe configStaticOpts ghcNewOpts)
                                 mcomputed callback ms)
     set ideBuildExeStatus (Just exitCode)
 
@@ -917,11 +911,7 @@ buildDoc = do
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     ghcNewOpts        <- get ideNewOpts
-    let SessionConfig{ configPackageDBStack
-                     , configGenerateModInfo
-                     , configStaticOpts
-                     , configExtraPathDirs } = ideConfig
-        ghcOpts = fromMaybe configStaticOpts ghcNewOpts
+    let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
@@ -929,8 +919,7 @@ buildDoc = do
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
-                  buildHaddock ideSourcesDir ideDistDir configExtraPathDirs
-                               ghcOpts configPackageDBStack
+                  buildHaddock ideConfig ideSourcesDir ideDistDir (fromMaybe configStaticOpts ghcNewOpts)
                                mcomputed callback)
     set ideBuildDocStatus (Just exitCode)
 
@@ -964,16 +953,12 @@ buildLicenses cabalsDir = do
     IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
-    let SessionConfig{..} = ideConfig
+    let SessionConfig{configGenerateModInfo} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
     exitCode <- liftIO $
-      buildLicenseCatenation mcomputed
-                             cabalsDir ideDistDir configExtraPathDirs
-                             configPackageDBStack
-                             configLicenseExc configLicenseFixed
-                             callback
+      buildLicenseCatenation ideConfig mcomputed cabalsDir ideDistDir callback
     set ideBuildLicensesStatus (Just exitCode)
 
 {------------------------------------------------------------------------------
