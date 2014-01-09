@@ -16,7 +16,7 @@ import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
 import Data.Text (Text)
-import Data.Char (isLower)
+import Data.Char (isLower, isSpace)
 import Data.Either (lefts)
 import qualified Data.Text as Text
 import Debug.Trace (traceEventIO)
@@ -385,10 +385,8 @@ syntheticTests = [
         assertEqual "" output (BSLC.pack "False\n")
     )
   , ( "Build executable from some .lhs files"
-    , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/compiler/utils"
-        loadModulesFrom session "."
-        setCurrentDirectory "../../../"
+    , withSession (withIncludes "test/compiler/utils") $ \session -> do
+        loadModulesFrom session "test/compiler/utils"
         assertNoErrors session
         status0 <- getBuildExeStatus session
         assertEqual "before exe build" Nothing status0
@@ -427,7 +425,7 @@ syntheticTests = [
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: Exception Maybes OrdList\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: Exception Maybes OrdList\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    ghc-options: -hide-package monads-tf\n \n ") $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.for.lhs"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -5200,8 +5198,8 @@ assertCheckWarns checkWarns =
 filterCheckWarns :: String -> BSSC.ByteString
 filterCheckWarns s =
   let (bs1, rest1) =
-        BSSC.breakSubstring (BSSC.pack "source-dirs:") $ BSSC.pack s
-      (_, bs2) = BSSC.breakSubstring (BSSC.pack ".\n") rest1
+        BSSC.breakSubstring (BSSC.pack "The following warnings are likely affect your build negatively") $ BSSC.pack s
+      (_, bs2) = BSSC.breakSubstring (BSSC.pack "These warnings may cause trouble") rest1
   in BSSC.append bs1 bs2
 
 assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
@@ -5711,19 +5709,22 @@ filterIdeBackendTest :: BSLC.ByteString -> BSSC.ByteString
 filterIdeBackendTest bsLazy =
   let toStrict = BSSC.concat . BSLC.toChunks  -- not in our old bytestring pkg
       bs = ignoreVersions $ toStrict bsLazy
-      (bs1, rest1) = BSSC.breakSubstring (BSSC.pack "hs-source-dirs:") bs
+      (bs1Raw, rest1) = BSSC.breakSubstring (BSSC.pack "hs-source-dirs:") bs
+      (bs1, _) = BSSC.spanEnd isSpace bs1Raw
       (_, bs2) = BSSC.breakSubstring (BSSC.pack "\n") rest1
   in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
 
 filterIdeBackendTestC :: String -> BSSC.ByteString -> BSSC.ByteString
 filterIdeBackendTestC lastFile bs =
-  let (bs1, rest1) = BSSC.breakSubstring (BSSC.pack "c-sources:") bs
+  let (bs1Raw, rest1) = BSSC.breakSubstring (BSSC.pack "c-sources:") bs
+      (bs1, _) = BSSC.spanEnd isSpace bs1Raw
       (_, bs2) = BSSC.breakSubstring (BSSC.pack lastFile) rest1
   in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
 
 filterIdeBackendTestH :: String -> BSSC.ByteString -> BSSC.ByteString
 filterIdeBackendTestH lastFile bs =
-  let (bs1, rest1) = BSSC.breakSubstring (BSSC.pack "install-includes:") bs
+  let (bs1Raw, rest1) = BSSC.breakSubstring (BSSC.pack "install-includes:") bs
+      (bs1, _) = BSSC.spanEnd isSpace bs1Raw
       (_, bs2) = BSSC.breakSubstring (BSSC.pack lastFile) rest1
   in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
 

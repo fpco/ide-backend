@@ -328,9 +328,10 @@ getDotCabal :: Query (String -> Version -> BSL.ByteString)
 getDotCabal session = withComputedState session
                       $ \idleState computed@Computed{..} -> do
   let sourcesDir = ideSourcesDir $ ideStaticInfo session
-      SessionConfig{configStaticOpts} = ideConfig $ ideStaticInfo session
+      SessionConfig{configStaticOpts, configRelativeIncludes}
+        = ideConfig $ ideStaticInfo session
       ghcOpts = fromMaybe configStaticOpts $ _ideNewOpts idleState
-  buildDotCabal sourcesDir ghcOpts computed
+  buildDotCabal sourcesDir configRelativeIncludes ghcOpts computed
 
 {------------------------------------------------------------------------------
   Debugging

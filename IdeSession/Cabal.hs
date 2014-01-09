@@ -400,9 +400,9 @@ configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
   -- as they are emitted, similarly as log_action in GHC API,
   -- or filter stdout and display progress on each good line.
 
-buildDotCabal :: FilePath -> [String] -> Computed
+buildDotCabal :: FilePath -> [FilePath] -> [String] -> Computed
               -> IO (String -> Version -> BSL.ByteString)
-buildDotCabal ideSourcesDir ghcNewOpts computed = do
+buildDotCabal ideSourcesDir configRelativeIncludes ghcNewOpts computed = do
   (loadedMs, pkgs) <- buildDeps $ just computed
   libDeps <- externalDeps pkgs
   -- We ignore any @Main@ modules (even in subdirectories or in @Foo.hs@)
@@ -417,7 +417,7 @@ buildDotCabal ideSourcesDir ghcNewOpts computed = do
       projectMs =
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
   library <- libDesc True -- relative C files paths
-                     [] [ideSourcesDir]
+                     (filter (/= "") configRelativeIncludes) [ideSourcesDir]
                      ghcNewOpts projectMs
   let libE = library {libExposed = True}
       gpDesc libName version = GenericPackageDescription
