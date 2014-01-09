@@ -662,7 +662,7 @@ buildDeps mcomputed = do
                 missing = fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
             return $ fromMaybe missing mdeps
       imps <- mapM imp loadedMs
-      return $ (loadedMs, nub $ sort $ concat imps)
+      return $ (nub $ sort $ loadedMs, nub $ sort $ concat imps)
 
 licenseText :: License -> String -> IO (Maybe String)
 licenseText license author = do

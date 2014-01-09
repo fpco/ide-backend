@@ -765,8 +765,8 @@ syntheticTests = [
         loadModulesFrom session "test/bootMods"
         assertNoErrors session
 
-        let m = "C"
-            upd = buildExe [(Text.pack m, m <.> "hs")]
+        let m = "Main"
+            upd = buildExe [(Text.pack m, "C" <.> "hs")]
         updateSessionD session upd 4
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
@@ -774,7 +774,7 @@ syntheticTests = [
         status <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status
         out <- readProcess (distDir </> "build" </> m </> m) [] []
-        assertEqual "" "C" out
+        assertEqual "" "C\n" out
     )
   , ( "Test TH; code generation on"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
@@ -4992,7 +4992,7 @@ syntheticTests = [
         status <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status
         out <- readProcess (distDir </> "build" </> m </> m) [] []
-        assertEqual "" "a1" out
+        assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
     )
   , ( "Support for lhs-boot files (#155)"
     , withSession defaultSessionConfig $ \session -> do
@@ -5035,7 +5035,7 @@ syntheticTests = [
         status <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status
         out <- readProcess (distDir </> "build" </> m </> m) [] []
-        assertEqual "" "a2" out
+        assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
     )
   , ( "Relative include paths (#156)"
     , withSession (withIncludes "test/ABnoError") $ \session -> do
