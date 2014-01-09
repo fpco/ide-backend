@@ -766,6 +766,17 @@ syntheticTests = [
     , withSession (withIncludes "test/bootMods") $ \session -> do
         loadModulesFrom session "test/bootMods"
         assertNoErrors session
+
+        let m = "C"
+            upd = buildExe [(Text.pack m, m <.> "hs")]
+        updateSessionD session upd 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "" "C" out
     )
   , ( "Test TH; code generation on"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
@@ -4977,6 +4988,17 @@ syntheticTests = [
                     ])
         updateSessionD session upd 3
         assertNoErrors session
+
+        let m = "A"
+            updE = buildExe [(Text.pack m, m <.> "hs")]
+        updateSessionD session updE 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "" "a1" out
     )
   , ( "Support for lhs-boot files (#155)"
     , withSession defaultSessionConfig $ \session -> do
@@ -5009,6 +5031,17 @@ syntheticTests = [
                     ])
         updateSessionD session upd 3
         assertNoErrors session
+
+        let m = "A"
+            updE = buildExe [(Text.pack m, m <.> "lhs")]
+        updateSessionD session updE 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "" "a2" out
     )
   , ( "Relative include paths (#156)"
     , withSession (withIncludes "test/ABnoError") $ \session -> do
