@@ -169,11 +169,12 @@ getCHeaders [sourceDir] =
 getCHeaders _sourceDirs =
   fail $ "getCHeaders: wrong sourceDir: " ++ intercalate ", " _sourceDirs
 
-exeDesc :: [FilePath] -> FilePath -> [String] -> (ModuleName, FilePath)
+exeDesc :: [FilePath] -> [FilePath] -> FilePath -> [String]
+        -> (ModuleName, FilePath)
         -> IO Executable
-exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
-  cSources <- getCSources False ideSourcesDir
-  cHeaders <- getCHeaders ideSourcesDir
+exeDesc ideSourcesDir ideSourcesDirForC ideDistDir ghcOpts (m, path) = do
+  cSources <- getCSources False ideSourcesDirForC
+  cHeaders <- getCHeaders ideSourcesDirForC
   let exeName = Text.unpack m
   if exeName == "Main" then do  -- that's what Cabal expects, no wrapper needed
     return $ Executable
@@ -195,12 +196,12 @@ exeDesc ideSourcesDir ideDistDir ghcOpts (m, path) = do
       , buildInfo = bInfo [mDir] ghcOpts cSources cHeaders
       }
 
-libDesc :: Bool -> [FilePath] -> FilePath -> [String]
+libDesc :: Bool -> [FilePath] -> [FilePath] -> [String]
         -> [Distribution.ModuleName.ModuleName]
         -> IO Library
 libDesc relative ideSourcesDir ideSourcesDirForC ghcOpts ms = do
-  cSources <- getCSources relative [ideSourcesDirForC]
-  cHeaders <- getCHeaders [ideSourcesDirForC]
+  cSources <- getCSources relative ideSourcesDirForC
+  cHeaders <- getCHeaders ideSourcesDirForC
   return $ Library
     { exposedModules = ms
     , libExposed = False
@@ -255,7 +256,10 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
   libDeps <- externalDeps pkgs
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
-  executables <- mapM (exeDesc [ideSourcesDir] ideDistDir ghcNewOpts) ms
+      sourcesDirs = map (\path -> ideSourcesDir </> path)
+                        configRelativeIncludes
+  executables <-
+    mapM (exeDesc sourcesDirs [ideSourcesDir] ideDistDir ghcNewOpts) ms
   callback $ Progress 2 4 Nothing Nothing
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
@@ -273,7 +277,7 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False [ideSourcesDir] ideSourcesDir ghcNewOpts projectMs
+  library <- libDesc False sourcesDirs [ideSourcesDir] ghcNewOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -348,13 +352,15 @@ configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
   libDeps <- externalDeps pkgs
   callback $ Progress 2 4 Nothing Nothing
   let condExecutables = []
+      sourcesDirs = map (\path -> ideSourcesDir </> path)
+                        configRelativeIncludes
   hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
   lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
   -- Cabal can't find the code of @Main@, except in the main dir. See above.
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False [ideSourcesDir] ideSourcesDir ghcNewOpts projectMs
+  library <- libDesc False sourcesDirs [ideSourcesDir] ghcNewOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -411,7 +417,7 @@ buildDotCabal ideSourcesDir ghcNewOpts computed = do
       projectMs =
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
   library <- libDesc True -- relative C files paths
-                     [] ideSourcesDir
+                     [] [ideSourcesDir]
                      ghcNewOpts projectMs
   let libE = library {libExposed = True}
       gpDesc libName version = GenericPackageDescription
