@@ -5050,8 +5050,6 @@ syntheticTests = [
         assertNoErrors session
     )
   , ( "buildExe on code with type errors (#160)"
-    -- TODO: right now this tests simply exposes the problem. Once the problem
-    -- is fixed, we should modify the test to test for the right behaviour.
     , withSession defaultSessionConfig $ \session -> do
         let upd1 = (updateCodeGeneration True)
                 <> (updateSourceFile "Main.hs" . BSLC.pack $
@@ -5063,8 +5061,10 @@ syntheticTests = [
         updateSessionD session upd2 4
 
         distDir <- getDistDir session
-        print =<< getBuildExeStatus session
-        print =<< (readFile $ distDir </> "build/ide-backend-exe.stderr")
+        status <- getBuildExeStatus session
+        assertEqual "" (Just $ ExitFailure 1) status
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "" "Source errors encountered. Not attempting to build executables." buildStderr
     )
   ]
 

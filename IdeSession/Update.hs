@@ -877,13 +877,27 @@ buildExe ms = do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    exitCode <- liftIO $ Ex.bracket
-      Dir.getCurrentDirectory
-      Dir.setCurrentDirectory
-      (const $ do Dir.setCurrentDirectory ideDataDir
-                  buildExecutable ideSourcesDir ideDistDir configExtraPathDirs
-                                  ghcOpts configDynLink configPackageDBStack
-                                  mcomputed callback ms)
+    let errors = case toLazyMaybe mcomputed of
+          Nothing ->
+            error "This session state does not admit artifact generation."
+          Just Computed{computedErrors} -> toLazyList computedErrors
+    exitCode <-
+      if any (== KindError) $ map errorKind errors then do
+        liftIO $ do
+          Dir.createDirectoryIfMissing False $ ideDistDir </> "build"
+          let stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
+          writeFile stderrLog
+            "Source errors encountered. Not attempting to build executables."
+          return $ ExitFailure 1
+      else do
+        liftIO $ Ex.bracket
+          Dir.getCurrentDirectory
+          Dir.setCurrentDirectory
+          (const $
+             do Dir.setCurrentDirectory ideDataDir
+                buildExecutable ideSourcesDir ideDistDir configExtraPathDirs
+                                ghcOpts configDynLink configPackageDBStack
+                                mcomputed callback ms)
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
