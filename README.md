@@ -23,10 +23,10 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
- *  Version 0.8. 
- 
+ *  Version 0.8.
+
     This is a major new release with a lot of new functionality, bug fixes, and
-    some minor API changes. 
+    some minor API changes.
 
      * New functionality: support for GHC 7.8, and make sure that a single
        ide-backend client library, compiled with a stock ghc, can talk to
@@ -34,7 +34,7 @@ Changelog
        #147, #148, #149, #150, #151, #158, ghc #8006, ghc #8067, ghc Hooks
        proposal).
 
-       NOTE: This requires new versions of both ghc 7.4 and ghc 7.8. 
+       NOTE: This requires new versions of both ghc 7.4 and ghc 7.8.
 
        - For ghc 7.4: commit 8c021d1 (branch ide-backend-experimental-74).
          Differences from the official release: backported Hooks; backported
@@ -117,10 +117,10 @@ Changelog
 
      * New functionality: a new field (configWarnings :: GhcWarnings) in the
        session config makes it possible to enable/disable certain warnings in
-       a ghc version-independent manner. 
+       a ghc version-independent manner.
 
-     * New functionality: allow to set compilation targets (#152) 
-       
+     * New functionality: allow to set compilation targets (#152)
+
            updateTargets :: Maybe [FilePath] -> IdeSessionUpdate ()
 
        As part of this also added a new field called configRelativeIncludes to
@@ -131,10 +131,11 @@ Changelog
        directory "foo/bar" (before updateTargets this was not an issue because
        we specified all modules paths explicitly to ghc). Now
        configRelativeIncludes can be used to tell ghc where to look (in this
-       case, it should be set to ["foo/bar"]). 
-  
+       case, it should be set to ["foo/bar"]).
+
        Note that buildExe and co do not yet take these targets into account
-       (#154).
+       (#154), except for configRelativeIncludes, which are, in particular,
+       inserted into the hs-source-dirs field of .cabal, if set.
 
        Also, fixed bug where we would not pass -i to the ghc server on session
        restart (this bug was mostly invisible when we were providing all source
@@ -146,8 +147,8 @@ Changelog
        ide-backend-server compiles the .c files into .o files and dynamically
        loads/unloads these object files) and in executable generation (#122).
 
-     * New functionality: specify additional arguments for ghc when building
-       executables (#159).
+     * New functionality: specify (as the first argument of buildExe)
+       additional arguments for ghc when building executables (#159).
 
      * Bugfix: Make sure ID info is updated on code changes (fixed a caching
        problem) (#142)
@@ -155,15 +156,15 @@ Changelog
      * Bugfix: Make sure that updating static files triggers recompilation
        (#118). This is fixed by means of a ghc patch (in both 7.4 and 7.8; ghc
        issue #4900).
-     
+
      * Bugfix: Avoid confusing error message in buildExe for code with type
-       errors (#145, #160). 
+       errors (#145, #160).
 
      * Better way to deal with async exceptions in snippet interrupts in ghc
        (#58, ghc issue #8006).  The new solution works in both 7.4 and 7.8, and
        in both "regular" execution of snippets and in execution with
        breakpoints enabled/resumed execution (#133). The new approach is now in
-       the official GHC tree. 
+       the official GHC tree.
 
      * Upgraded to Cabal 1.18.1.2 (necessary to support GHC 7.8), and set
        things up so that it generates the necessary dynlibs when using 7.8.
@@ -182,13 +183,13 @@ Changelog
           more than just Haskell modules).
 
      * Merged pull requests
-       
+
         - Use binary-ide-backend throughout (#144)
 
-     * Test-suite modificatons: 
+     * Test-suite modificatons:
 
-        - Test for #134: multiple changes to TH dependent files in one second 
-        - Test for #32: Internal paths in error messages 
+        - Test for #134: multiple changes to TH dependent files in one second
+        - Test for #32: Internal paths in error messages
         - Test for #50: Async problem with snippet interrupt
         - Test for fpco/fpco/#3043: constraints in monotypes
         - Fixed non-deterministic failure of test for #58 (#143)
@@ -196,12 +197,12 @@ Changelog
           use alpha-equivalence rather than syntactic identity to compare
           types, etc.), and be less picky about package versions
 
-     * Isolated a bug in sqlite which was causing #104.  
+     * Isolated a bug in sqlite which was causing #104.
 
      * Known issue: tracked #125 down to a bug in the GHC RTS, and reported
        this (https://ghc.haskell.org/trac/ghc/ticket/8648). There is no fix yet
-       though. 
-     
+       though.
+
      * Known issue: updateGhcOptions has some problems; detailed in #115.
 
  *  Version 0.7.1
