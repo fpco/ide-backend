@@ -839,8 +839,9 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 
 -- | Build an exe from sources added previously via the ide-backend
 -- updateSourceFile* mechanism. The modules that contains the @main@ code are
--- indicated by the arguments to @buildExe@. The function can be called
--- multiple times with different arguments.
+-- indicated in second argument to @buildExe@. The function can be called
+-- multiple times with different arguments. Additional GHC options,
+-- only applied when building executables, are supplied in the first argument.
 --
 -- We assume any indicated module is already successfully processed by GHC API
 -- in a compilation mode that makes @computedImports@ available (but no code
@@ -861,8 +862,8 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 -- in the 'Query.getDistDir' directory.
 --
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
-buildExe :: [(ModuleName, FilePath)] -> IdeSessionUpdate ()
-buildExe ms = do
+buildExe :: [String] -> [(ModuleName, FilePath)] -> IdeSessionUpdate ()
+buildExe extraOpts ms = do
     IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
@@ -885,12 +886,15 @@ buildExe ms = do
             "Source errors encountered. Not attempting to build executables."
           return $ ExitFailure 1
       else do
+        let ghcOpts = "-rtsopts=some"
+                      : (fromMaybe configStaticOpts ghcNewOpts)
+                      ++ extraOpts
         liftIO $ Ex.bracket
           Dir.getCurrentDirectory
           Dir.setCurrentDirectory
           (const $
              do Dir.setCurrentDirectory ideDataDir
-                buildExecutable ideConfig ideSourcesDir ideDistDir (fromMaybe configStaticOpts ghcNewOpts)
+                buildExecutable ideConfig ideSourcesDir ideDistDir ghcOpts
                                 mcomputed callback ms)
     set ideBuildExeStatus (Just exitCode)
 

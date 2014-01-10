@@ -56,8 +56,6 @@ data SessionConfig = SessionConfig {
     -- By default this is the singleton list @[""]@ -- i.e., we include the
     -- sources dir but nothing else.
   , configRelativeIncludes :: [FilePath]
-    -- | Additional GHC options, only applied when building executables.
-  , configExtraBuildExeOptions :: [String]
   }
 
 -- | Default session configuration
@@ -83,7 +81,6 @@ data SessionConfig = SessionConfig {
 -- >   , configDeleteTempFiles  = True
 -- >   , configWarnings         = defaultGhcWarnings
 -- >   , configRelativeIncludes = [""]
--- >   , configBuildExeOptions  = []
 -- >   }
 defaultSessionConfig :: SessionConfig
 defaultSessionConfig = SessionConfig {
@@ -107,5 +104,4 @@ defaultSessionConfig = SessionConfig {
   , configDeleteTempFiles  = True
   , configWarnings         = defaultGhcWarnings
   , configRelativeIncludes = [""]
-  , configExtraBuildExeOptions  = []
   }

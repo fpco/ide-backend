@@ -248,7 +248,7 @@ configureAndBuild :: SessionConfig -> FilePath -> FilePath -> [String]
                   -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
-configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
+configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcOpts
                   pkgs loadedMs callback ms = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
@@ -258,7 +258,6 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         configRelativeIncludes
-      ghcOpts = "-rtsopts=some" : ghcNewOpts ++ configExtraBuildExeOptions
   executables <-
     mapM (exeDesc sourcesDirs [ideSourcesDir] ideDistDir ghcOpts) ms
   callback $ Progress 2 4 Nothing Nothing
@@ -436,10 +435,10 @@ buildExecutable :: SessionConfig -> FilePath -> FilePath -> [String]
                 -> Strict Maybe Computed -> (Progress -> IO ())
                 -> [(ModuleName, FilePath)]
                 -> IO ExitCode
-buildExecutable ideConfig ideSourcesDir ideDistDir ghcNewOpts
+buildExecutable ideConfig ideSourcesDir ideDistDir ghcOpts
                 mcomputed callback ms = do
   (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndBuild ideConfig ideSourcesDir ideDistDir ghcNewOpts
+  configureAndBuild ideConfig ideSourcesDir ideDistDir ghcOpts
                     pkgs loadedMs callback ms
 
 buildHaddock :: SessionConfig -> FilePath -> FilePath -> [String]

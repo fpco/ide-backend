@@ -393,7 +393,7 @@ syntheticTests = [
         distDir <- getDistDir session
 
         let m = "Maybes"
-            upd = buildExe [(Text.pack m, m <.> "lhs")]
+            upd = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd 4
         status1 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status1
@@ -403,7 +403,7 @@ syntheticTests = [
                     out
 
         let m2 = "Exception"
-            upd2 = buildExe [(Text.pack m2, m2 <.> "hs")]
+            upd2 = buildExe [] [(Text.pack m2, m2 <.> "hs")]
         updateSessionD session upd2 4
         out2 <- readProcess (distDir </> "build" </> m2 </> m2) [] []
         assertEqual "Exception exe output"
@@ -411,14 +411,14 @@ syntheticTests = [
                     out2
 
         let m3 = "Main"
-            upd3 = buildExe [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
+            upd3 = buildExe [] [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
         updateSessionD session upd3 4
         out3 <- readProcess (distDir </> "build" </> m3 </> m3) [] []
         assertEqual "Main exe output"
                     ""
                     out3
 
-        let upd4 = buildExe [(Text.pack m, m <.> "lhs")]
+        let upd4 = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd4 4
         status4 <- getBuildExeStatus session
         assertEqual "after all exe builds" (Just ExitSuccess) status4
@@ -483,7 +483,7 @@ syntheticTests = [
         (output, _) <- runWaitAll runActions
         assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
         let m = "Main"
-            upd = buildExe [(Text.pack m, "Main.hs")]
+            upd = buildExe [] [(Text.pack m, "Main.hs")]
         updateSessionD session upd 4
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -508,7 +508,7 @@ syntheticTests = [
         assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
         -- TODO:
         -- let m = "Main"
-        --     upd = buildExe [(Text.pack m, "Main.hs")]
+        --     upd = buildExe [] [(Text.pack m, "Main.hs")]
         -- updateSessionD session upd 4
         -- distDir <- getDistDir session
         -- mOut <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -538,7 +538,7 @@ syntheticTests = [
         (output, _) <- runWaitAll runActions
         assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
         let m = "M"
-            upd = buildExe [(Text.pack m, "M.hs")]
+            upd = buildExe [] [(Text.pack m, "M.hs")]
         updateSessionD session upd 4
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -562,7 +562,7 @@ syntheticTests = [
         (output, _) <- runWaitAll runActions
         assertEqual "result of ifdefed print 5" (BSLC.pack "False\n") output
         let m = "M"
-            upd = buildExe [(Text.pack m, "M.hs")]
+            upd = buildExe [] [(Text.pack m, "M.hs")]
         updateSessionD session upd 4
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -627,7 +627,7 @@ syntheticTests = [
         setCurrentDirectory "../../"
         assertNoErrors session
         let m = "GHC.RTS.Events"
-            upd2 = buildExe [(Text.pack m, "GHC/RTS/Events.hs")]
+            upd2 = buildExe [] [(Text.pack m, "GHC/RTS/Events.hs")]
         updateSessionD session upd2 4
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
@@ -725,7 +725,7 @@ syntheticTests = [
         assertEqual "compare test data"
           "test data\n" (BSLC.unpack output)
         let m = "Main"
-            upd = buildExe [(Text.pack m, "Main.hs")]
+            upd = buildExe [] [(Text.pack m, "Main.hs")]
         updateSessionD session upd 4
         distDir <- getDistDir session
         out <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -766,7 +766,7 @@ syntheticTests = [
         assertNoErrors session
 
         let m = "Main"
-            upd = buildExe [(Text.pack m, "C" <.> "hs")]
+            upd = buildExe [] [(Text.pack m, "C" <.> "hs")]
         updateSessionD session upd 4
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
@@ -790,9 +790,7 @@ syntheticTests = [
         assertEqual "" output (BSLC.pack "(True,43)\n")
     )
   , ( "Build executable from TH"
-    , withSession (withOpts ["-XTemplateHaskell"])
-                   {configExtraBuildExeOptions =
-                      ["-rtsopts=all", "-O0"]} $ \session -> do
+    , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
         setCurrentDirectory "test"
         (originalUpdate, lm) <- getModulesFrom session "TH"
         let update = originalUpdate <> updateCodeGeneration True
@@ -800,7 +798,7 @@ syntheticTests = [
         setCurrentDirectory "../"
         assertNoErrors session
         let m = "TH.TH"
-            upd = buildExe [(Text.pack m, "TH/TH.hs")]
+            upd = buildExe ["-rtsopts=all", "-O0"] [(Text.pack m, "TH/TH.hs")]
         updateSessionD session upd 4
         distDir <- getDistDir session
         out <- readProcess (distDir </> "build" </> m </> m)
@@ -1753,7 +1751,7 @@ syntheticTests = [
               ]
         updateSessionD session upd 3
         let m = "Main"
-            upd2 = buildExe [(Text.pack m, "test/FFI/Main.hs")]
+            upd2 = buildExe [] [(Text.pack m, "test/FFI/Main.hs")]
         updateSessionD session upd2 4
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
@@ -1777,7 +1775,7 @@ syntheticTests = [
         assertNoErrors session
         setCurrentDirectory "../../"
         let m = "Main"
-            upd = buildExe [(Text.pack m, "ParFib.hs")]
+            upd = buildExe [] [(Text.pack m, "ParFib.hs")]
         updateSessionD session upd 4
         distDir <- getDistDir session
         fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -1806,7 +1804,7 @@ syntheticTests = [
         assertNoErrors session
         setCurrentDirectory "../../"
         let m = "Main"
-            upd = buildExe [(Text.pack m, "ParFib.hs")]
+            upd = buildExe [] [(Text.pack m, "ParFib.hs")]
         updateSessionD session upd 4
         distDir <- getDistDir session
         fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -1830,10 +1828,10 @@ syntheticTests = [
         assertNoErrors session
         setCurrentDirectory "../../"
         let m = "ParFib.Main"
-            upd = buildExe [ (Text.pack m, "ParFib.Main.hs")
-                           , (Text.pack "Main", "ParFib.hs") ]
+            upd = buildExe [] [ (Text.pack m, "ParFib.Main.hs")
+                              , (Text.pack "Main", "ParFib.hs") ]
         updateSessionD session upd 4
-        --let upd2 = buildExe [(Text.pack "Main", "ParFib.hs")]
+        --let upd2 = buildExe [] [(Text.pack "Main", "ParFib.hs")]
         --updateSessionD session upd2 4
         distDir <- getDistDir session
         fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -1857,7 +1855,7 @@ syntheticTests = [
         assertNoErrors session
         setCurrentDirectory "../../"
         let m = "Main"
-            upd = buildExe [(Text.pack m, "foooooooooooooooo.hs")]
+            upd = buildExe [] [(Text.pack m, "foooooooooooooooo.hs")]
         status0 <- getBuildExeStatus session
         assertEqual "before exe build" Nothing status0
         updateSessionD session upd 4
@@ -3322,7 +3320,7 @@ syntheticTests = [
         updateSessionD session upd 1
         assertNoErrors session
         let m = "Main"
-            upd2 = buildExe [(Text.pack m, "Main.hs")]
+            upd2 = buildExe [] [(Text.pack m, "Main.hs")]
         updateSessionD session upd2 4
         distDir <- getDistDir session
         out <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -3785,7 +3783,7 @@ syntheticTests = [
             "main = putStrLn \"Version 1\""
         assertNoErrors sess
 
-        update $ buildExe [(Text.pack "Main", "src/Main.hs")]
+        update $ buildExe [] [(Text.pack "Main", "src/Main.hs")]
         out1 <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
         assertEqual "" "Version 1\n" out1
 
@@ -3795,7 +3793,7 @@ syntheticTests = [
             "main = putStrLn \"Version 2\""
         assertNoErrors sess
 
-        update $ buildExe [(Text.pack "Main", "src/Main.hs")]
+        update $ buildExe [] [(Text.pack "Main", "src/Main.hs")]
         out2 <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
         assertEqual "" "Version 2\n" out2
     )
@@ -4955,9 +4953,7 @@ syntheticTests = [
           assertEqual "" (str i) output
     )
   , ( "Support for hs-boot files (#155)"
-    , withSession defaultSessionConfig
-                    {configExtraBuildExeOptions =
-                       ["-rtsopts", "-O1"]} $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateSourceFile "A.hs" $ BSLC.pack $ unlines [
                       "module A where"
@@ -4989,7 +4985,7 @@ syntheticTests = [
         assertNoErrors session
 
         let m = "A"
-            updE = buildExe [(Text.pack m, m <.> "hs")]
+            updE = buildExe ["-rtsopts", "-O1"] [(Text.pack m, m <.> "hs")]
         updateSessionD session updE 4
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
@@ -5033,7 +5029,7 @@ syntheticTests = [
         assertNoErrors session
 
         let m = "A"
-            updE = buildExe [(Text.pack m, m <.> "lhs")]
+            updE = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session updE 4
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
@@ -5090,7 +5086,7 @@ syntheticTests = [
         updateSessionD session upd1 1
         assertOneError session
 
-        let upd2 = buildExe [(Text.pack "Main", "Main.hs")]
+        let upd2 = buildExe [] [(Text.pack "Main", "Main.hs")]
         updateSessionD session upd2 4
 
         distDir <- getDistDir session
