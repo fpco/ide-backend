@@ -1769,6 +1769,107 @@ syntheticTests = [
         checkWarns <- checkPackage pkgDir
         assertCheckWarns checkWarns
     )
+  , ( "Using the FFI with TH and MIN_VERSION_base via buildExe"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateSourceFileFromFile "Main3.hs"
+              , updateSourceFileFromFile "A.hs"
+              , updateSourceFileFromFile "ffiles/life.c"
+              , updateSourceFileFromFile "ffiles/life.h"
+              , updateSourceFileFromFile "ffiles/local.h"
+              ]
+        setCurrentDirectory "test/FFI"
+        updateSessionD session upd 4
+        setCurrentDirectory "../../"
+        assertNoErrors session
+        let m = "Main"
+            upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
+        updateSessionD session upd2 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        _fixme session "#154" $ assertEqual "buildStderr empty" "" buildStderr
+--        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+--        assertEqual "FFI exe output" "84\n" exeOut
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n    ghc-options: -hide-package monads-tf\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.test"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
+    )
+  , ( "Using the FFI with withIncludes, TH and MIN_VERSION_base via buildExe"
+    , withSession (withIncludes "test/FFI") $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateSourceFileFromFile "test/FFI/Main3.hs"
+              , updateSourceFileFromFile "test/FFI/A.hs"
+              , updateSourceFileFromFile "test/FFI/ffiles/life.c"
+              , updateSourceFileFromFile "test/FFI/ffiles/life.h"
+              , updateSourceFileFromFile "test/FFI/ffiles/local.h"
+              ]
+        updateSessionD session upd 4
+        assertNoErrors session
+        let m = "Main"
+            upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
+        updateSessionD session upd2 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        _fixme session "#154" $ assertEqual "buildStderr empty" "" buildStderr
+--        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+--        assertEqual "FFI exe output" "84\n" exeOut
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n    ghc-options: -hide-package monads-tf\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.test"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
+    )
+  , ( "Build executable from 2 TH files"
+    , withSession defaultSessionConfig $ \session -> do
+        let upd = updateCodeGeneration True
+               <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module A where"
+                    , "import Language.Haskell.TH"
+                    , "ex1 :: Q Exp"
+                    , "ex1 = [| \\x -> x |]"
+                    , "ex2 :: Q Type"
+                    , "ex2 = [t| String -> String |]"
+                    , "ex3 :: Q [Dec]"
+                    , "ex3 = [d| foo x = x |]"
+                    ])
+               <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
+                    [ "{-# LANGUAGE TemplateHaskell #-}"
+                    , "module B where"
+                    , "import A"
+                      -- Types and expressions
+                    , "ex5 :: $ex2"
+                    , "ex5 = $ex1"
+                      -- Just to test slightly larger expressions
+                    , "ex6 :: $(return =<< ex2)"
+                    , "ex6 = $(ex1 >>= return)"
+                      -- Declarations
+                    , "$ex3"
+                      -- Outcome
+                    , "main :: IO ()"
+                    , "main = print $ $ex1 42"
+                    ])
+        updateSessionD session upd 2
+        assertNoErrors session
+        let m = "B"
+            upd2 = buildExe [] [(Text.pack m, "B.hs")]
+        updateSessionD session upd2 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+    )
   , ( "Build executable from Main"
     , withSession (withOpts []) $ \session -> do
         setCurrentDirectory "test/MainModule"
@@ -5922,7 +6023,7 @@ knownProblems = [
     -- so the error does not crop up. I don't know if this is true for _all_
     -- errors or just for this particular one (I tried a few but didn't see
     -- filepaths in any of them).
-    ("#32", [GHC742])
+    ("#32", [GHC742]), ("#154", [GHC742, GHC78])
   ]
 
 _fixme :: IdeSession -> String -> IO () -> IO ()
