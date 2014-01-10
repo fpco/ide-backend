@@ -1740,18 +1740,19 @@ syntheticTests = [
           RunOk -> assertEqual "" (BSL8.fromString "42\n") output
           _     -> assertFailure $ "Unexpected run result: " ++ show result
     )
-  , ( "Using the FFI compiled via buildExe"
-    , withSession (withOpts ["-hide-all-packages", "-package base"]  -- do not depend on the GHC API compilatioin success
-                  ) $ \session -> do
+  , ( "Using the FFI from a subdir and compiled via buildExe"
+    , withSession defaultSessionConfig $ \session -> do
         let upd = mconcat [
                 updateCodeGeneration True
-              , updateSourceFileFromFile "test/FFI/Main.hs"
-              , updateSourceFileFromFile "test/FFI/life.c"
-              , updateSourceFileFromFile "test/FFI/life.h"
+              , updateSourceFileFromFile "test/FFI/Main2.hs"
+              , updateSourceFileFromFile "test/FFI/ffiles/life.c"
+              , updateSourceFileFromFile "test/FFI/ffiles/life.h"
+              , updateSourceFileFromFile "test/FFI/ffiles/local.h"
               ]
         updateSessionD session upd 3
+        assertNoErrors session
         let m = "Main"
-            upd2 = buildExe [] [(Text.pack m, "test/FFI/Main.hs")]
+            upd2 = buildExe [] [(Text.pack m, "test/FFI/Main2.hs")]
         updateSessionD session upd2 4
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
@@ -1761,7 +1762,7 @@ syntheticTests = [
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed: True\n    buildable: True\n    c-sources: life.c\n    default-language: Haskell2010\n    install-includes: life.h\n    ghc-options: -hide-all-packages -package base\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed: True\n    buildable: True\n    c-sources: life.c\n    default-language: Haskell2010\n    install-includes: life.h local.h\n    ghc-options: -hide-package monads-tf\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.test"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
