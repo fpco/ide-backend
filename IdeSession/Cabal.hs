@@ -258,7 +258,7 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         configRelativeIncludes
-      ghcOpts = ghcNewOpts ++ configExtraBuildExeOptions
+      ghcOpts = "-rtsopts=some" : ghcNewOpts ++ configExtraBuildExeOptions
   executables <-
     mapM (exeDesc sourcesDirs [ideSourcesDir] ideDistDir ghcOpts) ms
   callback $ Progress 2 4 Nothing Nothing
