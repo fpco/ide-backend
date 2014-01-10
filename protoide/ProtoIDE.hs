@@ -4,7 +4,7 @@ import Graphics.UI.Gtk
 import Data.IORef
 import System.IO.Temp (withSystemTempDirectory)
 import Data.ByteString.Lazy (fromChunks)
-import Control.Monad (void)
+import Control.Monad (void, unless)
 import System.Process
 import Data.Traversable (forM)
 import qualified Data.Text as Text
@@ -82,7 +82,7 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
 
   -- Start IDE session
   let cfg = defaultSessionConfig { configDir = tempDir }
-  ideSession <- initSession cfg
+  ideSession <- initSession defaultSessionInitParams cfg
 
   -- Whenever the buffer changes, reload the module into ghc
   -- TODO: this is overkill..
@@ -137,8 +137,8 @@ main = withSystemTempDirectory "protoide" $ \tempDir -> do
               case idImportSpan of
                 ProperSpan span -> tagSpan span highlight
                 _               -> return ()
-            Local{idDefSpan} ->
-              case idDefSpan of
+            Local ->
+              case idDefSpan $ idProp idInfo of
                 ProperSpan span -> tagSpan span highlight
                 _               -> return ()
             _ ->
