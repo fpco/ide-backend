@@ -258,8 +258,9 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         configRelativeIncludes
+      ghcOpts = ghcNewOpts ++ configExtraBuildExeOptions
   executables <-
-    mapM (exeDesc sourcesDirs [ideSourcesDir] ideDistDir ghcNewOpts) ms
+    mapM (exeDesc sourcesDirs [ideSourcesDir] ideDistDir ghcOpts) ms
   callback $ Progress 2 4 Nothing Nothing
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
@@ -277,7 +278,7 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False sourcesDirs [ideSourcesDir] ghcNewOpts projectMs
+  library <- libDesc False sourcesDirs [ideSourcesDir] ghcOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused

@@ -790,7 +790,9 @@ syntheticTests = [
         assertEqual "" output (BSLC.pack "(True,43)\n")
     )
   , ( "Build executable from TH"
-    , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
+    , withSession (withOpts ["-XTemplateHaskell"])
+                   {configExtraBuildExeOptions =
+                      ["-rtsopts=all", "-O0"]} $ \session -> do
         setCurrentDirectory "test"
         (originalUpdate, lm) <- getModulesFrom session "TH"
         let update = originalUpdate <> updateCodeGeneration True
@@ -801,7 +803,8 @@ syntheticTests = [
             upd = buildExe [(Text.pack m, "TH/TH.hs")]
         updateSessionD session upd 4
         distDir <- getDistDir session
-        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        out <- readProcess (distDir </> "build" </> m </> m)
+                           ["+RTS", "-K4M", "-RTS"] []
         assertEqual "TH.TH exe output"
                     "(True,43)\n"
                     out
@@ -4952,7 +4955,9 @@ syntheticTests = [
           assertEqual "" (str i) output
     )
   , ( "Support for hs-boot files (#155)"
-    , withSession defaultSessionConfig $ \session -> do
+    , withSession defaultSessionConfig
+                    {configExtraBuildExeOptions =
+                       ["-rtsopts", "-O1"]} $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateSourceFile "A.hs" $ BSLC.pack $ unlines [
                       "module A where"
@@ -4991,7 +4996,8 @@ syntheticTests = [
         assertEqual "buildStderr empty" "" buildStderr
         status <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status
-        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        out <- readProcess (distDir </> "build" </> m </> m)
+                           ["+RTS", "-C0.005", "-RTS"] []
         assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
     )
   , ( "Support for lhs-boot files (#155)"
