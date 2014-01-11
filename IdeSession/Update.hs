@@ -841,7 +841,7 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 -- updateSourceFile* mechanism. The modules that contains the @main@ code are
 -- indicated in second argument to @buildExe@. The function can be called
 -- multiple times with different arguments. Additional GHC options,
--- only applied when building executables, are supplied in the first argument.
+-- applied only when building executables, are supplied in the first argument.
 --
 -- We assume any indicated module is already successfully processed by GHC API
 -- in a compilation mode that makes @computedImports@ available (but no code
@@ -853,9 +853,9 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 -- build the exe).
 --
 -- The executable files are placed in the filesystem inside the @build@
--- subdirectory of 'Query.getDistDir', in subdirectories corresponding to the given
--- module names. The build directory does not overlap with any of the other
--- used directories and its path.
+-- subdirectory of 'Query.getDistDir', in subdirectories corresponding
+-- to the given module names. The build directory does not overlap
+-- with any of the other used directories and with its path.
 --
 -- Logs from the building process are saved in files
 -- @build\/ide-backend-exe.stdout@ and @build\/ide-backend-exe.stderr@
@@ -952,6 +952,10 @@ buildDoc = do
 --
 -- Note: currently 'configGenerateModInfo' needs to be set
 -- for this function to work (see #86).
+--
+-- Note: if the executable uses TH and its module is named @Main@
+-- (and so it's not compiled as a part of a temporary library)
+-- 'Config.configDynLink' needs to be set. See #162.
 buildLicenses :: FilePath -> IdeSessionUpdate ()
 buildLicenses cabalsDir = do
     IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo

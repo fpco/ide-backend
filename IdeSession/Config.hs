@@ -29,7 +29,7 @@ data SessionConfig = SessionConfig {
   , configInProcess  :: InProcess
     -- | Whether to generate module type/autocompletion info.
   , configGenerateModInfo :: Bool
-    -- | Dynamically link executables (WIP).
+    -- | Dynamically link executables. Required if the executable uses TH.
   , configDynLink :: Bool
     -- | Package DBs to consult
   , configPackageDBStack :: PackageDBStack

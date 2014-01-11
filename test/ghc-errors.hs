@@ -1770,7 +1770,7 @@ syntheticTests = [
         assertCheckWarns checkWarns
     )
   , ( "Using the FFI with TH and MIN_VERSION_base via buildExe"
-    , withSession defaultSessionConfig $ \session -> do
+    , withSession defaultSessionConfig {configDynLink = True} $ \session -> do
         let upd = mconcat [
                 updateCodeGeneration True
               , updateSourceFileFromFile "Main3.hs"
@@ -1788,9 +1788,9 @@ syntheticTests = [
         updateSessionD session upd2 4
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-        _fixme session "#154" $ assertEqual "buildStderr empty" "" buildStderr
---        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
---        assertEqual "FFI exe output" "84\n" exeOut
+        assertEqual "buildStderr empty" "" buildStderr
+        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "FFI exe output" "84\n" exeOut
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -1802,7 +1802,7 @@ syntheticTests = [
         assertCheckWarns checkWarns
     )
   , ( "Using the FFI with withIncludes, TH and MIN_VERSION_base via buildExe"
-    , withSession (withIncludes "test/FFI") $ \session -> do
+    , withSession (withIncludes "test/FFI") {configDynLink = True} $ \session -> do
         let upd = mconcat [
                 updateCodeGeneration True
               , updateSourceFileFromFile "test/FFI/Main3.hs"
@@ -1818,9 +1818,9 @@ syntheticTests = [
         updateSessionD session upd2 4
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-        _fixme session "#154" $ assertEqual "buildStderr empty" "" buildStderr
---        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
---        assertEqual "FFI exe output" "84\n" exeOut
+        assertEqual "buildStderr empty" "" buildStderr
+        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "FFI exe output" "84\n" exeOut
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -1832,7 +1832,7 @@ syntheticTests = [
         assertCheckWarns checkWarns
     )
   , ( "Build executable from 2 TH files"
-    , withSession defaultSessionConfig $ \session -> do
+    , withSession defaultSessionConfig {configDynLink = True} $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
@@ -1847,7 +1847,7 @@ syntheticTests = [
                     ])
                <> (updateSourceFile "B.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
-                    , "module B where"
+                    , "module Main where"
                     , "import A"
                       -- Types and expressions
                     , "ex5 :: $ex2"
@@ -1863,7 +1863,7 @@ syntheticTests = [
                     ])
         updateSessionD session upd 2
         assertNoErrors session
-        let m = "B"
+        let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "B.hs")]
         updateSessionD session upd2 4
         distDir <- getDistDir session
@@ -6023,7 +6023,7 @@ knownProblems = [
     -- so the error does not crop up. I don't know if this is true for _all_
     -- errors or just for this particular one (I tried a few but didn't see
     -- filepaths in any of them).
-    ("#32", [GHC742]), ("#154", [GHC742, GHC78])
+    ("#32", [GHC742])
   ]
 
 _fixme :: IdeSession -> String -> IO () -> IO ()
