@@ -1770,7 +1770,7 @@ syntheticTests = [
         assertCheckWarns checkWarns
     )
   , ( "Using the FFI with TH and MIN_VERSION_base via buildExe"
-    , withSession defaultSessionConfig {configDynLink = True} $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = mconcat [
                 updateCodeGeneration True
               , updateSourceFileFromFile "Main3.hs"
@@ -1802,7 +1802,7 @@ syntheticTests = [
         assertCheckWarns checkWarns
     )
   , ( "Using the FFI with withIncludes, TH and MIN_VERSION_base via buildExe"
-    , withSession (withIncludes "test/FFI") {configDynLink = True} $ \session -> do
+    , withSession (withIncludes "test/FFI") $ \session -> do
         let upd = mconcat [
                 updateCodeGeneration True
               , updateSourceFileFromFile "test/FFI/Main3.hs"
@@ -1832,7 +1832,7 @@ syntheticTests = [
         assertCheckWarns checkWarns
     )
   , ( "Build executable from 2 TH files"
-    , withSession defaultSessionConfig {configDynLink = True} $ \session -> do
+    , withSession defaultSessionConfig $ \session -> do
         let upd = updateCodeGeneration True
                <> (updateSourceFile "A.hs" . BSLC.pack . unlines $
                     [ "{-# LANGUAGE TemplateHaskell #-}"
@@ -5816,7 +5816,11 @@ filterIdeBackendTest bsLazy =
       (bs1Raw, rest1) = BSSC.breakSubstring (BSSC.pack "hs-source-dirs:") bs
       (bs1, _) = BSSC.spanEnd isSpace bs1Raw
       (_, bs2) = BSSC.breakSubstring (BSSC.pack "\n") rest1
-  in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
+      bs3 = if BSSC.null rest1 then bs else BSSC.append bs1 bs2
+      (bs5Raw, rest5) = BSSC.breakSubstring (BSSC.pack "other-extensions:") bs3
+      (bs5, _) = BSSC.spanEnd isSpace bs5Raw
+      (_, bs6) = BSSC.breakSubstring (BSSC.pack "\n") rest5
+  in if BSSC.null rest5 then bs3 else BSSC.append bs5 bs6
 
 filterIdeBackendTestC :: String -> BSSC.ByteString -> BSSC.ByteString
 filterIdeBackendTestC lastFile bs =
