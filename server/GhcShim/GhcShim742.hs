@@ -17,7 +17,7 @@ module GhcShim.GhcShim742
     -- * Setup
   , ghcGetVersion
   , packageDBFlags
-  , setWarnings
+  , setGhcOptions
     -- * Folding
   , AstAlg(..)
   , fold
@@ -35,6 +35,7 @@ import DataCon
 import DynFlags
 import ErrUtils
 import FastString
+import GHC (setSessionDynFlags)
 import GhcMonad
 import HsBinds
 import HsDecls
@@ -61,7 +62,7 @@ import BreakArray (BreakArray)
 import qualified BreakArray
 
 import GhcShim.API
-import IdeSession.GHC.API (GhcWarnings(..), GhcVersion(..))
+import IdeSession.GHC.API (GhcVersion(..))
 
 {------------------------------------------------------------------------------
   Pretty-printing
@@ -141,18 +142,13 @@ packageDBFlags userDB specificDBs =
      ["-no-user-package-conf" | userDB]
   ++ concat [["-package-conf", db] | db <- specificDBs]
 
-setWarnings :: GhcWarnings -> DynFlags -> DynFlags
-setWarnings (GhcWarnings _warningAMP
-                          warningDeprecatedFlags) =
-      set Opt_WarnDeprecatedFlags warningDeprecatedFlags
-  where
-    set :: WarningFlag -> Maybe Bool -> DynFlags -> DynFlags
-    set _flag Nothing      = leaveAtDefault
-    set  flag (Just True)  = (`wopt_set`   flag)
-    set  flag (Just False) = (`wopt_unset` flag)
-
-    leaveAtDefault :: DynFlags -> DynFlags
-    leaveAtDefault dflags = dflags
+-- | TODO: Make this stateless
+setGhcOptions :: [String] -> Ghc ()
+setGhcOptions opts = do
+  dflags  <- getSessionDynFlags
+  -- TODO: look at errors and warnings
+  (dflags', _, _) <- parseDynamicFilePragma dflags (map noLoc opts)
+  void $ setSessionDynFlags dflags'
 
 {------------------------------------------------------------------------------
   Traversing the AST

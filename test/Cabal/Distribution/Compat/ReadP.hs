@@ -21,6 +21,10 @@
 --
 -----------------------------------------------------------------------------
 
+{-# LANGUAGE CPP #-}
+#if __GLASGOW_HASKELL__ >= 707
+{-# OPTIONS_GHC -fno-warn-amp #-}
+#endif
 module Distribution.Compat.ReadP
   (
   -- * The 'ReadP' type

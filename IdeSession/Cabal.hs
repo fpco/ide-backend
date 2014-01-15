@@ -233,13 +233,12 @@ externalDeps pkgs =
         return $ Just $ Package.Dependency packageN (thisVersion version)
   in liftM catMaybes $ mapM depOfName pkgs
 
-mkConfFlags :: FilePath -> Bool -> PackageDBStack -> [FilePath] -> Setup.ConfigFlags
-mkConfFlags ideDistDir dynlink configPackageDBStack progPathExtra =
+mkConfFlags :: FilePath -> PackageDBStack -> [FilePath] -> Setup.ConfigFlags
+mkConfFlags ideDistDir configPackageDBStack progPathExtra =
   (Setup.defaultConfigFlags (defaultProgramConfiguration progPathExtra))
     { Setup.configDistPref = Setup.Flag ideDistDir
     , Setup.configUserInstall = Setup.Flag False
     , Setup.configVerbosity = Setup.Flag minBound
-    , Setup.configDynExe = Setup.Flag dynlink
       -- @Nothing@ wipes out default, initial DBs.
     , Setup.configPackageDBs = Nothing : map Just configPackageDBStack
     , Setup.configProgramPathExtra = progPathExtra
@@ -287,7 +286,7 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcOpts
         , condTestSuites     = []
         , condBenchmarks     = []
         }
-      confFlags = mkConfFlags ideDistDir configDynLink configPackageDBStack configExtraPathDirs
+      confFlags = mkConfFlags ideDistDir configPackageDBStack configExtraPathDirs
       -- We don't override most build flags, but use configured values.
       buildFlags = Setup.defaultBuildFlags
                      { Setup.buildDistPref = Setup.Flag ideDistDir
@@ -371,7 +370,7 @@ configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
         , condBenchmarks     = []
         }
       confFlags =
-        mkConfFlags ideDistDir False configPackageDBStack configExtraPathDirs
+        mkConfFlags ideDistDir configPackageDBStack configExtraPathDirs
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       haddockFlags = Setup.defaultHaddockFlags

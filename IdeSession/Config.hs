@@ -7,8 +7,6 @@ module IdeSession.Config (
 import Distribution.License (License (..))
 import Distribution.Simple (PackageDB (..), PackageDBStack)
 
-import IdeSession.GHC.API (GhcWarnings, defaultGhcWarnings)
-
 type InProcess = Bool
 
 -- | Configuration parameters for a session. These remain the same throughout
@@ -21,16 +19,11 @@ data SessionConfig = SessionConfig {
     -- and other tools. Note that the @$PATH@ is still searched /first/, these
     -- directories are extra.
   , configExtraPathDirs :: [FilePath]
-    -- | GHC static options. Can also contain default dynamic options,
-    -- that are overridden via session update.
-  , configStaticOpts :: [String]
     -- | Should the GHC client run in-process?
     -- NOTE: This is currently broken. Set to False.
   , configInProcess  :: InProcess
     -- | Whether to generate module type/autocompletion info.
   , configGenerateModInfo :: Bool
-    -- | Dynamically link executables. Required if the executable uses TH.
-  , configDynLink :: Bool
     -- | Package DBs to consult
   , configPackageDBStack :: PackageDBStack
     -- | Packages that don't need the .cabal files provided for license
@@ -48,8 +41,6 @@ data SessionConfig = SessionConfig {
     -- | Delete temporary files when session finishes?
     -- (Defaults to True; mostly for internal debugging purposes)
   , configDeleteTempFiles :: Bool
-    -- | GHC warnings
-  , configWarnings :: GhcWarnings
     -- | Include paths (equivalent of GHC's @-i@ parameter) relative to the
     -- temporary directory where we store the session's source files.
     --
@@ -86,10 +77,8 @@ defaultSessionConfig :: SessionConfig
 defaultSessionConfig = SessionConfig {
     configDir              = "."
   , configExtraPathDirs    = []
-  , configStaticOpts       = []
   , configInProcess        = False
   , configGenerateModInfo  = True
-  , configDynLink          = False
   , configPackageDBStack   = [GlobalPackageDB, UserPackageDB]
     -- ghc-prim, integer-gmp, etc., all have their own licenses specified
     -- in their .cabal files.
@@ -102,6 +91,5 @@ defaultSessionConfig = SessionConfig {
     ]
   , configLog              = const $ return ()
   , configDeleteTempFiles  = True
-  , configWarnings         = defaultGhcWarnings
   , configRelativeIncludes = [""]
   }

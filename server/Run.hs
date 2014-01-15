@@ -447,6 +447,7 @@ importBreakInfo (Just GHC.BreakInfo{..}) names = runMaybeT $ do
 
     -- we ignore the package (because it's always the home package)
     mod = Text.pack . moduleNameString . GHC.moduleName $ breakInfo_module
+importBreakInfo Nothing _names = error "importBreakInfo: missing case"
 
 printVars :: String -> Bool -> Bool -> Ghc Public.VariableEnv
 printVars vars bind forceEval =

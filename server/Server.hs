@@ -13,7 +13,6 @@ import Control.Monad.State (StateT, runStateT)
 import Control.Monad.Trans.Class (lift)
 import Data.Char (isSpace)
 import qualified Data.ByteString as BSS (hGetSome, hPut, null)
-import Data.Monoid ((<>))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.List as List
@@ -63,10 +62,10 @@ ghcServer = rpcServer ghcServerEngine
 ghcServerEngine :: RpcConversation -> IO ()
 ghcServerEngine conv@RpcConversation{..} = do
   -- The initial handshake with the client
-  (configGenerateModInfo, staticOpts, initDynFlags) <- handleInit conv
+  (configGenerateModInfo, initOpts) <- handleInit conv
 
   -- Submit static opts and get back leftover dynamic opts.
-  dOpts <- submitStaticOpts staticOpts
+  dOpts <- submitStaticOpts initOpts
 
   -- Set up references for the current session of Ghc monad computations.
   pluginRef  <- newIORef StrictMap.empty
@@ -86,7 +85,7 @@ ghcServerEngine conv@RpcConversation{..} = do
     -- TODO: options like "-hide-all-packages" or "-package foo"
     -- are suspect as well, even though they work on subsequent invocations
     -- of @updateGhcOptions@, because they nullify and replace cabal commands.
-    flags0         <- initDynFlags `fmap` getSessionDynFlags
+    flags0         <- getSessionDynFlags
     (flags1, _, _) <- parseDynamicFlags flags0 dOpts
     let dynFlags | configGenerateModInfo = flags1 {
           hooks = (hooks flags1) {
@@ -102,9 +101,9 @@ ghcServerEngine conv@RpcConversation{..} = do
     let go args = do
           req <- liftIO get
           args' <- case req of
-            ReqCompile opts dir distDir genCode targets -> do
+            ReqCompile dir distDir genCode targets -> do
               ghcHandleCompile
-                conv opts pluginRef importsRef dir distDir
+                conv pluginRef importsRef dir distDir
                 genCode targets configGenerateModInfo
               return args
             ReqRun runCmd -> do
@@ -124,6 +123,9 @@ ghcServerEngine conv@RpcConversation{..} = do
               return args
             ReqLoad path unload -> do
               ghcHandleLoad conv path unload
+              return args
+            ReqSetGhcOpts opts -> do
+              ghcHandleSetOpts conv opts
               return args
             ReqCrash delay -> do
               ghcHandleCrash delay
@@ -147,7 +149,7 @@ data ModSummary = ModSummary {
   }
 
 -- | Client handshake
-handleInit :: RpcConversation -> IO (Bool, [String], DynFlags -> DynFlags)
+handleInit :: RpcConversation -> IO (Bool, [String])
 handleInit RpcConversation{..} = do
   GhcInitRequest{..} <- get
 
@@ -165,15 +167,13 @@ handleInit RpcConversation{..} = do
 
   -- Setup parameters for the server
   return ( ghcInitGenerateModInfo
-         , ghcInitStaticOpts ++
+         , ghcInitOpts ++
            packageDBFlags ghcInitUserPackageDB ghcInitSpecificPackageDBs
-         , setWarnings ghcInitWarnings
          )
 
 -- | Handle a compile or type check request
 ghcHandleCompile
   :: RpcConversation
-  -> Maybe [String]      -- ^ new, user-submitted dynamic flags
   -> StrictIORef (Strict (Map ModuleName) PluginResult)
                          -- ^ ref where the ExtractIdsT plugin stores its data
                          -- (We clear this at the end of each call)
@@ -185,7 +185,7 @@ ghcHandleCompile
   -> Maybe [FilePath]    -- ^ targets
   -> Bool                -- ^ should we generate per-module info
   -> Ghc ()
-ghcHandleCompile RpcConversation{..} ideNewOpts
+ghcHandleCompile RpcConversation{..}
                  pluginRef modsRef configSourcesDir ideDistDir
                  ideGenerateCode targets configGenerateModInfo = do
     errsRef <- liftIO $ newIORef StrictList.nil
@@ -343,14 +343,13 @@ ghcHandleCompile RpcConversation{..} ideNewOpts
   where
     dynOpts :: DynamicOpts
     dynOpts =
-      let userOpts = maybe [] optsToDynFlags ideNewOpts
-          -- Just in case the user specified -hide-all-packages.
+      let -- Just in case the user specified -hide-all-packages.
           rtsOpts = ["-package ide-backend-rts"]
           -- Include cabal_macros.h.
           cppOpts = [ "-optP-include"
                     , "-optP" ++ cabalMacrosLocation ideDistDir
                     ]
-      in userOpts <> optsToDynFlags (rtsOpts ++ cppOpts)
+      in optsToDynFlags (rtsOpts ++ cppOpts)
 
     -- Let GHC API print "compiling M ... done." for each module.
     verbosity :: Int
@@ -555,6 +554,12 @@ ghcHandleSetEnv :: RpcConversation -> [(String, Maybe String)] -> Ghc ()
 ghcHandleSetEnv RpcConversation{put} env = liftIO $ do
   setupEnv env
   put ()
+
+-- | Set ghc options
+ghcHandleSetOpts :: RpcConversation -> [String] -> Ghc ()
+ghcHandleSetOpts RpcConversation{put} opts = do
+  setGhcOptions opts
+  liftIO $ put ()
 
 -- | Handle a crash request (debugging)
 ghcHandleCrash :: Maybe Int -> Ghc ()

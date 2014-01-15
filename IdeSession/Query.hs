@@ -48,7 +48,6 @@ import Data.Version (Version)
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
-import Data.Maybe (fromMaybe)
 import System.Exit (ExitCode)
 import System.FilePath ((</>))
 import Control.Monad (forM_)
@@ -328,9 +327,8 @@ getDotCabal :: Query (String -> Version -> BSL.ByteString)
 getDotCabal session = withComputedState session
                       $ \idleState computed@Computed{..} -> do
   let sourcesDir = ideSourcesDir $ ideStaticInfo session
-      SessionConfig{configStaticOpts, configRelativeIncludes}
-        = ideConfig $ ideStaticInfo session
-      ghcOpts = fromMaybe configStaticOpts $ _ideNewOpts idleState
+      ghcOpts    = idleState ^. ideGhcOpts
+      SessionConfig{configRelativeIncludes} = ideConfig $ ideStaticInfo session
   buildDotCabal sourcesDir configRelativeIncludes ghcOpts computed
 
 {------------------------------------------------------------------------------

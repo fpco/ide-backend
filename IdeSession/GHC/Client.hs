@@ -21,6 +21,7 @@ module IdeSession.GHC.Client (
   , rpcBreakpoint
   , rpcPrint
   , rpcLoad
+  , rpcSetGhcOpts
   ) where
 
 import Control.Monad (when)
@@ -61,8 +62,10 @@ import Distribution.Simple.Program.Find ( -- From our patched cabal
 ------------------------------------------------------------------------------}
 
 -- | Start the ghc server
-forkGhcServer :: IdeStaticInfo -> IO (Either ExternalException (GhcServer, GhcVersion))
-forkGhcServer IdeStaticInfo{..} = do
+forkGhcServer :: IdeStaticInfo
+              -> [String]
+              -> IO (Either ExternalException (GhcServer, GhcVersion))
+forkGhcServer IdeStaticInfo{..} ghcOpts = do
   when configInProcess $
     fail "In-process ghc server not currently supported"
 
@@ -77,8 +80,7 @@ forkGhcServer IdeStaticInfo{..} = do
         GhcInitResponse{..} <- rpcInit server GhcInitRequest {
             ghcInitClientApiVersion   = ideBackendApiVersion
           , ghcInitGenerateModInfo    = configGenerateModInfo
-          , ghcInitWarnings           = configWarnings
-          , ghcInitStaticOpts         = opts
+          , ghcInitOpts               = opts
           , ghcInitUserPackageDB      = userDB
           , ghcInitSpecificPackageDBs = specificDBs
           }
@@ -88,7 +90,7 @@ forkGhcServer IdeStaticInfo{..} = do
     (userDB, specificDBs) = splitPackageDBStack configPackageDBStack
 
     opts :: [String]
-    opts = configStaticOpts
+    opts = ghcOpts
         ++ map (\path -> "-i" ++ ideSourcesDir </> path) configRelativeIncludes
 
     searchPath :: ProgramSearchPath
@@ -176,20 +178,26 @@ rpcSetArgs :: GhcServer -> [String] -> IO ()
 rpcSetArgs (OutProcess server) args =
   rpc server (ReqSetArgs args)
 rpcSetArgs (InProcess _ _) _ =
-  error "rpcSetArgs not supposed for in-process server"
+  error "rpcSetArgs not supported for in-process server"
+
+-- | Set ghc options
+rpcSetGhcOpts :: GhcServer -> [String] -> IO ()
+rpcSetGhcOpts (OutProcess server) opts =
+  rpc server (ReqSetGhcOpts opts)
+rpcSetGhcOpts (InProcess _ _) _ =
+  error "rpcSetGhcOpts not supported for in-process server"
 
 -- | Compile or typecheck
 rpcCompile :: GhcServer           -- ^ GHC server
-           -> Maybe [String]      -- ^ Options
            -> FilePath            -- ^ Source directory
            -> FilePath            -- ^ Cabal's dist directory
            -> Bool                -- ^ Should we generate code?
            -> Maybe [FilePath]    -- ^ Targets
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO GhcCompileResult
-rpcCompile server opts dir distDir genCode targets callback =
+rpcCompile server dir distDir genCode targets callback =
   conversation server $ \RpcConversation{..} -> do
-    put (ReqCompile opts dir distDir genCode targets)
+    put (ReqCompile dir distDir genCode targets)
 
     let go = do response <- get
                 case response of

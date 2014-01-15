@@ -56,7 +56,6 @@ import Data.Accessor ((.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString.Char8 as BSS
-import Data.Maybe (fromMaybe)
 import Data.Foldable (forM_)
 import qualified System.Directory as Dir
 import System.FilePath (
@@ -109,11 +108,18 @@ data SessionInitParams = SessionInitParams {
     -- | Previously computed cabal macros,
     -- or 'Nothing' to compute them on startup
     sessionInitCabalMacros :: Maybe BSL.ByteString
+
+    -- | Initial ghc options
+    --
+    -- It is useful to set static options here (which would require a server
+    -- restart otherwise)
+  , sessionInitGhcOpts :: [String]
   }
 
 defaultSessionInitParams :: SessionInitParams
 defaultSessionInitParams = SessionInitParams {
     sessionInitCabalMacros = Nothing
+  , sessionInitGhcOpts     = []
   }
 
 -- | Create a fresh session, using some initial configuration.
@@ -121,7 +127,7 @@ defaultSessionInitParams = SessionInitParams {
 -- Throws an exception if the configuration is invalid, or if GHC_PACKAGE_PATH
 -- is set.
 initSession :: SessionInitParams -> SessionConfig -> IO IdeSession
-initSession initParams ideConfig@SessionConfig{..} = do
+initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
   verifyConfig ideConfig
 
   configDirCanon <- Dir.canonicalizePath configDir
@@ -135,7 +141,7 @@ initSession initParams ideConfig@SessionConfig{..} = do
   execInitParams ideStaticInfo initParams
 
   -- Start the GHC server (as a separate process)
-  mServer <- forkGhcServer ideStaticInfo
+  mServer <- forkGhcServer ideStaticInfo sessionInitGhcOpts
   let (state, server, version) = case mServer of
          Right (s, v) -> (IdeSessionIdle,         s,          v)
          Left e       -> (IdeSessionServerDied e, Ex.throw e, Ex.throw e)
@@ -149,7 +155,7 @@ initSession initParams ideConfig@SessionConfig{..} = do
   let idleState = IdeIdleState {
                       _ideLogicalTimestamp = 86400
                     , _ideComputed         = Maybe.nothing
-                    , _ideNewOpts          = Nothing
+                    , _ideGhcOpts          = sessionInitGhcOpts
                     , _ideGenerateCode     = False
                     , _ideManagedFiles     = ManagedFilesInternal [] []
                     , _ideObjectFiles      = []
@@ -160,6 +166,7 @@ initSession initParams ideConfig@SessionConfig{..} = do
                     , _ideArgs             = []
                     , _ideUpdatedEnv       = False
                     , _ideUpdatedArgs      = False -- Server default is []
+                    , _ideUpdatedGhcOpts   = False
                       -- Make sure 'ideComputed' is set on first call
                       -- to updateSession
                     , _ideUpdatedCode      = True
@@ -293,16 +300,17 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
     restart :: IdeIdleState -> IO IdeSessionState
     restart idleState = do
       ignoreAllExceptions $ forceShutdownGhcServer $ _ideGhcServer idleState
-      mServer  <- forkGhcServer ideStaticInfo
+      mServer <- forkGhcServer ideStaticInfo (idleState ^. ideGhcOpts)
       case mServer of
         Right (server, version) ->
           return . IdeSessionIdle
-                 . (ideComputed    ^= Maybe.nothing)
-                 . (ideUpdatedEnv  ^= True)
-                 . (ideUpdatedArgs ^= True)
-                 . (ideUpdatedCode ^= True)
-                 . (ideGhcServer   ^= server)
-                 . (ideGhcVersion  ^= version)
+                 . (ideComputed       ^= Maybe.nothing)
+                 . (ideUpdatedEnv     ^= True)
+                 . (ideUpdatedArgs    ^= True)
+                 . (ideUpdatedCode    ^= True)
+                 . (ideUpdatedGhcOpts ^= False)
+                 . (ideGhcServer      ^= server)
+                 . (ideGhcVersion     ^= version)
                  $ idleState
         Left e ->
           return . IdeSessionServerDied e
@@ -388,11 +396,13 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
           when (idleState' ^. ideUpdatedArgs) $
             rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
 
+          when (idleState' ^. ideUpdatedGhcOpts) $
+            rpcSetGhcOpts (idleState ^. ideGhcServer) (idleState' ^. ideGhcOpts)
+
           -- Recompile
           computed <- if (idleState' ^. ideUpdatedCode)
             then do
               GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
-                                                 (idleState' ^. ideNewOpts)
                                                  (ideSourcesDir ideStaticInfo)
                                                  (ideDistDir    ideStaticInfo)
                                                  (idleState' ^. ideGenerateCode)
@@ -425,10 +435,11 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
 
           -- Update state
           return ( IdeSessionIdle
-                 . (ideComputed    ^= computed)
-                 . (ideUpdatedEnv  ^= False)
-                 . (ideUpdatedCode ^= False)
-                 . (ideUpdatedArgs ^= False)
+                 . (ideComputed       ^= computed)
+                 . (ideUpdatedEnv     ^= False)
+                 . (ideUpdatedCode    ^= False)
+                 . (ideUpdatedArgs    ^= False)
+                 . (ideUpdatedGhcOpts ^= False)
                  $ idleState'
                  , False
                  )
@@ -645,13 +656,12 @@ updateSourceFileDelete m = do
   set (ideManagedFiles .> managedSource .> lookup' m) Nothing
   set ideUpdatedCode True
 
--- | Update dynamic compiler flags, including pragmas and packages to use.
--- Warning: only dynamic flags can be set here.
--- Static flags need to be set at server startup.
-updateGhcOptions :: (Maybe [String]) -> IdeSessionUpdate ()
+-- | Set ghc options
+updateGhcOptions :: [String] -> IdeSessionUpdate ()
 updateGhcOptions opts = do
-  set ideNewOpts opts
-  set ideUpdatedCode True
+  set ideGhcOpts        opts
+  set ideUpdatedGhcOpts True
+  set ideUpdatedCode    True -- In case we need to recompile due to new opts
 
 -- | Enable or disable code generation in addition
 -- to type-checking. Required by 'runStmt'.
@@ -867,8 +877,8 @@ buildExe extraOpts ms = do
     IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
-    ghcNewOpts        <- get ideNewOpts
-    let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
+    sessionOpts       <- get ideGhcOpts
+    let SessionConfig{configGenerateModInfo} = ideConfig
         -- Note that these do not contain the @packageDbArgs@ options.
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
@@ -886,9 +896,7 @@ buildExe extraOpts ms = do
             "Source errors encountered. Not attempting to build executables."
           return $ ExitFailure 1
       else do
-        let ghcOpts = "-rtsopts=some"
-                      : (fromMaybe configStaticOpts ghcNewOpts)
-                      ++ extraOpts
+        let ghcOpts = "-rtsopts=some" : sessionOpts  ++ extraOpts
         liftIO $ Ex.bracket
           Dir.getCurrentDirectory
           Dir.setCurrentDirectory
@@ -914,8 +922,8 @@ buildDoc = do
     IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
-    ghcNewOpts        <- get ideNewOpts
-    let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
+    sessionOpts       <- get ideGhcOpts
+    let SessionConfig{configGenerateModInfo} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
@@ -923,7 +931,7 @@ buildDoc = do
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
-                  buildHaddock ideConfig ideSourcesDir ideDistDir (fromMaybe configStaticOpts ghcNewOpts)
+                  buildHaddock ideConfig ideSourcesDir ideDistDir sessionOpts
                                mcomputed callback)
     set ideBuildDocStatus (Just exitCode)
 

@@ -68,11 +68,14 @@ check opts what configDir = do
   -- Init session.
   let sessionConfig = defaultSessionConfig{
                           configDir
-                        , configStaticOpts = opts
                      -- , configInProcess  = True
                         }
 
-  bracket (initSession defaultSessionInitParams sessionConfig)
+      initParams    = defaultSessionInitParams {
+                          sessionInitGhcOpts = opts
+                        }
+
+  bracket (initSession initParams sessionConfig)
           shutdownSession $ \session -> do
     isFile      <- doesFileExist      what
     isDirectory <- doesDirectoryExist what
