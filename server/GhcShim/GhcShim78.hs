@@ -18,6 +18,7 @@ module GhcShim.GhcShim78
   , ghcGetVersion
   , packageDBFlags
   , setGhcOptions
+  , storeDynFlags
     -- * Folding
   , AstAlg(..)
   , fold
@@ -28,6 +29,8 @@ module GhcShim.GhcShim78
 import Prelude hiding (id, span)
 import Control.Monad (void, forM_, liftM)
 import Data.Time (UTCTime)
+import Data.IORef
+import System.IO.Unsafe (unsafePerformIO)
 
 import Bag
 import BasicTypes
@@ -150,10 +153,124 @@ packageDBFlags userDB specificDBs =
 -- | TODO: Make this stateless
 setGhcOptions :: [String] -> Ghc ()
 setGhcOptions opts = do
-  dflags  <- getSessionDynFlags
+  dflags <- restoreDynFlags
   -- TODO: look at errors and warnings
   (dflags', _, _) <- parseDynamicFilePragma dflags (map noLoc opts)
   void $ setSessionDynFlags dflags'
+
+{------------------------------------------------------------------------------
+  Backup DynFlags
+------------------------------------------------------------------------------}
+
+dynFlagsRef :: IORef DynFlags
+{-# NOINLINE dynFlagsRef #-}
+dynFlagsRef = unsafePerformIO $ newIORef (error "No DynFlags stored yet")
+
+storeDynFlags :: Ghc ()
+storeDynFlags = do
+  dynFlags <- getSessionDynFlags
+  liftIO $ writeIORef dynFlagsRef dynFlags
+
+restoreDynFlags :: Ghc DynFlags
+restoreDynFlags = do
+  storedDynFlags  <- liftIO $ readIORef dynFlagsRef
+  currentDynFlags <- getSessionDynFlags
+  return (currentDynFlags `restoreDynFlagsFrom` storedDynFlags)
+
+-- | Copy over all fields of DynFlags that are affected by dynamic_flags
+-- (and only those)
+restoreDynFlagsFrom :: DynFlags -> DynFlags -> DynFlags
+restoreDynFlagsFrom new old = new {
+    avx                   = avx                   old
+  , avx2                  = avx2                  old
+  , avx512cd              = avx512cd              old
+  , avx512er              = avx512er              old
+  , avx512f               = avx512f               old
+  , avx512pf              = avx512pf              old
+  , cmdlineFrameworks     = cmdlineFrameworks     old
+  , cmdlineHcIncludes     = cmdlineHcIncludes     old
+  , ctxtStkDepth          = ctxtStkDepth          old
+  , depExcludeMods        = depExcludeMods        old
+  , depIncludePkgDeps     = depIncludePkgDeps     old
+  , depMakefile           = depMakefile           old
+  , depSuffixes           = depSuffixes           old
+  , dllSplit              = dllSplit              old
+  , dllSplitFile          = dllSplitFile          old
+  , dumpDir               = dumpDir               old
+  , dumpFlags             = dumpFlags             old
+  , dumpPrefixForce       = dumpPrefixForce       old
+  , dylibInstallName      = dylibInstallName      old
+  , dynHiSuf              = dynHiSuf              old
+  , dynLibLoader          = dynLibLoader          old
+  , dynObjectSuf          = dynObjectSuf          old
+  , dynOutputFile         = dynOutputFile         old
+  , enableTimeStats       = enableTimeStats       old
+  , extensionFlags        = extensionFlags        old
+  , extensions            = extensions            old
+  , floatLamArgs          = floatLamArgs          old
+  , frameworkPaths        = frameworkPaths        old
+  , generalFlags          = generalFlags          old
+  , ghcHeapSize           = ghcHeapSize           old
+  , ghcLink               = ghcLink               old
+  , ghciHistSize          = ghciHistSize          old
+  , ghciScripts           = ghciScripts           old
+  , haddockOptions        = haddockOptions        old
+  , hcSuf                 = hcSuf                 old
+  , hiDir                 = hiDir                 old
+  , hiSuf                 = hiSuf                 old
+  , historySize           = historySize           old
+  , hpcDir                = hpcDir                old
+  , hscTarget             = hscTarget             old
+  , importPaths           = importPaths           old
+  , includePaths          = includePaths          old
+  , interactivePrint      = interactivePrint      old
+  , language              = language              old
+  , ldInputs              = ldInputs              old
+  , liberateCaseThreshold = liberateCaseThreshold old
+  , libraryPaths          = libraryPaths          old
+  , mainFunIs             = mainFunIs             old
+  , mainModIs             = mainModIs             old
+  , maxRelevantBinds      = maxRelevantBinds      old
+  , maxSimplIterations    = maxSimplIterations    old
+  , maxWorkerArgs         = maxWorkerArgs         old
+  , objectDir             = objectDir             old
+  , objectSuf             = objectSuf             old
+  , optLevel              = optLevel              old
+  , outputFile            = outputFile            old
+  , outputHi              = outputHi              old
+  , packageFlags          = packageFlags          old
+  , parMakeCount          = parMakeCount          old
+  , pkgTrustOnLoc         = pkgTrustOnLoc         old
+  , pluginModNameOpts     = pluginModNameOpts     old
+  , pluginModNames        = pluginModNames        old
+  , pprCols               = pprCols               old
+  , pprUserLength         = pprUserLength         old
+  , profAuto              = profAuto              old
+  , rtsOpts               = rtsOpts               old
+  , rtsOptsEnabled        = rtsOptsEnabled        old
+  , ruleCheck             = ruleCheck             old
+  , safeHaskell           = safeHaskell           old
+  , settings              = settings              old
+  , shouldDumpSimplPhase  = shouldDumpSimplPhase  old
+  , simplPhases           = simplPhases           old
+  , simplTickFactor       = simplTickFactor       old
+  , specConstrCount       = specConstrCount       old
+  , specConstrRecursive   = specConstrRecursive   old
+  , specConstrThreshold   = specConstrThreshold   old
+  , sseVersion            = sseVersion            old
+  , strictnessBefore      = strictnessBefore      old
+  , stubDir               = stubDir               old
+  , traceLevel            = traceLevel            old
+  , tyFunStkDepth         = tyFunStkDepth         old
+  , ufCreationThreshold   = ufCreationThreshold   old
+  , ufDictDiscount        = ufDictDiscount        old
+  , ufFunAppDiscount      = ufFunAppDiscount      old
+  , ufKeenessFactor       = ufKeenessFactor       old
+  , ufUseThreshold        = ufUseThreshold        old
+  , verbosity             = verbosity             old
+  , warningFlags          = warningFlags          old
+  , ways                  = ways                  old
+  }
 
 {------------------------------------------------------------------------------
   Traversing the AST

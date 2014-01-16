@@ -17,7 +17,7 @@ module IdeSession.State
     -- * Accessors
   , ideLogicalTimestamp
   , ideComputed
-  , ideGhcOpts
+  , ideDynamicOpts
   , ideGenerateCode
   , ideManagedFiles
   , ideObjectFiles
@@ -123,8 +123,8 @@ data IdeIdleState = IdeIdleState {
     -- | The result computed by the GHC API typing/compilation invocation
     -- in the last call to 'updateSession' invocation.
   , _ideComputed         :: !(Strict Maybe Computed)
-    -- | Additional ghc options
-  , _ideGhcOpts          :: ![String]
+    -- | Dynamic options for GHC
+  , _ideDynamicOpts          :: ![String]
     -- | Whether to generate code in addition to type-checking.
   , _ideGenerateCode     :: !Bool
     -- | Files submitted by the user and not deleted yet.
@@ -157,7 +157,7 @@ data IdeIdleState = IdeIdleState {
   , _ideUpdatedCode      :: !Bool
     -- | Has the value of ideArgs diverged from what's recorded on the server?
   , _ideUpdatedArgs      :: !Bool
-    -- | Has the value of ideGhcOpts diverged from what's recorded on the server?
+    -- | Has the value of ideDynamicOpts diverged from what's recorded on the server?
   , _ideUpdatedGhcOpts   :: !Bool
     -- | Are we currently in a breakpoint?
   , _ideBreakInfo        :: !(Strict Maybe Public.BreakInfo)
@@ -216,7 +216,7 @@ internalFile ideSourcesDir m = ideSourcesDir </> m
 
 ideLogicalTimestamp    :: Accessor IdeIdleState LogicalTimestamp
 ideComputed            :: Accessor IdeIdleState (Strict Maybe Computed)
-ideGhcOpts             :: Accessor IdeIdleState [String]
+ideDynamicOpts         :: Accessor IdeIdleState [String]
 ideGenerateCode        :: Accessor IdeIdleState Bool
 ideManagedFiles        :: Accessor IdeIdleState ManagedFilesInternal
 ideObjectFiles         :: Accessor IdeIdleState ObjectFiles
@@ -238,7 +238,7 @@ ideTargets             :: Accessor IdeIdleState (Maybe [FilePath])
 
 ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
-ideGhcOpts          = accessor _ideGhcOpts          $ \x s -> s { _ideGhcOpts          = x }
+ideDynamicOpts      = accessor _ideDynamicOpts          $ \x s -> s { _ideDynamicOpts          = x }
 ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCode     = x }
 ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }
 ideObjectFiles      = accessor _ideObjectFiles      $ \x s -> s { _ideObjectFiles      = x }

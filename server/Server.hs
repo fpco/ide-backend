@@ -80,11 +80,6 @@ ghcServerEngine conv@RpcConversation{..} = do
     -- this is the only place they could take any effect.
     -- This also implies that any options specifying package DBs
     -- passed via @updateGhcOptions@ won't have any effect in GHC API
-    -- TODO: ban them or at least filter them out from the options
-    -- passed to Cabal in @buildExe@ (where they could have some effect).
-    -- TODO: options like "-hide-all-packages" or "-package foo"
-    -- are suspect as well, even though they work on subsequent invocations
-    -- of @updateGhcOptions@, because they nullify and replace cabal commands.
     flags0         <- getSessionDynFlags
     (flags1, _, _) <- parseDynamicFlags flags0 dOpts
     let dynFlags | configGenerateModInfo = flags1 {
@@ -96,6 +91,10 @@ ghcServerEngine conv@RpcConversation{..} = do
         }
                  | otherwise = flags1
     void $ setSessionDynFlags dynFlags
+
+    -- We store the DynFlags _after_ setting the "static" options, so that
+    -- we restore to this state before every call to updateDynamicOpts
+    storeDynFlags
 
     -- Start handling RPC calls
     let go args = do

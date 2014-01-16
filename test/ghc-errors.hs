@@ -128,8 +128,8 @@ defaultSession = id
 
 withOpts :: [String] -> SessionSetup
 withOpts opts (initParams, config) = (
-    initParams { sessionInitGhcOpts = sessionInitGhcOpts initParams ++ opts }
-  , config
+    initParams
+  , config { configStaticOpts = configStaticOpts config ++ opts }
   )
 
 withIncludes :: FilePath -> SessionSetup
@@ -643,7 +643,7 @@ syntheticTests = [
         loadModulesFrom session "."
         assertMoreErrors session
         let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
-            update2 = updateGhcOptions punOpts
+            update2 = updateDynamicOpts punOpts
         (_, lm) <- getModules session
         updateSessionD session update2 (length lm)
         setCurrentDirectory "../../"
@@ -657,7 +657,7 @@ syntheticTests = [
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0, binary ==0.5.1.0,\n                   bytestring ==0.9.2.1, containers ==0.4.2.1, deepseq ==1.3.0.0,\n                   ghc-prim ==0.2.0.0, integer-gmp ==0.4.0.0, mtl ==2.1.2,\n                   transformers ==0.3.0.0\n    exposed-modules: GHC.RTS.EventParserUtils GHC.RTS.EventTypes\n                     GHC.RTS.Events\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    install-includes: EventLogFormat.h\n    ghc-options: -XNamedFieldPuns -XRecordWildCards\n \n ") $ filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal" (filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0, binary ==0.5.1.0,\n                   bytestring ==0.9.2.1, containers ==0.4.2.1, deepseq ==1.3.0.0,\n                   ghc-prim ==0.2.0.0, integer-gmp ==0.4.0.0, mtl ==2.1.2,\n                   transformers ==0.3.0.0\n    exposed-modules: GHC.RTS.EventParserUtils GHC.RTS.EventTypes\n                     GHC.RTS.Events\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    install-includes: EventLogFormat.h\n    ghc-options: -hide-package monads-tf -XNamedFieldPuns -XRecordWildCards\n \n ") $ filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.test"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -689,7 +689,7 @@ syntheticTests = [
         assertMoreErrors session
         let updL = buildLicenses "test/Puns/cabals/parse_error"
             punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
-            upd = updL <> updateGhcOptions punOpts
+            upd = updL <> updateDynamicOpts punOpts
         updateSessionD session upd 99
         assertNoErrors session
         status <- getBuildLicensesStatus session
@@ -4267,7 +4267,7 @@ syntheticTests = [
         update $ updateCodeGeneration True
         update $ updateStdoutBufferMode (RunLineBuffering Nothing)
         update $ updateStderrBufferMode (RunLineBuffering Nothing)
-        update $ updateGhcOptions ["-Wall", "-Werror"]
+        update $ updateDynamicOpts ["-Wall", "-Werror"]
 
         update $ updateSourceFile "src/Main.hs" $ BSLC.pack $ unlines [
             "module Main where"
@@ -5165,7 +5165,7 @@ syntheticTests = [
     )
   , ( "Dynamically setting/unsetting -Werror (#115)"
     , withSession defaultSession $ \session -> do
-        let upd1 = (updateGhcOptions ["-Wall", "-Werror"])
+        let upd1 = (updateDynamicOpts ["-Wall", "-Werror"])
                 <> (updateSourceFile "src/Main.hs" . BSLC.pack $ unlines [
                        "module Main where"
                      , "main = putStrLn \"Hello 1\""
@@ -5173,9 +5173,10 @@ syntheticTests = [
 
         updateSessionD session upd1 1
         errs1 <- getSourceErrors session
-        assertBool "" $ any (== KindError) $ map errorKind errs1
+        unless (any (== KindError) $ map errorKind errs1) $
+          assertFailure $ "Expected some errors in " ++ show3errors errs1
 
-        let upd2 = (updateGhcOptions ["-Wwarn"])
+        let upd2 = (updateDynamicOpts ["-Wall"])
                 <> (updateSourceFile "src/Main.hs" . BSLC.pack $ unlines [
                        "module Main where"
                      , "main = putStrLn \"Hello 2\""
@@ -5183,12 +5184,13 @@ syntheticTests = [
 
         updateSessionD session upd2 1
         errs2 <- getSourceErrors session
-        assertBool "" $ not $ any (== KindError) $ map errorKind errs2
+        when (any (== KindError) $ map errorKind errs2) $
+          assertFailure $ "Expected only warnings in " ++ show3errors errs2
     )
   , ( "GHC bug #8333 (#145)"
-    , withSession (withOpts ["-XScopedTypeVariables"]) $ \session -> do
+    , withSession defaultSession $ \session -> do
         let upd1 = (updateCodeGeneration True)
-                <> (updateGhcOptions ["-O"])
+                <> (updateDynamicOpts ["-XScopedTypeVariables", "-O"])
                 <> (updateSourceFile "Main.hs" . BSLC.pack $
                      "main = let (x :: String) = \"hello\" in putStrLn x")
         updateSessionD session upd1 1

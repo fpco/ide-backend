@@ -62,10 +62,8 @@ import Distribution.Simple.Program.Find ( -- From our patched cabal
 ------------------------------------------------------------------------------}
 
 -- | Start the ghc server
-forkGhcServer :: IdeStaticInfo
-              -> [String]
-              -> IO (Either ExternalException (GhcServer, GhcVersion))
-forkGhcServer IdeStaticInfo{..} ghcOpts = do
+forkGhcServer :: IdeStaticInfo -> IO (Either ExternalException (GhcServer, GhcVersion))
+forkGhcServer IdeStaticInfo{..} = do
   when configInProcess $
     fail "In-process ghc server not currently supported"
 
@@ -90,7 +88,7 @@ forkGhcServer IdeStaticInfo{..} ghcOpts = do
     (userDB, specificDBs) = splitPackageDBStack configPackageDBStack
 
     opts :: [String]
-    opts = ghcOpts
+    opts = configStaticOpts
         ++ map (\path -> "-i" ++ ideSourcesDir </> path) configRelativeIncludes
 
     searchPath :: ProgramSearchPath

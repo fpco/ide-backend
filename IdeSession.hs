@@ -118,7 +118,7 @@ module IdeSession (
   , updateSourceFile
   , updateSourceFileFromFile
   , updateSourceFileDelete
-  , updateGhcOptions
+  , updateDynamicOpts
   , updateCodeGeneration
   , updateDataFile
   , updateDataFileFromFile

@@ -18,6 +18,7 @@ module GhcShim.GhcShim742
   , ghcGetVersion
   , packageDBFlags
   , setGhcOptions
+  , storeDynFlags
     -- * Folding
   , AstAlg(..)
   , fold
@@ -28,6 +29,8 @@ module GhcShim.GhcShim742
 import Prelude hiding (id, span)
 import Control.Monad (void, forM_, liftM)
 import System.Time (ClockTime)
+import Data.IORef
+import System.IO.Unsafe (unsafePerformIO)
 
 import Bag
 import BasicTypes
@@ -142,13 +145,96 @@ packageDBFlags userDB specificDBs =
      ["-no-user-package-conf" | userDB]
   ++ concat [["-package-conf", db] | db <- specificDBs]
 
--- | TODO: Make this stateless
+-- | Set GHC options
+--
+-- This is meant to be stateless. It is important to call storeDynFlags at least
+-- once before calling setGhcOptions so that we know what state to restore to
+-- before setting the options.
 setGhcOptions :: [String] -> Ghc ()
 setGhcOptions opts = do
-  dflags  <- getSessionDynFlags
+  dflags <- restoreDynFlags
   -- TODO: look at errors and warnings
   (dflags', _, _) <- parseDynamicFilePragma dflags (map noLoc opts)
   void $ setSessionDynFlags dflags'
+
+{------------------------------------------------------------------------------
+  Backup DynFlags
+------------------------------------------------------------------------------}
+
+dynFlagsRef :: IORef DynFlags
+{-# NOINLINE dynFlagsRef #-}
+dynFlagsRef = unsafePerformIO $ newIORef (error "No DynFlags stored yet")
+
+storeDynFlags :: Ghc ()
+storeDynFlags = do
+  dynFlags <- getSessionDynFlags
+  liftIO $ writeIORef dynFlagsRef dynFlags
+
+restoreDynFlags :: Ghc DynFlags
+restoreDynFlags = do
+  storedDynFlags  <- liftIO $ readIORef dynFlagsRef
+  currentDynFlags <- getSessionDynFlags
+  return (currentDynFlags `restoreDynFlagsFrom` storedDynFlags)
+
+-- | Copy over all fields of DynFlags that are affected by dynamic_flags
+-- (and only those)
+restoreDynFlagsFrom :: DynFlags -> DynFlags -> DynFlags
+restoreDynFlagsFrom new old = new {
+    cmdlineFrameworks     = cmdlineFrameworks     old
+  , cmdlineHcIncludes     = cmdlineHcIncludes     old
+  , ctxtStkDepth          = ctxtStkDepth          old
+  , depExcludeMods        = depExcludeMods        old
+  , depIncludePkgDeps     = depIncludePkgDeps     old
+  , depMakefile           = depMakefile           old
+  , depSuffixes           = depSuffixes           old
+  , dumpDir               = dumpDir               old
+  , dumpPrefixForce       = dumpPrefixForce       old
+  , dylibInstallName      = dylibInstallName      old
+  , dynLibLoader          = dynLibLoader          old
+  , extensionFlags        = extensionFlags        old
+  , extensions            = extensions            old
+  , flags                 = flags                 old
+  , floatLamArgs          = floatLamArgs          old
+  , frameworkPaths        = frameworkPaths        old
+  , ghcLink               = ghcLink               old
+  , haddockOptions        = haddockOptions        old
+  , hcSuf                 = hcSuf                 old
+  , hiDir                 = hiDir                 old
+  , hiSuf                 = hiSuf                 old
+  , hpcDir                = hpcDir                old
+  , hscTarget             = hscTarget             old
+  , importPaths           = importPaths           old
+  , includePaths          = includePaths          old
+  , language              = language              old
+  , liberateCaseThreshold = liberateCaseThreshold old
+  , libraryPaths          = libraryPaths          old
+  , mainFunIs             = mainFunIs             old
+  , mainModIs             = mainModIs             old
+  , maxSimplIterations    = maxSimplIterations    old
+  , objectDir             = objectDir             old
+  , objectSuf             = objectSuf             old
+  , optLevel              = optLevel              old
+  , outputFile            = outputFile            old
+  , outputHi              = outputHi              old
+  , pkgTrustOnLoc         = pkgTrustOnLoc         old
+  , pluginModNameOpts     = pluginModNameOpts     old
+  , pluginModNames        = pluginModNames        old
+  , profAuto              = profAuto              old
+  , rtsOpts               = rtsOpts               old
+  , rtsOptsEnabled        = rtsOptsEnabled        old
+  , ruleCheck             = ruleCheck             old
+  , safeHaskell           = safeHaskell           old
+  , settings              = settings              old
+  , shouldDumpSimplPhase  = shouldDumpSimplPhase  old
+  , simplPhases           = simplPhases           old
+  , simplTickFactor       = simplTickFactor       old
+  , specConstrCount       = specConstrCount       old
+  , specConstrThreshold   = specConstrThreshold   old
+  , strictnessBefore      = strictnessBefore      old
+  , stubDir               = stubDir               old
+  , verbosity             = verbosity             old
+  , warningFlags          = warningFlags          old
+  }
 
 {------------------------------------------------------------------------------
   Traversing the AST

@@ -19,6 +19,8 @@ data SessionConfig = SessionConfig {
     -- and other tools. Note that the @$PATH@ is still searched /first/, these
     -- directories are extra.
   , configExtraPathDirs :: [FilePath]
+    -- | Static options for GHC
+  , configStaticOpts :: [String]
     -- | Should the GHC client run in-process?
     -- NOTE: This is currently broken. Set to False.
   , configInProcess  :: InProcess
@@ -77,6 +79,7 @@ defaultSessionConfig :: SessionConfig
 defaultSessionConfig = SessionConfig {
     configDir              = "."
   , configExtraPathDirs    = []
+  , configStaticOpts       = []
   , configInProcess        = False
   , configGenerateModInfo  = True
   , configPackageDBStack   = [GlobalPackageDB, UserPackageDB]

@@ -326,10 +326,12 @@ getUseSites = computedQuery $ \computed@Computed{..} mod span ->
 getDotCabal :: Query (String -> Version -> BSL.ByteString)
 getDotCabal session = withComputedState session
                       $ \idleState computed@Computed{..} -> do
-  let sourcesDir = ideSourcesDir $ ideStaticInfo session
-      ghcOpts    = idleState ^. ideGhcOpts
-      SessionConfig{configRelativeIncludes} = ideConfig $ ideStaticInfo session
-  buildDotCabal sourcesDir configRelativeIncludes ghcOpts computed
+  let sourcesDir  = ideSourcesDir $ ideStaticInfo session
+      dynamicOpts = idleState ^. ideDynamicOpts
+      SessionConfig{configRelativeIncludes, configStaticOpts}
+                  = ideConfig $ ideStaticInfo session
+      options     = configStaticOpts ++ dynamicOpts
+  buildDotCabal sourcesDir configRelativeIncludes options computed
 
 {------------------------------------------------------------------------------
   Debugging

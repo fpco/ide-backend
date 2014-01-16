@@ -15,7 +15,7 @@ module IdeSession.Update (
   , updateSourceFile
   , updateSourceFileFromFile
   , updateSourceFileDelete
-  , updateGhcOptions
+  , updateDynamicOpts
   , updateCodeGeneration
   , updateDataFile
   , updateDataFileFromFile
@@ -108,18 +108,11 @@ data SessionInitParams = SessionInitParams {
     -- | Previously computed cabal macros,
     -- or 'Nothing' to compute them on startup
     sessionInitCabalMacros :: Maybe BSL.ByteString
-
-    -- | Initial ghc options
-    --
-    -- It is useful to set static options here (which would require a server
-    -- restart otherwise)
-  , sessionInitGhcOpts :: [String]
   }
 
 defaultSessionInitParams :: SessionInitParams
 defaultSessionInitParams = SessionInitParams {
     sessionInitCabalMacros = Nothing
-  , sessionInitGhcOpts     = []
   }
 
 -- | Create a fresh session, using some initial configuration.
@@ -141,7 +134,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
   execInitParams ideStaticInfo initParams
 
   -- Start the GHC server (as a separate process)
-  mServer <- forkGhcServer ideStaticInfo sessionInitGhcOpts
+  mServer <- forkGhcServer ideStaticInfo
   let (state, server, version) = case mServer of
          Right (s, v) -> (IdeSessionIdle,         s,          v)
          Left e       -> (IdeSessionServerDied e, Ex.throw e, Ex.throw e)
@@ -155,7 +148,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
   let idleState = IdeIdleState {
                       _ideLogicalTimestamp = 86400
                     , _ideComputed         = Maybe.nothing
-                    , _ideGhcOpts          = sessionInitGhcOpts
+                    , _ideDynamicOpts      = []
                     , _ideGenerateCode     = False
                     , _ideManagedFiles     = ManagedFilesInternal [] []
                     , _ideObjectFiles      = []
@@ -300,7 +293,7 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
     restart :: IdeIdleState -> IO IdeSessionState
     restart idleState = do
       ignoreAllExceptions $ forceShutdownGhcServer $ _ideGhcServer idleState
-      mServer <- forkGhcServer ideStaticInfo (idleState ^. ideGhcOpts)
+      mServer <- forkGhcServer ideStaticInfo
       case mServer of
         Right (server, version) ->
           return . IdeSessionIdle
@@ -308,7 +301,7 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
                  . (ideUpdatedEnv     ^= True)
                  . (ideUpdatedArgs    ^= True)
                  . (ideUpdatedCode    ^= True)
-                 . (ideUpdatedGhcOpts ^= False)
+                 . (ideUpdatedGhcOpts ^= True)
                  . (ideGhcServer      ^= server)
                  . (ideGhcVersion     ^= version)
                  $ idleState
@@ -397,7 +390,7 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
             rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
 
           when (idleState' ^. ideUpdatedGhcOpts) $
-            rpcSetGhcOpts (idleState ^. ideGhcServer) (idleState' ^. ideGhcOpts)
+            rpcSetGhcOpts (idleState ^. ideGhcServer) (idleState' ^. ideDynamicOpts)
 
           -- Recompile
           computed <- if (idleState' ^. ideUpdatedCode)
@@ -656,10 +649,14 @@ updateSourceFileDelete m = do
   set (ideManagedFiles .> managedSource .> lookup' m) Nothing
   set ideUpdatedCode True
 
--- | Set ghc options
-updateGhcOptions :: [String] -> IdeSessionUpdate ()
-updateGhcOptions opts = do
-  set ideGhcOpts        opts
+-- | Set ghc dynamic options
+--
+-- This function is stateless: semantically, the full set of "active" options
+-- are those in 'configStaticOpts' plus whatever options were set in the last
+-- call to updateDynamicOptions.
+updateDynamicOpts :: [String] -> IdeSessionUpdate ()
+updateDynamicOpts opts = do
+  set ideDynamicOpts    opts
   set ideUpdatedGhcOpts True
   set ideUpdatedCode    True -- In case we need to recompile due to new opts
 
@@ -877,8 +874,8 @@ buildExe extraOpts ms = do
     IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
-    sessionOpts       <- get ideGhcOpts
-    let SessionConfig{configGenerateModInfo} = ideConfig
+    dynamicOpts       <- get ideDynamicOpts
+    let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
         -- Note that these do not contain the @packageDbArgs@ options.
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
@@ -896,7 +893,8 @@ buildExe extraOpts ms = do
             "Source errors encountered. Not attempting to build executables."
           return $ ExitFailure 1
       else do
-        let ghcOpts = "-rtsopts=some" : sessionOpts  ++ extraOpts
+        let ghcOpts = "-rtsopts=some"
+                    : configStaticOpts ++ dynamicOpts ++ extraOpts
         liftIO $ Ex.bracket
           Dir.getCurrentDirectory
           Dir.setCurrentDirectory
@@ -922,8 +920,8 @@ buildDoc = do
     IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
-    sessionOpts       <- get ideGhcOpts
-    let SessionConfig{configGenerateModInfo} = ideConfig
+    dynamicOpts       <- get ideDynamicOpts
+    let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
@@ -931,7 +929,8 @@ buildDoc = do
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
-                  buildHaddock ideConfig ideSourcesDir ideDistDir sessionOpts
+                  buildHaddock ideConfig ideSourcesDir ideDistDir
+                               (dynamicOpts ++ configStaticOpts)
                                mcomputed callback)
     set ideBuildDocStatus (Just exitCode)
 
