@@ -32,7 +32,7 @@ Changelog
        ide-backend client library, compiled with a stock ghc, can talk to
        multiple ide-backend-servers (one for ghc 7.4, one for ghc 7.8) (#137,
        #147, #148, #149, #150, #151, #158, ghc #8006, ghc #8067, ghc Hooks
-       proposal).
+       proposal). Setup instructions are included in "setup/SETUP.md".
 
        NOTE: This requires new versions of both ghc 7.4 and ghc 7.8.
 
@@ -110,7 +110,9 @@ Changelog
        change the runStmt API too. This is documented in great detail in a new
        ticket (#153).
 
-     * New functionality: generate Hoogle/Haddock (#70)
+     * New functionality: generate Hoogle/Haddock (#70). Please read
+       the documentation of @buildDoc@, test and suggest improvements. See also
+       https://github.com/fpco/ide-backend/issues/70#issuecomment-32031570
 
      * New functionality: distinguish between KindError and KindServerDied, and
        hide the "internal exception" when showing external exceptions (#135)
@@ -139,18 +141,19 @@ Changelog
 
      * New functionality: support for boot files (#155, #157).
 
-     * New functionality: support C files, both through the API (where
-       ide-backend-server compiles the .c files into .o files and dynamically
-       loads/unloads these object files) and in executable generation (#122).
+     * New functionality: support C files (and .h files), both through
+       the API (where ide-backend-server compiles the .c files
+       into .o files and dynamically loads/unloads these object files)
+       and in executable generation (#122).
 
      * New functionality: specify (as the first argument of buildExe)
        additional arguments for ghc when building executables (#159).
-      
+
      * Bugfix: setting ghc options is now stateless. We still have
 
            configStaticOpts :: [String]
-     
-       as before, which can be used for things like package options, but changed 
+
+       as before, which can be used for things like package options, but changed
 
            updateGhcOptions :: Maybe [String] -> IdeSessionUpdate
 
@@ -165,10 +168,10 @@ Changelog
            updateDynamicOpts ["-Wall", "-Werror"]
 
        and then later
-       
+
            updateDynamicOpts ["-Wall"]
 
-       now does the right thing (#115). 
+       now does the right thing (#115).
 
      * Bugfix: Make sure ID info is updated on code changes (fixed a caching
        problem) (#142)
@@ -188,8 +191,8 @@ Changelog
 
      * Upgraded to Cabal 1.18.1.2 (necessary to support GHC 7.8), and set
        things up so that it generates the necessary dynlibs when using 7.8.
-       Although Cabal 1.18 reports from problems slightly differently to Cabal
-       1.16; ide-backend attempts to hide this difference (#146). There is
+       Although Cabal 1.18 reports problems slightly differently to Cabal
+       1.16, ide-backend attempts to hide this difference (#146). There is
        still a minor problem on OSX when using an in-place compiler due to
        either a bug in ghc or a bug in cabal (#8266); see #164.
 
@@ -207,6 +210,7 @@ Changelog
      * Merged pull requests
 
         - Use binary-ide-backend throughout (#144)
+        - Tweaks to getDotCabal (#141)
 
      * Test-suite modificatons:
 
@@ -218,6 +222,7 @@ Changelog
         - Updated tests to support for 7.4 and 7.8 (mark allowable differences,
           use alpha-equivalence rather than syntactic identity to compare
           types, etc.), and be less picky about package versions
+        - Others, testing most of the features and fixes in this release
 
      * Isolated a bug in sqlite which was causing #104.
 
