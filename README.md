@@ -115,10 +115,6 @@ Changelog
      * New functionality: distinguish between KindError and KindServerDied, and
        hide the "internal exception" when showing external exceptions (#135)
 
-     * New functionality: a new field (configWarnings :: GhcWarnings) in the
-       session config makes it possible to enable/disable certain warnings in
-       a ghc version-independent manner.
-
      * New functionality: allow to set compilation targets (#152)
 
            updateTargets :: Maybe [FilePath] -> IdeSessionUpdate ()
@@ -149,6 +145,30 @@ Changelog
 
      * New functionality: specify (as the first argument of buildExe)
        additional arguments for ghc when building executables (#159).
+      
+     * Bugfix: setting ghc options is now stateless. We still have
+
+           configStaticOpts :: [String]
+     
+       as before, which can be used for things like package options, but changed 
+
+           updateGhcOptions :: Maybe [String] -> IdeSessionUpdate
+
+       to
+
+           updateDynamicOpts :: [String] -> IdeSessionUpdate
+
+       with the following semantics: the full set of active options is those
+       specified in configStaticOpts, plus those (and only those) set in the
+       last call to updateDynamicOpts. In other words, setting
+
+           updateDynamicOpts ["-Wall", "-Werror"]
+
+       and then later
+       
+           updateDynamicOpts ["-Wall"]
+
+       now does the right thing (#115). 
 
      * Bugfix: Make sure ID info is updated on code changes (fixed a caching
        problem) (#142)
@@ -169,7 +189,9 @@ Changelog
      * Upgraded to Cabal 1.18.1.2 (necessary to support GHC 7.8), and set
        things up so that it generates the necessary dynlibs when using 7.8.
        Although Cabal 1.18 reports from problems slightly differently to Cabal
-       1.16; ide-backend attempts to hide this difference (#146).
+       1.16; ide-backend attempts to hide this difference (#146). There is
+       still a minor problem on OSX when using an in-place compiler due to
+       either a bug in ghc or a bug in cabal (#8266); see #164.
 
      * Minor API changes:
 
@@ -200,10 +222,8 @@ Changelog
      * Isolated a bug in sqlite which was causing #104.
 
      * Known issue: tracked #125 down to a bug in the GHC RTS, and reported
-       this (https://ghc.haskell.org/trac/ghc/ticket/8648). There is no fix yet
-       though.
-
-     * Known issue: updateGhcOptions has some problems; detailed in #115.
+       this (#165, https://ghc.haskell.org/trac/ghc/ticket/8648). There is no
+       fix yet though.
 
  *  Version 0.7.1
 
