@@ -96,7 +96,15 @@ test-suite typecheck-dir
   type:               exitcode-stdio-1.0
   main-is:            typecheck-dir.hs
   hs-source-dirs:     test
-  build-depends:      base, ide-backend, temporary, filemanip, directory, time, text
+  build-depends:       base, ide-backend, text, random, utf8-string, bytestring,
+                      unix, process, filemanip, temporary, filepath, directory,
+                      HUnit, test-framework, test-framework-hunit, time,
+                      regex-compat, deepseq, containers,
+                      Cabal-ide-backend,
+-- parallel is only needed for the code of the tests; please do not remove.
+-- Note that under cabal-dev it's still not enough and you need to install
+-- parallel by hand into a regular package DB; similarly for *-mtl.
+                      parallel, MonadCatchIO-mtl, MonadCatchIO-transformers
 
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,
