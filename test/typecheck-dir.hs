@@ -82,10 +82,10 @@ say msg = do
 main :: IO ()
 main = do
     say "Entering main"
-    session <- initSession (SessionInitParams Nothing) defaultSessionConfig
+    session <- initSession (SessionInitParams Nothing) defaultSessionConfig {configDeleteTempFiles = False, configGenerateModInfo = False}
     say "Session initialized"
 
-    forM_ [1..10000] $ \i -> do
+    forM_ [1..600] $ \i -> do
         let (name, contents) = mkFile i
         let update = updateSourceFile name contents
         say $ "applying " ++ show i
