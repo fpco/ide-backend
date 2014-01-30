@@ -396,8 +396,6 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
           computed <- if (idleState' ^. ideUpdatedCode)
             then do
               GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
-                                                 (ideSourcesDir ideStaticInfo)
-                                                 (ideDistDir    ideStaticInfo)
                                                  (idleState' ^. ideGenerateCode)
                                                  (idleState' ^. ideTargets)
                                                  callback'

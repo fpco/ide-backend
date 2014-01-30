@@ -147,22 +147,21 @@ ghandleJust p handler a = ghandle handler' a
                    Just b  -> handler b
 
 compileInGhc :: FilePath            -- ^ target directory
-             -> DynamicOpts         -- ^ dynamic flags for this call
              -> Bool                -- ^ should we generate code
              -> Maybe [FilePath]    -- ^ targets
-             -> Int                 -- ^ verbosity level
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc (Strict [] SourceError, [ModuleName])
-compileInGhc configSourcesDir dynOpts
-             generateCode mTargets verbosity
+compileInGhc configSourcesDir generateCode mTargets
              errsRef handlerOutput handlerRemaining = do
+    -- Let GHC API print "compiling M ... done." for each module.
+    let verbosity :: Int
+        verbosity = 1
     -- Reset errors storage.
     liftIO $ writeIORef errsRef StrictList.nil
     -- Compute new GHC flags.
-    flags0 <- getSessionDynFlags
-    (flags1, _, _) <- parseDynamicFlags flags0 dynOpts
+    flags1 <- getSessionDynFlags
     let (hscTarget, ghcLink) | generateCode = (HscInterpreted, LinkInMemory)
                              | otherwise    = (HscNothing,     NoLink)
         flags = flags1 {

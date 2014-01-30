@@ -25,14 +25,14 @@ data GhcInitRequest = GhcInitRequest {
   , ghcInitOpts               :: [String]
   , ghcInitUserPackageDB      :: Bool
   , ghcInitSpecificPackageDBs :: [String]
+  , ghcInitSourceDir          :: FilePath
+  , ghcInitDistDir            :: FilePath
   }
   deriving (Typeable, Generic)
 
 data GhcRequest
   = ReqCompile {
-        reqCompileSourceDir :: FilePath
-      , reqCompileDistDir   :: FilePath
-      , reqCompileGenCode   :: Bool
+        reqCompileGenCode   :: Bool
       , reqCompileTargets   :: Maybe [FilePath]
       }
   | ReqRun {
@@ -97,8 +97,12 @@ instance Binary GhcInitRequest where
     put ghcInitOpts
     put ghcInitUserPackageDB
     put ghcInitSpecificPackageDBs
+    put ghcInitSourceDir
+    put ghcInitDistDir
 
   get = GhcInitRequest <$> get
+                       <*> get
+                       <*> get
                        <*> get
                        <*> get
                        <*> get
@@ -107,8 +111,6 @@ instance Binary GhcInitRequest where
 instance Binary GhcRequest where
   put ReqCompile{..} = do
     putWord8 0
-    put reqCompileSourceDir
-    put reqCompileDistDir
     put reqCompileGenCode
     put reqCompileTargets
   put ReqRun{..} = do
@@ -144,7 +146,7 @@ instance Binary GhcRequest where
   get = do
     header <- getWord8
     case header of
-      0   -> ReqCompile     <$> get <*> get <*> get <*> get
+      0   -> ReqCompile     <$> get <*> get
       1   -> ReqRun         <$> get
       2   -> ReqSetEnv      <$> get
       3   -> ReqSetArgs     <$> get
