@@ -547,14 +547,12 @@ recompileObjectFiles = do
             -- The object is newer than the C file. Recompilation unnecessary
             return ()
           _ -> do
-            -- TODO: We need to deal with errors in the C code
             delay $ \callback -> do
               callback (compiling fp)
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
               errs <- lift $ do
                 errs <- runGcc configPackageDBStack configExtraPathDirs
                                distDir absC absObj objDir
-                --  errs <- _runGccTest absC absObj
                 when (null errs) $ do
                   ts' <- updateFileTimes absObj
                   set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
