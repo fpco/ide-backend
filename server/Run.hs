@@ -48,7 +48,7 @@ module Run
 
 import Prelude hiding (id, mod, span)
 import qualified Control.Exception as Ex
-import Control.Monad (filterM, liftM, void)
+import Control.Monad (filterM, liftM, void, when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (MaybeT(..))
 import Control.Applicative ((<$>))
@@ -153,24 +153,28 @@ compileInGhc :: FilePath            -- ^ target directory
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
              -> Ghc (Strict [] SourceError, [ModuleName])
 compileInGhc configSourcesDir generateCode mTargets errsRef = do
-    -- Let GHC API print "compiling M ... done." for each module.
-    let verbosity :: Int
-        verbosity = 1
     -- Reset errors storage.
     liftIO $ writeIORef errsRef StrictList.nil
     -- Compute new GHC flags.
     flags1 <- getSessionDynFlags
-    let (hscTarget, ghcLink) | generateCode = (HscInterpreted, LinkInMemory)
-                             | otherwise    = (HscNothing,     NoLink)
+    -- Let GHC API print "compiling M ... done." for each module.
+    let verbosityNew :: Int
+        verbosityNew = 1
+        (hscTargetNew, ghcLinkNew)
+          | generateCode = (HscInterpreted, LinkInMemory)
+          | otherwise    = (HscNothing,     NoLink)
+        flagsNeedChange = hscTargetNew /= hscTarget flags1
+                          || ghcLinkNew /= ghcLink flags1
+                          || verbosityNew /= verbosity flags1
         flags = flags1 {
-                         hscTarget,
-                         ghcLink,
-                         verbosity
+                         hscTarget = hscTargetNew,
+                         ghcLink = ghcLinkNew,
+                         verbosity = verbosityNew
                        }
     handleErrors flags $ do
       defaultCleanupHandler flags $ do
         -- Set up the GHC flags.
-        _ <- setSessionDynFlags flags
+        when flagsNeedChange $ void $ setSessionDynFlags flags
         setTargets =<< computeTargets
         void $ load LoadAllTargets
 
