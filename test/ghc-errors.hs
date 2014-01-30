@@ -5341,13 +5341,13 @@ testPerfMs :: Int
 {-# NOINLINE testPerfMs #-}
 testPerfMs = read $ unsafePerformIO $
   System.Environment.getEnv "IDE_BACKEND_testPerfMs"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "100")
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "200")
 
 testPerfTimes :: Int
 {-# NOINLINE testPerfTimes #-}
 testPerfTimes = read $ unsafePerformIO $
   System.Environment.getEnv "IDE_BACKEND_testPerfTimes"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "100")
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "800")
 
 modAn, modBn, modCn :: String -> IdeSessionUpdate ()
 modAn n = updateSourceFile "A.hs" $ BSLC.pack $ unlines [
