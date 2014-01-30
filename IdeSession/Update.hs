@@ -50,7 +50,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Applicative (Applicative, (<$>), (<*>))
 import qualified Control.Exception as Ex
 import qualified Control.Monad.State as St
-import Data.List (delete, elemIndices)
+import Data.List (elemIndices)
 import Data.Monoid (Monoid(..))
 import Data.Accessor (Accessor, (.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
