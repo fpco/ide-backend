@@ -50,9 +50,9 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Applicative (Applicative, (<$>), (<*>))
 import qualified Control.Exception as Ex
 import qualified Control.Monad.State as St
-import Data.List (delete, elemIndices, intercalate)
+import Data.List (elemIndices, intercalate)
 import Data.Monoid (Monoid(..))
-import Data.Accessor ((.>), (^.), (^=))
+import Data.Accessor (Accessor, (.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString.Char8 as BSS
@@ -60,8 +60,7 @@ import Data.Maybe (fromMaybe)
 import Data.Foldable (forM_)
 import qualified System.Directory as Dir
 import System.FilePath (
-    takeDirectory
-  , makeRelative
+    makeRelative
   , (</>)
   , splitSearchPath
   , searchPathSeparator
@@ -624,43 +623,18 @@ recompileObjectFiles = do
 -- Usually the two names are equal, but they needn't be.
 --
 updateSourceFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
-updateSourceFile m bs = do
-  IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
-  let internal = internalFile ideSourcesDir m
-  old <- get (ideManagedFiles .> managedSource .> lookup' m)
-  -- We always overwrite the file, and then later set the timestamp back
-  -- to what it was if it turns out the hash was the same. If we compute
-  -- the hash first, we would force the entire lazy bytestring into memory
-  newHash <- liftIO $ writeFileAtomic internal bs
-  case old of
-    Just (oldHash, oldTS) | oldHash == newHash ->
-      liftIO $ setFileTimes internal oldTS oldTS
-    _ -> do
-      newTS <- updateFileTimes internal
-      set (ideManagedFiles .> managedSource .> lookup' m) (Just (newHash, newTS))
-      set ideUpdatedCode True
+updateSourceFile = updateFile ideSourcesDir managedSource
 
 -- | Like 'updateSourceFile' except that instead of passing the source by
 -- value, it's given by reference to an existing file, which will be copied.
 --
 updateSourceFileFromFile :: FilePath -> IdeSessionUpdate ()
-updateSourceFileFromFile p = do
-  -- We just call 'updateSourceFile' because we need to read the file anyway
-  -- to compute the hash.
-  bs <- liftIO $ BSL.readFile p
-  updateSourceFile p bs
+updateSourceFileFromFile p = updateFileFromFile ideSourcesDir managedSource p p
 
 -- | A session update that deletes an existing source file.
 --
 updateSourceFileDelete :: FilePath -> IdeSessionUpdate ()
-updateSourceFileDelete m = do
-  IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
-  liftIO $ Dir.removeFile (internalFile ideSourcesDir m)
-      `Ex.catch` \e -> if isDoesNotExistError e
-                       then return ()
-                       else Ex.throwIO e
-  set (ideManagedFiles .> managedSource .> lookup' m) Nothing
-  set ideUpdatedCode True
+updateSourceFileDelete = updateFileDelete ideSourcesDir managedSource
 
 -- | Update dynamic compiler flags, including pragmas and packages to use.
 -- Warning: only dynamic flags can be set here.
@@ -683,37 +657,19 @@ updateCodeGeneration b = do
 -- @ideUpdatedCode@ to force recompilation (see #94).
 --
 updateDataFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
-updateDataFile n bs = do
-  IdeStaticInfo{ideDataDir} <- asks ideSessionUpdateStaticInfo
-  liftIO $ writeFileAtomic (ideDataDir </> n) bs
-  modify (ideManagedFiles .> managedData) (n :)
-  set ideUpdatedCode True
+updateDataFile = updateFile ideDataDir managedData
 
 -- | Like 'updateDataFile' except that instead of passing the file content by
 -- value, it's given by reference to an existing file (the second argument),
 -- which will be copied.
 --
 updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate ()
-updateDataFileFromFile n p = do
-  IdeStaticInfo{ideDataDir} <- asks ideSessionUpdateStaticInfo
-  let targetPath = ideDataDir </> n
-      targetDir  = takeDirectory targetPath
-  liftIO $ Dir.createDirectoryIfMissing True targetDir
-  liftIO $ Dir.copyFile p targetPath
-  modify (ideManagedFiles .> managedData) (n :)
-  set ideUpdatedCode True
+updateDataFileFromFile = updateFileFromFile ideDataDir managedData
 
 -- | A session update that deletes an existing data file.
 --
 updateDataFileDelete :: FilePath -> IdeSessionUpdate ()
-updateDataFileDelete n = do
-  IdeStaticInfo{ideDataDir} <- asks ideSessionUpdateStaticInfo
-  liftIO $ Dir.removeFile (ideDataDir </> n)
-      `Ex.catch` \e -> if isDoesNotExistError e
-                       then return ()
-                       else Ex.throwIO e
-  modify (ideManagedFiles .> managedData) $ delete n
-  set ideUpdatedCode True
+updateDataFileDelete = updateFileDelete ideDataDir managedData
 
 -- | Set an environment variable
 --
@@ -1010,6 +966,8 @@ unloadObject path = do
   liftIO $ rpcLoad ghcServer path True
 
 -- | Force recompilation of the given modules
+--
+-- TODO: Should we update data files here too?
 markAsUpdated :: (FilePath -> Bool) -> IdeSessionUpdate ()
 markAsUpdated shouldMark = do
   IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
@@ -1017,7 +975,7 @@ markAsUpdated shouldMark = do
   sources' <- forM sources $ \(path, (digest, oldTS)) ->
     if shouldMark path
       then do set ideUpdatedCode True
-              newTS <- updateFileTimes (internalFile ideSourcesDir path)
+              newTS <- updateFileTimes (ideSourcesDir </> path)
               return (path, (digest, newTS))
       else return (path, (digest, oldTS))
   set (ideManagedFiles .> managedSource) sources'
@@ -1095,3 +1053,56 @@ modifyIdleState IdeSession{..} act = modifyMVar ideState $ \state -> case state 
 -- | Variaton on 'tell' for the State monad rather than writer monad
 tellSt :: (Monoid w, MonadState w m) => w -> m ()
 tellSt w = St.modify (`mappend` w)
+
+{-------------------------------------------------------------------------------
+  Managed files
+-------------------------------------------------------------------------------}
+
+-- | Generalization of updateSourceFile and updateDataFile
+updateFile :: (IdeStaticInfo -> FilePath)
+           -> Accessor ManagedFilesInternal [ManagedFile]
+           -> FilePath
+           -> BSL.ByteString
+           -> IdeSessionUpdate ()
+updateFile base acc file bs = do
+  staticInfo <- asks ideSessionUpdateStaticInfo
+  let internal = base staticInfo </> file
+  old <- get (ideManagedFiles .> acc .> lookup' file)
+  -- We always overwrite the file, and then later set the timestamp back
+  -- to what it was if it turns out the hash was the same. If we compute
+  -- the hash first, we would force the entire lazy bytestring into memory
+  newHash <- liftIO $ writeFileAtomic internal bs
+  case old of
+    Just (oldHash, oldTS) | oldHash == newHash ->
+      liftIO $ setFileTimes internal oldTS oldTS
+    _ -> do
+      newTS <- updateFileTimes internal
+      set (ideManagedFiles .> acc .> lookup' file) (Just (newHash, newTS))
+      set ideUpdatedCode True
+
+-- | Generalization of updateSourceFileFromFile and updateDataFileFromFile
+updateFileFromFile :: (IdeStaticInfo -> FilePath)
+                   -> Accessor ManagedFilesInternal [ManagedFile]
+                   -> FilePath
+                   -> FilePath
+                   -> IdeSessionUpdate ()
+updateFileFromFile base acc target source = do
+  -- We just call 'updateFile' because we need to read the file anyway to
+  -- compute the hash.
+  bs <- liftIO $ BSL.readFile source
+  updateFile base acc target bs
+
+-- | Generalization of updateSourceFileDelete and updateDataFileDelete
+updateFileDelete :: (IdeStaticInfo -> FilePath)
+                 -> Accessor ManagedFilesInternal [ManagedFile]
+                 -> FilePath
+                 -> IdeSessionUpdate ()
+updateFileDelete base acc file = do
+  staticInfo <- asks ideSessionUpdateStaticInfo
+  let internal = base staticInfo </> file
+  liftIO $ Dir.removeFile (internal)
+      `Ex.catch` \e -> if isDoesNotExistError e
+                       then return ()
+                       else Ex.throwIO e
+  set (ideManagedFiles .> acc .> lookup' file) Nothing
+  set ideUpdatedCode True
