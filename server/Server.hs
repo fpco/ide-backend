@@ -90,15 +90,25 @@ ghcServerEngine conv@RpcConversation{..} = do
                         , "-optP" ++ cabalMacrosLocation distDir
                         ]
           in optsToDynFlags (rtsOpts ++ cppOpts)
-    (flags1, _, _) <- parseDynamicFlags flags0 $ dOpts ++ dynOpts
-    let dynFlags | configGenerateModInfo = flags1 {
-          hooks = (hooks flags1) {
+    (flags05, _, _) <- parseDynamicFlags flags0 $ dOpts ++ dynOpts
+    errsRef <- liftIO $ newIORef StrictList.nil
+    let flags1 | configGenerateModInfo = flags05 {
+          hooks = (hooks flags05) {
               hscFrontendHook   = Just $ runHscPlugin pluginRef stRef
             , runQuasiQuoteHook = Just $ runHscQQ stRef
             , runRnSpliceHook   = Just $ runRnSplice stRef
             }
         }
-                 | otherwise = flags1
+                 | otherwise = flags05
+        dynFlags = flags1
+                       {
+                         GHC.ghcMode    = GHC.CompManager,
+#if __GLASGOW_HASKELL__ >= 706
+                         GHC.log_action = collectSrcError errsRef progressCallback (\_ -> return ()) -- TODO: log?
+#else
+                         GHC.log_action = collectSrcError errsRef progressCallback (\_ -> return ()) dynFlags
+#endif
+                       }
     void $ setSessionDynFlags dynFlags
 
     -- We store the DynFlags _after_ setting the "static" options, so that
@@ -111,7 +121,7 @@ ghcServerEngine conv@RpcConversation{..} = do
           args' <- case req of
             ReqCompile genCode targets -> do
               ghcHandleCompile
-                conv pluginRef importsRef sourceDir
+                conv pluginRef importsRef errsRef sourceDir
                 genCode targets configGenerateModInfo
               return args
             ReqRun runCmd -> do
@@ -141,6 +151,22 @@ ghcServerEngine conv@RpcConversation{..} = do
           go args'
 
     go []
+
+  where
+    progressCallback :: String -> IO ()
+    progressCallback ghcMsg = do
+      let ghcMsg' = Text.pack ghcMsg
+      case parseProgressMessage ghcMsg' of
+        Right (step, numSteps, msg) ->
+          put $ GhcCompileProgress $ Progress {
+               progressStep      = step
+             , progressNumSteps  = numSteps
+             , progressParsedMsg = Just msg
+             , progressOrigMsg   = Just ghcMsg'
+             }
+        _ ->
+          -- Ignore messages we cannot parse
+          return ()
 
 -- | We cache our own "module summaries" in between compile requests
 data ModSummary = ModSummary {
@@ -189,23 +215,21 @@ ghcHandleCompile
                          -- (We clear this at the end of each call)
   -> StrictIORef (Strict (Map ModuleName) ModSummary)
                          -- ^ see doc for 'ModSummary'
+  -> StrictIORef (Strict [] SourceError)
+                         -- ^ the IORef where GHC stores errors
   -> FilePath            -- ^ source directory
   -> Bool                -- ^ should we generate code
   -> Maybe [FilePath]    -- ^ targets
   -> Bool                -- ^ should we generate per-module info
   -> Ghc ()
 ghcHandleCompile RpcConversation{..}
-                 pluginRef modsRef configSourcesDir
+                 pluginRef modsRef errsRef configSourcesDir
                  ideGenerateCode targets configGenerateModInfo = do
-    errsRef <- liftIO $ newIORef StrictList.nil
     (errs, loadedModules) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        ideGenerateCode
                                        targets
                                        errsRef
-                                       progressCallback
-                                       (\_ -> return ()) -- TODO: log?
-
 
     let initialResponse = GhcCompileResult {
             ghcCompileErrors   = errs
@@ -348,21 +372,6 @@ ghcHandleCompile RpcConversation{..}
     -- TODO: Should we clear the link env caches here?
     liftIO $ put (GhcCompileDone fullResponse)
   where
-    progressCallback :: String -> IO ()
-    progressCallback ghcMsg = do
-      let ghcMsg' = Text.pack ghcMsg
-      case parseProgressMessage ghcMsg' of
-        Right (step, numSteps, msg) ->
-          put $ GhcCompileProgress $ Progress {
-               progressStep      = step
-             , progressNumSteps  = numSteps
-             , progressParsedMsg = Just msg
-             , progressOrigMsg   = Just ghcMsg'
-             }
-        _ ->
-          -- Ignore messages we cannot parse
-          return ()
-
     -- Various accessors
     allImports  = accessor ghcCompileImports  (\is st -> st { ghcCompileImports  = is })
     allAuto     = accessor ghcCompileAuto     (\as st -> st { ghcCompileAuto     = as })
