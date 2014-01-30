@@ -114,7 +114,7 @@ getDistDir = staticQuery $ return . ideDistDir
 -- | Read the current value of one of the source modules.
 getSourceModule :: FilePath -> Query BSL.ByteString
 getSourceModule path = staticQuery $ \IdeStaticInfo{ideSourcesDir} ->
-  BSL.readFile $ internalFile ideSourcesDir path
+  BSL.readFile $ ideSourcesDir </> path
 
 -- | Read the current value of one of the data files.
 getDataFile :: FilePath -> Query BSL.ByteString
@@ -164,7 +164,7 @@ getManagedFiles = simpleQuery $ translate . getVal ideManagedFiles
     translate :: ManagedFilesInternal -> ManagedFiles
     translate files = ManagedFiles {
         sourceFiles = map fst $ _managedSource files
-      , dataFiles   = _managedData files
+      , dataFiles   = map fst $ _managedData   files
       }
 
 -- | Get exit status of the last invocation of 'buildExe', if any.
