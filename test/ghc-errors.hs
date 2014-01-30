@@ -5302,13 +5302,14 @@ syntheticTests = [
     )
   , ( "Perf: Update a module testPerfTimes with testPerfMs modules 2"
     , withSession defaultSession $ \session -> do
+        let testPerfMsFixed = 100  -- dependencies force recompilation: slow
         updateSessionD session (updateCodeGeneration True) 1
         let updates = foldr (\n ups -> ups <> updDepKN n n)
                             mempty
-                            [1..testPerfMs]
-        updateSessionD session updates testPerfMs
-        let upd k = updDepKN k (testPerfMs `div` 2)
-        mapM_ (\k -> updateSessionD session (upd k) (1 + testPerfMs `div` 2)) [1..testPerfTimes]
+                            [1..testPerfMsFixed]
+        updateSessionD session updates testPerfMsFixed
+        let upd k = updDepKN k (testPerfMsFixed `div` 2)
+        mapM_ (\k -> updateSessionD session (upd k) (1 + testPerfMsFixed `div` 2)) [1..testPerfTimes]
         assertNoErrors session
     )
   ]
@@ -5341,13 +5342,13 @@ testPerfMs :: Int
 {-# NOINLINE testPerfMs #-}
 testPerfMs = read $ unsafePerformIO $
   System.Environment.getEnv "IDE_BACKEND_testPerfMs"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "100")
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "200")
 
 testPerfTimes :: Int
 {-# NOINLINE testPerfTimes #-}
 testPerfTimes = read $ unsafePerformIO $
   System.Environment.getEnv "IDE_BACKEND_testPerfTimes"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "100")
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "800")
 
 modAn, modBn, modCn :: String -> IdeSessionUpdate ()
 modAn n = updateSourceFile "A.hs" $ BSLC.pack $ unlines [
