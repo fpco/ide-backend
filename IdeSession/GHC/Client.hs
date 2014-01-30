@@ -81,6 +81,8 @@ forkGhcServer IdeStaticInfo{..} = do
           , ghcInitOpts               = opts
           , ghcInitUserPackageDB      = userDB
           , ghcInitSpecificPackageDBs = specificDBs
+          , ghcInitSourceDir          = ideSourcesDir
+          , ghcInitDistDir            = ideDistDir
           }
         return ghcInitVersion
       return ((server,) <$> version)
@@ -187,15 +189,13 @@ rpcSetGhcOpts (InProcess _ _) _ =
 
 -- | Compile or typecheck
 rpcCompile :: GhcServer           -- ^ GHC server
-           -> FilePath            -- ^ Source directory
-           -> FilePath            -- ^ Cabal's dist directory
            -> Bool                -- ^ Should we generate code?
            -> Maybe [FilePath]    -- ^ Targets
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO GhcCompileResult
-rpcCompile server dir distDir genCode targets callback =
+rpcCompile server genCode targets callback =
   conversation server $ \RpcConversation{..} -> do
-    put (ReqCompile dir distDir genCode targets)
+    put (ReqCompile genCode targets)
 
     let go = do response <- get
                 case response of
