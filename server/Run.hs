@@ -23,6 +23,7 @@ module Run
   , ms_mod_name, ms_hs_date
     -- * Processing source files (including compilation)
   , compileInGhc
+  , collectSrcError
   , DynamicOpts
   , submitStaticOpts
   , optsToDynFlags
@@ -150,11 +151,8 @@ compileInGhc :: FilePath            -- ^ target directory
              -> Bool                -- ^ should we generate code
              -> Maybe [FilePath]    -- ^ targets
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
-             -> (String -> IO ())   -- ^ handler for each SevOutput message
-             -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc (Strict [] SourceError, [ModuleName])
-compileInGhc configSourcesDir generateCode mTargets
-             errsRef handlerOutput handlerRemaining = do
+compileInGhc configSourcesDir generateCode mTargets errsRef = do
     -- Let GHC API print "compiling M ... done." for each module.
     let verbosity :: Int
         verbosity = 1
@@ -167,13 +165,7 @@ compileInGhc configSourcesDir generateCode mTargets
         flags = flags1 {
                          hscTarget,
                          ghcLink,
-                         ghcMode    = CompManager,
-                         verbosity,
-#if __GLASGOW_HASKELL__ >= 706
-                         log_action = collectSrcError errsRef handlerOutput handlerRemaining
-#else
-                         log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
-#endif
+                         verbosity
                        }
     handleErrors flags $ do
       defaultCleanupHandler flags $ do
