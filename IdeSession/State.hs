@@ -10,10 +10,9 @@ module IdeSession.State
   , LogicalTimestamp
   , IdeIdleState(..)
   , ManagedFilesInternal(..)
+  , ManagedFile
   , GhcServer(..)
   , RunActions(..)
-    -- * Util
-  , internalFile
     -- * Accessors
   , ideLogicalTimestamp
   , ideComputed
@@ -45,7 +44,6 @@ import Data.Digest.Pure.MD5 (MD5Digest)
 import Data.Accessor (Accessor, accessor)
 import qualified Data.ByteString as BSS
 import System.Exit (ExitCode)
-import System.FilePath ((</>))
 import System.Posix.Types (EpochTime)
 import IdeSession.Types.Private hiding (RunResult)
 import qualified IdeSession.Types.Public as Public
@@ -167,9 +165,11 @@ data IdeIdleState = IdeIdleState {
 
 -- | The collection of source and data files submitted by the user.
 data ManagedFilesInternal = ManagedFilesInternal
-  { _managedSource :: [(FilePath, (MD5Digest, LogicalTimestamp))]
-  , _managedData   :: [FilePath]
+  { _managedSource :: [ManagedFile]
+  , _managedData   :: [ManagedFile]
   }
+
+type ManagedFile = (FilePath, (MD5Digest, LogicalTimestamp))
 
 -- | Mapping from C files to the corresponding .o files and their timestamps
 type ObjectFiles = [(FilePath, (FilePath, LogicalTimestamp))]
@@ -202,13 +202,6 @@ data RunActions a = RunActions {
     -- Guranteed not to block.
   , forceCancel :: IO ()
   }
-
-{------------------------------------------------------------------------------
-  Util
-------------------------------------------------------------------------------}
-
-internalFile :: FilePath -> FilePath -> FilePath
-internalFile ideSourcesDir m = ideSourcesDir </> m
 
 {------------------------------------------------------------------------------
   Accessors
@@ -259,8 +252,8 @@ ideUpdatedGhcOpts   = accessor _ideUpdatedGhcOpts   $ \x s -> s { _ideUpdatedGhc
 ideBreakInfo        = accessor _ideBreakInfo        $ \x s -> s { _ideBreakInfo        = x }
 ideTargets          = accessor _ideTargets          $ \x s -> s { _ideTargets          = x }
 
-managedSource :: Accessor ManagedFilesInternal [(FilePath, (MD5Digest, LogicalTimestamp))]
-managedData   :: Accessor ManagedFilesInternal [FilePath]
+managedSource :: Accessor ManagedFilesInternal [ManagedFile]
+managedData   :: Accessor ManagedFilesInternal [ManagedFile]
 
 managedSource = accessor _managedSource $ \x s -> s { _managedSource = x }
 managedData   = accessor _managedData   $ \x s -> s { _managedData   = x }
