@@ -380,9 +380,13 @@ parseProgressMessage = Att.parseOnly parser
 
     parseCompiling :: Att.Parser Text
     parseCompiling = do
-      compiling <- Att.string (Text.pack "Compiling ")
+      compiling <- Att.string (Text.pack "Compiling") ; Att.skipSpace
+      _         <- parseTH                            ; Att.skipSpace
       modName   <- Att.takeTill isSpace
-      return (Text.append compiling modName)
+      return $ Text.concat [compiling, Text.pack " ", modName]
+
+    parseTH :: Att.Parser ()
+    parseTH = Att.option () $ void $ Att.string (Text.pack "[TH]")
 
 -- | Handle a break request
 ghcHandleBreak :: RpcConversation -> ModuleName -> Public.SourceSpan -> Bool -> Ghc ()
