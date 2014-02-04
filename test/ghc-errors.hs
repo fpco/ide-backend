@@ -4824,7 +4824,149 @@ syntheticTests =
            assertEqual "autocompletion info for C cleared" 0 $
              length (autocomplete (Text.pack "C") "sp")
     )
+  , ( "Perf: Load testPerfMs modules in one call 1"
+    , withSession defaultSessionConfig$ \session -> limitPerfTest $ do
+        updateSessionD session (updateCodeGeneration True) 1
+        let updates = foldr (\n ups -> updKN n n <> ups)
+                            mempty
+                            [1..testPerfMs]
+        updateSessionD session updates testPerfMs
+        assertNoErrors session
+    )
+  , ( "Perf: Load testPerfMs modules in one call 2"
+    , withSession defaultSessionConfig$ \session -> limitPerfTest $ do
+        updateSessionD session (updateCodeGeneration True) 1
+        let updates = foldr (\n ups -> updDepKN n n <> ups)
+                            mempty
+                            [1..testPerfMs]
+        updateSessionD session updates testPerfMs
+        assertNoErrors session
+    )
+  , ( "Perf: Load testPerfMs modules in many calls 1"
+    , withSession defaultSessionConfig$ \session -> limitPerfTest $ do
+        updateSessionD session (updateCodeGeneration True) 1
+        let updates = map (\n -> updKN n n) [1..testPerfMs]
+        mapM (\up -> updateSessionD session up 1) updates
+        assertNoErrors session
+    )
+  , ( "Perf: Load testPerfMs modules in many calls 2"
+    , withSession defaultSessionConfig$ \session -> limitPerfTest $ do
+        updateSessionD session (updateCodeGeneration True) 1
+        let updates = map (\n -> updDepKN n n) [1..testPerfMs]
+        mapM (\up -> updateSessionD session up 1) updates
+        assertNoErrors session
+    )
+  , ( "Perf: Load 4xtestPerfMs modules, each batch in one call 1"
+    , withSession defaultSessionConfig$ \session -> limitPerfTest $ do
+        updateSessionD session (updateCodeGeneration True) 1
+        let updates1 = foldr (\n ups -> updKN n n <> ups)
+                            mempty
+                            [1..testPerfMs]
+        updateSessionD session updates1 testPerfMs
+        let updates2 = foldr (\n ups -> updKN 42 n <> ups)
+                            mempty
+                            [1..testPerfMs]
+        updateSessionD session updates2 testPerfMs
+        updateSessionD session updates1 testPerfMs
+        updateSessionD session updates2 testPerfMs
+        assertNoErrors session
+    )
+  , ( "Perf: Load 4xtestPerfMs modules, each batch in one call 2"
+    , withSession defaultSessionConfig$ \session -> limitPerfTest $ do
+        updateSessionD session (updateCodeGeneration True) 1
+        let updates1 = foldr (\n ups -> updDepKN n n <> ups)
+                            mempty
+                            [1..testPerfMs]
+        updateSessionD session updates1 testPerfMs
+        let updates2 = foldr (\n ups -> updDepKN 42 n <> ups)
+                            mempty
+                            [1..testPerfMs]
+        updateSessionD session updates2 testPerfMs
+        updateSessionD session updates1 testPerfMs
+        updateSessionD session updates2 testPerfMs
+        assertNoErrors session
+    )
+  , ( "Perf: Update a module testPerfTimes with no context 1"
+    , withSession defaultSessionConfig$ \session -> limitPerfTest $ do
+        updateSessionD session (updateCodeGeneration True) 1
+        let upd k = updKN k 1
+        mapM_ (\k -> updateSessionD session (upd k) 1) [1..testPerfTimes]
+        assertNoErrors session
+    )
+  , ( "Perf: Update a module testPerfTimes with no context 2"
+    , withSession defaultSessionConfig$ \session -> limitPerfTest $ do
+        updateSessionD session (updateCodeGeneration True) 1
+        let upd k = updDepKN k 1
+        mapM_ (\k -> updateSessionD session (upd k) 1) [1..testPerfTimes]
+        assertNoErrors session
+    )
+  , ( "Perf: Update a module testPerfTimes with testPerfMs modules 1"
+    , withSession defaultSessionConfig$ \session -> limitPerfTest $ do
+        updateSessionD session (updateCodeGeneration True) 1
+        let updates = foldr (\n ups -> ups <> updKN n n)
+                            mempty
+                            [1..testPerfMs]
+        updateSessionD session updates testPerfMs
+        let upd k = updKN k (testPerfMs `div` 2)
+        mapM_ (\k -> updateSessionD session (upd k) 1) [1..testPerfTimes]
+        assertNoErrors session
+    )
+  , ( "Perf: Update a module testPerfTimes with testPerfMs modules 2"
+    , withSession defaultSessionConfig$ \session -> limitPerfTest $ do
+        let testPerfMsFixed = 100  -- dependencies force recompilation: slow
+        updateSessionD session (updateCodeGeneration True) 1
+        let updates = foldr (\n ups -> ups <> updDepKN n n)
+                            mempty
+                            [1..testPerfMsFixed]
+        updateSessionD session updates testPerfMsFixed
+        let upd k = updDepKN k (testPerfMsFixed `div` 2)
+        mapM_ (\k -> updateSessionD session (upd k) (1 + testPerfMsFixed `div` 2)) [1..testPerfTimes]
+        assertNoErrors session
+    )
   ]
+
+limitPerfTest :: IO () -> IO ()
+limitPerfTest t = do
+  mu <- timeout (3 * 60 * 1000000) t
+  case mu of
+    Nothing -> fail "Performance test did not finish within alotted time"
+    Just () -> return ()
+
+updKN :: Int -> Int -> IdeSessionUpdate ()
+updKN k n =
+  let moduleN = BSLC.pack $ unlines $
+              [ "module M" ++ show n ++ " where"
+              , "import Control.Concurrent (threadDelay)"
+              , "m :: IO ()"
+              , "m = threadDelay " ++ show k ++ " >> m"
+              ]
+  in updateSourceFile ("M" ++ show n ++ ".hs") moduleN
+
+updDepKN :: Int -> Int -> IdeSessionUpdate ()
+updDepKN k n =
+  let depN | n <= 1 = ("System.IO", ".hFlush System.IO.stdout")
+           | otherwise = ("M" ++ show (n - 1), ".m")
+      moduleN = BSLC.pack $ unlines $
+              [ "module M" ++ show n ++ " where"
+              , "import Control.Concurrent (threadDelay)"
+              , "import qualified " ++ fst depN
+              , "m :: IO ()"
+              , "m = threadDelay " ++ show k ++ " >> "
+                ++ fst depN ++ snd depN
+              ]
+  in updateSourceFile ("M" ++ show n ++ ".hs") moduleN
+
+testPerfMs :: Int
+{-# NOINLINE testPerfMs #-}
+testPerfMs = read $ unsafePerformIO $
+  System.Environment.getEnv "IDE_BACKEND_testPerfMs"
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "200")
+
+testPerfTimes :: Int
+{-# NOINLINE testPerfTimes #-}
+testPerfTimes = read $ unsafePerformIO $
+  System.Environment.getEnv "IDE_BACKEND_testPerfTimes"
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "800")
 
 modAn, modBn, modCn :: String -> IdeSessionUpdate ()
 modAn n = updateSourceFile "A.hs" $ BSLC.pack $ unlines [
