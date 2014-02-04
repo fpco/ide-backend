@@ -169,14 +169,12 @@ ghcHandleCompile
 ghcHandleCompile RpcConversation{..} ideNewOpts
                  pluginRef modsRef configSourcesDir ideDistDir
                  ideGenerateCode targets configGenerateModInfo = do
-    errsRef <- liftIO $ newIORef StrictList.nil
     (errs, loadedModules) <-
       suppressGhcStdout $ compileInGhc configSourcesDir
                                        dynOpts
                                        ideGenerateCode
                                        targets
                                        verbosity
-                                       errsRef
                                        progressCallback
                                        (\_ -> return ()) -- TODO: log?
 

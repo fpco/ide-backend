@@ -47,7 +47,7 @@ module Run
 
 import Prelude hiding (id, mod, span)
 import qualified Control.Exception as Ex
-import Control.Monad (filterM, liftM, void)
+import Control.Monad (filterM, liftM, void, when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (MaybeT(..))
 import Control.Applicative ((<$>))
@@ -163,18 +163,40 @@ invalidateModSummaryCache =
 #endif
 #endif
 
+dynOptsRef :: StrictIORef (Maybe DynamicOpts)
+{-# NOINLINE dynOptsRef #-}
+dynOptsRef = unsafePerformIO $ newIORef Nothing
+
+-- Since we don't set log_action on every invocation anymore, it is important
+-- that we only use a single errsRef, rather than creating a new one on
+-- each compile request
+errsRef :: StrictIORef (Strict [] SourceError)
+{-# NOINLINE errsRef #-}
+errsRef = unsafePerformIO $ newIORef StrictList.nil
+
+-- Note that this will return True on the first invocation, and hence we will
+-- initialize the log_action on the first call
+shouldUpdateDynFlags :: DynamicOpts -> DynFlags -> DynFlags -> Ghc Bool
+shouldUpdateDynFlags newDynOpts oldFlags newFlags = liftIO $ do
+  oldDynOpts <- readIORef dynOptsRef
+  writeIORef dynOptsRef $ Just newDynOpts
+  return $ oldDynOpts         /= Just newDynOpts
+        || hscTarget oldFlags /= hscTarget newFlags
+        || ghcLink   oldFlags /= ghcLink   newFlags
+        || ghcMode   oldFlags /= ghcMode   newFlags
+        || verbosity oldFlags /= verbosity oldFlags
+
 compileInGhc :: FilePath            -- ^ target directory
              -> DynamicOpts         -- ^ dynamic flags for this call
              -> Bool                -- ^ should we generate code
              -> Maybe [ModuleName]  -- ^ targets
              -> Int                 -- ^ verbosity level
-             -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
              -> (String -> IO ())   -- ^ handler for each SevOutput message
              -> (String -> IO ())   -- ^ handler for remaining non-error msgs
              -> Ghc (Strict [] SourceError, [ModuleName])
 compileInGhc configSourcesDir dynOpts
              generateCode mTargets verbosity
-             errsRef handlerOutput handlerRemaining = do
+             handlerOutput handlerRemaining = do
     -- Reset errors storage.
     liftIO $ writeIORef errsRef StrictList.nil
     -- Compute new GHC flags.
@@ -188,20 +210,20 @@ compileInGhc configSourcesDir dynOpts
                          ghcMode    = CompManager,
                          verbosity,
 #if __GLASGOW_HASKELL__ >= 706
-                         log_action = collectSrcError errsRef handlerOutput handlerRemaining
+                         log_action = collectSrcError handlerOutput handlerRemaining
 #else
-                         log_action = collectSrcError errsRef handlerOutput handlerRemaining flags
+                         log_action = collectSrcError handlerOutput handlerRemaining flags
 #endif
                        }
     handleErrors flags $ do
       defaultCleanupHandler flags $ do
+        shouldUpdate <- shouldUpdateDynFlags dynOpts flags0 flags
+        when shouldUpdate $ void $ do
         -- Set up the GHC flags.
 #if __GLASGOW_HASKELL__ < 706 || defined(GHC_761)
-        invalidateModSummaryCache
+          invalidateModSummaryCache
 #endif
-        _ <- setSessionDynFlags flags
-        liftIO (print =<< find always ((`elem` hsExtensions) `liftM` extension)
-                              configSourcesDir)
+          setSessionDynFlags flags
         setTargets =<< computeTargets
         void $ load LoadAllTargets
 
@@ -490,12 +512,11 @@ exportVar qual (var, term) = do
 -- Source error conversion and collection
 --
 
-collectSrcError :: StrictIORef (Strict [] SourceError)
-                -> (String -> IO ())
+collectSrcError :: (String -> IO ())
                 -> (String -> IO ())
                 -> DynFlags
                 -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
-collectSrcError errsRef handlerOutput handlerRemaining flags
+collectSrcError handlerOutput handlerRemaining flags
                 severity srcspan style msg = do
   -- Prepare debug prints.
   let showSeverity SevOutput  = "SevOutput"
@@ -515,14 +536,13 @@ collectSrcError errsRef handlerOutput handlerRemaining flags
    ++ "\n"
   -- Actually collect errors.
   collectSrcError'
-    errsRef handlerOutput handlerRemaining flags severity srcspan style msg
+    handlerOutput handlerRemaining flags severity srcspan style msg
 
-collectSrcError' :: StrictIORef (Strict [] SourceError)
-                 -> (String -> IO ())
+collectSrcError' :: (String -> IO ())
                  -> (String -> IO ())
                  -> DynFlags
                  -> Severity -> SrcSpan -> PprStyle -> MsgDoc -> IO ()
-collectSrcError' errsRef _ _ flags severity srcspan style msg
+collectSrcError' _ _ flags severity srcspan style msg
   | Just errKind <- case severity of
                       SevWarning -> Just KindWarning
                       SevError   -> Just KindError
@@ -532,11 +552,11 @@ collectSrcError' errsRef _ _ flags severity srcspan style msg
        sp <- extractSourceSpan srcspan
        modifyIORef errsRef (StrictList.cons $ SourceError errKind sp (Text.pack msgstr))
 
-collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
+collectSrcError' handlerOutput _ flags SevOutput _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in handlerOutput msgstr
 
-collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
+collectSrcError' _ handlerRemaining flags _severity _srcspan style msg
   = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
      in handlerRemaining msgstr
 
