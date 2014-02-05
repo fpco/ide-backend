@@ -5214,7 +5214,7 @@ syntheticTests = [
         assertEqual "" "Source errors encountered. Not attempting to build executables." buildStderr
     )
   , ( "Perf: Load testPerfMs modules in one call 1"
-    , withSession defaultSession $ \session -> do
+    , withSession defaultSession $ \session -> limitPerfTest $ do
         updateSessionD session (updateCodeGeneration True) 1
         let updates = foldr (\n ups -> updKN n n <> ups)
                             mempty
@@ -5223,7 +5223,7 @@ syntheticTests = [
         assertNoErrors session
     )
   , ( "Perf: Load testPerfMs modules in one call 2"
-    , withSession defaultSession $ \session -> do
+    , withSession defaultSession $ \session -> limitPerfTest $ do
         updateSessionD session (updateCodeGeneration True) 1
         let updates = foldr (\n ups -> updDepKN n n <> ups)
                             mempty
@@ -5232,21 +5232,21 @@ syntheticTests = [
         assertNoErrors session
     )
   , ( "Perf: Load testPerfMs modules in many calls 1"
-    , withSession defaultSession $ \session -> do
+    , withSession defaultSession $ \session -> limitPerfTest $ do
         updateSessionD session (updateCodeGeneration True) 1
         let updates = map (\n -> updKN n n) [1..testPerfMs]
         mapM (\up -> updateSessionD session up 1) updates
         assertNoErrors session
     )
   , ( "Perf: Load testPerfMs modules in many calls 2"
-    , withSession defaultSession $ \session -> do
+    , withSession defaultSession $ \session -> limitPerfTest $ do
         updateSessionD session (updateCodeGeneration True) 1
         let updates = map (\n -> updDepKN n n) [1..testPerfMs]
         mapM (\up -> updateSessionD session up 1) updates
         assertNoErrors session
     )
   , ( "Perf: Load 4xtestPerfMs modules, each batch in one call 1"
-    , withSession defaultSession $ \session -> do
+    , withSession defaultSession $ \session -> limitPerfTest $ do
         updateSessionD session (updateCodeGeneration True) 1
         let updates1 = foldr (\n ups -> updKN n n <> ups)
                             mempty
@@ -5261,7 +5261,7 @@ syntheticTests = [
         assertNoErrors session
     )
   , ( "Perf: Load 4xtestPerfMs modules, each batch in one call 2"
-    , withSession defaultSession $ \session -> do
+    , withSession defaultSession $ \session -> limitPerfTest $ do
         updateSessionD session (updateCodeGeneration True) 1
         let updates1 = foldr (\n ups -> updDepKN n n <> ups)
                             mempty
@@ -5276,21 +5276,21 @@ syntheticTests = [
         assertNoErrors session
     )
   , ( "Perf: Update a module testPerfTimes with no context 1"
-    , withSession defaultSession $ \session -> do
+    , withSession defaultSession $ \session -> limitPerfTest $ do
         updateSessionD session (updateCodeGeneration True) 1
         let upd k = updKN k 1
         mapM_ (\k -> updateSessionD session (upd k) 1) [1..testPerfTimes]
         assertNoErrors session
     )
   , ( "Perf: Update a module testPerfTimes with no context 2"
-    , withSession defaultSession $ \session -> do
+    , withSession defaultSession $ \session -> limitPerfTest $ do
         updateSessionD session (updateCodeGeneration True) 1
         let upd k = updDepKN k 1
         mapM_ (\k -> updateSessionD session (upd k) 1) [1..testPerfTimes]
         assertNoErrors session
     )
   , ( "Perf: Update a module testPerfTimes with testPerfMs modules 1"
-    , withSession defaultSession $ \session -> do
+    , withSession defaultSession $ \session -> limitPerfTest $ do
         updateSessionD session (updateCodeGeneration True) 1
         let updates = foldr (\n ups -> ups <> updKN n n)
                             mempty
@@ -5301,7 +5301,7 @@ syntheticTests = [
         assertNoErrors session
     )
   , ( "Perf: Update a module testPerfTimes with testPerfMs modules 2"
-    , withSession defaultSession $ \session -> do
+    , withSession defaultSession $ \session -> limitPerfTest $ do
         let testPerfMsFixed = 100  -- dependencies force recompilation: slow
         updateSessionD session (updateCodeGeneration True) 1
         let updates = foldr (\n ups -> ups <> updDepKN n n)
@@ -5313,6 +5313,31 @@ syntheticTests = [
         assertNoErrors session
     )
   ]
+
+testPerfMs :: Int
+{-# NOINLINE testPerfMs #-}
+testPerfMs = read $ unsafePerformIO $
+  System.Environment.getEnv "IDE_BACKEND_testPerfMs"
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "200")
+
+testPerfTimes :: Int
+{-# NOINLINE testPerfTimes #-}
+testPerfTimes = read $ unsafePerformIO $
+  System.Environment.getEnv "IDE_BACKEND_testPerfTimes"
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "800")
+
+testPerfLimit :: Int
+{-# NOINLINE testPerfLimit #-}
+testPerfLimit = read $ unsafePerformIO $
+  System.Environment.getEnv "IDE_BACKEND_testPerfLimit"
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "180")
+
+limitPerfTest :: IO () -> IO ()
+limitPerfTest t = do
+  mu <- timeout (testPerfLimit * 1000000) t
+  case mu of
+    Nothing -> fail "Performance test did not finish within alotted time"
+    Just () -> return ()
 
 updKN :: Int -> Int -> IdeSessionUpdate ()
 updKN k n =
@@ -5337,18 +5362,6 @@ updDepKN k n =
                 ++ fst depN ++ snd depN
               ]
   in updateSourceFile ("M" ++ show n ++ ".hs") moduleN
-
-testPerfMs :: Int
-{-# NOINLINE testPerfMs #-}
-testPerfMs = read $ unsafePerformIO $
-  System.Environment.getEnv "IDE_BACKEND_testPerfMs"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "200")
-
-testPerfTimes :: Int
-{-# NOINLINE testPerfTimes #-}
-testPerfTimes = read $ unsafePerformIO $
-  System.Environment.getEnv "IDE_BACKEND_testPerfTimes"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "800")
 
 modAn, modBn, modCn :: String -> IdeSessionUpdate ()
 modAn n = updateSourceFile "A.hs" $ BSLC.pack $ unlines [
