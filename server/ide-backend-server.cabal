@@ -65,3 +65,4 @@ executable ide-backend-server
                       -threaded
                       -- use the compacting GC:
                       -with-rtsopts=-c
+                      -with-rtsopts=-I0
