@@ -5302,7 +5302,7 @@ syntheticTests = [
     )
   , ( "Perf: Update a module testPerfTimes with testPerfMs modules 2"
     , withSession defaultSession $ \session -> limitPerfTest $ do
-        let testPerfMsFixed = 100  -- dependencies force recompilation: slow
+        let testPerfMsFixed = 150  -- dependencies force recompilation: slow
         updateSessionD session (updateCodeGeneration True) 1
         let updates = foldr (\n ups -> ups <> updDepKN n n)
                             mempty
@@ -5310,6 +5310,39 @@ syntheticTests = [
         updateSessionD session updates testPerfMsFixed
         let upd k = updDepKN k (testPerfMsFixed `div` 2)
         mapM_ (\k -> updateSessionD session (upd k) (1 + testPerfMsFixed `div` 2)) [1..testPerfTimes]
+        assertNoErrors session
+    )
+  , ( "Perf: Update and run a module testPerfTimes with testPerfMs modules 1"
+    , withSession defaultSession $ \session -> limitPerfTest $ do
+        updateSessionD session (updateCodeGeneration True) 1
+        let updates = foldr (\n ups -> ups <> updKN n n)
+                            mempty
+                            [1..testPerfMs]
+        updateSessionD session updates testPerfMs
+        let upd k = updKN k (testPerfMs `div` 2)
+            mdiv2 = "M" ++ show (testPerfMs `div` 2)
+        mapM_ (\k -> do
+          updateSessionD session (upd k) 1
+          runActions <- runStmt session mdiv2 "m"
+          void $ runWaitAll runActions
+          ) [1..testPerfTimes]
+        assertNoErrors session
+    )
+  , ( "Perf: Update and run a module testPerfTimes with testPerfMs modules 2"
+    , withSession defaultSession $ \session -> limitPerfTest $ do
+        let testPerfMsFixed = 150  -- dependencies force recompilation: slow
+        updateSessionD session (updateCodeGeneration True) 1
+        let updates = foldr (\n ups -> ups <> updDepKN n n)
+                            mempty
+                            [1..testPerfMsFixed]
+        updateSessionD session updates testPerfMsFixed
+        let upd k = updDepKN k (testPerfMsFixed `div` 2)
+            mdiv2 = "M" ++ show (testPerfMsFixed `div` 2)
+        mapM_ (\k -> do
+          updateSessionD session (upd k) (1 + testPerfMsFixed `div` 2)
+          runActions <- runStmt session mdiv2 "m"
+          void $ runWaitAll runActions
+          ) [1..testPerfTimes]
         assertNoErrors session
     )
   ]
@@ -5345,7 +5378,7 @@ updKN k n =
               [ "module M" ++ show n ++ " where"
               , "import Control.Concurrent (threadDelay)"
               , "m :: IO ()"
-              , "m = threadDelay " ++ show k ++ " >> m"
+              , "m = threadDelay " ++ show k
               ]
   in updateSourceFile ("M" ++ show n ++ ".hs") moduleN
 
