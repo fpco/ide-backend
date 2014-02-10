@@ -5477,7 +5477,7 @@ testPerfLimit :: Int
 {-# NOINLINE testPerfLimit #-}
 testPerfLimit = read $ unsafePerformIO $
   System.Environment.getEnv "IDE_BACKEND_testPerfLimit"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "180")
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "240")
 
 limitPerfTest :: IO () -> IO ()
 limitPerfTest t = do
