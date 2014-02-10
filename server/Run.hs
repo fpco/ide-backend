@@ -306,9 +306,6 @@ autocompletion summary = do
 runInGhc :: RunCmd -> Ghc RunResult
 runInGhc cmd = do
   flags <- getSessionDynFlags
-  -- Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
-  -- Set GHC verbosity to avoid stray GHC messages, e.g., from the linker.
-  _ <- setSessionDynFlags (flags { verbosity = 0 })
   defaultCleanupHandler flags . handleErrors $ do
     handleErrors $ do
       runRes <- runCmd cmd
