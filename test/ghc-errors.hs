@@ -4849,6 +4849,8 @@ syntheticTests = [
           ]) 1
         assertNoErrors session
         assertLoadedModules session "" ["A"]
+
+        buildExeTargetHsSucceeds session "A"
     )
   , ( "updateTargets  2: [{} < A, {A} < B, {A} < C], require [A], error in B"
     , withSession defaultSession $ \session -> do
@@ -4860,6 +4862,8 @@ syntheticTests = [
           ]) 1
         assertNoErrors session
         assertLoadedModules session "" ["A"]
+
+        buildExeTargetHsSucceeds session "A"
     )
   , ( "updateTargets  3: [{} < A, {A} < B, {A} < C], require [B]"
     , withSession defaultSession $ \session -> do
@@ -4871,6 +4875,8 @@ syntheticTests = [
           ]) 2
         assertNoErrors session
         assertLoadedModules session "" ["A", "B"]
+
+        buildExeTargetHsSucceeds session "B"
     )
   , ( "updateTargets  4: [{} < A, {A} < B, {A} < C], require [B], error in C"
     , withSession defaultSession $ \session -> do
@@ -4882,6 +4888,8 @@ syntheticTests = [
           ]) 2
         assertNoErrors session
         assertLoadedModules session "" ["A", "B"]
+
+        buildExeTargetHsSucceeds session "B"
     )
   , ( "updateTargets  5: [{} < A, {A} < B, {A} < C], require [A], error in A"
     , withSession defaultSession $ \session -> do
@@ -4893,6 +4901,8 @@ syntheticTests = [
           ]) 1
         assertOneError session
         assertLoadedModules session "" []
+
+        buildExeTargetHsFails session "B"
     )
   , ( "updateTargets  6: [{} < A, {A} < B, {A} < C], require [B], error in A"
     , withSession defaultSession $ \session -> do
@@ -4904,6 +4914,8 @@ syntheticTests = [
           ]) 2
         assertOneError session
         assertLoadedModules session "" []
+
+        buildExeTargetHsFails session "B"
     )
   , ( "updateTargets  7: [{} < A, {A} < B, {A} < C], require [B], error in B"
     , withSession defaultSession $ \session -> do
@@ -4929,6 +4941,8 @@ syntheticTests = [
         autocomplete <- getAutocompletion session
         assertEqual "we have autocompletion info for C" 2 $
           length (autocomplete (Text.pack "C") "sp") -- span, split
+
+        buildExeTargetHsSucceeds session "C"
     )
   , ( "updateTargets  9: [{} < A, {A} < B, {A} < C], require [B, C], then [B]"
     , withSession defaultSession $ \session -> do
@@ -4944,6 +4958,8 @@ syntheticTests = [
            assertEqual "we have autocompletion info for C" 2 $
              length (autocomplete (Text.pack "C") "sp") -- span, split
 
+        buildExeTargetHsSucceeds session "C"
+
         updateSessionD session (mconcat [
             updateTargets (Just ["B.hs"])
           ]) 0
@@ -4951,6 +4967,8 @@ syntheticTests = [
         do autocomplete <- getAutocompletion session
            assertEqual "we still have autocompletion info for C" 2 $
              length (autocomplete (Text.pack "C") "sp") -- span, split
+
+        buildExeTargetHsSucceeds session "B"
     )
   , ( "updateTargets 10: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with modified B"
     , withSession defaultSession $ \session -> do
@@ -4966,6 +4984,8 @@ syntheticTests = [
            assertEqual "we have autocompletion info for C" 2 $
              length (autocomplete (Text.pack "C") "sp") -- span, split
 
+        buildExeTargetHsSucceeds session "C"
+
         updateSessionD session (mconcat [
             modBn "1"
           , updateTargets (Just ["B.hs"])
@@ -4974,6 +4994,8 @@ syntheticTests = [
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
              length (autocomplete (Text.pack "C") "sp")
+
+        buildExeTargetHsSucceeds session "B"
     )
   , ( "updateTargets 11: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with modified B and error in C"
     , withSession defaultSession $ \session -> do
@@ -4998,6 +5020,9 @@ syntheticTests = [
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
              length (autocomplete (Text.pack "C") "sp")
+
+        buildExeTargetHsFails session "C"
+        buildExeTargetHsSucceeds session "B"
     )
   , ( "updateTargets 12: [{} < A, {A} < B, {A} < C], require [B, C], then [B] with error in C"
     , withSession defaultSession $ \session -> do
@@ -5021,6 +5046,9 @@ syntheticTests = [
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
              length (autocomplete (Text.pack "C") "sp")
+
+        buildExeTargetHsFails session "C"
+        buildExeTargetHsSucceeds session "B"
     )
   , ( "Paths in type errors (#32)"
     , withSession defaultSession $ \session -> do
@@ -5462,6 +5490,23 @@ syntheticTests = [
     )
   ]
 
+buildExeTargetHsSucceeds :: IdeSession -> String -> IO ()
+buildExeTargetHsSucceeds session m = do
+  let updE = buildExe [] [(Text.pack m, m <.> "hs")]
+  updateSessionD session updE 4
+  distDir <- getDistDir session
+  buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+  assertEqual "buildStderr empty" "" buildStderr
+  status <- getBuildExeStatus session
+  assertEqual "after exe build" (Just ExitSuccess) status
+
+buildExeTargetHsFails :: IdeSession -> String -> IO ()
+buildExeTargetHsFails session m = do
+  let updE = buildExe [] [(Text.pack m, m <.> "hs")]
+  updateSessionD session updE 4
+  status <- getBuildExeStatus session
+  assertEqual "after exe build" (Just $ ExitFailure 1) status
+
 testPerfMs :: Int
 {-# NOINLINE testPerfMs #-}
 testPerfMs = read $ unsafePerformIO $
@@ -5513,21 +5558,27 @@ updDepKN k n =
 
 modAn, modBn, modCn :: String -> IdeSessionUpdate ()
 modAn n = updateSourceFile "A.hs" $ BSLC.pack $ unlines [
-    "module A (foo) where"
+    "module A (foo, main) where"
   , "foo :: Int"
   , "foo = " ++ n
+  , "main :: IO ()"
+  , "main = return ()"
   ]
 modBn n = updateSourceFile "B.hs" $ BSLC.pack $ unlines [
-    "module B (bar) where"
+    "module B (bar, main) where"
   , "import A (foo)"
   , "bar :: Int"
   , "bar = foo + " ++ n
+  , "main :: IO ()"
+  , "main = return ()"
   ]
 modCn n = updateSourceFile "C.hs" $ BSLC.pack $ unlines [
-    "module C (baz) where"
+    "module C (baz, main) where"
   , "import A (foo)"
   , "baz :: Int"
   , "baz = foo + " ++ n
+  , "main :: IO ()"
+  , "main = return ()"
   ]
 
 qsort :: IdeSessionUpdate ()
