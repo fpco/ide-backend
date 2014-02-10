@@ -5345,12 +5345,119 @@ syntheticTests = [
           ) [1..testPerfTimes]
         assertNoErrors session
     )
-  , ( "Data files leak into compilation if referenced #169"
+  , ( "GHC API expects 'main' to be present in 'Main' (#170)"
+    , withSession defaultSession $ \session -> do
+        let update = updateDataFile "Data/Monoid.hs" (BSLC.pack "module Data.Monoid where\nfoo = doesnotexist")
+                     <> updateSourceFile "Main.hs" (BSLC.pack "module Main where\nimport Data.Monoid\nmain2222 = return ()")
+        updateSessionD session update 2
+        assertOneError session
+    )
+  , ( "buildExe doesn't expect 'Main.main' to be present nor to be in IO (#170)"
     , withSession defaultSession $ \session -> do
         let update = updateDataFile "Data/Monoid.hs" (BSLC.pack "module Data.Monoid where\nfoo = doesnotexist")
                      <> updateSourceFile "Main.hs" (BSLC.pack "module Main where\nimport Data.Monoid\nmain = return ()")
-        updateSession session update $ \p -> putStrLn $ "progress == " ++ show p
+        updateSessionD session update 2
         assertNoErrors session
+        let updE = buildExe [] [(Text.pack "Main", "Main.hs")]
+        updateSessionD session updE 4
+        status <- getBuildExeStatus session
+        assertEqual "buildExe doesn't know 'main' is in IO"
+          (Just $ ExitFailure 1) status
+    )
+  , ( "Data files should not leak into compilation if referenced (#169)"
+    , withSession defaultSession $ \session -> do
+        let update = updateDataFile "Data/Monoid.hs" (BSLC.pack "module Data.Monoid where\nfoo = doesnotexist")
+                     <> updateSourceFile "Main.hs" (BSLC.pack "module Main where\nimport Data.Monoid\nmain = return ()")
+        updateSessionD session update 2
+        assertNoErrors session
+    )
+  , ( "Data files should not leak in exe building (#169)"
+    , withSession defaultSession $ \session -> do
+        let update = updateDataFile "Data/Monoid.hs" (BSLC.pack "module Data.Monoid where\nfoo = doesnotexist")
+                     <> updateSourceFile "Main.hs" (BSLC.pack "module Main where\nimport Data.Monoid\nmain :: IO()\nmain = return ()")
+        updateSessionD session update 2
+        assertNoErrors session
+        let updE = buildExe [] [(Text.pack "Main", "Main.hs")]
+        updateSessionD session updE 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "" "" buildStderr
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+
+        let updDoc = buildDoc
+        updateSessionD session updDoc 4
+        statusDoc <- getBuildDocStatus session
+        assertEqual "after doc build" (Just ExitSuccess) statusDoc
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "main" $ Version [1, 0] []
+        assertEqual "dotCabal from Main" (filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.for.lhs"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "main.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
+    )
+  , ( "Data files should not leak in exe building (#169), with a extra modules"
+    , withSession defaultSession $ \session -> do
+        let update = updateDataFile "Data/Monoid.hs" (BSLC.pack "module Data.Monoid where\nfoo = doesnotexist")
+                     <> updateSourceFile "Main.hs" (BSLC.pack "module Main where\nimport Data.Monoid\nmain :: IO()\nmain = return ()")
+                     <> updateSourceFile "NonMain.hs" (BSLC.pack "module NonMain where\nimport Data.Monoid\nmain :: IO()\nmain = return ()")
+                     <> updateSourceFile "NonMain2.hs" (BSLC.pack "module NonMain2 where\nimport Data.Monoid\nmain :: IO()\nmain = return ()")
+        updateSessionD session update 4
+        assertNoErrors session
+        let updE = buildExe [] [(Text.pack "Main", "Main.hs")]
+        updateSessionD session updE 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "" "" buildStderr
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+
+        let updDoc = buildDoc
+        updateSessionD session updDoc 4
+        statusDoc <- getBuildDocStatus session
+        assertEqual "after doc build" (Just ExitSuccess) statusDoc
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "main" $ Version [1, 0] []
+        assertEqual "dotCabal from Main" (filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: NonMain NonMain2\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.for.lhs"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "main.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
+    )
+  , ( "Data files should not leak in exe building (#169), with a non-'Main' main module"
+    , withSession defaultSession $ \session -> do
+        let update = updateDataFile "Data/Monoid.hs" (BSLC.pack "module Data.Monoid where\nfoo = doesnotexist")
+                     <> updateSourceFile "Main.hs" (BSLC.pack "module Main where\nimport Data.Monoid\nmain :: IO()\nmain = return ()")
+                     <> updateSourceFile "NonMain.hs" (BSLC.pack "module NonMain where\nimport Data.Monoid\nmain :: IO()\nmain = return ()")
+                     <> updateSourceFile "NonMain2.hs" (BSLC.pack "module NonMain2 where\nimport Data.Monoid\nmain :: IO()\nmain = return ()")
+        updateSessionD session update 4
+        assertNoErrors session
+        let updE = buildExe [] [(Text.pack "NonMain", "NonMain.hs")]
+        updateSessionD session updE 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "" "" buildStderr
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+
+        let updDoc = buildDoc
+        updateSessionD session updDoc 4
+        statusDoc <- getBuildDocStatus session
+        assertEqual "after doc build" (Just ExitSuccess) statusDoc
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "main" $ Version [1, 0] []
+        assertEqual "dotCabal from Main" (filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: NonMain NonMain2\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.for.lhs"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "main.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
     )
   ]
 
