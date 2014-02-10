@@ -5345,6 +5345,13 @@ syntheticTests = [
           ) [1..testPerfTimes]
         assertNoErrors session
     )
+  , ( "Data files leak into compilation if referenced #169"
+    , withSession defaultSession $ \session -> do
+        let update = updateDataFile "Data/Monoid.hs" (BSLC.pack "module Data.Monoid where\nfoo = doesnotexist")
+                     <> updateSourceFile "Main.hs" (BSLC.pack "module Main where\nimport Data.Monoid\nmain = return ()")
+        updateSession session update $ \p -> putStrLn $ "progress == " ++ show p
+        assertNoErrors session
+    )
   ]
 
 testPerfMs :: Int

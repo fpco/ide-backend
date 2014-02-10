@@ -90,7 +90,7 @@ forkGhcServer IdeStaticInfo{..} = do
     (userDB, specificDBs) = splitPackageDBStack configPackageDBStack
 
     opts :: [String]
-    opts = configStaticOpts
+    opts = configStaticOpts ++ ["-i"]
         ++ map (\path -> "-i" ++ ideSourcesDir </> path) configRelativeIncludes
 
     searchPath :: ProgramSearchPath
