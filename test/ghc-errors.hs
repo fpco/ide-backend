@@ -5302,7 +5302,7 @@ syntheticTests = [
     )
   , ( "Perf: Update a module testPerfTimes with testPerfMs modules 2"
     , withSession defaultSession $ \session -> limitPerfTest $ do
-        let testPerfMsFixed = 150  -- dependencies force recompilation: slow
+        let testPerfMsFixed = 50  -- dependencies force recompilation: slow
         updateSessionD session (updateCodeGeneration True) 1
         let updates = foldr (\n ups -> ups <> updDepKN n n)
                             mempty
@@ -5314,13 +5314,14 @@ syntheticTests = [
     )
   , ( "Perf: Update and run a module testPerfTimes with testPerfMs modules 1"
     , withSession defaultSession $ \session -> limitPerfTest $ do
+        let testPerfMsFixed = testPerfMs * 1 `div` 2  -- running has overheads
         updateSessionD session (updateCodeGeneration True) 1
         let updates = foldr (\n ups -> ups <> updKN n n)
                             mempty
-                            [1..testPerfMs]
-        updateSessionD session updates testPerfMs
-        let upd k = updKN k (testPerfMs `div` 2)
-            mdiv2 = "M" ++ show (testPerfMs `div` 2)
+                            [1..testPerfMsFixed]
+        updateSessionD session updates testPerfMsFixed
+        let upd k = updKN k (testPerfMsFixed `div` 2)
+            mdiv2 = "M" ++ show (testPerfMsFixed `div` 2)
         mapM_ (\k -> do
           updateSessionD session (upd k) 1
           runActions <- runStmt session mdiv2 "m"
@@ -5330,7 +5331,7 @@ syntheticTests = [
     )
   , ( "Perf: Update and run a module testPerfTimes with testPerfMs modules 2"
     , withSession defaultSession $ \session -> limitPerfTest $ do
-        let testPerfMsFixed = 150  -- dependencies force recompilation: slow
+        let testPerfMsFixed = 40  -- dependencies force recompilation: slow
         updateSessionD session (updateCodeGeneration True) 1
         let updates = foldr (\n ups -> ups <> updDepKN n n)
                             mempty
@@ -5465,19 +5466,19 @@ testPerfMs :: Int
 {-# NOINLINE testPerfMs #-}
 testPerfMs = read $ unsafePerformIO $
   System.Environment.getEnv "IDE_BACKEND_testPerfMs"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "200")
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "150")
 
 testPerfTimes :: Int
 {-# NOINLINE testPerfTimes #-}
 testPerfTimes = read $ unsafePerformIO $
   System.Environment.getEnv "IDE_BACKEND_testPerfTimes"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "800")
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "150")
 
 testPerfLimit :: Int
 {-# NOINLINE testPerfLimit #-}
 testPerfLimit = read $ unsafePerformIO $
   System.Environment.getEnv "IDE_BACKEND_testPerfLimit"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "240")
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "30")
 
 limitPerfTest :: IO () -> IO ()
 limitPerfTest t = do
