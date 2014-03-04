@@ -135,7 +135,7 @@ withOpts opts (initParams, config) = (
 withIncludes :: FilePath -> SessionSetup
 withIncludes path (initParams, config) = (
     initParams
-  , config { configRelativeIncludes = [path] }
+  , config { configRelativeIncludes = path : configRelativeIncludes config }
   )
 
 withMacros :: BSL.ByteString -> SessionSetup
@@ -4890,6 +4890,7 @@ syntheticTests = [
         assertLoadedModules session "" ["A", "B"]
 
         buildExeTargetHsSucceeds session "B"
+        buildExeTargetHsFails session "C"
     )
   , ( "updateTargets  5: [{} < A, {A} < B, {A} < C], require [A], error in A"
     , withSession defaultSession $ \session -> do
@@ -4902,7 +4903,7 @@ syntheticTests = [
         assertOneError session
         assertLoadedModules session "" []
 
-        buildExeTargetHsFails session "B"
+        buildExeTargetHsFails session "A"
     )
   , ( "updateTargets  6: [{} < A, {A} < B, {A} < C], require [B], error in A"
     , withSession defaultSession $ \session -> do
@@ -4927,6 +4928,11 @@ syntheticTests = [
           ]) 2
         assertOneError session
         assertLoadedModules session "" ["A"]
+
+        buildExeTargetHsFails session "B"
+        -- Only fails due to
+        -- "Source errors encountered. Not attempting to build executables."
+        -- buildExeTargetHsSucceeds session "A"
     )
   , ( "updateTargets  8: [{} < A, {A} < B, {A} < C], require [B, C]"
     , withSession defaultSession $ \session -> do
@@ -4942,6 +4948,7 @@ syntheticTests = [
         assertEqual "we have autocompletion info for C" 2 $
           length (autocomplete (Text.pack "C") "sp") -- span, split
 
+        buildExeTargetHsSucceeds session "B"
         buildExeTargetHsSucceeds session "C"
     )
   , ( "updateTargets  9: [{} < A, {A} < B, {A} < C], require [B, C], then [B]"
@@ -5190,6 +5197,16 @@ syntheticTests = [
         -- path to <ideSourcesDir>/test/ABnoError
         loadModulesFrom' session "test/ABnoError" (Just ["test/ABnoError/A.hs"])
         assertNoErrors session
+
+        let updE = buildExe [] [(Text.pack "Main", "test/ABnoError/A.hs")]
+        updateSessionD session updE 4
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+
+        let updE2 = buildExe [] [(Text.pack "Main", "A.hs")]
+        updateSessionD session updE2 4
+        status2 <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status2
     )
   , ( "Dynamically setting/unsetting -Werror (#115)"
     , withSession defaultSession $ \session -> do
