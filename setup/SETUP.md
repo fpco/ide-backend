@@ -163,8 +163,9 @@ we use for ide-backend-server). For now we will assume it's a stock 7.4.
 * Install:
 
   - Standard installation of ghc 7.4.2
-  - ide-backend/vendor/cabal/Cabal (Cabal-ide-backend)
-    (make sure to ghc-pkg hide Cabal-ide-backend)
+  - ide-backend/vendor/cabal/Cabal (Cabal-ide-backend) and
+    ide-backend/vendor/binary (binary-ide-backend)
+    (make sure to ghc-pkg hide these packages)
   - ide-backend and dependencies
 
 The fpco-patched-7.4 and fpco-patched-7.8 sandboxes
@@ -331,14 +332,24 @@ ghc 7.4
 
       perl boot && ./configure && make -j8
 
+  (Note on OSX Mavericks: use gcc-4.8 (or maybe gcc-4.2) instead, and disable
+  DTRACE: 
+ 
+      export CC=`which gcc-4.8`
+      perl boot && ./configure && make -j8 USE_DTRACE=NO
+
+  If you don't want to disable DTRACE, it might work to cherry-pick
+  https://github.com/ghc/ghc/commit/8878541d02ad15fbdbd04608cbc6ea3fde5d5beb;
+  YMMV. See also https://gist.github.com/cartazio/7131371).
+
 * Make the in-place compiler available as normal; i.e. create the following
   symlinks in ~/env/fpco-patched-7.4/local/bin:
 
-      ghc          -> ../src/ghc/inplace/bin/ghc-stage2
-      ghc-7.4.2.10 -> ../src/ghc/inplace/bin/ghc-stage2
-      ghc-pkg      -> ../src/ghc/inplace/bin/ghc-pkg
-      haddock      -> ../src/ghc/inplace/bin/haddock
-      hsc2hs       -> ../src/ghc/inplace/bin/hsc2hs
+      ghc                 -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-7.4.2.201401313 -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-pkg             -> ../src/ghc/inplace/bin/ghc-pkg
+      haddock             -> ../src/ghc/inplace/bin/haddock
+      hsc2hs              -> ../src/ghc/inplace/bin/hsc2hs
 
 ghc 7.8
 -------
@@ -379,6 +390,14 @@ make proper use of git subrepos).
 * Build as usual
 
       perl boot && ./configure && make -j8
+
+  (Note on OSX Mavericks: use gcc-4.8 (or maybe gcc-4.2) instead:
+ 
+      export CC=`which gcc-4.8`
+      perl boot && ./configure && make -j8 
+  
+  The DTRACE patch mentioned in the instructions for 7.4 is already in ghc 7.8.
+  See also https://gist.github.com/cartazio/7131371).
 
 * Make the in-place compiler available as normal; i.e. create the following
   symlinks in ~/env/fpco-patched-7.8/local/bin:
