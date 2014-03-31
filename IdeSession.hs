@@ -147,6 +147,7 @@ module IdeSession (
     -- ** Types
   , Query
   , ManagedFiles(..)
+  , Targets(..)
   , GhcVersion(..)
     -- ** Queries that rely on the static part of the state only
   , getSessionConfig

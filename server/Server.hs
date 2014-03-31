@@ -219,7 +219,7 @@ ghcHandleCompile
                          -- ^ the IORef where GHC stores errors
   -> FilePath            -- ^ source directory
   -> Bool                -- ^ should we generate code
-  -> Maybe [FilePath]    -- ^ targets
+  -> Public.Targets      -- ^ targets
   -> Bool                -- ^ should we generate per-module info
   -> Ghc ()
 ghcHandleCompile RpcConversation{..}

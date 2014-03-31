@@ -25,6 +25,7 @@ module IdeSession.Types.Public (
   , BreakInfo(..)
   , Value
   , VariableEnv
+  , Targets(..)
     -- * Util
   , idInfoQN
 --, idInfoAtLocation
@@ -242,6 +243,9 @@ type Value = Text
 -- | Variables during execution (in debugging mode)
 type VariableEnv = [(Name, Type, Value)]
 
+data Targets = TargetsInclude [FilePath] | TargetsExclude [FilePath]
+  deriving (Typeable, Generic)
+
 {------------------------------------------------------------------------------
   Show instances
 ------------------------------------------------------------------------------}
@@ -448,6 +452,21 @@ instance Binary RunBufferMode where
       2 -> RunBlockBuffering <$> get <*> get
       _ -> fail "RunBufferMode.get: invalid header"
 
+instance Binary Targets where
+  put (TargetsInclude l) = do
+    putWord8 0
+    put l
+  put (TargetsExclude l) = do
+    putWord8 1
+    put l
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> TargetsInclude <$> get
+      1 -> TargetsExclude <$> get
+      _ -> fail "Targets.get: invalid header"
+
 {------------------------------------------------------------------------------
   JSON instances
 
@@ -492,6 +511,7 @@ instance PrettyVal SpanInfo
 instance PrettyVal RunBufferMode
 instance PrettyVal RunResult
 instance PrettyVal BreakInfo
+instance PrettyVal Targets
 
 {------------------------------------------------------------------------------
   Util

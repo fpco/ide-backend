@@ -167,7 +167,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
                     , _ideBreakInfo        = Maybe.nothing
                     , _ideGhcServer        = server
                     , _ideGhcVersion       = version
-                    , _ideTargets          = Nothing
+                    , _ideTargets          = Public.TargetsExclude []
                     }
   ideState <- newMVar (state idleState)
   return IdeSession{..}
@@ -681,10 +681,15 @@ updateStderrBufferMode :: RunBufferMode -> IdeSessionUpdate ()
 updateStderrBufferMode = set ideStderrBufferMode
 
 -- | Set compilation targets
-updateTargets :: Maybe [FilePath] -> IdeSessionUpdate ()
+updateTargets :: Public.Targets -> IdeSessionUpdate ()
 updateTargets targets = do
   IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
-  set ideTargets (map (ideSourcesDir </>) <$> targets)
+  let dirTargets = case targets of
+        Public.TargetsInclude l ->
+          Public.TargetsInclude $ map (ideSourcesDir </>) l
+        Public.TargetsExclude l ->
+          Public.TargetsExclude $ map (ideSourcesDir </>) l
+  set ideTargets dirTargets
 
 -- | Run a given function in a given module (the name of the module
 -- is the one between @module ... end@, which may differ from the file name).

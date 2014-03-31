@@ -52,6 +52,7 @@ import Control.Monad (filterM, liftM, void, when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Maybe (MaybeT(..))
 import Control.Applicative ((<$>))
+import Data.List ((\\))
 import Data.Maybe (catMaybes, listToMaybe)
 import Data.Text (Text)
 import Data.Array (Array)
@@ -98,7 +99,7 @@ import ErrUtils   ( Message )
 #endif
 
 import IdeSession.GHC.API
-import IdeSession.Types.Public (RunBufferMode(..))
+import IdeSession.Types.Public (RunBufferMode(..), Targets(..))
 import IdeSession.Types.Private
 import qualified IdeSession.Types.Public as Public
 import IdeSession.Util
@@ -149,7 +150,7 @@ ghandleJust p handler a = ghandle handler' a
 
 compileInGhc :: FilePath            -- ^ target directory
              -> Bool                -- ^ should we generate code
-             -> Maybe [FilePath]    -- ^ targets
+             -> Targets             -- ^ targets
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
              -> Ghc (Strict [] SourceError, [ModuleName])
 compileInGhc configSourcesDir generateCode mTargets errsRef = do
@@ -188,10 +189,11 @@ compileInGhc configSourcesDir generateCode mTargets errsRef = do
     computeTargets :: Ghc [Target]
     computeTargets = do
       targetIds <- case mTargets of
-        Just targets -> return (map targetIdFromFile targets)
-        Nothing      -> liftIO $ do
-          paths <- find always ((`elem` hsExtensions) `liftM` extension)
-                               configSourcesDir
+        TargetsInclude include -> return (map targetIdFromFile include)
+        TargetsExclude exclude -> liftIO $ do
+          allPaths <- find always ((`elem` hsExtensions) `liftM` extension)
+                                  configSourcesDir
+          let paths = allPaths \\ exclude
           return (map targetIdFromFile paths)
       return (map targetWithId targetIds)
 

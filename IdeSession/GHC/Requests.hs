@@ -33,7 +33,7 @@ data GhcInitRequest = GhcInitRequest {
 data GhcRequest
   = ReqCompile {
         reqCompileGenCode   :: Bool
-      , reqCompileTargets   :: Maybe [FilePath]
+      , reqCompileTargets   :: Targets
       }
   | ReqRun {
         reqRunCmd :: RunCmd

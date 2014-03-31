@@ -77,9 +77,9 @@ getModules session = do
 
 loadModulesFrom :: IdeSession -> FilePath -> IO ()
 loadModulesFrom session originalSourcesDir =
-  loadModulesFrom' session originalSourcesDir Nothing
+  loadModulesFrom' session originalSourcesDir $ TargetsExclude []
 
-loadModulesFrom' :: IdeSession -> FilePath -> Maybe [FilePath] -> IO ()
+loadModulesFrom' :: IdeSession -> FilePath -> Targets -> IO ()
 loadModulesFrom' session originalSourcesDir targets = do
   (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
   updateSessionD session (originalUpdate <> updateTargets targets) (length lm)
@@ -4845,7 +4845,7 @@ syntheticTests = [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just ["A.hs"])
+          , updateTargets (TargetsInclude ["A.hs"])
           ]) 1
         assertNoErrors session
         assertLoadedModules session "" ["A"]
@@ -4858,7 +4858,7 @@ syntheticTests = [
             modAn "0"
           , modBn "invalid"
           , modCn "0"
-          , updateTargets (Just ["A.hs"])
+          , updateTargets (TargetsInclude ["A.hs"])
           ]) 1
         assertNoErrors session
         assertLoadedModules session "" ["A"]
@@ -4871,7 +4871,7 @@ syntheticTests = [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just ["B.hs"])
+          , updateTargets (TargetsInclude ["B.hs"])
           ]) 2
         assertNoErrors session
         assertLoadedModules session "" ["A", "B"]
@@ -4884,7 +4884,7 @@ syntheticTests = [
             modAn "0"
           , modBn "0"
           , modCn "invalid"
-          , updateTargets (Just ["B.hs"])
+          , updateTargets (TargetsInclude ["B.hs"])
           ]) 2
         assertNoErrors session
         assertLoadedModules session "" ["A", "B"]
@@ -4898,7 +4898,7 @@ syntheticTests = [
             modAn "invalid"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just ["A.hs"])
+          , updateTargets (TargetsInclude ["A.hs"])
           ]) 1
         assertOneError session
         assertLoadedModules session "" []
@@ -4911,7 +4911,7 @@ syntheticTests = [
             modAn "invalid"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just ["B.hs"])
+          , updateTargets (TargetsInclude ["B.hs"])
           ]) 2
         assertOneError session
         assertLoadedModules session "" []
@@ -4924,7 +4924,7 @@ syntheticTests = [
             modAn "0"
           , modBn "invalid"
           , modCn "0"
-          , updateTargets (Just ["B.hs"])
+          , updateTargets (TargetsInclude ["B.hs"])
           ]) 2
         assertOneError session
         assertLoadedModules session "" ["A"]
@@ -4940,7 +4940,7 @@ syntheticTests = [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just ["B.hs", "C.hs"])
+          , updateTargets (TargetsInclude ["B.hs", "C.hs"])
           ]) 3
         assertNoErrors session
         assertLoadedModules session "" ["A", "B", "C"]
@@ -4957,7 +4957,7 @@ syntheticTests = [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just ["B.hs", "C.hs"])
+          , updateTargets (TargetsInclude ["B.hs", "C.hs"])
           ]) 3
         assertNoErrors session
         assertLoadedModules session "" ["A", "B", "C"]
@@ -4968,7 +4968,7 @@ syntheticTests = [
         buildExeTargetHsSucceeds session "C"
 
         updateSessionD session (mconcat [
-            updateTargets (Just ["B.hs"])
+            updateTargets (TargetsInclude ["B.hs"])
           ]) 0
         assertLoadedModules session "" ["A", "B", "C"]
         do autocomplete <- getAutocompletion session
@@ -4983,7 +4983,7 @@ syntheticTests = [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just ["B.hs", "C.hs"])
+          , updateTargets (TargetsInclude ["B.hs", "C.hs"])
           ]) 3
         assertNoErrors session
         assertLoadedModules session "" ["A", "B", "C"]
@@ -4995,7 +4995,7 @@ syntheticTests = [
 
         updateSessionD session (mconcat [
             modBn "1"
-          , updateTargets (Just ["B.hs"])
+          , updateTargets (TargetsInclude ["B.hs"])
           ]) 1
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
@@ -5010,7 +5010,7 @@ syntheticTests = [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just ["B.hs", "C.hs"])
+          , updateTargets (TargetsInclude ["B.hs", "C.hs"])
           ]) 3
         assertNoErrors session
         assertLoadedModules session "" ["A", "B", "C"]
@@ -5021,7 +5021,7 @@ syntheticTests = [
         updateSessionD session (mconcat [
             modBn "1"
           , modCn "invalid"
-          , updateTargets (Just ["B.hs"])
+          , updateTargets (TargetsInclude ["B.hs"])
           ]) 1
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
@@ -5037,7 +5037,7 @@ syntheticTests = [
             modAn "0"
           , modBn "0"
           , modCn "0"
-          , updateTargets (Just ["B.hs", "C.hs"])
+          , updateTargets (TargetsInclude ["B.hs", "C.hs"])
           ]) 3
         assertNoErrors session
         assertLoadedModules session "" ["A", "B", "C"]
@@ -5047,7 +5047,7 @@ syntheticTests = [
 
         updateSessionD session (mconcat [
             modCn "invalid"
-          , updateTargets (Just ["B.hs"])
+          , updateTargets (TargetsInclude ["B.hs"])
           ]) 1
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
@@ -5195,7 +5195,7 @@ syntheticTests = [
         -- Since we set the target explicitly, ghc will need to be able to find
         -- the other module (B) on its own; that means it will need an include
         -- path to <ideSourcesDir>/test/ABnoError
-        loadModulesFrom' session "test/ABnoError" (Just ["test/ABnoError/A.hs"])
+        loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
         assertNoErrors session
 
         let updE = buildExe [] [(Text.pack "Main", "test/ABnoError/A.hs")]

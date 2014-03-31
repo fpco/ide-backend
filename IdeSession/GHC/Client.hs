@@ -190,7 +190,7 @@ rpcSetGhcOpts (InProcess _ _) _ =
 -- | Compile or typecheck
 rpcCompile :: GhcServer           -- ^ GHC server
            -> Bool                -- ^ Should we generate code?
-           -> Maybe [FilePath]    -- ^ Targets
+           -> Public.Targets      -- ^ Targets
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO GhcCompileResult
 rpcCompile server genCode targets callback =

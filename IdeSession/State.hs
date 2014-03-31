@@ -160,7 +160,7 @@ data IdeIdleState = IdeIdleState {
     -- | Are we currently in a breakpoint?
   , _ideBreakInfo        :: !(Strict Maybe Public.BreakInfo)
     -- | Targets for compilation
-  , _ideTargets          :: !(Maybe [FilePath])
+  , _ideTargets          :: !Public.Targets
   }
 
 -- | The collection of source and data files submitted by the user.
@@ -227,7 +227,7 @@ ideUpdatedCode         :: Accessor IdeIdleState Bool
 ideUpdatedArgs         :: Accessor IdeIdleState Bool
 ideUpdatedGhcOpts      :: Accessor IdeIdleState Bool
 ideBreakInfo           :: Accessor IdeIdleState (Strict Maybe Public.BreakInfo)
-ideTargets             :: Accessor IdeIdleState (Maybe [FilePath])
+ideTargets             :: Accessor IdeIdleState Public.Targets
 
 ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
