@@ -30,17 +30,17 @@ Changelog
 
      * New functionality: support for GHC 7.8, and make sure that a single
        ide-backend client library, compiled with a stock ghc, can talk to
-       multiple ide-backend-servers (one for ghc 7.4, one for ghc 7.8) (#137,
-       #147, #148, #149, #150, #151, #158, ghc #8006, ghc #8067, ghc Hooks
-       proposal). Setup instructions are included in "setup/SETUP.md".
+       multiple ide-backend-servers (one for ghc 7.4, one for ghc 7.8)
+       (#137, #147, #148, #149, #150, #151, #158, ghc #8006, ghc #8067,
+       ghc Hooks proposal). Setup instructions are included in "setup/SETUP.md".
 
        NOTE: This requires new versions of both ghc 7.4 and ghc 7.8.
 
        - For ghc 7.4: commit 8c021d1 (branch ide-backend-experimental-74).
          Differences from the official release: backported Hooks; backported
-         fixes to #1381, #7040, #7231, #7478, #8006, #8333 (ide-backend issues
-         #145 and #161). Also applied patch for #4900, although that patch is
-         not accepted in HEAD yet (necessary for #118).
+         fixes to #1381, #7040, #7231, #7478, #8006, #8333
+         (ide-backend issues #145 and #161). Also applied patch for #4900,
+         although that patch is not accepted in HEAD yet (necessary for #118).
 
        - For ghc 7.8: commit e0f0172 (branch ide-backend-experimental-78).
          Since there is no official release of ghc yet, this picks a
