@@ -72,7 +72,7 @@ import IdeSession.GHC.API (GhcVersion(..))
 
 showSDoc :: DynFlags -> PprStyle -> SDoc -> String
 showSDoc dflags pprStyle doc =
-    showDocWith OneLineMode
+    showDoc OneLineMode 100
   $ runSDoc doc
   $ initSDocContext dflags pprStyle
 
