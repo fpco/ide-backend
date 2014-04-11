@@ -6310,10 +6310,10 @@ mark (x:xs) = (x, True, False) : aux xs
 
 -- | Replace everything that looks like a quote by a standard single quote.
 ignoreQuotes :: String -> String
-ignoreQuotes s = subRegex (mkRegex versionRegexp) s "'"
+ignoreQuotes s = subRegex (mkRegex quoteRegexp) s "'"
   where
-    versionRegexp :: String
-    versionRegexp = "[‛’`\"]"
+    quoteRegexp :: String
+    quoteRegexp = "[‘‛’`\"]"
 
 collectErrors :: [Assertion] -> Assertion
 collectErrors as = do
