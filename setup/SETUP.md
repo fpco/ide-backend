@@ -96,11 +96,8 @@ runtime.
 User environment with ghc 7.8.x
 -------------------------------
 
-Similar points as above apply. In addition we have the issue that ghc-7.8 as
-such is not yet released and so we must use a snapshot for now, and update to
-the 7.8 release later.
-
-This ghc 7.8 snapshot still needs some patches. The same point as above applies
+Similar points as above apply.
+Ghc 7.8 snapshot still needs some patches. The same point as above applies
 about building the user packages with this ghc instance.
 
 
@@ -200,29 +197,12 @@ only a few minor differences, explained when they come up.
   (See http://www.edsko.net/2013/02/10/comprehensive-haskell-sandboxes/ , the
   last section, "Known Limitations".)
 
-* For ghc 7.4 install
+* For ghc 7.4 and 7.8 install
 
   - Branch "ide-backend-experimental-74" of ghc (see instructions below)
+    or branch "ide-backend-experimental-78", respectively
   - ide-backend/vendor/binary (binary-ide-backend)
     (make sure to ghc-pkg hide binary-ide-backend)
-
-  For ghc 7.8 install (TODO: once 7.8 is properly released it should not be
-  necessary anymore to install haddock, async, data-accessor in special ways)
-
-  - Branch "ide-backend-experimental-78" of ghc (see instructions below)
-  - make sure to use the newest cabal, since 7.8 requires dynamic libraries
-  - remember to do "cabal update", since very new versions of packages
-    are needed for 7.8
-  - update alex and happy to the newest version on hackage
-  - ide-backend/vendor/binary (binary-ide-backend)
-    (make sure to ghc-pkg hide binary-ide-backend)
-  - haddock from its git repo (http://darcs.haskell.org/haddock.git)
-  - async from its git repo (https://github.com/simonmar/async.git)
-  - data-accessor from its darcs repo (http://code.haskell.org/data-accessor/core/)
-  - pretty-show from its git repo (https://github.com/yav/pretty-show)
-
-  In both:
-
   - ide-backend-server and dependencies (including alex/happy)
 
 * Create package DB for snippets (the "snippet DB")
@@ -306,8 +286,10 @@ ghc 7.4
 
 * Get the 7.4.2 release of the core libraries:
 
+```
       ./sync-all --no-dph -r git://git.haskell.org get
       ./sync-all checkout -b ghc-7.4.2 ghc-7.4.2-release
+```
 
 * Make sure we're still in the experimental branch of ghc:
 
@@ -333,8 +315,8 @@ ghc 7.4
       perl boot && ./configure && make -j8
 
   (Note on OSX Mavericks: use gcc-4.8 (or maybe gcc-4.2) instead, and disable
-  DTRACE: 
- 
+  DTRACE:
+
       export CC=`which gcc-4.8`
       perl boot && ./configure && make -j8 USE_DTRACE=NO
 
@@ -346,7 +328,7 @@ ghc 7.4
   symlinks in ~/env/fpco-patched-7.4/local/bin:
 
       ghc                 -> ../src/ghc/inplace/bin/ghc-stage2
-      ghc-7.4.2.201401313 -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-7.4.2.20140313  -> ../src/ghc/inplace/bin/ghc-stage2
       ghc-pkg             -> ../src/ghc/inplace/bin/ghc-pkg
       haddock             -> ../src/ghc/inplace/bin/haddock
       hsc2hs              -> ../src/ghc/inplace/bin/hsc2hs
@@ -354,11 +336,10 @@ ghc 7.4
 ghc 7.8
 -------
 
-The instructions for 7.8 are much as they are for 7.4; most important
-difference is that there is no official RC of 7.8 yet so we are simply checking
-out the latest version of the core libraries (TODO: ideally, we'd be using a
-specific snapshot, but this is made a bit awkward by the fact that ghc does not
-make proper use of git subrepos).
+The instructions for 7.8 are much as they are for 7.4,
+though it may be more troublesome to get the right versions of libraries
+(TODO: ideally, we'd be using a specific snapshot, but this is made
+a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
 * Get ghc from fpco; in ~/env/fpco-patched-7.8/local/src, run
 
@@ -370,7 +351,11 @@ make proper use of git subrepos).
 
 * Get the latest version of the core libraries:
 
-      ./sync-all --no-dph -r git://git.haskell.org get
+      ./sync-all --extra --nofib -r git://git.haskell.org get -b ghc-7.8
+
+* Make sure we're still in the experimental branch of ghc:
+
+      git checkout ide-backend-experimental-78
 
 * Create build.mk
 
@@ -392,10 +377,10 @@ make proper use of git subrepos).
       perl boot && ./configure && make -j8
 
   (Note on OSX Mavericks: use gcc-4.8 (or maybe gcc-4.2) instead:
- 
+
       export CC=`which gcc-4.8`
-      perl boot && ./configure && make -j8 
-  
+      perl boot && ./configure && make -j8
+
   The DTRACE patch mentioned in the instructions for 7.4 is already in ghc 7.8.
   See also https://gist.github.com/cartazio/7131371).
 
@@ -403,7 +388,7 @@ make proper use of git subrepos).
   symlinks in ~/env/fpco-patched-7.8/local/bin:
 
       ghc              -> ../src/ghc/inplace/bin/ghc-stage2
-      ghc-7.7.20131119 -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-7.8.1.20140411 -> ../src/ghc/inplace/bin/ghc-stage2
       ghc-pkg          -> ../src/ghc/inplace/bin/ghc-pkg
       haddock          -> ../src/ghc/inplace/bin/haddock
       hsc2hs           -> ../src/ghc/inplace/bin/hsc2hs
