@@ -22,6 +22,8 @@ module GhcShim.GhcShim78
     -- * Folding
   , AstAlg(..)
   , fold
+    -- * Operations on types
+  , typeOfTyThing
     -- * Re-exports
   , tidyOpenType
   ) where
@@ -34,7 +36,8 @@ import System.IO.Unsafe (unsafePerformIO)
 
 import Bag
 import BasicTypes
-import DataCon
+import ConLike (ConLike(RealDataCon))
+import DataCon (dataConRepType)
 import DynFlags
 import ErrUtils
 import FastString
@@ -330,6 +333,14 @@ instance FoldId id => Fold (LSig id) where
   fold alg (L span (TypeSig names tp)) = astMark alg (Just span) "TypeSig" $ do
     forM_ names $ \name -> foldId alg name SigSite
     fold alg tp
+  fold alg (L span (PatSynSig name
+                              _{-TODO?: (HsPatSynDetails (LHsType name))-}
+                              tp
+                              _{-TODO?: (LHsContext name)-}
+                              _{-TODO?: (LHsContext name)-})
+           ) = astMark alg (Just span) "PatSynSig" $ do
+    foldId alg name SigSite
+    fold alg tp
   fold alg (L span (GenericSig names tp)) = astMark alg (Just span) "GenericSig" $ do
     forM_ names $ \name -> foldId alg name SigSite
     fold alg tp
@@ -427,7 +438,7 @@ instance FoldId id => Fold (LHsContext id) where
     fold alg typs
 
 instance FoldId id => Fold (LHsBinds id) where
-  fold alg = fold alg . bagToList
+  fold alg = fold alg . map snd . bagToList
 
 instance FoldId id => Fold (LHsBind id) where
   fold alg (L span bind@(FunBind {})) = astMark alg (Just span) "FunBind" $ do
@@ -444,6 +455,12 @@ instance FoldId id => Fold (LHsBind id) where
     forM_ (abs_exports bind) $ \abs_export ->
       foldId alg (L typecheckOnly (abe_poly abs_export)) DefSite
     fold alg (abs_binds bind)
+  fold alg (L span bind@(PatSynBind {})) = astMark alg (Just span)
+                                             "PatSynBind" $ do
+    foldId alg (patsyn_id bind) DefSite
+    fold alg (patsyn_def bind)
+      -- TODO?: patsyn_args :: HsPatSynDetails (Located idR)
+      --        patsyn_dir  :: HsPatSynDir idR
 
 typecheckOnly :: SrcSpan
 typecheckOnly = mkGeneralSrcSpan (fsLit "<typecheck only>")
@@ -749,7 +766,7 @@ instance FoldId id => Fold (LPat id) where
     foldId alg con UseSite -- the constructor name is non-binding
     fold alg details
   fold alg (L span (ConPatOut {pat_con, pat_args})) = astMark alg (Just span) "ConPatOut" $ do
-    foldId alg (L (getLoc pat_con) (dataConName (unLoc pat_con))) UseSite
+    foldId alg (L (getLoc pat_con) (getName (unLoc pat_con))) UseSite
     fold alg pat_args
   fold alg (L span (LitPat _)) = astMark alg (Just span) "LitPat" $
     return Nothing
@@ -1045,3 +1062,7 @@ splitFunTy2 :: Type -> (Type, Type, Type)
 splitFunTy2 ty0 = let (arg1, ty1) = splitFunTy ty0
                       (arg2, ty2) = splitFunTy ty1
                   in (arg1, arg2, ty2)
+
+typeOfTyThing :: TyThing -> Maybe Type
+typeOfTyThing (AConLike (RealDataCon dataCon)) = Just $ dataConRepType dataCon
+typeOfTyThing _ = Nothing  -- we probably don't want psOrigResTy from PatSynCon

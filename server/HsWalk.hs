@@ -67,7 +67,6 @@ import VarEnv (TidyEnv, emptyTidyEnv)
 import Unique (Unique, getUnique, getKey)
 import HscTypes (Hsc, TypeEnv, HscEnv(hsc_dflags), mkPrintUnqualified)
 import NameEnv (nameEnvUniqueElts)
-import DataCon (dataConRepType)
 import IOEnv (getEnv)
 import DynFlags (HasDynFlags(..), getDynFlags)
 import HscMain (hscParse', tcRnModule', getHscEnv)
@@ -198,10 +197,8 @@ extractTypesFromTypeEnv :: TypeEnv -> ExtractIdsM ()
 extractTypesFromTypeEnv = mapM_ go . nameEnvUniqueElts
   where
     go :: (Unique, TyThing) -> ExtractIdsM ()
-    go (uniq, ADataCon dataCon) =
-      recordType uniq (dataConRepType dataCon)
-    go _ =
-      return ()
+    go (uniq, tyThing) =
+      maybe (return ()) (recordType uniq) (typeOfTyThing tyThing)
 
 {------------------------------------------------------------------------------
   Override hscFileFrontEnd so that we pass the renamer result through the

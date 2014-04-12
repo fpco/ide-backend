@@ -22,6 +22,8 @@ module GhcShim.GhcShim742
     -- * Folding
   , AstAlg(..)
   , fold
+    -- * Operations on types
+  , typeOfTyThing
     -- * Re-exports
   , tidyOpenType
   ) where
@@ -889,3 +891,7 @@ splitFunTy2 :: Type -> (Type, Type, Type)
 splitFunTy2 ty0 = let (arg1, ty1) = splitFunTy ty0
                       (arg2, ty2) = splitFunTy ty1
                   in (arg1, arg2, ty2)
+
+typeOfTyThing :: TyThing -> Maybe Type
+typeOfTyThing (ADataCon dataCon) = Just $ dataConRepType dataCon
+typeOfTyThing _ = Nothing
