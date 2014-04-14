@@ -258,6 +258,7 @@ in the fpco-stock-7.4 sandbox, and can be run inside that sandbox (or indeed in
 an empty sandbox where no ghc compiler is available on the path at all), as
 long as we specify the right paths:
 
+    PATH=/bin:/usr/bin \
     IDE_BACKEND_EXTRA_PATH_DIRS=~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin \
     IDE_BACKEND_PACKAGE_DB=~/env/fpco-patched-7.4/dot-ghc/snippet-db \
     dist/build/ghc-errors/ghc-errors
