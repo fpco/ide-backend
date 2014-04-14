@@ -238,8 +238,8 @@ only a few minor differences, explained when they come up.
   - the test suite requires the following packages (you might of course want to
     use a separate snippet DB for the test suite:)
 
-    * parallel-3.2.0.4
-    * mtl
+    * parallel-3.2.0.4 (not necessary for 7.8, is now in the ghc DB itself)
+    * mtl (tested with 2.1.3.1)
     * monads-tf-0.1.0.1
     * yesod-1.2.4 (optional; only required for one test; install with
       cabal --max-backjumps=-1; do not attempt for 7.8 for now))
@@ -349,13 +349,9 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
       git checkout ide-backend-experimental-78
 
-* Get the latest version of the core libraries:
+* Get the corresponding version of the core libraries:
 
       ./sync-all --extra --nofib -r git://git.haskell.org get -b ghc-7.8
-
-* Make sure we're still in the experimental branch of ghc:
-
-      git checkout ide-backend-experimental-78
 
 * Create build.mk
 
@@ -376,13 +372,8 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
       perl boot && ./configure && make -j8
 
-  (Note on OSX Mavericks: use gcc-4.8 (or maybe gcc-4.2) instead:
-
-      export CC=`which gcc-4.8`
-      perl boot && ./configure && make -j8
-
-  The DTRACE patch mentioned in the instructions for 7.4 is already in ghc 7.8.
-  See also https://gist.github.com/cartazio/7131371).
+  (OSX Mavericks: Unlike 7.4, ghc 7.8 can build with clang so you don't need to
+  do anything special.)
 
 * Make the in-place compiler available as normal; i.e. create the following
   symlinks in ~/env/fpco-patched-7.8/local/bin:
