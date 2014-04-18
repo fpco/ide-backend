@@ -5226,6 +5226,29 @@ syntheticTests = [
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
     )
+  , ( "Support for hs-boot files from a subdirectory (#177)"
+    , withSession (withIncludes "src") $ \session -> do
+        let ahs = BSLC.pack $ "module A where\nimport B( TB(..) )\nnewtype TA = MkTA Int\nf :: TB -> TA\nf (MkTB x) = MkTA x"
+            ahsboot = BSLC.pack $ "module A where\nnewtype TA = MkTA Int"
+            bhs = BSLC.pack $ "module B where\nimport {-# SOURCE #-} A( TA(..) )\ndata TB = MkTB !Int\ng :: TA -> TB\ng (MkTA x) = MkTB x\nmain = print 42"
+        let update = updateSourceFile "src/A.hs" ahs
+                  <> updateSourceFile "src/A.hs-boot" ahsboot
+                  <> updateSourceFile "src/B.hs" bhs
+                  <> updateCodeGeneration True
+        updateSessionD session update 3
+        assertNoErrors session
+
+        let m = "B"
+            updE = buildExe [] [(Text.pack m, m <.> "hs")]
+        updateSessionD session updE 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "" "42\n" out
+    )
   , ( "Relative include paths (#156)"
     , withSession (withIncludes "test/ABnoError") $ \session -> do
         -- Since we set the target explicitly, ghc will need to be able to find
