@@ -163,7 +163,7 @@ test-suite rpc-server
                       random               >= 1.0.1   && < 2,
                       bytestring           >= 0.9.2   && < 1,
                       async                >= 2.0     && < 2.1,
-                      aeson                >= 0.6     && < 0.7,
+                      aeson                >= 0.6     && < 0.8,
                       temporary            >= 1.1.2.4 && < 1.2,
                       test-framework       >= 0.6     && < 0.9,
                       test-framework-hunit >= 0.2     && < 0.4,
