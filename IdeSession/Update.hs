@@ -16,6 +16,7 @@ module IdeSession.Update (
   , updateSourceFileFromFile
   , updateSourceFileDelete
   , updateDynamicOpts
+  , updateRelativeIncludes
   , updateCodeGeneration
   , updateDataFile
   , updateDataFileFromFile
@@ -635,6 +636,18 @@ updateDynamicOpts opts = do
   set ideDynamicOpts    opts
   set ideUpdatedGhcOpts True
   set ideUpdatedCode    True -- In case we need to recompile due to new opts
+
+-- | Set include paths (equivalent of GHC's @-i@ parameter)
+--
+-- This function is stateless: semantically, the set of currently active
+-- include paths are those set in the last call to updateRelativeIncludes.
+-- Any paths set earlier (including those from 'configRelativeIncludes')
+-- are wiped out and overwritten in each call to updateRelativeIncludes.
+updateRelativeIncludes :: [FilePath] -> IdeSessionUpdate ()
+updateRelativeIncludes relIncl = do
+  set ideRelativeIncludes relIncl
+  set ideUpdatedGhcOpts   True
+  set ideUpdatedCode      True -- In case we need to recompile due to new paths
 
 -- | Enable or disable code generation in addition
 -- to type-checking. Required by 'runStmt'.
