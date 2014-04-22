@@ -17,6 +17,7 @@ module IdeSession.State
   , ideLogicalTimestamp
   , ideComputed
   , ideDynamicOpts
+  , ideRelativeIncludes
   , ideGenerateCode
   , ideManagedFiles
   , ideObjectFiles
@@ -123,6 +124,15 @@ data IdeIdleState = IdeIdleState {
   , _ideComputed         :: !(Strict Maybe Computed)
     -- | Dynamic options for GHC
   , _ideDynamicOpts          :: ![String]
+    -- | Include paths (equivalent of GHC's @-i@ parameter) relative to the
+    -- temporary directory where we store the session's source files.
+    -- The initial value, used also for server startup, is taken from
+    -- 'configRelativeIncludes'.
+    --
+    -- By default this is the singleton list @[""]@ -- i.e., we include the
+    -- sources dir (located there in simple setups, e.g., ide-backend tests)
+    -- but nothing else.
+  , _ideRelativeIncludes :: ![FilePath]
     -- | Whether to generate code in addition to type-checking.
   , _ideGenerateCode     :: !Bool
     -- | Files submitted by the user and not deleted yet.
@@ -210,6 +220,7 @@ data RunActions a = RunActions {
 ideLogicalTimestamp    :: Accessor IdeIdleState LogicalTimestamp
 ideComputed            :: Accessor IdeIdleState (Strict Maybe Computed)
 ideDynamicOpts         :: Accessor IdeIdleState [String]
+ideRelativeIncludes    :: Accessor IdeIdleState [FilePath]
 ideGenerateCode        :: Accessor IdeIdleState Bool
 ideManagedFiles        :: Accessor IdeIdleState ManagedFilesInternal
 ideObjectFiles         :: Accessor IdeIdleState ObjectFiles
@@ -231,7 +242,8 @@ ideTargets             :: Accessor IdeIdleState Public.Targets
 
 ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
-ideDynamicOpts      = accessor _ideDynamicOpts          $ \x s -> s { _ideDynamicOpts          = x }
+ideDynamicOpts      = accessor _ideDynamicOpts      $ \x s -> s { _ideDynamicOpts      = x }
+ideRelativeIncludes      = accessor _ideRelativeIncludes $ \x s -> s { _ideRelativeIncludes = x }
 ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCode     = x }
 ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }
 ideObjectFiles      = accessor _ideObjectFiles      $ \x s -> s { _ideObjectFiles      = x }

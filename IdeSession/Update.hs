@@ -148,6 +148,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
                       _ideLogicalTimestamp = 86400
                     , _ideComputed         = Maybe.nothing
                     , _ideDynamicOpts      = []
+                    , _ideRelativeIncludes = configRelativeIncludes
                     , _ideGenerateCode     = False
                     , _ideManagedFiles     = ManagedFilesInternal [] []
                     , _ideObjectFiles      = []
@@ -389,8 +390,12 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
           when (idleState' ^. ideUpdatedArgs) $
             rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
 
+          let relIncl = idleState' ^. ideRelativeIncludes
+              sourcesDir = ideSourcesDir ideStaticInfo
           when (idleState' ^. ideUpdatedGhcOpts) $
-            rpcSetGhcOpts (idleState ^. ideGhcServer) (idleState' ^. ideDynamicOpts)
+            rpcSetGhcOpts (idleState ^. ideGhcServer)
+                          (idleState' ^. ideDynamicOpts
+                           ++ relInclToOpts sourcesDir relIncl)
 
           -- Recompile
           computed <- if (idleState' ^. ideUpdatedCode)
@@ -833,6 +838,7 @@ buildExe extraOpts ms = do
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
+    relativeIncludes  <- get ideRelativeIncludes
     let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
         -- Note that these do not contain the @packageDbArgs@ options.
     when (not configGenerateModInfo) $
@@ -858,7 +864,8 @@ buildExe extraOpts ms = do
           Dir.setCurrentDirectory
           (const $
              do Dir.setCurrentDirectory ideDataDir
-                buildExecutable ideConfig ideSourcesDir ideDistDir ghcOpts
+                buildExecutable ideConfig ideSourcesDir ideDistDir
+                                relativeIncludes ghcOpts
                                 mcomputed callback ms)
     set ideBuildExeStatus (Just exitCode)
 
@@ -879,6 +886,7 @@ buildDoc = do
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
+    relativeIncludes  <- get ideRelativeIncludes
     let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
@@ -888,6 +896,7 @@ buildDoc = do
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
                   buildHaddock ideConfig ideSourcesDir ideDistDir
+                               relativeIncludes
                                (dynamicOpts ++ configStaticOpts)
                                mcomputed callback)
     set ideBuildDocStatus (Just exitCode)

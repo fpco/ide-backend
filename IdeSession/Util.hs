@@ -7,6 +7,7 @@ module IdeSession.Util (
   , lookup'
   , writeFileAtomic
   , setupEnv
+  , relInclToOpts
     -- * Simple diffs
   , Diff(..)
   , applyMapDiff
@@ -35,7 +36,7 @@ import Foreign.Ptr (castPtr)
 import Control.Applicative ((<$>))
 import Crypto.Types (BitLength)
 import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
-import System.FilePath (splitFileName, (<.>))
+import System.FilePath (splitFileName, (<.>), (</>))
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
 import System.IO (Handle, hClose, openBinaryTempFile, hFlush, stdout, stderr)
 import Data.Text (Text)
@@ -147,6 +148,11 @@ setupEnv :: [(String, Maybe String)] -> IO ()
 setupEnv env = forM_ env $ \(var, mVal) ->
   case mVal of Just val -> setEnv var val True
                Nothing  -> unsetEnv var
+
+relInclToOpts :: FilePath -> [FilePath] -> [String]
+relInclToOpts sourcesDir relIncl =
+   ["-i"]  -- reset to empty
+   ++ map (\path -> "-i" ++ sourcesDir </> path) relIncl
 
 {------------------------------------------------------------------------------
   Simple diffs
