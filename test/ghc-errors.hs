@@ -36,7 +36,7 @@ import System.FilePath.Find (always, extension, find)
 import System.IO as IO
 import System.IO.Temp (withTempDirectory, createTempDirectory)
 import System.IO.Unsafe (unsafePerformIO)
-import System.Process (readProcess)
+import System.Process (readProcess, readProcessWithExitCode)
 import qualified System.Process as Process
 import System.Random (randomRIO)
 import System.Timeout (timeout)
@@ -97,7 +97,7 @@ type SessionSetup = ((SessionInitParams, SessionConfig) -> (SessionInitParams, S
 -- temporary directory
 withSession :: SessionSetup -> (IdeSession -> IO a) -> IO a
 withSession setup io = inTempDir $ \tempDir -> do
-    let config' = config { configDir = tempDir }
+    let config' = config { configDir = tempDir}
     Ex.bracket (initSession initParams config') tryShutdownSession io
   where
     (initParams, config) = setup (defaultSessionInitParams, defaultSessionConfig)
@@ -5504,10 +5504,12 @@ syntheticTests = [
         -- Since we set the target explicitly, ghc will need to be able to find
         -- the other module (B) on its own; that means it will need an include
         -- path to <ideSourcesDir>/test/ABnoError
+        loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
+        assertOneError session
+
         updateSessionD session
                        (updateRelativeIncludes ["test/ABnoError"])
-                       0
-        loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
+                       2  -- note the recompilation
         assertNoErrors session
 
         let updE = buildExe [] [(Text.pack "Main", "test/ABnoError/A.hs")]
@@ -5520,6 +5522,248 @@ syntheticTests = [
         updateSessionD session updE2 4
         status2 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status2
+    )
+  , ( "Switch from one to another relative include path for the same module name with TargetsInclude"
+    , withSession defaultSession $ \session -> do
+        loadModulesFrom' session "test/AnotherA" (TargetsInclude ["test/AnotherA/A.hs"])
+        assertOneError session
+        updateSessionD session (updateCodeGeneration True) 0
+        updateSessionD session
+                       (updateSourceFileFromFile "test/ABnoError/B.hs")
+                       0
+        assertOneError session
+        updateSessionD session
+                       (updateSourceFileFromFile "test/AnotherB/B.hs")
+                       0
+        assertOneError session
+
+        updateSessionD session
+                       (updateRelativeIncludes ["", "test/AnotherA", "test/ABnoError"])
+                       2  -- note the recompilation
+        assertNoErrors session
+
+        runActions <- runStmt session "Main" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "output" (BSLC.pack "\"running 'A depends on B, no errors' from test/ABnoError\"\n") output
+
+        distDir <- getDistDir session
+        let m = "Main"
+            updE = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
+        updateSessionD session updE 4
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        (stExc, out, _) <-
+           readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc
+        assertEqual "exe output with old include path"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                    out
+
+        let updE2 = buildExe [] [(Text.pack m, "A.hs")]
+        updateSessionD session updE2 4
+        status2 <- getBuildExeStatus session
+        assertEqual "after exe build2" (Just ExitSuccess) status2
+        (stExc2, out2, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc2
+        assertEqual "exe output with old include path"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                    out2
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
+                       0  -- !!!
+        assertNoErrors session
+
+        -- This is very unfortunate. Should be "\"running A with another B\"\n".
+        runActions3 <- runStmt session "Main" "main"
+        (output3, _) <- runWaitAll runActions3
+        assertEqual "output3" (BSLC.pack "\"running 'A depends on B, no errors' from test/ABnoError\"\n") output3
+
+        updateSessionD session
+                       (updateSourceFileDelete "test/ABnoError/B.hs")
+                       2  -- note the too late recompilation
+        assertNoErrors session
+        -- To trigger recompilation we could also update "test/AnotherA/A.hs",
+        -- with the same effect (but the tests are huge enough already).
+
+        runActions35 <- runStmt session "Main" "main"
+        (output35, _) <- runWaitAll runActions35
+        assertEqual "output35" (BSLC.pack "\"running A with another B\"\n") output35
+
+        -- And this one works OK even without updateSourceFileDelete.
+        let updE3 = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
+        updateSessionD session updE3 4
+        status3 <- getBuildExeStatus session
+        -- Path "" no longer in include paths here!
+        assertEqual "after exe build3" (Just $ ExitFailure 1) status3
+
+        let updE4 = buildExe [] [(Text.pack m, "A.hs")]
+        updateSessionD session updE4 4
+        status4 <- getBuildExeStatus session
+        assertEqual "after exe build4" (Just ExitSuccess) status4
+        (stExc4, out4, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc4
+        assertEqual "exe output with new include path"
+                    "\"running A with another B\"\n"
+                    out4
+    )
+  , ( "Switch from one to another relative include path for the same module name with TargetsExclude"
+    , withSession defaultSession $ \session -> do
+        loadModulesFrom' session "test/AnotherA" (TargetsExclude [])
+        assertOneError session
+
+        updateSessionD session (updateCodeGeneration True) 0
+        updateSessionD session
+                       (updateSourceFileFromFile "test/ABnoError/B.hs")
+                       2
+        assertNoErrors session
+        updateSessionD session
+                       (updateRelativeIncludes ["", "test/AnotherA", "test/ABnoError"])
+                       0  -- with TargetsExclude, this does nothing
+        assertNoErrors session
+
+        runActions <- runStmt session "Main" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "output" (BSLC.pack "\"running 'A depends on B, no errors' from test/ABnoError\"\n") output
+
+        distDir <- getDistDir session
+        let m = "Main"
+            updE = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
+        updateSessionD session updE 4
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        (stExc, out, _) <-
+           readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc
+        assertEqual "exe output with old include path"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                    out
+
+        let updE2 = buildExe [] [(Text.pack m, "A.hs")]
+        updateSessionD session updE2 4
+        status2 <- getBuildExeStatus session
+        assertEqual "after exe build2" (Just ExitSuccess) status2
+        (stExc2, out2, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc2
+        assertEqual "exe output with old include path"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                    out2
+
+        updateSessionD session
+                       (updateSourceFileDelete "test/ABnoError/B.hs")
+                       0
+        assertOneError session
+        updateSessionD session
+                       (updateSourceFileFromFile "test/AnotherB/B.hs")
+                       2
+        assertNoErrors session
+        updateSessionD session
+                       (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
+                       0  -- with TargetsExclude, this does nothing
+        assertNoErrors session
+
+        runActions3 <- runStmt session "Main" "main"
+        (output3, _) <- runWaitAll runActions3
+        assertEqual "output3" (BSLC.pack "\"running A with another B\"\n") output3
+
+        let updE3 = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
+        updateSessionD session updE3 4
+        status3 <- getBuildExeStatus session
+        -- Path "" no longer in include paths here!
+        assertEqual "after exe build3" (Just $ ExitFailure 1) status3
+
+        let updE4 = buildExe [] [(Text.pack m, "A.hs")]
+        updateSessionD session updE4 4
+        status4 <- getBuildExeStatus session
+        assertEqual "after exe build4" (Just ExitSuccess) status4
+        (stExc4, out4, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc4
+        assertEqual "exe output with new include path"
+                    "\"running A with another B\"\n"
+                    out4
+    )
+  , ( "Switch from one to another relative include path with TargetsInclude and the main module not in path"
+    , withSession defaultSession $ \session -> do
+        -- Since we set the target explicitly, ghc will need to be able to find
+        -- the other module (B) on its own; that means it will need an include
+        -- path to <ideSourcesDir>/test/ABnoError
+        loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
+        assertOneError session
+        updateSessionD session
+                       (updateSourceFileFromFile "test/AnotherB/B.hs")
+                       0
+        assertOneError session
+
+        updateSessionD session (updateCodeGeneration True) 0
+        updateSessionD session
+                       (updateRelativeIncludes ["test/ABnoError"])
+                       2  -- note the recompilation
+        assertNoErrors session
+
+        runActions <- runStmt session "Main" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "output" (BSLC.pack "\"running 'A depends on B, no errors' from test/ABnoError\"\n") output
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/AnotherB"])  -- A not in path
+                       0  -- !!!
+        assertNoErrors session
+
+        -- This is very unfortunate. Should be "\"running A with another B\"\n".
+        runActions3 <- runStmt session "Main" "main"
+        (output3, _) <- runWaitAll runActions3
+        assertEqual "output3" (BSLC.pack "\"running 'A depends on B, no errors' from test/ABnoError\"\n") output3
+
+        updateSessionD session
+                       (updateSourceFileDelete "test/ABnoError/B.hs")
+                       2  -- note the too late recompilation
+        assertNoErrors session
+
+        runActions35 <- runStmt session "Main" "main"
+        (output35, _) <- runWaitAll runActions35
+        assertEqual "output35" (BSLC.pack "\"running A with another B\"\n") output35
+
+        distDir <- getDistDir session
+        let m = "Main"
+
+        let updE4 = buildExe [] [(Text.pack m, "A.hs")]
+        updateSessionD session updE4 4
+        status4 <- getBuildExeStatus session
+        assertEqual "after exe build4" (Just $ ExitFailure 1) status4
+          -- Failure due to no A in path.
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/AnotherB", "test/ABnoError"])  -- A again in path
+                       0  -- note no recompilation
+        assertNoErrors session
+
+        runActions4 <- runStmt session "Main" "main"
+        (output4, _) <- runWaitAll runActions4
+        assertEqual "output4" (BSLC.pack "\"running A with another B\"\n") output4
+
+        updateSessionD session updE4 4
+        status45 <- getBuildExeStatus session
+        assertEqual "after exe build45" (Just ExitSuccess) status45
+        (stExc4, out4, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc4
+        assertEqual "exe output with new include path"
+                    "\"running A with another B\"\n"
+                    out4
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/ABnoError"])
+                       0  -- !!!
+        assertNoErrors session  -- wrong
+
+        -- Again this is wrong. Instead, the compilation should fail (no B).
+        runActions5 <- runStmt session "Main" "main"
+        (output5, _) <- runWaitAll runActions5
+        assertEqual "output5" (BSLC.pack "\"running A with another B\"\n") output5
     )
   , ( "Dynamically setting/unsetting -Werror (#115)"
     , withSession defaultSession $ \session -> do
@@ -6550,6 +6794,7 @@ defaultSessionConfig = unsafePerformIO $ do
   return IdeSession.defaultSessionConfig {
              configPackageDBStack = packageDbStack
            , configExtraPathDirs  = splitSearchPath extraPathDirs
+--           , configDeleteTempFiles = False
            }
 
 {------------------------------------------------------------------------------
