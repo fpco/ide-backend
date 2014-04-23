@@ -1856,6 +1856,66 @@ syntheticTests = [
           RunOk -> assertEqual "" (BSL8.fromString "42\n") output
           _     -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Using the FFI via GHC API with deleting and re-adding the .c file"
+    , withSession defaultSession $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateSourceFileFromFile "test/FFI/Main.hs"
+              , updateSourceFileFromFile "test/FFI/life.c"
+              , updateSourceFileFromFile "test/FFI/life.h"
+              ]
+        updateSessionD session upd 3
+        assertNoErrors session
+
+        updateSessionD session (updateSourceFileDelete "test/FFI/life.c") 0
+        assertNoErrors session
+
+        updateSessionD session (updateSourceFileFromFile "test/FFI/life.c") 4
+        assertNoErrors session
+
+        updateSessionD session (updateSourceFileDelete "test/FFI/life.c") 0
+        assertNoErrors session
+
+        restartSession session Nothing
+        updateSessionD session mempty 1
+        assertOneError session
+
+        updateSessionD session (updateSourceFileFromFile "test/FFI/life.c") 4
+        assertNoErrors session
+
+        runActions <- runStmt session "Main" "main"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk -> assertEqual "" (BSL8.fromString "42\n") output
+          _     -> assertFailure $ "Unexpected run result: " ++ show result
+    )
+  , ( "Using the FFI via GHC API with deleting and adding a different .c file"
+    , withSession defaultSession $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateSourceFileFromFile "test/FFI/Main.hs"
+              , updateSourceFileFromFile "test/FFI/life.c"
+              , updateSourceFileFromFile "test/FFI/life.h"
+              ]
+        updateSessionD session upd 3
+        assertNoErrors session
+
+        updateSessionD session (updateSourceFileDelete "test/FFI/life.c"
+                                <> updateSourceFileDelete "test/FFI/life.h") 0
+        assertNoErrors session
+
+{- duplicate definition for symbol...    errorMsg = "Server killed"
+        updateSessionD session (updateSourceFileFromFile "test/FFI/ffiles/life.c"
+                                <> updateSourceFileFromFile "test/FFI/ffiles/local.h"
+                                <> updateSourceFileFromFile "test/FFI/ffiles/life.h") 4
+        assertNoErrors session
+        runActions <- runStmt session "Main" "main"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk -> assertEqual "" (BSL8.fromString "42\n") output
+          _     -> assertFailure $ "Unexpected run result: " ++ show result
+-}
+    )
   , ( "Using the FFI from a subdir and compiled via buildExe"
     , withSession defaultSession $ \session -> do
         let upd = mconcat [
@@ -1964,6 +2024,19 @@ syntheticTests = [
         updateSessionD session mempty 4
         assertNoErrors session
 
+        updateSessionD session (updateSourceFileDelete "test/FFI/ffiles/life.c"
+                                <> updateSourceFileDelete "test/FFI/ffiles/life.h"
+                                <> updateSourceFileDelete "test/FFI/ffiles/local.h") 0
+        assertNoErrors session
+
+        restartSession session Nothing
+        updateSessionD session mempty 4
+        assertOneError session
+
+        updateSessionD session (updateSourceFileFromFile "test/FFI/life.h"
+                                <> updateSourceFileFromFile "test/FFI/life.c") 4
+        assertNoErrors session
+
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
         updateSessionD session upd2 4
@@ -1975,7 +2048,7 @@ syntheticTests = [
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.test"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -1994,12 +2067,36 @@ syntheticTests = [
               , updateSourceFileFromFile "test/FFI/ffiles/life.h"
               , updateSourceFileFromFile "test/FFI/ffiles/local.h"
               , updateTargets (TargetsExclude ["test/FFI/life.c", "test/FFI/life.h", "life.c", "life.h", "test/FFI/Main.hs", "test/FFI/Main2.hs"])
--- TODO, possibly: these wouldn't be excluded currently and cause an error:
---              , updateSourceFileFromFile "test/FFI/life.c"
---              , updateSourceFileFromFile "test/FFI/life.h"
-              ]
+                            ]
         updateSessionD session upd 4
         assertNoErrors session
+        updateSessionD session (updateSourceFileDelete "test/FFI/ffiles/life.c") 0
+        assertNoErrors session
+
+        restartSession session Nothing
+        updateSessionD session mempty 1
+        assertOneError session
+
+        -- Without the restartSession we get
+{-
+GHCi runtime linker: fatal error: I found a duplicate definition for symbol
+   meaningOfLife
+whilst processing object file
+   /tmp/ide-backend-test.28928/dist.28928/objs/test/FFI/ffiles/life.o
+This could be caused by:
+   * Loading two different object files which export the same symbol
+   * Specifying the same object file twice on the GHCi command line
+   * An incorrect `package.conf' entry, causing some object to be
+     loaded twice.
+GHCi cannot safely continue in this situation.  Exiting now.  Sorry.
+
+  Using the FFI via GHC API with deleting and adding a different .c file: [Failed]
+Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server died>>, errorMsg = "Server killed"}
+-}
+        updateSessionD session (updateSourceFileFromFile "test/FFI/life.c"
+                                <> updateSourceFileFromFile "test/FFI/life.h") 5
+        assertNoErrors session
+
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
         updateSessionD session upd2 4
@@ -2011,7 +2108,7 @@ syntheticTests = [
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h life.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.test"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -2020,6 +2117,9 @@ syntheticTests = [
     )
   , ( "Using the FFI with dynamic include, TH and MIN_VERSION_base via buildExe"
     , withSession defaultSession $ \session -> do
+        updateSessionD session
+                       (updateRelativeIncludes [])
+                       0
         let upd = mconcat [
                 updateCodeGeneration True
               , updateSourceFileFromFile "test/FFI/Main3.hs"
@@ -2030,9 +2130,12 @@ syntheticTests = [
               ]
         updateSessionD session upd 4
         assertNoErrors session
+
         updateSessionD session
                        (updateRelativeIncludes ["test/FFI"])
-                       0
+                       4
+        assertNoErrors session
+
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
         updateSessionD session upd2 4
@@ -2051,10 +2154,11 @@ syntheticTests = [
         checkWarns <- checkPackage pkgDir
         assertCheckWarns checkWarns
     )
-  , ( "Using the FFI with dynamic include and TargetsExclude"
+  , ( "Using the FFI with dynamic include and TargetsInclude"
     , withSession defaultSession $ \session -> do
         let upd = mconcat [
                 updateCodeGeneration True
+              , updateTargets (TargetsInclude ["test/FFI/Main.hs"])
               , updateSourceFileFromFile "test/FFI/Main.hs"
               , updateSourceFileFromFile "test/FFI/Main2.hs"
               , updateSourceFileFromFile "test/FFI/Main3.hs"
@@ -2062,16 +2166,21 @@ syntheticTests = [
               , updateSourceFileFromFile "test/FFI/ffiles/life.c"
               , updateSourceFileFromFile "test/FFI/ffiles/life.h"
               , updateSourceFileFromFile "test/FFI/ffiles/local.h"
-              , updateTargets (TargetsExclude ["test/FFI/life.c", "test/FFI/life.h", "life.c", "life.h", "test/FFI/Main.hs", "test/FFI/Main2.hs"])
--- TODO, possibly: these wouldn't be excluded currently and cause an error:
---              , updateSourceFileFromFile "test/FFI/life.c"
---              , updateSourceFileFromFile "test/FFI/life.h"
               ]
         updateSessionD session upd 4
         assertNoErrors session
+
         updateSessionD session
                        (updateRelativeIncludes ["test/FFI"])
-                       0
+                       4
+        assertNoErrors session
+
+        updateSessionD session (updateTargets (TargetsInclude ["test/FFI/Main2.hs"])) 3
+        assertNoErrors session
+
+        updateSessionD session (updateTargets (TargetsInclude ["test/FFI/Main3.hs"])) 4
+        assertNoErrors session
+
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
         updateSessionD session upd2 4
