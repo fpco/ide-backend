@@ -5572,26 +5572,24 @@ syntheticTests = [
 
         updateSessionD session
                        (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
-                       0  -- !!!
+                       2
         assertNoErrors session
 
-        -- This is very unfortunate. Should be "\"running A with another B\"\n".
         runActions3 <- runStmt session "Main" "main"
         (output3, _) <- runWaitAll runActions3
-        assertEqual "output3" (BSLC.pack "\"running 'A depends on B, no errors' from test/ABnoError\"\n") output3
+        assertEqual "output3" (BSLC.pack "\"running A with another B\"\n") output3
 
         updateSessionD session
                        (updateSourceFileDelete "test/ABnoError/B.hs")
-                       2  -- note the too late recompilation
+                       0  -- already recompiled above
         assertNoErrors session
-        -- To trigger recompilation we could also update "test/AnotherA/A.hs",
-        -- with the same effect (but the tests are huge enough already).
 
         runActions35 <- runStmt session "Main" "main"
         (output35, _) <- runWaitAll runActions35
         assertEqual "output35" (BSLC.pack "\"running A with another B\"\n") output35
 
-        -- And this one works OK even without updateSourceFileDelete.
+        -- And this one works OK even without updateSourceFileDelete
+        -- and even without session restart.
         let updE3 = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
         updateSessionD session updE3 4
         status3 <- getBuildExeStatus session
@@ -5621,7 +5619,7 @@ syntheticTests = [
         assertNoErrors session
         updateSessionD session
                        (updateRelativeIncludes ["", "test/AnotherA", "test/ABnoError"])
-                       0  -- with TargetsExclude, this does nothing
+                       2  -- with TargetsExclude [], this is superfluous
         assertNoErrors session
 
         runActions <- runStmt session "Main" "main"
@@ -5668,11 +5666,11 @@ syntheticTests = [
 
         updateSessionD session
                        (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
-                       2  -- with TargetsExclude, this would do nothing
+                       2  -- with TargetsExclude, this would be superfluous
         assertNoErrors session  -- fixed the error from above
         updateSessionD session
                        (updateTargets  (TargetsExclude []))
-                       2  -- recompilation due to session restart
+                       2  -- recompilation due to session restart only
         assertNoErrors session
 
         runActions3 <- runStmt session "Main" "main"
@@ -5720,17 +5718,16 @@ syntheticTests = [
 
         updateSessionD session
                        (updateRelativeIncludes ["test/AnotherB"])  -- A not in path
-                       0  -- !!!
+                       2
         assertNoErrors session
 
-        -- This is very unfortunate. Should be "\"running A with another B\"\n".
         runActions3 <- runStmt session "Main" "main"
         (output3, _) <- runWaitAll runActions3
-        assertEqual "output3" (BSLC.pack "\"running 'A depends on B, no errors' from test/ABnoError\"\n") output3
+        assertEqual "output3" (BSLC.pack "\"running A with another B\"\n") output3
 
         updateSessionD session
                        (updateSourceFileDelete "test/ABnoError/B.hs")
-                       2  -- note the too late recompilation
+                       0  -- already recompiled above
         assertNoErrors session
 
         runActions35 <- runStmt session "Main" "main"
@@ -5748,7 +5745,7 @@ syntheticTests = [
 
         updateSessionD session
                        (updateRelativeIncludes ["test/AnotherB", "test/ABnoError"])  -- A again in path
-                       0  -- note no recompilation
+                       2
         assertNoErrors session
 
         runActions4 <- runStmt session "Main" "main"
@@ -5767,13 +5764,8 @@ syntheticTests = [
 
         updateSessionD session
                        (updateRelativeIncludes ["test/ABnoError"])
-                       0  -- !!!
-        assertNoErrors session  -- wrong
-
-        -- Again this is wrong. Instead, the compilation should fail (no B).
-        runActions5 <- runStmt session "Main" "main"
-        (output5, _) <- runWaitAll runActions5
-        assertEqual "output5" (BSLC.pack "\"running A with another B\"\n") output5
+                       2
+        assertOneError session  -- correct
     )
   , ( "Dynamically setting/unsetting -Werror (#115)"
     , withSession defaultSession $ \session -> do

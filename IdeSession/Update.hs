@@ -652,7 +652,10 @@ updateDynamicOpts opts = do
   set ideUpdatedGhcOpts True
   set ideUpdatedCode    True -- In case we need to recompile due to new opts
 
--- | Set include paths (equivalent of GHC's @-i@ parameter)
+-- | Set include paths (equivalent of GHC's @-i@ parameter).
+-- In general, this requires session restart,
+-- because GHC doesn't revise module dependencies when targets
+-- or include paths change, but only when files change.
 --
 -- This function is stateless: semantically, the set of currently active
 -- include paths are those set in the last call to updateRelativeIncludes.
@@ -663,6 +666,7 @@ updateRelativeIncludes relIncl = do
   set ideRelativeIncludes relIncl
   set ideUpdatedGhcOpts   True
   set ideUpdatedCode      True -- In case we need to recompile due to new paths
+  set ideUpdatedRestart   True
 
 -- | Enable or disable code generation in addition
 -- to type-checking. Required by 'runStmt'.
@@ -714,7 +718,7 @@ updateStdoutBufferMode = set ideStdoutBufferMode
 updateStderrBufferMode :: RunBufferMode -> IdeSessionUpdate ()
 updateStderrBufferMode = set ideStderrBufferMode
 
--- | Set compilation targets. In general this requires session restart,
+-- | Set compilation targets. In general, this requires session restart,
 -- because GHC doesn't revise module dependencies when targets
 -- or include paths change, but only when files change.
 updateTargets :: Public.Targets -> IdeSessionUpdate ()
