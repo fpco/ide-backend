@@ -5744,6 +5744,23 @@ syntheticTests = [
           -- Failure due to no A in path.
 
         updateSessionD session
+                       (updateRelativeIncludes ["", "test/AnotherB"])  -- A still not in path
+                       2
+        assertNoErrors session
+
+        -- buildExe with full paths works though, if the includes have ""
+        let updE41 = buildExe [] [(Text.pack m, "test/ABnoError/A.hs")]
+        updateSessionD session updE41 4
+        status41 <- getBuildExeStatus session
+        assertEqual "after exe build41" (Just ExitSuccess) status41
+        (stExc41, out41, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc41
+        assertEqual "exe output with new include path"
+                    "\"running A with another B\"\n"
+                    out41
+
+        updateSessionD session
                        (updateRelativeIncludes ["test/AnotherB", "test/ABnoError"])  -- A again in path
                        2
         assertNoErrors session
@@ -5752,15 +5769,16 @@ syntheticTests = [
         (output4, _) <- runWaitAll runActions4
         assertEqual "output4" (BSLC.pack "\"running A with another B\"\n") output4
 
+        -- A again in path, so this time this works
         updateSessionD session updE4 4
         status45 <- getBuildExeStatus session
         assertEqual "after exe build45" (Just ExitSuccess) status45
-        (stExc4, out4, _) <-
+        (stExc45, out45, _) <-
           readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
-        assertEqual "A throws exception" (ExitFailure 1) stExc4
+        assertEqual "A throws exception" (ExitFailure 1) stExc45
         assertEqual "exe output with new include path"
                     "\"running A with another B\"\n"
-                    out4
+                    out45
 
         updateSessionD session
                        (updateRelativeIncludes ["test/ABnoError"])
