@@ -34,6 +34,7 @@ module IdeSession.State
   , ideUpdatedCode
   , ideUpdatedArgs
   , ideUpdatedGhcOpts
+  , ideUpdatedRestart
   , ideBreakInfo
   , ideTargets
   , managedSource
@@ -167,6 +168,8 @@ data IdeIdleState = IdeIdleState {
   , _ideUpdatedArgs      :: !Bool
     -- | Has the value of ideDynamicOpts diverged from what's recorded on the server?
   , _ideUpdatedGhcOpts   :: !Bool
+    -- | Does the update require session restart?
+  , _ideUpdatedRestart   :: !Bool
     -- | Are we currently in a breakpoint?
   , _ideBreakInfo        :: !(Strict Maybe Public.BreakInfo)
     -- | Targets for compilation
@@ -237,6 +240,7 @@ ideUpdatedEnv          :: Accessor IdeIdleState Bool
 ideUpdatedCode         :: Accessor IdeIdleState Bool
 ideUpdatedArgs         :: Accessor IdeIdleState Bool
 ideUpdatedGhcOpts      :: Accessor IdeIdleState Bool
+ideUpdatedRestart      :: Accessor IdeIdleState Bool
 ideBreakInfo           :: Accessor IdeIdleState (Strict Maybe Public.BreakInfo)
 ideTargets             :: Accessor IdeIdleState Public.Targets
 
@@ -261,6 +265,7 @@ ideUpdatedEnv       = accessor _ideUpdatedEnv       $ \x s -> s { _ideUpdatedEnv
 ideUpdatedCode      = accessor _ideUpdatedCode      $ \x s -> s { _ideUpdatedCode      = x }
 ideUpdatedArgs      = accessor _ideUpdatedArgs      $ \x s -> s { _ideUpdatedArgs      = x }
 ideUpdatedGhcOpts   = accessor _ideUpdatedGhcOpts   $ \x s -> s { _ideUpdatedGhcOpts   = x }
+ideUpdatedRestart   = accessor _ideUpdatedRestart   $ \x s -> s { _ideUpdatedRestart   = x }
 ideBreakInfo        = accessor _ideBreakInfo        $ \x s -> s { _ideBreakInfo        = x }
 ideTargets          = accessor _ideTargets          $ \x s -> s { _ideTargets          = x }
 

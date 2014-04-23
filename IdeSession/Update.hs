@@ -161,6 +161,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
                     , _ideUpdatedEnv       = False
                     , _ideUpdatedArgs      = False -- Server default is []
                     , _ideUpdatedGhcOpts   = False
+                    , _ideUpdatedRestart   = False
                       -- Make sure 'ideComputed' is set on first call
                       -- to updateSession
                     , _ideUpdatedCode      = True
@@ -303,6 +304,7 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
                  . (ideUpdatedArgs    ^= True)
                  . (ideUpdatedCode    ^= True)
                  . (ideUpdatedGhcOpts ^= True)
+                 . (ideUpdatedRestart ^= False)
                  . (ideGhcServer      ^= server)
                  . (ideGhcVersion     ^= version)
                  . (ideObjectFiles    ^= [])
@@ -366,18 +368,31 @@ instance Monoid a => Monoid (IdeSessionUpdate a) where
 -- which can be used to monitor progress of the operation.
 updateSession :: IdeSession -> IdeSessionUpdate () -> (Progress -> IO ()) -> IO ()
 updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
-    go False
+    go False False
   where
-    go :: Bool -> IO ()
-    go alreadyRestarted = do
+    go :: Bool -> Bool -> IO ()
+    go alreadyRestartedDead alreadyRestartedDueToUpdate = do
       -- We don't want to call 'restartSession' while we hold the lock
-      shouldRestart <- modifyMVar ideState $ \state -> case state of
+      (shouldRestartDead, shouldRestartDueToUpdate)
+       <- modifyMVar ideState $ \state -> case state of
         IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
+         ((), idleState0) <-
+           if alreadyRestartedDueToUpdate
+           then return ((), idleState)
+           else runSessionUpdate update
+                                 ideStaticInfo
+                                 callback
+                                 idleState
+
+         if idleState0 ^. ideUpdatedRestart then
+           return (IdeSessionIdle idleState0, (False, True))
+         else do
+
           ((numActions, cErrors), idleState') <-
-            runSessionUpdate (update >> recompileObjectFiles)
+            runSessionUpdate recompileObjectFiles
                              ideStaticInfo
                              callback
-                             idleState
+                             idleState0
 
           let callback' p = callback p {
                   progressStep     = progressStep     p + numActions
@@ -438,20 +453,20 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
                  . (ideUpdatedArgs    ^= False)
                  . (ideUpdatedGhcOpts ^= False)
                  $ idleState'
-                 , False
+                 , (False, False)
                  )
 
         IdeSessionServerDied _ _ ->
-          return (state, not alreadyRestarted)
+          return (state, (not alreadyRestartedDead, False))
 
         IdeSessionRunning _ _ ->
           Ex.throwIO (userError "Cannot update session in running mode")
         IdeSessionShutdown ->
           Ex.throwIO (userError "Session already shut down.")
 
-      when shouldRestart $ do
+      when (shouldRestartDead || shouldRestartDueToUpdate) $ do
         restartSession session Nothing
-        go True
+        go shouldRestartDead shouldRestartDueToUpdate
 
     mkRelative :: ExplicitSharingCache -> ExplicitSharingCache
     mkRelative ExplicitSharingCache{..} =
@@ -462,8 +477,8 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
       , idPropCache   = idPropCache
       }
 
-    handleExternal :: IdeIdleState -> ExternalException -> IO (IdeSessionState, Bool)
-    handleExternal idleState e = return (IdeSessionServerDied e idleState, False)
+    handleExternal :: IdeIdleState -> ExternalException -> IO (IdeSessionState, (Bool, Bool))
+    handleExternal idleState e = return (IdeSessionServerDied e idleState, (False, False))
 
     constructAuto :: ExplicitSharingCache -> Strict [] IdInfo
                   -> Strict Trie (Strict [] IdInfo)
