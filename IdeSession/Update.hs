@@ -714,7 +714,9 @@ updateStdoutBufferMode = set ideStdoutBufferMode
 updateStderrBufferMode :: RunBufferMode -> IdeSessionUpdate ()
 updateStderrBufferMode = set ideStderrBufferMode
 
--- | Set compilation targets
+-- | Set compilation targets. In general this requires session restart,
+-- because GHC doesn't revise module dependencies when targets
+-- or include paths change, but only when files change.
 updateTargets :: Public.Targets -> IdeSessionUpdate ()
 updateTargets targets = do
   IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
@@ -724,6 +726,7 @@ updateTargets targets = do
         Public.TargetsExclude l ->
           Public.TargetsExclude $ map (ideSourcesDir </>) l
   set ideTargets dirTargets
+  set ideUpdatedRestart True
 
 -- | Run a given function in a given module (the name of the module
 -- is the one between @module ... end@, which may differ from the file name).

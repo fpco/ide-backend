@@ -5660,17 +5660,20 @@ syntheticTests = [
                        (updateSourceFileFromFile "test/AnotherB/B.hs")
                        2
         assertNoErrors session
+
         updateSessionD session
                        (updateTargets (TargetsInclude ["test/AnotherA/A.hs"]))
                        0
-        assertNoErrors session  -- should cause and error, but doesn't
+        assertOneError session
+
         updateSessionD session
                        (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
-                       0  -- with TargetsExclude, this does nothing
-        assertNoErrors session  -- should fix the error from above
+                       2  -- with TargetsExclude, this would do nothing
+        assertNoErrors session  -- fixed the error from above
         updateSessionD session
                        (updateTargets  (TargetsExclude []))
-                       0
+                       2  -- recompilation due to session restart
+        assertNoErrors session
 
         runActions3 <- runStmt session "Main" "main"
         (output3, _) <- runWaitAll runActions3
