@@ -5661,9 +5661,16 @@ syntheticTests = [
                        2
         assertNoErrors session
         updateSessionD session
+                       (updateTargets (TargetsInclude ["test/AnotherA/A.hs"]))
+                       0
+        assertNoErrors session  -- should cause and error, but doesn't
+        updateSessionD session
                        (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
                        0  -- with TargetsExclude, this does nothing
-        assertNoErrors session
+        assertNoErrors session  -- should fix the error from above
+        updateSessionD session
+                       (updateTargets  (TargetsExclude []))
+                       0
 
         runActions3 <- runStmt session "Main" "main"
         (output3, _) <- runWaitAll runActions3
