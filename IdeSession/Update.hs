@@ -303,6 +303,7 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
                  . (ideUpdatedGhcOpts ^= True)
                  . (ideGhcServer      ^= server)
                  . (ideGhcVersion     ^= version)
+                 . (ideObjectFiles    ^= [])
                  $ idleState
         Left e ->
           return . IdeSessionServerDied e

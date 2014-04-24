@@ -1759,6 +1759,27 @@ syntheticTests = [
           RunOk -> assertEqual "" (BSL8.fromString "42\n") output
           _     -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Using the FFI via GHC API with restartSession"
+    , withSession defaultSession $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateSourceFileFromFile "test/FFI/Main.hs"
+              , updateSourceFileFromFile "test/FFI/life.c"
+              , updateSourceFileFromFile "test/FFI/life.h"
+              ]
+        updateSessionD session upd 3
+        assertNoErrors session
+
+        restartSession session Nothing
+        updateSessionD session mempty 3
+        assertNoErrors session
+
+        runActions <- runStmt session "Main" "main"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk -> assertEqual "" (BSL8.fromString "42\n") output
+          _     -> assertFailure $ "Unexpected run result: " ++ show result
+    )
   , ( "Using the FFI from a subdir and compiled via buildExe"
     , withSession defaultSession $ \session -> do
         let upd = mconcat [
@@ -1832,6 +1853,41 @@ syntheticTests = [
               ]
         updateSessionD session upd 4
         assertNoErrors session
+        let m = "Main"
+            upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
+        updateSessionD session upd2 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "FFI exe output" "84\n" exeOut
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.test"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
+    )
+  , ( "Using the FFI with withIncludes, TH and MIN_VERSION_base via buildExe and with restartSession"
+    , withSession (withIncludes "test/FFI") $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateSourceFileFromFile "test/FFI/Main3.hs"
+              , updateSourceFileFromFile "test/FFI/A.hs"
+              , updateSourceFileFromFile "test/FFI/ffiles/life.c"
+              , updateSourceFileFromFile "test/FFI/ffiles/life.h"
+              , updateSourceFileFromFile "test/FFI/ffiles/local.h"
+              ]
+        updateSessionD session upd 4
+        assertNoErrors session
+
+        restartSession session Nothing
+        updateSessionD session mempty 4
+        assertNoErrors session
+
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
         updateSessionD session upd2 4
