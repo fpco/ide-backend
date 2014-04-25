@@ -472,7 +472,7 @@ syntheticTests = [
         assertEqual "after exe build" (Just $ ExitFailure 1) status0
         updateSessionD session
                        (updateRelativeIncludes ["test/compiler/utils"])
-                       0
+                       4
         assertNoErrors session
         distDir <- getDistDir session
 
@@ -5318,10 +5318,10 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
 
         updateSessionD session (mconcat [
             updateTargets (TargetsInclude ["B.hs"])
-          ]) 0
-        assertLoadedModules session "" ["A", "B", "C"]
+          ]) 2
+        assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
-           assertEqual "we still have autocompletion info for C" 2 $
+           assertEqual "we no longer have autocompletion info for C" 0 $
              length (autocomplete (Text.pack "C") "sp") -- span, split
 
         buildExeTargetHsSucceeds session "B"
@@ -5345,7 +5345,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSessionD session (mconcat [
             modBn "1"
           , updateTargets (TargetsInclude ["B.hs"])
-          ]) 1
+          ]) 2
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
@@ -5371,7 +5371,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
             modBn "1"
           , modCn "invalid"
           , updateTargets (TargetsInclude ["B.hs"])
-          ]) 1
+          ]) 2
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
@@ -5397,7 +5397,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSessionD session (mconcat [
             modCn "invalid"
           , updateTargets (TargetsInclude ["B.hs"])
-          ]) 1
+          ]) 2
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
