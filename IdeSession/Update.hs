@@ -42,6 +42,7 @@ module IdeSession.Update (
   where
 
 import Prelude hiding (mod, span)
+import Control.Concurrent (threadDelay)
 import Control.Monad (when, void, forM, unless)
 import Control.Monad.State (MonadState, StateT, execStateT, runStateT)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
@@ -384,7 +385,9 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
                                  callback
                                  idleState
 
-         if idleState0 ^. ideUpdatedRestart then
+         if idleState0 ^. ideUpdatedRestart then do
+           -- To avoid "<stdout> hPutChar: resource vanished (Broken pipe)":
+           threadDelay 100000
            return (IdeSessionIdle idleState0, (False, True))
          else do
 
