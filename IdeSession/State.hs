@@ -17,6 +17,7 @@ module IdeSession.State
   , ideLogicalTimestamp
   , ideComputed
   , ideDynamicOpts
+  , ideRelativeIncludes
   , ideGenerateCode
   , ideManagedFiles
   , ideObjectFiles
@@ -33,6 +34,7 @@ module IdeSession.State
   , ideUpdatedCode
   , ideUpdatedArgs
   , ideUpdatedGhcOpts
+  , ideUpdatedRestart
   , ideBreakInfo
   , ideTargets
   , managedSource
@@ -123,6 +125,15 @@ data IdeIdleState = IdeIdleState {
   , _ideComputed         :: !(Strict Maybe Computed)
     -- | Dynamic options for GHC
   , _ideDynamicOpts          :: ![String]
+    -- | Include paths (equivalent of GHC's @-i@ parameter) relative to the
+    -- temporary directory where we store the session's source files.
+    -- The initial value, used also for server startup, is taken from
+    -- 'configRelativeIncludes'.
+    --
+    -- By default this is the singleton list @[""]@ -- i.e., we include the
+    -- sources dir (located there in simple setups, e.g., ide-backend tests)
+    -- but nothing else.
+  , _ideRelativeIncludes :: ![FilePath]
     -- | Whether to generate code in addition to type-checking.
   , _ideGenerateCode     :: !Bool
     -- | Files submitted by the user and not deleted yet.
@@ -157,6 +168,8 @@ data IdeIdleState = IdeIdleState {
   , _ideUpdatedArgs      :: !Bool
     -- | Has the value of ideDynamicOpts diverged from what's recorded on the server?
   , _ideUpdatedGhcOpts   :: !Bool
+    -- | Does the update require session restart?
+  , _ideUpdatedRestart   :: !Bool
     -- | Are we currently in a breakpoint?
   , _ideBreakInfo        :: !(Strict Maybe Public.BreakInfo)
     -- | Targets for compilation
@@ -210,6 +223,7 @@ data RunActions a = RunActions {
 ideLogicalTimestamp    :: Accessor IdeIdleState LogicalTimestamp
 ideComputed            :: Accessor IdeIdleState (Strict Maybe Computed)
 ideDynamicOpts         :: Accessor IdeIdleState [String]
+ideRelativeIncludes    :: Accessor IdeIdleState [FilePath]
 ideGenerateCode        :: Accessor IdeIdleState Bool
 ideManagedFiles        :: Accessor IdeIdleState ManagedFilesInternal
 ideObjectFiles         :: Accessor IdeIdleState ObjectFiles
@@ -226,12 +240,14 @@ ideUpdatedEnv          :: Accessor IdeIdleState Bool
 ideUpdatedCode         :: Accessor IdeIdleState Bool
 ideUpdatedArgs         :: Accessor IdeIdleState Bool
 ideUpdatedGhcOpts      :: Accessor IdeIdleState Bool
+ideUpdatedRestart      :: Accessor IdeIdleState Bool
 ideBreakInfo           :: Accessor IdeIdleState (Strict Maybe Public.BreakInfo)
 ideTargets             :: Accessor IdeIdleState Public.Targets
 
 ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
-ideDynamicOpts      = accessor _ideDynamicOpts          $ \x s -> s { _ideDynamicOpts          = x }
+ideDynamicOpts      = accessor _ideDynamicOpts      $ \x s -> s { _ideDynamicOpts      = x }
+ideRelativeIncludes      = accessor _ideRelativeIncludes $ \x s -> s { _ideRelativeIncludes = x }
 ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCode     = x }
 ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }
 ideObjectFiles      = accessor _ideObjectFiles      $ \x s -> s { _ideObjectFiles      = x }
@@ -249,6 +265,7 @@ ideUpdatedEnv       = accessor _ideUpdatedEnv       $ \x s -> s { _ideUpdatedEnv
 ideUpdatedCode      = accessor _ideUpdatedCode      $ \x s -> s { _ideUpdatedCode      = x }
 ideUpdatedArgs      = accessor _ideUpdatedArgs      $ \x s -> s { _ideUpdatedArgs      = x }
 ideUpdatedGhcOpts   = accessor _ideUpdatedGhcOpts   $ \x s -> s { _ideUpdatedGhcOpts   = x }
+ideUpdatedRestart   = accessor _ideUpdatedRestart   $ \x s -> s { _ideUpdatedRestart   = x }
 ideBreakInfo        = accessor _ideBreakInfo        $ \x s -> s { _ideBreakInfo        = x }
 ideTargets          = accessor _ideTargets          $ \x s -> s { _ideTargets          = x }
 

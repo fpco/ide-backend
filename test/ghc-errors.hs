@@ -36,7 +36,7 @@ import System.FilePath.Find (always, extension, find)
 import System.IO as IO
 import System.IO.Temp (withTempDirectory, createTempDirectory)
 import System.IO.Unsafe (unsafePerformIO)
-import System.Process (readProcess)
+import System.Process (readProcess, readProcessWithExitCode)
 import qualified System.Process as Process
 import System.Random (randomRIO)
 import System.Timeout (timeout)
@@ -97,7 +97,7 @@ type SessionSetup = ((SessionInitParams, SessionConfig) -> (SessionInitParams, S
 -- temporary directory
 withSession :: SessionSetup -> (IdeSession -> IO a) -> IO a
 withSession setup io = inTempDir $ \tempDir -> do
-    let config' = config { configDir = tempDir }
+    let config' = config { configDir = tempDir}
     Ex.bracket (initSession initParams config') tryShutdownSession io
   where
     (initParams, config) = setup (defaultSessionInitParams, defaultSessionConfig)
@@ -422,6 +422,61 @@ syntheticTests = [
 
         let m = "Maybes"
             upd = buildExe [] [(Text.pack m, m <.> "lhs")]
+        updateSessionD session upd 4
+        status1 <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status1
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "Maybes exe output"
+                    "False\n"
+                    out
+
+        let m2 = "Exception"
+            upd2 = buildExe [] [(Text.pack m2, m2 <.> "hs")]
+        updateSessionD session upd2 4
+        out2 <- readProcess (distDir </> "build" </> m2 </> m2) [] []
+        assertEqual "Exception exe output"
+                    ""
+                    out2
+
+        let m3 = "Main"
+            upd3 = buildExe [] [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
+        updateSessionD session upd3 4
+        out3 <- readProcess (distDir </> "build" </> m3 </> m3) [] []
+        assertEqual "Main exe output"
+                    ""
+                    out3
+
+        let upd4 = buildExe [] [(Text.pack m, m <.> "lhs")]
+        updateSessionD session upd4 4
+        status4 <- getBuildExeStatus session
+        assertEqual "after all exe builds" (Just ExitSuccess) status4
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
+        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: Exception Maybes OrdList\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.for.lhs"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
+    )
+  , ( "Build executable from some .lhs files with dynamic include path change"
+    , withSession defaultSession $ \session -> do
+        loadModulesFrom session "test/compiler/utils"
+        assertNoErrors session
+        let m = "Maybes"
+            upd0 = buildExe [] [(Text.pack m, m <.> "lhs")]
+        updateSessionD session upd0 4
+        status0 <- getBuildExeStatus session
+        -- Expected failure! The updateRelativeIncludes below is really needed.
+        assertEqual "after exe build" (Just $ ExitFailure 1) status0
+        updateSessionD session
+                       (updateRelativeIncludes ["test/compiler/utils"])
+                       4
+        assertNoErrors session
+        distDir <- getDistDir session
+
+        let upd = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd 4
         status1 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status1
@@ -785,6 +840,27 @@ syntheticTests = [
   , ( "Test recursive modules"
     , withSession (withIncludes "test/bootMods") $ \session -> do
         loadModulesFrom session "test/bootMods"
+        assertNoErrors session
+
+        let m = "Main"
+            upd = buildExe [] [(Text.pack m, "C" <.> "hs")]
+        updateSessionD session upd 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "" "C\n" out
+    )
+  , ( "Test recursive modules with dynamic include path change"
+    , withSession defaultSession $ \session -> do
+        loadModulesFrom session "test/bootMods"
+        assertOneError session
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/bootMods"])
+                       4
         assertNoErrors session
 
         let m = "Main"
@@ -1780,6 +1856,66 @@ syntheticTests = [
           RunOk -> assertEqual "" (BSL8.fromString "42\n") output
           _     -> assertFailure $ "Unexpected run result: " ++ show result
     )
+  , ( "Using the FFI via GHC API with deleting and re-adding the .c file"
+    , withSession defaultSession $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateSourceFileFromFile "test/FFI/Main.hs"
+              , updateSourceFileFromFile "test/FFI/life.c"
+              , updateSourceFileFromFile "test/FFI/life.h"
+              ]
+        updateSessionD session upd 3
+        assertNoErrors session
+
+        updateSessionD session (updateSourceFileDelete "test/FFI/life.c") 0
+        assertNoErrors session
+
+        updateSessionD session (updateSourceFileFromFile "test/FFI/life.c") 4
+        assertNoErrors session
+
+        updateSessionD session (updateSourceFileDelete "test/FFI/life.c") 0
+        assertNoErrors session
+
+        restartSession session Nothing
+        updateSessionD session mempty 1
+        assertOneError session
+
+        updateSessionD session (updateSourceFileFromFile "test/FFI/life.c") 4
+        assertNoErrors session
+
+        runActions <- runStmt session "Main" "main"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk -> assertEqual "" (BSL8.fromString "42\n") output
+          _     -> assertFailure $ "Unexpected run result: " ++ show result
+    )
+  , ( "Using the FFI via GHC API with deleting and adding a different .c file"
+    , withSession defaultSession $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateSourceFileFromFile "test/FFI/Main.hs"
+              , updateSourceFileFromFile "test/FFI/life.c"
+              , updateSourceFileFromFile "test/FFI/life.h"
+              ]
+        updateSessionD session upd 3
+        assertNoErrors session
+
+        updateSessionD session (updateSourceFileDelete "test/FFI/life.c"
+                                <> updateSourceFileDelete "test/FFI/life.h") 0
+        assertNoErrors session
+
+{- duplicate definition for symbol...    errorMsg = "Server killed"
+        updateSessionD session (updateSourceFileFromFile "test/FFI/ffiles/life.c"
+                                <> updateSourceFileFromFile "test/FFI/ffiles/local.h"
+                                <> updateSourceFileFromFile "test/FFI/ffiles/life.h") 4
+        assertNoErrors session
+        runActions <- runStmt session "Main" "main"
+        (output, result) <- runWaitAll runActions
+        case result of
+          RunOk -> assertEqual "" (BSL8.fromString "42\n") output
+          _     -> assertFailure $ "Unexpected run result: " ++ show result
+-}
+    )
   , ( "Using the FFI from a subdir and compiled via buildExe"
     , withSession defaultSession $ \session -> do
         let upd = mconcat [
@@ -1888,6 +2024,19 @@ syntheticTests = [
         updateSessionD session mempty 4
         assertNoErrors session
 
+        updateSessionD session (updateSourceFileDelete "test/FFI/ffiles/life.c"
+                                <> updateSourceFileDelete "test/FFI/ffiles/life.h"
+                                <> updateSourceFileDelete "test/FFI/ffiles/local.h") 0
+        assertNoErrors session
+
+        restartSession session Nothing
+        updateSessionD session mempty 4
+        assertOneError session
+
+        updateSessionD session (updateSourceFileFromFile "test/FFI/life.h"
+                                <> updateSourceFileFromFile "test/FFI/life.c") 4
+        assertNoErrors session
+
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
         updateSessionD session upd2 4
@@ -1899,7 +2048,7 @@ syntheticTests = [
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
         let pkgDir = distDir </> "dotCabal.test"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -1918,12 +2067,120 @@ syntheticTests = [
               , updateSourceFileFromFile "test/FFI/ffiles/life.h"
               , updateSourceFileFromFile "test/FFI/ffiles/local.h"
               , updateTargets (TargetsExclude ["test/FFI/life.c", "test/FFI/life.h", "life.c", "life.h", "test/FFI/Main.hs", "test/FFI/Main2.hs"])
--- TODO, possibly: these wouldn't be excluded currently and cause an error:
---              , updateSourceFileFromFile "test/FFI/life.c"
---              , updateSourceFileFromFile "test/FFI/life.h"
+                            ]
+        updateSessionD session upd 4
+        assertNoErrors session
+        updateSessionD session (updateSourceFileDelete "test/FFI/ffiles/life.c") 0
+        assertNoErrors session
+
+        restartSession session Nothing
+        updateSessionD session mempty 1
+        assertOneError session
+
+        -- Without the restartSession we get
+{-
+GHCi runtime linker: fatal error: I found a duplicate definition for symbol
+   meaningOfLife
+whilst processing object file
+   /tmp/ide-backend-test.28928/dist.28928/objs/test/FFI/ffiles/life.o
+This could be caused by:
+   * Loading two different object files which export the same symbol
+   * Specifying the same object file twice on the GHCi command line
+   * An incorrect `package.conf' entry, causing some object to be
+     loaded twice.
+GHCi cannot safely continue in this situation.  Exiting now.  Sorry.
+
+  Using the FFI via GHC API with deleting and adding a different .c file: [Failed]
+Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server died>>, errorMsg = "Server killed"}
+-}
+        updateSessionD session (updateSourceFileFromFile "test/FFI/life.c"
+                                <> updateSourceFileFromFile "test/FFI/life.h") 5
+        assertNoErrors session
+
+        let m = "Main"
+            upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
+        updateSessionD session upd2 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "FFI exe output" "84\n" exeOut
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h life.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.test"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
+    )
+  , ( "Using the FFI with dynamic include, TH and MIN_VERSION_base via buildExe"
+    , withSession defaultSession $ \session -> do
+        updateSessionD session
+                       (updateRelativeIncludes [])
+                       0
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateSourceFileFromFile "test/FFI/Main3.hs"
+              , updateSourceFileFromFile "test/FFI/A.hs"
+              , updateSourceFileFromFile "test/FFI/ffiles/life.c"
+              , updateSourceFileFromFile "test/FFI/ffiles/life.h"
+              , updateSourceFileFromFile "test/FFI/ffiles/local.h"
               ]
         updateSessionD session upd 4
         assertNoErrors session
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/FFI"])
+                       4
+        assertNoErrors session
+
+        let m = "Main"
+            upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
+        updateSessionD session upd2 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "FFI exe output" "84\n" exeOut
+
+        dotCabalFromName <- getDotCabal session
+        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
+        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        let pkgDir = distDir </> "dotCabal.test"
+        createDirectoryIfMissing False pkgDir
+        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
+        checkWarns <- checkPackage pkgDir
+        assertCheckWarns checkWarns
+    )
+  , ( "Using the FFI with dynamic include and TargetsInclude"
+    , withSession defaultSession $ \session -> do
+        let upd = mconcat [
+                updateCodeGeneration True
+              , updateTargets (TargetsInclude ["test/FFI/Main.hs"])
+              , updateSourceFileFromFile "test/FFI/Main.hs"
+              , updateSourceFileFromFile "test/FFI/Main2.hs"
+              , updateSourceFileFromFile "test/FFI/Main3.hs"
+              , updateSourceFileFromFile "test/FFI/A.hs"
+              , updateSourceFileFromFile "test/FFI/ffiles/life.c"
+              , updateSourceFileFromFile "test/FFI/ffiles/life.h"
+              , updateSourceFileFromFile "test/FFI/ffiles/local.h"
+              ]
+        updateSessionD session upd 4
+        assertNoErrors session
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/FFI"])
+                       4
+        assertNoErrors session
+
+        updateSessionD session (updateTargets (TargetsInclude ["test/FFI/Main2.hs"])) 3
+        assertNoErrors session
+
+        updateSessionD session (updateTargets (TargetsInclude ["test/FFI/Main3.hs"])) 4
+        assertNoErrors session
+
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
         updateSessionD session upd2 4
@@ -5061,10 +5318,10 @@ syntheticTests = [
 
         updateSessionD session (mconcat [
             updateTargets (TargetsInclude ["B.hs"])
-          ]) 0
-        assertLoadedModules session "" ["A", "B", "C"]
+          ]) 2
+        assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
-           assertEqual "we still have autocompletion info for C" 2 $
+           assertEqual "we no longer have autocompletion info for C" 0 $
              length (autocomplete (Text.pack "C") "sp") -- span, split
 
         buildExeTargetHsSucceeds session "B"
@@ -5088,7 +5345,7 @@ syntheticTests = [
         updateSessionD session (mconcat [
             modBn "1"
           , updateTargets (TargetsInclude ["B.hs"])
-          ]) 1
+          ]) 2
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
@@ -5114,7 +5371,7 @@ syntheticTests = [
             modBn "1"
           , modCn "invalid"
           , updateTargets (TargetsInclude ["B.hs"])
-          ]) 1
+          ]) 2
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
@@ -5140,7 +5397,7 @@ syntheticTests = [
         updateSessionD session (mconcat [
             modCn "invalid"
           , updateTargets (TargetsInclude ["B.hs"])
-          ]) 1
+          ]) 2
         assertLoadedModules session "" ["A", "B"]
         do autocomplete <- getAutocompletion session
            assertEqual "autocompletion info for C cleared" 0 $
@@ -5305,6 +5562,34 @@ syntheticTests = [
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "" "42\n" out
     )
+  , ( "Support for hs-boot files from a subdirectory (#177) with dynamic include path change"
+    , withSession defaultSession $ \session -> do
+        let ahs = BSLC.pack $ "module A where\nimport B( TB(..) )\nnewtype TA = MkTA Int\nf :: TB -> TA\nf (MkTB x) = MkTA x"
+            ahsboot = BSLC.pack $ "module A where\nnewtype TA = MkTA Int"
+            bhs = BSLC.pack $ "module B where\nimport {-# SOURCE #-} A( TA(..) )\ndata TB = MkTB !Int\ng :: TA -> TB\ng (MkTA x) = MkTB x\nmain = print 42"
+        let update = updateSourceFile "src/A.hs" ahs
+                  <> updateSourceFile "src/A.hs-boot" ahsboot
+                  <> updateSourceFile "src/B.hs" bhs
+                  <> updateCodeGeneration True
+        updateSessionD session update 3
+        assertOneError session
+
+        updateSessionD session
+                       (updateRelativeIncludes ["src"])
+                       3
+        assertNoErrors session
+
+        let m = "B"
+            updE = buildExe [] [(Text.pack m, m <.> "hs")]
+        updateSessionD session updE 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "" "42\n" out
+    )
   , ( "Relative include paths (#156)"
     , withSession (withIncludes "test/ABnoError") $ \session -> do
         -- Since we set the target explicitly, ghc will need to be able to find
@@ -5322,6 +5607,292 @@ syntheticTests = [
         updateSessionD session updE2 4
         status2 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status2
+    )
+  , ( "Relative include paths (#156) with dynamic include path change"
+    , withSession defaultSession $ \session -> do
+        -- Since we set the target explicitly, ghc will need to be able to find
+        -- the other module (B) on its own; that means it will need an include
+        -- path to <ideSourcesDir>/test/ABnoError
+        loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
+        assertOneError session
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/ABnoError"])
+                       2  -- note the recompilation
+        assertNoErrors session
+
+        let updE = buildExe [] [(Text.pack "Main", "test/ABnoError/A.hs")]
+        updateSessionD session updE 4
+        status <- getBuildExeStatus session
+        -- Path "" no longer in include paths here!
+        assertEqual "after exe build" (Just $ ExitFailure 1) status
+
+        let updE2 = buildExe [] [(Text.pack "Main", "A.hs")]
+        updateSessionD session updE2 4
+        status2 <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status2
+    )
+  , ( "Switch from one to another relative include path for the same module name with TargetsInclude"
+    , withSession defaultSession $ \session -> do
+        loadModulesFrom' session "test/AnotherA" (TargetsInclude ["test/AnotherA/A.hs"])
+        assertOneError session
+        updateSessionD session (updateCodeGeneration True) 0
+        updateSessionD session
+                       (updateSourceFileFromFile "test/ABnoError/B.hs")
+                       0
+        assertOneError session
+        updateSessionD session
+                       (updateSourceFileFromFile "test/AnotherB/B.hs")
+                       0
+        assertOneError session
+
+        updateSessionD session
+                       (updateRelativeIncludes ["", "test/AnotherA", "test/ABnoError"])
+                       2  -- note the recompilation
+        assertNoErrors session
+
+        runActions <- runStmt session "Main" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "output" (BSLC.pack "\"running 'A depends on B, no errors' from test/ABnoError\"\n") output
+
+        distDir <- getDistDir session
+        let m = "Main"
+            updE = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
+        updateSessionD session updE 4
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        (stExc, out, _) <-
+           readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc
+        assertEqual "exe output with old include path"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                    out
+
+        let updE2 = buildExe [] [(Text.pack m, "A.hs")]
+        updateSessionD session updE2 4
+        status2 <- getBuildExeStatus session
+        assertEqual "after exe build2" (Just ExitSuccess) status2
+        (stExc2, out2, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc2
+        assertEqual "exe output with old include path"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                    out2
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
+                       2
+        assertNoErrors session
+
+        runActions3 <- runStmt session "Main" "main"
+        (output3, _) <- runWaitAll runActions3
+        assertEqual "output3" (BSLC.pack "\"running A with another B\"\n") output3
+
+        updateSessionD session
+                       (updateSourceFileDelete "test/ABnoError/B.hs")
+                       0  -- already recompiled above
+        assertNoErrors session
+
+        runActions35 <- runStmt session "Main" "main"
+        (output35, _) <- runWaitAll runActions35
+        assertEqual "output35" (BSLC.pack "\"running A with another B\"\n") output35
+
+        -- And this one works OK even without updateSourceFileDelete
+        -- and even without session restart.
+        let updE3 = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
+        updateSessionD session updE3 4
+        status3 <- getBuildExeStatus session
+        -- Path "" no longer in include paths here!
+        assertEqual "after exe build3" (Just $ ExitFailure 1) status3
+
+        let updE4 = buildExe [] [(Text.pack m, "A.hs")]
+        updateSessionD session updE4 4
+        status4 <- getBuildExeStatus session
+        assertEqual "after exe build4" (Just ExitSuccess) status4
+        (stExc4, out4, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc4
+        assertEqual "exe output with new include path"
+                    "\"running A with another B\"\n"
+                    out4
+    )
+  , ( "Switch from one to another relative include path for the same module name with TargetsExclude"
+    , withSession defaultSession $ \session -> do
+        loadModulesFrom' session "test/AnotherA" (TargetsExclude [])
+        assertOneError session
+
+        updateSessionD session (updateCodeGeneration True) 0
+        updateSessionD session
+                       (updateSourceFileFromFile "test/ABnoError/B.hs")
+                       2
+        assertNoErrors session
+        updateSessionD session
+                       (updateRelativeIncludes ["", "test/AnotherA", "test/ABnoError"])
+                       2  -- with TargetsExclude [], this is superfluous
+        assertNoErrors session
+
+        runActions <- runStmt session "Main" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "output" (BSLC.pack "\"running 'A depends on B, no errors' from test/ABnoError\"\n") output
+
+        distDir <- getDistDir session
+        let m = "Main"
+            updE = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
+        updateSessionD session updE 4
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        (stExc, out, _) <-
+           readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc
+        assertEqual "exe output with old include path"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                    out
+
+        let updE2 = buildExe [] [(Text.pack m, "A.hs")]
+        updateSessionD session updE2 4
+        status2 <- getBuildExeStatus session
+        assertEqual "after exe build2" (Just ExitSuccess) status2
+        (stExc2, out2, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc2
+        assertEqual "exe output with old include path"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                    out2
+
+        updateSessionD session
+                       (updateSourceFileDelete "test/ABnoError/B.hs")
+                       0
+        assertOneError session
+        updateSessionD session
+                       (updateSourceFileFromFile "test/AnotherB/B.hs")
+                       2
+        assertNoErrors session
+
+        updateSessionD session
+                       (updateTargets (TargetsInclude ["test/AnotherA/A.hs"]))
+                       0
+        assertOneError session
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
+                       2  -- with TargetsExclude, this would be superfluous
+        assertNoErrors session  -- fixed the error from above
+        updateSessionD session
+                       (updateTargets  (TargetsExclude []))
+                       2  -- recompilation due to session restart only
+        assertNoErrors session
+
+        runActions3 <- runStmt session "Main" "main"
+        (output3, _) <- runWaitAll runActions3
+        assertEqual "output3" (BSLC.pack "\"running A with another B\"\n") output3
+
+        let updE3 = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
+        updateSessionD session updE3 4
+        status3 <- getBuildExeStatus session
+        -- Path "" no longer in include paths here!
+        assertEqual "after exe build3" (Just $ ExitFailure 1) status3
+
+        let updE4 = buildExe [] [(Text.pack m, "A.hs")]
+        updateSessionD session updE4 4
+        status4 <- getBuildExeStatus session
+        assertEqual "after exe build4" (Just ExitSuccess) status4
+        (stExc4, out4, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc4
+        assertEqual "exe output with new include path"
+                    "\"running A with another B\"\n"
+                    out4
+    )
+  , ( "Switch from one to another relative include path with TargetsInclude and the main module not in path"
+    , withSession defaultSession $ \session -> do
+        -- Since we set the target explicitly, ghc will need to be able to find
+        -- the other module (B) on its own; that means it will need an include
+        -- path to <ideSourcesDir>/test/ABnoError
+        loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
+        assertOneError session
+        updateSessionD session
+                       (updateSourceFileFromFile "test/AnotherB/B.hs")
+                       0
+        assertOneError session
+
+        updateSessionD session (updateCodeGeneration True) 0
+        updateSessionD session
+                       (updateRelativeIncludes ["test/ABnoError"])
+                       2  -- note the recompilation
+        assertNoErrors session
+
+        runActions <- runStmt session "Main" "main"
+        (output, _) <- runWaitAll runActions
+        assertEqual "output" (BSLC.pack "\"running 'A depends on B, no errors' from test/ABnoError\"\n") output
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/AnotherB"])  -- A not in path
+                       2
+        assertNoErrors session
+
+        runActions3 <- runStmt session "Main" "main"
+        (output3, _) <- runWaitAll runActions3
+        assertEqual "output3" (BSLC.pack "\"running A with another B\"\n") output3
+
+        updateSessionD session
+                       (updateSourceFileDelete "test/ABnoError/B.hs")
+                       0  -- already recompiled above
+        assertNoErrors session
+
+        runActions35 <- runStmt session "Main" "main"
+        (output35, _) <- runWaitAll runActions35
+        assertEqual "output35" (BSLC.pack "\"running A with another B\"\n") output35
+
+        distDir <- getDistDir session
+        let m = "Main"
+
+        let updE4 = buildExe [] [(Text.pack m, "A.hs")]
+        updateSessionD session updE4 4
+        status4 <- getBuildExeStatus session
+        assertEqual "after exe build4" (Just $ ExitFailure 1) status4
+          -- Failure due to no A in path.
+
+        updateSessionD session
+                       (updateRelativeIncludes ["", "test/AnotherB"])  -- A still not in path
+                       2
+        assertNoErrors session
+
+        -- buildExe with full paths works though, if the includes have ""
+        let updE41 = buildExe [] [(Text.pack m, "test/ABnoError/A.hs")]
+        updateSessionD session updE41 4
+        status41 <- getBuildExeStatus session
+        assertEqual "after exe build41" (Just ExitSuccess) status41
+        (stExc41, out41, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc41
+        assertEqual "exe output with new include path"
+                    "\"running A with another B\"\n"
+                    out41
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/AnotherB", "test/ABnoError"])  -- A again in path
+                       2
+        assertNoErrors session
+
+        runActions4 <- runStmt session "Main" "main"
+        (output4, _) <- runWaitAll runActions4
+        assertEqual "output4" (BSLC.pack "\"running A with another B\"\n") output4
+
+        -- A again in path, so this time this works
+        updateSessionD session updE4 4
+        status45 <- getBuildExeStatus session
+        assertEqual "after exe build45" (Just ExitSuccess) status45
+        (stExc45, out45, _) <-
+          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
+        assertEqual "A throws exception" (ExitFailure 1) stExc45
+        assertEqual "exe output with new include path"
+                    "\"running A with another B\"\n"
+                    out45
+
+        updateSessionD session
+                       (updateRelativeIncludes ["test/ABnoError"])
+                       2
+        assertOneError session  -- correct
     )
   , ( "Dynamically setting/unsetting -Werror (#115)"
     , withSession defaultSession $ \session -> do
@@ -6352,6 +6923,7 @@ defaultSessionConfig = unsafePerformIO $ do
   return IdeSession.defaultSessionConfig {
              configPackageDBStack = packageDbStack
            , configExtraPathDirs  = splitSearchPath extraPathDirs
+--           , configDeleteTempFiles = False
            }
 
 {------------------------------------------------------------------------------

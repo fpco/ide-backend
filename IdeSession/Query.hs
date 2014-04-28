@@ -328,10 +328,10 @@ getDotCabal session = withComputedState session
                       $ \idleState computed@Computed{..} -> do
   let sourcesDir  = ideSourcesDir $ ideStaticInfo session
       dynamicOpts = idleState ^. ideDynamicOpts
-      SessionConfig{configRelativeIncludes, configStaticOpts}
-                  = ideConfig $ ideStaticInfo session
+      relativeIncludes = idleState ^. ideRelativeIncludes
+      SessionConfig{configStaticOpts} = ideConfig $ ideStaticInfo session
       options     = configStaticOpts ++ dynamicOpts
-  buildDotCabal sourcesDir configRelativeIncludes options computed
+  buildDotCabal sourcesDir relativeIncludes options computed
 
 {------------------------------------------------------------------------------
   Debugging

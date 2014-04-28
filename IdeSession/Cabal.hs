@@ -244,12 +244,13 @@ mkConfFlags ideDistDir configPackageDBStack progPathExtra =
     , Setup.configProgramPathExtra = progPathExtra
     }
 
-configureAndBuild :: SessionConfig -> FilePath -> FilePath -> [String]
+configureAndBuild :: SessionConfig -> FilePath -> FilePath -> [FilePath]
+                  -> [String]
                   -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
-configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcOpts
-                  pkgs loadedMs callback ms = do
+configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
+                  ghcOpts pkgs loadedMs callback ms = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
   callback $ Progress 1 4 Nothing Nothing
@@ -257,7 +258,7 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcOpts
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
-                        configRelativeIncludes
+                        relativeIncludes
   executables <-
     mapM (exeDesc sourcesDirs [ideSourcesDir] ideDistDir ghcOpts) ms
   callback $ Progress 2 4 Nothing Nothing
@@ -341,11 +342,12 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir ghcOpts
       if isDoesNotExistError e then return ()
                                else Ex.throwIO e
 
-configureAndHaddock :: SessionConfig -> FilePath -> FilePath -> [String]
+configureAndHaddock :: SessionConfig -> FilePath -> FilePath -> [FilePath]
+                    -> [String]
                     -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
                     -> IO ExitCode
-configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
-                    pkgs loadedMs callback = do
+configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
+                    ghcNewOpts pkgs loadedMs callback = do
   -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
   -- meaningful,  and if so, replace the Nothings with Just meaningful messages
   callback $ Progress 1 4 Nothing Nothing
@@ -353,7 +355,7 @@ configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
   callback $ Progress 2 4 Nothing Nothing
   let condExecutables = []
       sourcesDirs = map (\path -> ideSourcesDir </> path)
-                        configRelativeIncludes
+                        relativeIncludes
   hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
   lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
   -- Cabal can't find the code of @Main@, except in the main dir. See above.
@@ -402,7 +404,7 @@ configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir ghcNewOpts
 
 buildDotCabal :: FilePath -> [FilePath] -> [String] -> Computed
               -> IO (String -> Version -> BSL.ByteString)
-buildDotCabal ideSourcesDir configRelativeIncludes ghcNewOpts computed = do
+buildDotCabal ideSourcesDir relativeIncludes ghcNewOpts computed = do
   (loadedMs, pkgs) <- buildDeps $ just computed
   libDeps <- externalDeps pkgs
   -- We ignore any @Main@ modules (even in subdirectories or in @Foo.hs@)
@@ -417,7 +419,7 @@ buildDotCabal ideSourcesDir configRelativeIncludes ghcNewOpts computed = do
       projectMs =
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
   library <- libDesc True -- relative C files paths
-                     (filter (/= "") configRelativeIncludes) [ideSourcesDir]
+                     (filter (/= "") relativeIncludes) [ideSourcesDir]
                      ghcNewOpts projectMs
   let libE = library {libExposed = True}
       gpDesc libName version = GenericPackageDescription
@@ -431,24 +433,25 @@ buildDotCabal ideSourcesDir configRelativeIncludes ghcNewOpts computed = do
   return $ \libName version ->
     BSL8.pack $ showGenericPackageDescription $ gpDesc libName version
 
-buildExecutable :: SessionConfig -> FilePath -> FilePath -> [String]
+buildExecutable :: SessionConfig -> FilePath -> FilePath -> [FilePath]
+                -> [String]
                 -> Strict Maybe Computed -> (Progress -> IO ())
                 -> [(ModuleName, FilePath)]
                 -> IO ExitCode
-buildExecutable ideConfig ideSourcesDir ideDistDir ghcOpts
+buildExecutable ideConfig ideSourcesDir ideDistDir relativeIncludes ghcOpts
                 mcomputed callback ms = do
   (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndBuild ideConfig ideSourcesDir ideDistDir ghcOpts
+  configureAndBuild ideConfig ideSourcesDir ideDistDir relativeIncludes ghcOpts
                     pkgs loadedMs callback ms
 
-buildHaddock :: SessionConfig -> FilePath -> FilePath -> [String]
+buildHaddock :: SessionConfig -> FilePath -> FilePath -> [FilePath] -> [String]
              -> Strict Maybe Computed -> (Progress -> IO ())
              -> IO ExitCode
-buildHaddock ideConfig ideSourcesDir ideDistDir ghcNewOpts
+buildHaddock ideConfig ideSourcesDir ideDistDir relativeIncludes ghcNewOpts
              mcomputed callback = do
   (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndHaddock ideConfig ideSourcesDir ideDistDir ghcNewOpts
-                      pkgs loadedMs callback
+  configureAndHaddock ideConfig ideSourcesDir ideDistDir relativeIncludes
+                      ghcNewOpts pkgs loadedMs callback
 
 lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
 lFieldDescrs =

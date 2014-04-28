@@ -119,6 +119,7 @@ module IdeSession (
   , updateSourceFileFromFile
   , updateSourceFileDelete
   , updateDynamicOpts
+  , updateRelativeIncludes
   , updateCodeGeneration
   , updateDataFile
   , updateDataFileFromFile

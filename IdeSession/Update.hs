@@ -16,6 +16,7 @@ module IdeSession.Update (
   , updateSourceFileFromFile
   , updateSourceFileDelete
   , updateDynamicOpts
+  , updateRelativeIncludes
   , updateCodeGeneration
   , updateDataFile
   , updateDataFileFromFile
@@ -41,6 +42,7 @@ module IdeSession.Update (
   where
 
 import Prelude hiding (mod, span)
+import Control.Concurrent (threadDelay)
 import Control.Monad (when, void, forM, unless)
 import Control.Monad.State (MonadState, StateT, execStateT, runStateT)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
@@ -148,6 +150,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
                       _ideLogicalTimestamp = 86400
                     , _ideComputed         = Maybe.nothing
                     , _ideDynamicOpts      = []
+                    , _ideRelativeIncludes = configRelativeIncludes
                     , _ideGenerateCode     = False
                     , _ideManagedFiles     = ManagedFilesInternal [] []
                     , _ideObjectFiles      = []
@@ -159,6 +162,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
                     , _ideUpdatedEnv       = False
                     , _ideUpdatedArgs      = False -- Server default is []
                     , _ideUpdatedGhcOpts   = False
+                    , _ideUpdatedRestart   = False
                       -- Make sure 'ideComputed' is set on first call
                       -- to updateSession
                     , _ideUpdatedCode      = True
@@ -301,6 +305,7 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
                  . (ideUpdatedArgs    ^= True)
                  . (ideUpdatedCode    ^= True)
                  . (ideUpdatedGhcOpts ^= True)
+                 . (ideUpdatedRestart ^= False)
                  . (ideGhcServer      ^= server)
                  . (ideGhcVersion     ^= version)
                  . (ideObjectFiles    ^= [])
@@ -364,18 +369,33 @@ instance Monoid a => Monoid (IdeSessionUpdate a) where
 -- which can be used to monitor progress of the operation.
 updateSession :: IdeSession -> IdeSessionUpdate () -> (Progress -> IO ()) -> IO ()
 updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
-    go False
+    go False False
   where
-    go :: Bool -> IO ()
-    go alreadyRestarted = do
+    go :: Bool -> Bool -> IO ()
+    go alreadyRestartedDead alreadyRestartedDueToUpdate = do
       -- We don't want to call 'restartSession' while we hold the lock
-      shouldRestart <- modifyMVar ideState $ \state -> case state of
+      (shouldRestartDead, shouldRestartDueToUpdate)
+       <- modifyMVar ideState $ \state -> case state of
         IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
+         ((), idleState0) <-
+           if alreadyRestartedDueToUpdate
+           then return ((), idleState)
+           else runSessionUpdate update
+                                 ideStaticInfo
+                                 callback
+                                 idleState
+
+         if idleState0 ^. ideUpdatedRestart then do
+           -- To avoid "<stdout> hPutChar: resource vanished (Broken pipe)":
+           threadDelay 100000
+           return (IdeSessionIdle idleState0, (False, True))
+         else do
+
           ((numActions, cErrors), idleState') <-
-            runSessionUpdate (update >> recompileObjectFiles)
+            runSessionUpdate recompileObjectFiles
                              ideStaticInfo
                              callback
-                             idleState
+                             idleState0
 
           let callback' p = callback p {
                   progressStep     = progressStep     p + numActions
@@ -389,8 +409,12 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
           when (idleState' ^. ideUpdatedArgs) $
             rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
 
+          let relIncl = idleState' ^. ideRelativeIncludes
+              sourcesDir = ideSourcesDir ideStaticInfo
           when (idleState' ^. ideUpdatedGhcOpts) $
-            rpcSetGhcOpts (idleState ^. ideGhcServer) (idleState' ^. ideDynamicOpts)
+            rpcSetGhcOpts (idleState ^. ideGhcServer)
+                          (idleState' ^. ideDynamicOpts
+                           ++ relInclToOpts sourcesDir relIncl)
 
           -- Recompile
           computed <- if (idleState' ^. ideUpdatedCode)
@@ -432,20 +456,20 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
                  . (ideUpdatedArgs    ^= False)
                  . (ideUpdatedGhcOpts ^= False)
                  $ idleState'
-                 , False
+                 , (False, False)
                  )
 
         IdeSessionServerDied _ _ ->
-          return (state, not alreadyRestarted)
+          return (state, (not alreadyRestartedDead, False))
 
         IdeSessionRunning _ _ ->
           Ex.throwIO (userError "Cannot update session in running mode")
         IdeSessionShutdown ->
           Ex.throwIO (userError "Session already shut down.")
 
-      when shouldRestart $ do
+      when (shouldRestartDead || shouldRestartDueToUpdate) $ do
         restartSession session Nothing
-        go True
+        go shouldRestartDead shouldRestartDueToUpdate
 
     mkRelative :: ExplicitSharingCache -> ExplicitSharingCache
     mkRelative ExplicitSharingCache{..} =
@@ -456,8 +480,8 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
       , idPropCache   = idPropCache
       }
 
-    handleExternal :: IdeIdleState -> ExternalException -> IO (IdeSessionState, Bool)
-    handleExternal idleState e = return (IdeSessionServerDied e idleState, False)
+    handleExternal :: IdeIdleState -> ExternalException -> IO (IdeSessionState, (Bool, Bool))
+    handleExternal idleState e = return (IdeSessionServerDied e idleState, (False, False))
 
     constructAuto :: ExplicitSharingCache -> Strict [] IdInfo
                   -> Strict Trie (Strict [] IdInfo)
@@ -631,6 +655,22 @@ updateDynamicOpts opts = do
   set ideUpdatedGhcOpts True
   set ideUpdatedCode    True -- In case we need to recompile due to new opts
 
+-- | Set include paths (equivalent of GHC's @-i@ parameter).
+-- In general, this requires session restart,
+-- because GHC doesn't revise module dependencies when targets
+-- or include paths change, but only when files change.
+--
+-- This function is stateless: semantically, the set of currently active
+-- include paths are those set in the last call to updateRelativeIncludes.
+-- Any paths set earlier (including those from 'configRelativeIncludes')
+-- are wiped out and overwritten in each call to updateRelativeIncludes.
+updateRelativeIncludes :: [FilePath] -> IdeSessionUpdate ()
+updateRelativeIncludes relIncl = do
+  set ideRelativeIncludes relIncl
+  set ideUpdatedGhcOpts   True
+  set ideUpdatedCode      True -- In case we need to recompile due to new paths
+  set ideUpdatedRestart   True
+
 -- | Enable or disable code generation in addition
 -- to type-checking. Required by 'runStmt'.
 updateCodeGeneration :: Bool -> IdeSessionUpdate ()
@@ -681,7 +721,9 @@ updateStdoutBufferMode = set ideStdoutBufferMode
 updateStderrBufferMode :: RunBufferMode -> IdeSessionUpdate ()
 updateStderrBufferMode = set ideStderrBufferMode
 
--- | Set compilation targets
+-- | Set compilation targets. In general, this requires session restart,
+-- because GHC doesn't revise module dependencies when targets
+-- or include paths change, but only when files change.
 updateTargets :: Public.Targets -> IdeSessionUpdate ()
 updateTargets targets = do
   IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
@@ -691,6 +733,7 @@ updateTargets targets = do
         Public.TargetsExclude l ->
           Public.TargetsExclude $ map (ideSourcesDir </>) l
   set ideTargets dirTargets
+  set ideUpdatedRestart True
 
 -- | Run a given function in a given module (the name of the module
 -- is the one between @module ... end@, which may differ from the file name).
@@ -833,6 +876,7 @@ buildExe extraOpts ms = do
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
+    relativeIncludes  <- get ideRelativeIncludes
     let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
         -- Note that these do not contain the @packageDbArgs@ options.
     when (not configGenerateModInfo) $
@@ -858,7 +902,8 @@ buildExe extraOpts ms = do
           Dir.setCurrentDirectory
           (const $
              do Dir.setCurrentDirectory ideDataDir
-                buildExecutable ideConfig ideSourcesDir ideDistDir ghcOpts
+                buildExecutable ideConfig ideSourcesDir ideDistDir
+                                relativeIncludes ghcOpts
                                 mcomputed callback ms)
     set ideBuildExeStatus (Just exitCode)
 
@@ -879,6 +924,7 @@ buildDoc = do
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
+    relativeIncludes  <- get ideRelativeIncludes
     let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
@@ -888,6 +934,7 @@ buildDoc = do
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
                   buildHaddock ideConfig ideSourcesDir ideDistDir
+                               relativeIncludes
                                (dynamicOpts ++ configStaticOpts)
                                mcomputed callback)
     set ideBuildDocStatus (Just exitCode)
