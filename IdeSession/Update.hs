@@ -901,9 +901,10 @@ buildExe extraOpts ms = do
           Dir.setCurrentDirectory
           (const $
              do Dir.setCurrentDirectory ideDataDir
-                buildExecutable ideConfig ideSourcesDir ideDistDir
-                                relativeIncludes ghcOpts
-                                mcomputed ms)
+                (loadedMs, pkgs) <- buildDeps mcomputed
+                configureAndBuild ideConfig ideSourcesDir ideDistDir
+                                  relativeIncludes ghcOpts
+                                  pkgs loadedMs ms)
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
@@ -927,14 +928,16 @@ buildDoc = do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
+    let ghcOpts = configStaticOpts ++ dynamicOpts
     exitCode <- liftIO $ Ex.bracket
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
-                  buildHaddock ideConfig ideSourcesDir ideDistDir
-                               relativeIncludes
-                               (dynamicOpts ++ configStaticOpts)
-                               mcomputed)
+                  (loadedMs, pkgs) <- buildDeps mcomputed
+                  configureAndHaddock ideConfig ideSourcesDir ideDistDir
+                                      relativeIncludes
+                                      ghcOpts
+                                      pkgs loadedMs)
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.

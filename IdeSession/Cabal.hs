@@ -1,7 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
 module IdeSession.Cabal (
-    buildExecutable, buildHaddock, buildLicenseCatenation
+    configureAndBuild, configureAndHaddock, buildDeps, buildLicenseCatenation
   , generateMacros, buildDotCabal, runComponentCc
   , buildLicsFromPkgs  -- for testing only
   ) where
@@ -342,7 +342,7 @@ configureAndHaddock :: SessionConfig -> FilePath -> FilePath
                     -> [ModuleName]
                     -> IO ExitCode
 configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
-                    ghcNewOpts pkgs loadedMs = do
+                    ghcOpts pkgs loadedMs = do
   libDeps <- externalDeps pkgs
   let condExecutables = []
       sourcesDirs = map (\path -> ideSourcesDir </> path)
@@ -353,7 +353,7 @@ configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False sourcesDirs [ideSourcesDir] ghcNewOpts projectMs
+  library <- libDesc False sourcesDirs [ideSourcesDir] ghcOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -390,7 +390,7 @@ configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
 
 buildDotCabal :: FilePath -> [FilePath] -> [String] -> Computed
               -> IO (String -> Version -> BSL.ByteString)
-buildDotCabal ideSourcesDir relativeIncludes ghcNewOpts computed = do
+buildDotCabal ideSourcesDir relativeIncludes ghcOpts computed = do
   (loadedMs, pkgs) <- buildDeps $ just computed
   libDeps <- externalDeps pkgs
   -- We ignore any @Main@ modules (even in subdirectories or in @Foo.hs@)
@@ -406,7 +406,7 @@ buildDotCabal ideSourcesDir relativeIncludes ghcNewOpts computed = do
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
   library <- libDesc True -- relative C files paths
                      (filter (/= "") relativeIncludes) [ideSourcesDir]
-                     ghcNewOpts projectMs
+                     ghcOpts projectMs
   let libE = library {libExposed = True}
       gpDesc libName version = GenericPackageDescription
         { packageDescription = pkgDescFromName libName version
@@ -418,26 +418,6 @@ buildDotCabal ideSourcesDir relativeIncludes ghcNewOpts computed = do
         }
   return $ \libName version ->
     BSL8.pack $ showGenericPackageDescription $ gpDesc libName version
-
-buildExecutable :: SessionConfig -> FilePath -> FilePath -> [FilePath]
-                -> [String]
-                -> Strict Maybe Computed
-                -> [(ModuleName, FilePath)]
-                -> IO ExitCode
-buildExecutable ideConfig ideSourcesDir ideDistDir relativeIncludes ghcOpts
-                mcomputed ms = do
-  (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndBuild ideConfig ideSourcesDir ideDistDir relativeIncludes ghcOpts
-                    pkgs loadedMs ms
-
-buildHaddock :: SessionConfig -> FilePath -> FilePath -> [FilePath] -> [String]
-             -> Strict Maybe Computed
-             -> IO ExitCode
-buildHaddock ideConfig ideSourcesDir ideDistDir relativeIncludes ghcNewOpts
-             mcomputed = do
-  (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndHaddock ideConfig ideSourcesDir ideDistDir relativeIncludes
-                      ghcNewOpts pkgs loadedMs
 
 lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
 lFieldDescrs =
