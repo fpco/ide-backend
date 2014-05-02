@@ -1,8 +1,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
 module IdeSession.Cabal (
-    configureAndBuild, configureAndHaddock, buildDeps, buildLicenseCatenation
-  , generateMacros, buildDotCabal, runComponentCc
+    BuildExeArgs(..), configureAndBuild, configureAndHaddock
+  , buildDeps, buildLicenseCatenation
+  , generateMacros, buildDotCabal
+  , RunCcArgs(..), runComponentCc
   , buildLicsFromPkgs  -- for testing only
   ) where
 
@@ -244,15 +246,26 @@ mkConfFlags ideDistDir configPackageDBStack progPathExtra =
     , Setup.configProgramPathExtra = progPathExtra
     }
 
-configureAndBuild :: SessionConfig -> FilePath -> FilePath
-                  -> [FilePath]
-                  -> [String]
-                  -> [PackageId]
-                  -> [ModuleName]
+data BuildExeArgs = BuildExeArgs
+  { beConfig :: SessionConfig
+  , beSourcesDir :: FilePath
+  , beDistDir :: FilePath
+  , beRelativeIncludes :: [FilePath]
+  , beGhcOpts :: [String]
+  , bePkgs :: [PackageId]
+  , beLoadedMs :: [ModuleName]
+  }
+
+configureAndBuild :: BuildExeArgs
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
-configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
-                  ghcOpts pkgs loadedMs ms = do
+configureAndBuild BuildExeArgs{ beConfig = SessionConfig{..}
+                              , beSourcesDir = ideSourcesDir
+                              , beDistDir =ideDistDir
+                              , beRelativeIncludes = relativeIncludes
+                              , beGhcOpts = ghcOpts
+                              , bePkgs = pkgs
+                              , beLoadedMs = loadedMs } ms = do
   libDeps <- externalDeps pkgs
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
@@ -335,14 +348,15 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
       if isDoesNotExistError e then return ()
                                else Ex.throwIO e
 
-configureAndHaddock :: SessionConfig -> FilePath -> FilePath
-                    -> [FilePath]
-                    -> [String]
-                    -> [PackageId]
-                    -> [ModuleName]
+configureAndHaddock :: BuildExeArgs
                     -> IO ExitCode
-configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
-                    ghcOpts pkgs loadedMs = do
+configureAndHaddock BuildExeArgs{ beConfig = SessionConfig{..}
+                              , beSourcesDir = ideSourcesDir
+                              , beDistDir =ideDistDir
+                              , beRelativeIncludes = relativeIncludes
+                              , beGhcOpts = ghcOpts
+                              , bePkgs = pkgs
+                              , beLoadedMs = loadedMs } = do
   libDeps <- externalDeps pkgs
   let condExecutables = []
       sourcesDirs = map (\path -> ideSourcesDir </> path)
@@ -712,13 +726,26 @@ localBuildInfo buildDir withPackageDB configExtraPathDirs = LocalBuildInfo
   , progSuffix = undefined
   }
 
+-- TODO: rename to document better
+data RunCcArgs = RunCcArgs
+  { rcPackageDBStack :: PackageDBStack
+  , rcExtraPathDirs :: [FilePath]
+  , rcDistDir :: FilePath
+  , rcAbsC :: FilePath
+  , rcAbsObj :: FilePath
+  , rcPref :: FilePath
+  }
+
 -- | Run gcc via ghc, with correct parameters.
 -- Copied from bits and pieces of @Distribution.Simple.GHC@.
-runComponentCc :: PackageDBStack -> [FilePath]
-               -> FilePath -> FilePath -> FilePath -> FilePath
+runComponentCc :: RunCcArgs
                -> IO (ExitCode, String, String)
-runComponentCc configPackageDBStack configExtraPathDirs
-               ideDistDir absC absObj pref = do
+runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
+                        , rcExtraPathDirs = configExtraPathDirs
+                        , rcDistDir = ideDistDir
+                        , rcAbsC = absC
+                        , rcAbsObj = absObj
+                        , rcPref = pref } = do
   let verbosity = silent
       -- TODO: create dist.23412/build? see cabalMacrosLocation
       buildDir = ideDistDir

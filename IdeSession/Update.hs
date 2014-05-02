@@ -902,9 +902,14 @@ buildExe extraOpts ms = do
           (const $
              do Dir.setCurrentDirectory ideDataDir
                 (loadedMs, pkgs) <- buildDeps mcomputed
-                configureAndBuild ideConfig ideSourcesDir ideDistDir
-                                  relativeIncludes ghcOpts
-                                  pkgs loadedMs ms)
+                let beArgs = BuildExeArgs{ beConfig = ideConfig
+                                         , beSourcesDir = ideSourcesDir
+                                         , beDistDir = ideDistDir
+                                         , beRelativeIncludes = relativeIncludes
+                                         , beGhcOpts = ghcOpts
+                                         , bePkgs = pkgs
+                                         , beLoadedMs = loadedMs }
+                configureAndBuild beArgs ms)
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
@@ -934,10 +939,15 @@ buildDoc = do
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
                   (loadedMs, pkgs) <- buildDeps mcomputed
-                  configureAndHaddock ideConfig ideSourcesDir ideDistDir
-                                      relativeIncludes
-                                      ghcOpts
-                                      pkgs loadedMs)
+                  let beArgs =
+                        BuildExeArgs{ beConfig = ideConfig
+                                    , beSourcesDir = ideSourcesDir
+                                    , beDistDir = ideDistDir
+                                    , beRelativeIncludes = relativeIncludes
+                                    , beGhcOpts = ghcOpts
+                                    , bePkgs = pkgs
+                                    , beLoadedMs = loadedMs }
+                  configureAndHaddock beArgs)
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
@@ -1058,12 +1068,16 @@ runGcc configPackageDBStack configExtraPathDirs
               ]
       _stdin :: String
       _stdin = ""
+      runCcArgs = RunCcArgs{ rcPackageDBStack = configPackageDBStack
+                           , rcExtraPathDirs = configExtraPathDirs
+                           , rcDistDir = ideDistDir
+                           , rcAbsC = absC
+                           , rcAbsObj = absObj
+                           , rcPref = pref }
   -- (_exitCode, _stdout, _stderr)
   --   <- readProcessWithExitCode _gcc _args _stdin
   -- The real deal; we call gcc via ghc via cabal functions:
-  (exitCode, stdout, stderr)
-    <- runComponentCc configPackageDBStack configExtraPathDirs
-                      ideDistDir absC absObj pref
+  (exitCode, stdout, stderr) <- runComponentCc runCcArgs
   case exitCode of
     ExitSuccess   -> return []
     ExitFailure _ -> return (parseErrorMsgs stdout stderr)
