@@ -244,16 +244,15 @@ mkConfFlags ideDistDir configPackageDBStack progPathExtra =
     , Setup.configProgramPathExtra = progPathExtra
     }
 
-configureAndBuild :: SessionConfig -> FilePath -> FilePath -> [FilePath]
+configureAndBuild :: SessionConfig -> FilePath -> FilePath
+                  -> [FilePath]
                   -> [String]
-                  -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
+                  -> [PackageId]
+                  -> [ModuleName]
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
 configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
-                  ghcOpts pkgs loadedMs callback ms = do
-  -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
-  -- meaningful,  and if so, replace the Nothings with Just meaningful messages
-  callback $ Progress 1 4 Nothing Nothing
+                  ghcOpts pkgs loadedMs ms = do
   libDeps <- externalDeps pkgs
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
@@ -261,7 +260,6 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
                         relativeIncludes
   executables <-
     mapM (exeDesc sourcesDirs [ideSourcesDir] ideDistDir ghcOpts) ms
-  callback $ Progress 2 4 Nothing Nothing
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
   hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
@@ -307,9 +305,7 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
         -- Setting @withPackageDB@ here is too late, @configure@ would fail
         -- already. Hence we set it in @mkConfFlags@ (can be reverted,
         -- when/if we construct @lbi@ without @configure@).
-        callback $ Progress 3 4 Nothing Nothing
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
-        callback $ Progress 4 4 Nothing Nothing
   -- Handle various exceptions and stderr/stdout printouts.
   let stdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
       stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
@@ -333,26 +329,21 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
                                exitFailure
                              else ioError e))
   return $! either id (const ExitSuccess) exitCode
-  -- TODO: add a callback hook to Cabal that is applied to GHC messages
-  -- as they are emitted, similarly as log_action in GHC API,
-  -- or filter stdout and display progress on each good line.
   where
     ignoreDoesNotExist :: IO () -> IO ()
     ignoreDoesNotExist = Ex.handle $ \e ->
       if isDoesNotExistError e then return ()
                                else Ex.throwIO e
 
-configureAndHaddock :: SessionConfig -> FilePath -> FilePath -> [FilePath]
+configureAndHaddock :: SessionConfig -> FilePath -> FilePath
+                    -> [FilePath]
                     -> [String]
-                    -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
+                    -> [PackageId]
+                    -> [ModuleName]
                     -> IO ExitCode
 configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
-                    ghcNewOpts pkgs loadedMs callback = do
-  -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
-  -- meaningful,  and if so, replace the Nothings with Just meaningful messages
-  callback $ Progress 1 4 Nothing Nothing
+                    ghcNewOpts pkgs loadedMs = do
   libDeps <- externalDeps pkgs
-  callback $ Progress 2 4 Nothing Nothing
   let condExecutables = []
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         relativeIncludes
@@ -394,13 +385,8 @@ configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
-        callback $ Progress 3 4 Nothing Nothing
-        Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
-        callback $ Progress 4 4 Nothing Nothing)
+        Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags)
   return $! either id (const ExitSuccess) exitCode
-  -- TODO: add a callback hook to Cabal that is applied to GHC messages
-  -- as they are emitted, similarly as log_action in GHC API,
-  -- or filter stdout and display progress on each good line.
 
 buildDotCabal :: FilePath -> [FilePath] -> [String] -> Computed
               -> IO (String -> Version -> BSL.ByteString)
@@ -435,23 +421,23 @@ buildDotCabal ideSourcesDir relativeIncludes ghcNewOpts computed = do
 
 buildExecutable :: SessionConfig -> FilePath -> FilePath -> [FilePath]
                 -> [String]
-                -> Strict Maybe Computed -> (Progress -> IO ())
+                -> Strict Maybe Computed
                 -> [(ModuleName, FilePath)]
                 -> IO ExitCode
 buildExecutable ideConfig ideSourcesDir ideDistDir relativeIncludes ghcOpts
-                mcomputed callback ms = do
+                mcomputed ms = do
   (loadedMs, pkgs) <- buildDeps mcomputed
   configureAndBuild ideConfig ideSourcesDir ideDistDir relativeIncludes ghcOpts
-                    pkgs loadedMs callback ms
+                    pkgs loadedMs ms
 
 buildHaddock :: SessionConfig -> FilePath -> FilePath -> [FilePath] -> [String]
-             -> Strict Maybe Computed -> (Progress -> IO ())
+             -> Strict Maybe Computed
              -> IO ExitCode
 buildHaddock ideConfig ideSourcesDir ideDistDir relativeIncludes ghcNewOpts
-             mcomputed callback = do
+             mcomputed = do
   (loadedMs, pkgs) <- buildDeps mcomputed
   configureAndHaddock ideConfig ideSourcesDir ideDistDir relativeIncludes
-                      ghcNewOpts pkgs loadedMs callback
+                      ghcNewOpts pkgs loadedMs
 
 lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
 lFieldDescrs =

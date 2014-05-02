@@ -873,7 +873,6 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 buildExe :: [String] -> [(ModuleName, FilePath)] -> IdeSessionUpdate ()
 buildExe extraOpts ms = do
     IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
-    callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
     relativeIncludes  <- get ideRelativeIncludes
@@ -904,7 +903,7 @@ buildExe extraOpts ms = do
              do Dir.setCurrentDirectory ideDataDir
                 buildExecutable ideConfig ideSourcesDir ideDistDir
                                 relativeIncludes ghcOpts
-                                mcomputed callback ms)
+                                mcomputed ms)
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
@@ -921,7 +920,6 @@ buildExe extraOpts ms = do
 buildDoc :: IdeSessionUpdate ()
 buildDoc = do
     IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
-    callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
     relativeIncludes  <- get ideRelativeIncludes
@@ -936,7 +934,7 @@ buildDoc = do
                   buildHaddock ideConfig ideSourcesDir ideDistDir
                                relativeIncludes
                                (dynamicOpts ++ configStaticOpts)
-                               mcomputed callback)
+                               mcomputed)
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
