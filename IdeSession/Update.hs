@@ -876,7 +876,7 @@ buildExe extraOpts ms = do
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
     relativeIncludes  <- get ideRelativeIncludes
-    let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
+    let SessionConfig{..} = ideConfig
         -- Note that these do not contain the @packageDbArgs@ options.
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
@@ -902,13 +902,16 @@ buildExe extraOpts ms = do
           (const $
              do Dir.setCurrentDirectory ideDataDir
                 (loadedMs, pkgs) <- buildDeps mcomputed
-                let beArgs = BuildExeArgs{ beConfig = ideConfig
-                                         , beSourcesDir = ideSourcesDir
-                                         , beDistDir = ideDistDir
-                                         , beRelativeIncludes = relativeIncludes
-                                         , beGhcOpts = ghcOpts
-                                         , bePkgs = pkgs
-                                         , beLoadedMs = loadedMs }
+                libDeps <- externalDeps pkgs
+                let beArgs =
+                      BuildExeArgs{ bePackageDBStack = configPackageDBStack
+                                  , beExtraPathDirs = configExtraPathDirs
+                                  , beSourcesDir = ideSourcesDir
+                                  , beDistDir = ideDistDir
+                                  , beRelativeIncludes = relativeIncludes
+                                  , beGhcOpts = ghcOpts
+                                  , beLibDeps = libDeps
+                                  , beLoadedMs = loadedMs }
                 configureAndBuild beArgs ms)
     set ideBuildExeStatus (Just exitCode)
 
@@ -929,7 +932,7 @@ buildDoc = do
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
     relativeIncludes  <- get ideRelativeIncludes
-    let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
+    let SessionConfig{..} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
@@ -939,13 +942,15 @@ buildDoc = do
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
                   (loadedMs, pkgs) <- buildDeps mcomputed
+                  libDeps <- externalDeps pkgs
                   let beArgs =
-                        BuildExeArgs{ beConfig = ideConfig
+                        BuildExeArgs{ bePackageDBStack = configPackageDBStack
+                                    , beExtraPathDirs = configExtraPathDirs
                                     , beSourcesDir = ideSourcesDir
                                     , beDistDir = ideDistDir
                                     , beRelativeIncludes = relativeIncludes
                                     , beGhcOpts = ghcOpts
-                                    , bePkgs = pkgs
+                                    , beLibDeps = libDeps
                                     , beLoadedMs = loadedMs }
                   configureAndHaddock beArgs)
     set ideBuildDocStatus (Just exitCode)

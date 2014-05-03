@@ -1,8 +1,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
 module IdeSession.Cabal (
-    BuildExeArgs(..), configureAndBuild, configureAndHaddock
-  , buildDeps, buildLicenseCatenation
+    buildDeps, externalDeps
+  , BuildExeArgs(..), configureAndBuild, configureAndHaddock
+  , buildLicenseCatenation
   , generateMacros, buildDotCabal
   , RunCcArgs(..), runComponentCc
   , buildLicsFromPkgs  -- for testing only
@@ -247,26 +248,28 @@ mkConfFlags ideDistDir configPackageDBStack progPathExtra =
     }
 
 data BuildExeArgs = BuildExeArgs
-  { beConfig :: SessionConfig
+  { bePackageDBStack :: PackageDBStack
+  , beExtraPathDirs :: [FilePath]
   , beSourcesDir :: FilePath
   , beDistDir :: FilePath
   , beRelativeIncludes :: [FilePath]
   , beGhcOpts :: [String]
-  , bePkgs :: [PackageId]
+  , beLibDeps :: [Package.Dependency]
   , beLoadedMs :: [ModuleName]
   }
+  deriving (Show, Read)
 
 configureAndBuild :: BuildExeArgs
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
-configureAndBuild BuildExeArgs{ beConfig = SessionConfig{..}
+configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
+                              , beExtraPathDirs = configExtraPathDirs
                               , beSourcesDir = ideSourcesDir
-                              , beDistDir =ideDistDir
+                              , beDistDir = ideDistDir
                               , beRelativeIncludes = relativeIncludes
                               , beGhcOpts = ghcOpts
-                              , bePkgs = pkgs
+                              , beLibDeps = libDeps
                               , beLoadedMs = loadedMs } ms = do
-  libDeps <- externalDeps pkgs
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
@@ -350,14 +353,14 @@ configureAndBuild BuildExeArgs{ beConfig = SessionConfig{..}
 
 configureAndHaddock :: BuildExeArgs
                     -> IO ExitCode
-configureAndHaddock BuildExeArgs{ beConfig = SessionConfig{..}
-                              , beSourcesDir = ideSourcesDir
-                              , beDistDir =ideDistDir
-                              , beRelativeIncludes = relativeIncludes
-                              , beGhcOpts = ghcOpts
-                              , bePkgs = pkgs
-                              , beLoadedMs = loadedMs } = do
-  libDeps <- externalDeps pkgs
+configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
+                                , beExtraPathDirs = configExtraPathDirs
+                                , beSourcesDir = ideSourcesDir
+                                , beDistDir = ideDistDir
+                                , beRelativeIncludes = relativeIncludes
+                                , beGhcOpts = ghcOpts
+                                , beLibDeps = libDeps
+                                , beLoadedMs = loadedMs } = do
   let condExecutables = []
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         relativeIncludes
@@ -735,6 +738,7 @@ data RunCcArgs = RunCcArgs
   , rcAbsObj :: FilePath
   , rcPref :: FilePath
   }
+  deriving (Show, Read)
 
 -- | Run gcc via ghc, with correct parameters.
 -- Copied from bits and pieces of @Distribution.Simple.GHC@.
