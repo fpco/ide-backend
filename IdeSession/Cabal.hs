@@ -734,6 +734,8 @@ data RunCcArgs = RunCcArgs
   { rcPackageDBStack :: PackageDBStack
   , rcExtraPathDirs :: [FilePath]
   , rcDistDir :: FilePath
+  , rcStdoutLog :: FilePath
+  , rcStderrLog :: FilePath
   , rcAbsC :: FilePath
   , rcAbsObj :: FilePath
   , rcPref :: FilePath
@@ -742,11 +744,12 @@ data RunCcArgs = RunCcArgs
 
 -- | Run gcc via ghc, with correct parameters.
 -- Copied from bits and pieces of @Distribution.Simple.GHC@.
-runComponentCc :: RunCcArgs
-               -> IO (ExitCode, String, String)
+runComponentCc :: RunCcArgs -> IO ExitCode
 runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
                         , rcExtraPathDirs = configExtraPathDirs
                         , rcDistDir = ideDistDir
+                        , rcStdoutLog = stdoutLog
+                        , rcStderrLog = stderrLog
                         , rcAbsC = absC
                         , rcAbsObj = absObj
                         , rcPref = pref } = do
@@ -777,8 +780,6 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
                        }
       odir          = Setup.fromFlag (ghcOptObjDir vanillaCcOpts)
 
-  let stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
-      stderrLog = ideDistDir </> "ide-backend-cc.stderr"
   exitCode :: Either ExitCode () <- Ex.bracket
     (do stdOutputBackup <- redirectStdOutput stdoutLog
         stdErrorBackup  <- redirectStdError  stderrLog
@@ -802,7 +803,4 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
 
         whenSharedLib forceSharedLib (runGhcProg sharedCcOpts)
         whenProfLib (runGhcProg profCcOpts))
-  sout <- readFile stdoutLog
-  serr <- readFile stderrLog
-  let exitC = either id (const ExitSuccess) exitCode
-  return (exitC, sout, serr)
+  return $! either id (const ExitSuccess) exitCode

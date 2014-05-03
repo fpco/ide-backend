@@ -1073,16 +1073,22 @@ runGcc configPackageDBStack configExtraPathDirs
               ]
       _stdin :: String
       _stdin = ""
+      stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
+      stderrLog = ideDistDir </> "ide-backend-cc.stderr"
       runCcArgs = RunCcArgs{ rcPackageDBStack = configPackageDBStack
                            , rcExtraPathDirs = configExtraPathDirs
                            , rcDistDir = ideDistDir
+                           , rcStdoutLog = stdoutLog
+                           , rcStderrLog = stderrLog
                            , rcAbsC = absC
                            , rcAbsObj = absObj
                            , rcPref = pref }
   -- (_exitCode, _stdout, _stderr)
   --   <- readProcessWithExitCode _gcc _args _stdin
   -- The real deal; we call gcc via ghc via cabal functions:
-  (exitCode, stdout, stderr) <- runComponentCc runCcArgs
+  exitCode <- runComponentCc runCcArgs
+  stdout <- readFile stdoutLog
+  stderr <- readFile stderrLog
   case exitCode of
     ExitSuccess   -> return []
     ExitFailure _ -> return (parseErrorMsgs stdout stderr)
