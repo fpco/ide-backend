@@ -259,13 +259,14 @@ an empty sandbox where no ghc compiler is available on the path at all), as
 long as we specify the right paths:
 
     PATH=/bin:/usr/bin \
-    IDE_BACKEND_EXTRA_PATH_DIRS=~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin \
+    IDE_BACKEND_EXTRA_PATH_DIRS=~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
     IDE_BACKEND_PACKAGE_DB=~/env/fpco-patched-7.4/dot-ghc/snippet-db \
     dist/build/ghc-errors/ghc-errors
 
 (These environment variables are translated by the test-suite to the
 corresponding options in SessionConfig, they are *not* part of the ide-backend
-library itself.)
+library itself. The path with `fpco-stock-7.4` is intended to make the 
+`ide-backend-exe-cabal` executable available --- modify it if you put the executable elsewhere.)
 
 Installing the patched versions of ghc
 ======================================
