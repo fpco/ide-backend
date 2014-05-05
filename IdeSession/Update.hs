@@ -79,6 +79,7 @@ import Distribution.Simple (PackageDBStack, PackageDB(..))
 import IdeSession.State
 import IdeSession.Cabal
 import IdeSession.Config
+import IdeSession.ExeCabal (invokeExeCabal)
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
 import IdeSession.Types.Private hiding (RunResult(..))
@@ -542,8 +543,6 @@ recompileObjectFiles = do
           srcDir = ideSourcesDir staticInfo
           distDir = ideDistDir staticInfo
           objDir = distDir </> "objs"
-          SessionConfig{ configPackageDBStack
-                       , configExtraPathDirs } = ideConfig staticInfo
 
           compiling, loading, unloading, skipped :: FilePath -> String
           compiling src = "Compiling " ++ makeRelative srcDir src
@@ -576,7 +575,7 @@ recompileObjectFiles = do
               callback (compiling fp)
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
               errs <- lift $ do
-                errs <- runGcc configPackageDBStack configExtraPathDirs
+                errs <- runGcc (ideConfig staticInfo)
                                distDir absC absObj objDir
                 when (null errs) $ do
                   ts' <- updateFileTimes absObj
@@ -912,7 +911,9 @@ buildExe extraOpts ms = do
                                   , beGhcOpts = ghcOpts
                                   , beLibDeps = libDeps
                                   , beLoadedMs = loadedMs }
-                configureAndBuild beArgs ms)
+                invokeExeCabal ideConfig [ "configureAndBuild"
+                                         , show beArgs
+                                         , show ms ])
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
@@ -952,7 +953,8 @@ buildDoc = do
                                     , beGhcOpts = ghcOpts
                                     , beLibDeps = libDeps
                                     , beLoadedMs = loadedMs }
-                  configureAndHaddock beArgs)
+                  invokeExeCabal ideConfig [ "configureAndHaddock"
+                                           , show beArgs ])
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
@@ -1058,10 +1060,10 @@ nextLogicalTimestamp = do
   return newTS
 
 -- | Call gcc via ghc, with the same parameters cabal uses.
-runGcc :: PackageDBStack -> [FilePath]
+runGcc :: SessionConfig
        -> FilePath -> FilePath -> FilePath -> FilePath
        -> IdeSessionUpdate [SourceError]
-runGcc configPackageDBStack configExtraPathDirs
+runGcc ideConfig@SessionConfig{configPackageDBStack, configExtraPathDirs}
        ideDistDir absC absObj pref = liftIO $ do
   -- Direct call to gcc, for testing only:
   let _gcc :: FilePath
@@ -1086,7 +1088,8 @@ runGcc configPackageDBStack configExtraPathDirs
   -- (_exitCode, _stdout, _stderr)
   --   <- readProcessWithExitCode _gcc _args _stdin
   -- The real deal; we call gcc via ghc via cabal functions:
-  exitCode <- runComponentCc runCcArgs
+  exitCode <- invokeExeCabal ideConfig [ "runComponentCc"
+                                       , show runCcArgs ]
   stdout <- readFile stdoutLog
   stderr <- readFile stderrLog
   case exitCode of
