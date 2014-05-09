@@ -23,6 +23,17 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
+ *  Version 0.8.1???.
+
+     * Session is now internally restarted after `updateRelativeIncludes`
+       and after `updateTargets` (#178, #177). No heuristics are currently
+       implemented, so even calls that effectively don't change anything cause
+       a recompilation. Note that you need path `""` in relative includes
+       for `updateTargets` and `buildExe` to be aware of the same set of
+       source directories (#184).
+
+     * ...
+
  *  Version 0.8.
 
     This is a major new release with a lot of new functionality, bug fixes, and
