@@ -6,6 +6,7 @@ module IdeSession.Cabal (
   , buildLicenseCatenation
   , generateMacros, buildDotCabal
   , RunCcArgs(..), runComponentCc
+  , ExeArgs(..)
   , buildLicsFromPkgs  -- for testing only
   ) where
 
@@ -804,3 +805,9 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
         whenSharedLib forceSharedLib (runGhcProg sharedCcOpts)
         whenProfLib (runGhcProg profCcOpts))
   return $! either id (const ExitSuccess) exitCode
+
+data ExeArgs =
+    ExeBuild BuildExeArgs [(ModuleName, FilePath)]
+  | ExeDoc BuildExeArgs
+  | ExeCc RunCcArgs
+  deriving (Show, Read)

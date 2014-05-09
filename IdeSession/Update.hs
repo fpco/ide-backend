@@ -911,9 +911,7 @@ buildExe extraOpts ms = do
                                   , beGhcOpts = ghcOpts
                                   , beLibDeps = libDeps
                                   , beLoadedMs = loadedMs }
-                invokeExeCabal ideConfig [ "configureAndBuild"
-                                         , show beArgs
-                                         , show ms ])
+                invokeExeCabal ideConfig (ExeBuild beArgs ms))
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via
@@ -953,8 +951,7 @@ buildDoc = do
                                     , beGhcOpts = ghcOpts
                                     , beLibDeps = libDeps
                                     , beLoadedMs = loadedMs }
-                  invokeExeCabal ideConfig [ "configureAndHaddock"
-                                           , show beArgs ])
+                  invokeExeCabal ideConfig (ExeDoc beArgs))
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
@@ -1088,8 +1085,7 @@ runGcc ideConfig@SessionConfig{configPackageDBStack, configExtraPathDirs}
   -- (_exitCode, _stdout, _stderr)
   --   <- readProcessWithExitCode _gcc _args _stdin
   -- The real deal; we call gcc via ghc via cabal functions:
-  exitCode <- invokeExeCabal ideConfig [ "runComponentCc"
-                                       , show runCcArgs ]
+  exitCode <- invokeExeCabal ideConfig (ExeCc runCcArgs)
   stdout <- readFile stdoutLog
   stderr <- readFile stderrLog
   case exitCode of
