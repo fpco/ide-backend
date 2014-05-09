@@ -191,6 +191,11 @@ data GhcServer = OutProcess RpcServer
                | InProcess RpcConversation ThreadId
 
 -- | Handles to the running code, through which one can interact with the code.
+--
+-- Requirement: concurrent uses of @supplyStdin@ should be possible,
+-- e.g., two threads that share a @RunActions@ should be able to provide
+-- input concurrently without problems. (Currently this is ensured
+-- by @supplyStdin@ writing to a channel.)
 data RunActions a = RunActions {
     -- | Wait for the code to output something or terminate
     runWait :: IO (Either BSS.ByteString a)
