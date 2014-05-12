@@ -879,16 +879,21 @@ buildExe extraOpts ms = do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    let errors = case toLazyMaybe mcomputed of
+    -- Delete the build directory completely so that we trigger a full
+    -- recompilation. This is a workaround for #119.
+    liftIO $ do
+      ignoreDoesNotExist $ Dir.removeDirectoryRecursive $ ideDistDir </> "build"
+      Dir.createDirectoryIfMissing False $ ideDistDir </> "build"
+    let beStdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
+        beStderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
+        errors = case toLazyMaybe mcomputed of
           Nothing ->
             error "This session state does not admit artifact generation."
           Just Computed{computedErrors} -> toLazyList computedErrors
     exitCode <-
       if any (== KindError) $ map errorKind errors then do
         liftIO $ do
-          Dir.createDirectoryIfMissing False $ ideDistDir </> "build"
-          let stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
-          writeFile stderrLog
+          writeFile beStderrLog
             "Source errors encountered. Not attempting to build executables."
           return $ ExitFailure 1
       else do
@@ -906,12 +911,19 @@ buildExe extraOpts ms = do
                                   , beExtraPathDirs = configExtraPathDirs
                                   , beSourcesDir = ideSourcesDir
                                   , beDistDir = ideDistDir
+                                  , beStdoutLog
+                                  , beStderrLog
                                   , beRelativeIncludes = relativeIncludes
                                   , beGhcOpts = ghcOpts
                                   , beLibDeps = libDeps
                                   , beLoadedMs = loadedMs }
                 invokeExeCabal ideStaticInfo (ExeBuild beArgs ms))
     set ideBuildExeStatus (Just exitCode)
+  where
+    ignoreDoesNotExist :: IO () -> IO ()
+    ignoreDoesNotExist = Ex.handle $ \e ->
+      if isDoesNotExistError e then return ()
+                               else Ex.throwIO e
 
 -- | Build haddock documentation from sources added previously via
 -- the ide-backend updateSourceFile* mechanism. Similarly to 'buildExe',
@@ -934,7 +946,10 @@ buildDoc = do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
+    liftIO $ Dir.createDirectoryIfMissing False $ ideDistDir </> "doc"
     let ghcOpts = configStaticOpts ++ dynamicOpts
+        beStdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
+        beStderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
     exitCode <- liftIO $ Ex.bracket
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
@@ -946,6 +961,8 @@ buildDoc = do
                                     , beExtraPathDirs = configExtraPathDirs
                                     , beSourcesDir = ideSourcesDir
                                     , beDistDir = ideDistDir
+                                    , beStdoutLog
+                                    , beStderrLog
                                     , beRelativeIncludes = relativeIncludes
                                     , beGhcOpts = ghcOpts
                                     , beLibDeps = libDeps

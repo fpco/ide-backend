@@ -31,14 +31,10 @@ import System.Exit (ExitCode (ExitSuccess, ExitFailure), exitFailure)
 import System.FilePath ( (</>), takeFileName, makeRelative
                        , takeDirectory, replaceExtension )
 import System.FilePath.Find (find, always, extension)
-import System.Directory (
-    doesFileExist
-  , createDirectoryIfMissing
-  , removeDirectoryRecursive
-  )
+import System.Directory (doesFileExist)
 import System.IO.Temp (createTempDirectory)
 import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr, hPutStrLn, stderr)
-import System.IO.Error (isDoesNotExistError, isUserError, catchIOError)
+import System.IO.Error (isUserError, catchIOError)
 
 import Distribution.InstalledPackageInfo
   (InstalledPackageInfo_ ( InstalledPackageInfo
@@ -257,6 +253,8 @@ data BuildExeArgs = BuildExeArgs
   , beExtraPathDirs :: [FilePath]
   , beSourcesDir :: FilePath
   , beDistDir :: FilePath
+  , beStdoutLog :: FilePath
+  , beStderrLog :: FilePath
   , beRelativeIncludes :: [FilePath]
   , beGhcOpts :: [String]
   , beLibDeps :: [Package.Dependency]
@@ -274,7 +272,8 @@ configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
                               , beRelativeIncludes = relativeIncludes
                               , beGhcOpts = ghcOpts
                               , beLibDeps = libDeps
-                              , beLoadedMs = loadedMs } ms = do
+                              , beLoadedMs = loadedMs
+                              , .. } ms = do
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
@@ -315,12 +314,6 @@ configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
-
-  -- Delete the build directory completely so that we trigger a full
-  -- recompilation. This is a workaround for #119.
-  ignoreDoesNotExist $ removeDirectoryRecursive $ ideDistDir </> "build"
-
-  createDirectoryIfMissing False $ ideDistDir </> "build"
   let confAndBuild = do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
         -- Setting @withPackageDB@ here is too late, @configure@ would fail
@@ -328,11 +321,9 @@ configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
         -- when/if we construct @lbi@ without @configure@).
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
   -- Handle various exceptions and stderr/stdout printouts.
-  let stdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
-      stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
   exitCode :: Either ExitCode () <- Ex.bracket
-    (do stdOutputBackup <- redirectStdOutput stdoutLog
-        stdErrorBackup  <- redirectStdError  stderrLog
+    (do stdOutputBackup <- redirectStdOutput beStdoutLog
+        stdErrorBackup  <- redirectStdError  beStderrLog
         return (stdOutputBackup, stdErrorBackup))
     (\(stdOutputBackup, stdErrorBackup) -> do
         restoreStdOutput stdOutputBackup
@@ -350,11 +341,6 @@ configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
                                exitFailure
                              else ioError e))
   return $! either id (const ExitSuccess) exitCode
-  where
-    ignoreDoesNotExist :: IO () -> IO ()
-    ignoreDoesNotExist = Ex.handle $ \e ->
-      if isDoesNotExistError e then return ()
-                               else Ex.throwIO e
 
 configureAndHaddock :: BuildExeArgs
                     -> IO ExitCode
@@ -365,7 +351,8 @@ configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
                                 , beRelativeIncludes = relativeIncludes
                                 , beGhcOpts = ghcOpts
                                 , beLibDeps = libDeps
-                                , beLoadedMs = loadedMs } = do
+                                , beLoadedMs = loadedMs
+                                , .. } = do
   let condExecutables = []
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         relativeIncludes
@@ -395,12 +382,9 @@ configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
         , Setup.haddockVerbosity = Setup.Flag minBound
         }
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
-  createDirectoryIfMissing False $ ideDistDir </> "doc"
-  let stdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
-      stderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
   exitCode :: Either ExitCode () <- Ex.bracket
-    (do stdOutputBackup <- redirectStdOutput stdoutLog
-        stdErrorBackup  <- redirectStdError  stderrLog
+    (do stdOutputBackup <- redirectStdOutput beStdoutLog
+        stdErrorBackup  <- redirectStdError  beStderrLog
         return (stdOutputBackup, stdErrorBackup))
     (\(stdOutputBackup, stdErrorBackup) -> do
         restoreStdOutput stdOutputBackup
