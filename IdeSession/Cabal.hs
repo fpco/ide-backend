@@ -1,17 +1,20 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 module IdeSession.Cabal (
     buildDeps, externalDeps
   , BuildExeArgs(..), configureAndBuild, configureAndHaddock
   , buildLicenseCatenation
   , generateMacros, buildDotCabal
   , RunCcArgs(..), runComponentCc
-  , ExeArgs(..)
+  , ExeArgs(..), ExeCabalRequest(..), ExeCabalResponse(..)
   , buildLicsFromPkgs  -- for testing only
   ) where
 
+import Control.Applicative ((<$>))
 import qualified Control.Exception as Ex
 import Control.Monad
+import Data.Binary
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.Function (on)
@@ -20,6 +23,7 @@ import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Monoid (Monoid(..))
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
+import Data.Typeable (Typeable)
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
@@ -811,3 +815,30 @@ data ExeArgs =
   | ExeDoc BuildExeArgs
   | ExeCc RunCcArgs
   deriving (Show, Read)
+
+data ExeCabalRequest
+  = ReqExeCabalRun {
+        reqExeArgs :: ExeArgs  -- TODO: inline ExeArgs
+      }
+  deriving Typeable
+
+data ExeCabalResponse =
+    ExeCabalProgress Progress
+  | ExeCabalDone ExitCode
+  deriving Typeable
+
+instance Binary ExeCabalRequest where
+  put ReqExeCabalRun{..} = put $ show reqExeArgs  -- TODO: get rid of show
+
+  get = ReqExeCabalRun . read <$> get
+
+instance Binary ExeCabalResponse where
+  put (ExeCabalProgress progress) = putWord8 0 >> put progress
+  put (ExeCabalDone exitCode)     = putWord8 1 >> put (show exitCode)  -- TODO: get rid of show
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> ExeCabalProgress <$> get
+      1 -> ExeCabalDone . read <$> get
+      _ -> fail "ExeCabalResponse.get: invalid header"

@@ -5,6 +5,7 @@ module IdeSession.Util (
     showExWithClass
   , accessorName
   , lookup'
+  , envWithPathOverride
   , writeFileAtomic
   , setupEnv
   , relInclToOpts
@@ -32,6 +33,8 @@ import qualified Data.Binary                  as Bin
 import qualified Data.Binary.Get.Internal     as Bin (readNWith)
 import qualified Data.Binary.Put              as Bin (putBuilder)
 import qualified Data.Binary.Builder.Internal as Bin (writeN)
+import Data.List (intercalate)
+import Data.Maybe (fromMaybe)
 import Foreign.Ptr (castPtr)
 import Control.Applicative ((<$>))
 import Crypto.Types (BitLength)
@@ -41,6 +44,8 @@ import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
 import System.IO (Handle, hClose, openBinaryTempFile, hFlush, stdout, stderr)
 import Data.Text (Text)
 import qualified Data.Text.Foreign as Text
+import System.Environment (getEnvironment)
+import System.FilePath (splitSearchPath, searchPathSeparator)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import qualified System.Posix.Files as Files
@@ -84,6 +89,16 @@ lookup' key =
     delete a ((a', b') : xs)
       | a == a'   = xs
       | otherwise = (a', b') : delete a xs
+
+envWithPathOverride :: [FilePath] -> IO (Maybe [(String, String)])
+envWithPathOverride []            = return Nothing
+envWithPathOverride extraPathDirs = do
+    env <- getEnvironment
+    let path  = fromMaybe "" (lookup "PATH" env)
+        path' = intercalate [searchPathSeparator]
+                  (splitSearchPath path ++ extraPathDirs)
+        env'  = ("PATH", path') : filter (\(var, _) -> var /= "PATH") env
+    return (Just env')
 
 -- | Writes a file atomically.
 --

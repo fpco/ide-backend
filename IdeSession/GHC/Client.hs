@@ -126,17 +126,6 @@ splitPackageDBStack dbstack = case dbstack of
     ierror = error $ "internal error: unexpected package db stack: "
                   ++ show dbstack
 
-envWithPathOverride :: [FilePath] -> IO (Maybe [(String, String)])
-envWithPathOverride []            = return Nothing
-envWithPathOverride extraPathDirs = do
-    env <- getEnvironment
-    let path  = fromMaybe "" (lookup "PATH" env)
-        path' = intercalate [searchPathSeparator]
-                  (splitSearchPath path ++ extraPathDirs)
-        env'  = ("PATH", path') : filter (\(var, _) -> var /= "PATH") env
-    return (Just env')
-
-
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer (OutProcess server) = shutdown server
 shutdownGhcServer (InProcess _ tid)   = killThread tid
