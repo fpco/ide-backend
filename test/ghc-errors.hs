@@ -423,6 +423,7 @@ syntheticTests = [
         let m = "Maybes"
             upd = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd 4
+        assertNoErrors session
         status1 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status1
         out <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -467,9 +468,10 @@ syntheticTests = [
         let m = "Maybes"
             upd0 = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd0 4
+        assertNoErrors session
         status0 <- getBuildExeStatus session
         -- Expected failure! The updateRelativeIncludes below is really needed.
-        assertEqual "after exe build" (Just $ ExitFailure 1) status0
+        assertEqual "after exe build 1" (Just $ ExitFailure 1) status0
         updateSessionD session
                        (updateRelativeIncludes ["test/compiler/utils"])
                        4
@@ -479,7 +481,7 @@ syntheticTests = [
         let upd = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd 4
         status1 <- getBuildExeStatus session
-        assertEqual "after exe build" (Just ExitSuccess) status1
+        assertEqual "after exe build 2" (Just ExitSuccess) status1
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "Maybes exe output"
                     "False\n"
@@ -2301,6 +2303,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
             upd = buildExe [] [ (Text.pack m, "ParFib.Main.hs")
                               , (Text.pack "Main", "ParFib.hs") ]
         updateSessionD session upd 4
+        assertNoErrors session
         --let upd2 = buildExe [] [(Text.pack "Main", "ParFib.hs")]
         --updateSessionD session upd2 4
         distDir <- getDistDir session
@@ -2329,6 +2332,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         status0 <- getBuildExeStatus session
         assertEqual "before exe build" Nothing status0
         updateSessionD session upd 4
+        assertNoErrors session
         status1 <- getBuildExeStatus session
         assertEqual "failure after exe build" (Just $ ExitFailure 1) status1
     )

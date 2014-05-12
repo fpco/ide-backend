@@ -322,11 +322,11 @@ configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
   -- Handle various exceptions and stderr/stdout printouts.
   exitCode :: Either ExitCode () <- Ex.bracket
-    (do stdOutputBackup <- redirectStdOutput beStdoutLog
+    (do  -- stdOutputBackup <- redirectStdOutput beStdoutLog
         stdErrorBackup  <- redirectStdError  beStderrLog
-        return (stdOutputBackup, stdErrorBackup))
-    (\(stdOutputBackup, stdErrorBackup) -> do
-        restoreStdOutput stdOutputBackup
+        return ({-stdOutputBackup,-} stdErrorBackup))
+    (\({-stdOutputBackup,-} stdErrorBackup) -> do
+        -- restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ catchIOError confAndBuild
                       (\e -> if isUserError e
@@ -383,11 +383,11 @@ configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
         }
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
   exitCode :: Either ExitCode () <- Ex.bracket
-    (do stdOutputBackup <- redirectStdOutput beStdoutLog
+    (do  -- stdOutputBackup <- redirectStdOutput beStdoutLog
         stdErrorBackup  <- redirectStdError  beStderrLog
-        return (stdOutputBackup, stdErrorBackup))
-    (\(stdOutputBackup, stdErrorBackup) -> do
-        restoreStdOutput stdOutputBackup
+        return ({-stdOutputBackup,-} stdErrorBackup))
+    (\({-stdOutputBackup,-} stdErrorBackup) -> do
+        -- restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
@@ -737,11 +737,10 @@ runComponentCc :: RunCcArgs -> IO ExitCode
 runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
                         , rcExtraPathDirs = configExtraPathDirs
                         , rcDistDir = ideDistDir
-                        , rcStdoutLog = stdoutLog
-                        , rcStderrLog = stderrLog
                         , rcAbsC = absC
                         , rcAbsObj = absObj
-                        , rcPref = pref } = do
+                        , rcPref = pref
+                        , .. } = do
   let verbosity = silent
       -- TODO: create dist.23412/build? see cabalMacrosLocation
       buildDir = ideDistDir
@@ -770,11 +769,11 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
       odir          = Setup.fromFlag (ghcOptObjDir vanillaCcOpts)
 
   exitCode :: Either ExitCode () <- Ex.bracket
-    (do stdOutputBackup <- redirectStdOutput stdoutLog
-        stdErrorBackup  <- redirectStdError  stderrLog
-        return (stdOutputBackup, stdErrorBackup))
-    (\(stdOutputBackup, stdErrorBackup) -> do
-        restoreStdOutput stdOutputBackup
+    (do  -- stdOutputBackup <- redirectStdOutput rcStdoutLog
+        stdErrorBackup  <- redirectStdError rcStderrLog
+        return ({-stdOutputBackup,-} stdErrorBackup))
+    (\({-stdOutputBackup,-} stdErrorBackup) -> do
+        -- restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
         createDirectoryIfMissingVerbose verbosity True odir

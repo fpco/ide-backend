@@ -30,14 +30,10 @@ import Control.Concurrent (killThread)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.MVar (newMVar)
-import Data.Maybe (fromMaybe)
-import Data.List (intercalate)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Char8      as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import System.Exit (ExitCode)
-import System.Environment (getEnvironment)
-import System.FilePath (splitSearchPath, searchPathSeparator)
 
 import IdeSession.Config
 import IdeSession.GHC.API
