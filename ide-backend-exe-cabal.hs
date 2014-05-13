@@ -1,6 +1,5 @@
 module Main where
 
-import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, wait)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString as BSS
@@ -86,6 +85,7 @@ readStdout RpcConversation{..} stdOutputRdHandle stdoutLog = do
           Right bs -> do
             progressCallback bs
             BSS.hPut logHandle bs
+            BSS.hPut logHandle (BSS.singleton (0x0a))  -- \n
             go
   go
   IO.hClose logHandle
