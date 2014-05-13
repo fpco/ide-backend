@@ -1,8 +1,8 @@
 module Main where
 
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, wait)
 import qualified Control.Exception as Ex
-import Control.Monad (unless)
 import qualified Data.ByteString as BSS
 import Data.Text.Encoding as E
 import System.Environment (getArgs)
@@ -41,6 +41,7 @@ runExeCabal conv args = do
   (stdOutputRd, stdOutputWr) <- createPipe
 
   -- Backup stdout, then replace stdout with the pipe's write end
+  IO.hFlush IO.stdout
   stdOutputBackup <- dup stdOutput
   _ <- dupTo stdOutputWr stdOutput
   closeFd stdOutputWr
@@ -65,6 +66,7 @@ runExeCabal conv args = do
       runComponentCc runCcArgs
 
   -- Restore stdout
+  IO.hFlush IO.stdout
   dupTo stdOutputBackup stdOutput >> closeFd stdOutputBackup
 
   -- Closing the write end of the stdout pipe will cause the stdout
@@ -77,8 +79,6 @@ runExeCabal conv args = do
 readStdout :: RpcConversation -> IO.Handle -> FilePath -> IO ()
 readStdout RpcConversation{..} stdOutputRdHandle stdoutLog = do
   logHandle <- IO.openFile stdoutLog IO.WriteMode
---  let go = do bs <- BSS.hGetSome stdOutputRdHandle 4096
---              unless (BSS.null bs) $ BSS.hPut logHandle bs >> go
   let go = do
         res <- Ex.try $ BSS.hGetLine stdOutputRdHandle
         case res of
