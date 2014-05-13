@@ -80,6 +80,7 @@ library
                       tagged               >= 0.4     && < 0.8,
                       transformers         >= 0.3     && < 0.4,
                       time                 >= 1.4     && < 1.5,
+                      attoparsec           >= 0.10    && < 0.11,
                       template-haskell,
                       -- our own private fork:
                       Cabal-ide-backend    >= 1.18,
@@ -123,6 +124,7 @@ executable ide-backend-exe-cabal
                       tagged               >= 0.4     && < 0.8,
                       transformers         >= 0.3     && < 0.4,
                       time                 >= 1.4     && < 1.5,
+                      attoparsec           >= 0.10    && < 0.11,
                       template-haskell,
                       -- our own private fork:
                       Cabal-ide-backend    >= 1.18,

@@ -22,8 +22,8 @@ import IdeSession.Util
 
 -- | Invoke the executable that processes our custom functions that use
 -- the machinery of the cabal library.
-invokeExeCabal :: IdeStaticInfo -> ExeArgs -> IO ExitCode
-invokeExeCabal IdeStaticInfo{..} args = do
+invokeExeCabal :: IdeStaticInfo -> ExeArgs -> (Progress -> IO ()) -> IO ExitCode
+invokeExeCabal IdeStaticInfo{..} args callback = do
   mLoc <- findProgramOnSearchPath normal searchPath "ide-backend-exe-cabal"
   case mLoc of
     Nothing ->
@@ -31,7 +31,7 @@ invokeExeCabal IdeStaticInfo{..} args = do
     Just prog -> do
       env <- envWithPathOverride configExtraPathDirs
       server <- forkRpcServer prog [] (Just ideDataDir) env
-      exitCode <- rpcRunExeCabal server args (\_ -> return ())
+      exitCode <- rpcRunExeCabal server args callback
       shutdown server  -- TODO: forceShutdown? getRpcExitCode server?
       return exitCode
   where

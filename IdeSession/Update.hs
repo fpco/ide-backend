@@ -575,7 +575,7 @@ recompileObjectFiles = do
               callback (compiling fp)
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
               errs <- lift $ do
-                errs <- runGcc staticInfo absC absObj objDir
+                errs <- runGcc absC absObj objDir
                 when (null errs) $ do
                   ts' <- updateFileTimes absObj
                   set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
@@ -871,6 +871,7 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 buildExe :: [String] -> [(ModuleName, FilePath)] -> IdeSessionUpdate ()
 buildExe extraOpts ms = do
     ideStaticInfo@ IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
     relativeIncludes  <- get ideRelativeIncludes
@@ -917,7 +918,7 @@ buildExe extraOpts ms = do
                                   , beGhcOpts = ghcOpts
                                   , beLibDeps = libDeps
                                   , beLoadedMs = loadedMs }
-                invokeExeCabal ideStaticInfo (ExeBuild beArgs ms))
+                invokeExeCabal ideStaticInfo (ExeBuild beArgs ms) callback)
     set ideBuildExeStatus (Just exitCode)
   where
     ignoreDoesNotExist :: IO () -> IO ()
@@ -939,6 +940,7 @@ buildExe extraOpts ms = do
 buildDoc :: IdeSessionUpdate ()
 buildDoc = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
     relativeIncludes  <- get ideRelativeIncludes
@@ -967,7 +969,7 @@ buildDoc = do
                                     , beGhcOpts = ghcOpts
                                     , beLibDeps = libDeps
                                     , beLoadedMs = loadedMs }
-                  invokeExeCabal ideStaticInfo (ExeDoc beArgs))
+                  invokeExeCabal ideStaticInfo (ExeDoc beArgs) callback)
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
@@ -1073,10 +1075,11 @@ nextLogicalTimestamp = do
   return newTS
 
 -- | Call gcc via ghc, with the same parameters cabal uses.
-runGcc :: IdeStaticInfo -> FilePath -> FilePath -> FilePath
-       -> IdeSessionUpdate [SourceError]
-runGcc ideStaticInfo@IdeStaticInfo{..}
-       absC absObj pref = liftIO $ do
+runGcc :: FilePath -> FilePath -> FilePath -> IdeSessionUpdate [SourceError]
+runGcc absC absObj pref = do
+ ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+ callback  <- asks ideSessionUpdateCallback
+ liftIO $ do
   -- Direct call to gcc, for testing only:
   let SessionConfig{configPackageDBStack, configExtraPathDirs} = ideConfig
       _gcc :: FilePath
@@ -1101,7 +1104,7 @@ runGcc ideStaticInfo@IdeStaticInfo{..}
   -- (_exitCode, _stdout, _stderr)
   --   <- readProcessWithExitCode _gcc _args _stdin
   -- The real deal; we call gcc via ghc via cabal functions:
-  exitCode <- invokeExeCabal ideStaticInfo (ExeCc runCcArgs)
+  exitCode <- invokeExeCabal ideStaticInfo (ExeCc runCcArgs) callback
   stdout <- readFile stdoutLog
   stderr <- readFile stderrLog
   case exitCode of
