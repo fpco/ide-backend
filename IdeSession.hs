@@ -204,6 +204,7 @@ module IdeSession (
   , haddockLink
   -- * Exception types
   , ExternalException(..)
+  , InvalidSessionStateQueries(..)
   -- * Re-exports from Cabal
   , PackageDBStack
   , PackageDB(..)
