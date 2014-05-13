@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 -- | Session queries
 --
 -- We have to be very careful in the types in this module. We should not be
@@ -7,6 +8,7 @@ module IdeSession.Query (
     -- * Types
     Query
   , ManagedFiles(..)
+  , InvalidSessionStateQueries(..)
     -- * Queries that rely on the static part of the state only
   , getSessionConfig
   , getSourcesDir
@@ -45,11 +47,13 @@ import Data.Maybe (listToMaybe, maybeToList)
 import Data.List (isInfixOf, sortBy)
 import Data.Accessor ((^.), (^:), getVal)
 import Data.Version (Version)
+import Data.Typeable (Typeable)
 import qualified System.FilePath.Find as Find
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BSSC
 import System.Exit (ExitCode)
 import System.FilePath ((</>))
+import Control.Exception (Exception, throwIO)
 import Control.Monad (forM_)
 import Data.Text (Text)
 import qualified Data.Text as Text (pack, unpack)
@@ -398,7 +402,13 @@ withComputedState :: IdeSession -> (IdeIdleState -> Computed -> IO a) -> IO a
 withComputedState session f = withIdleState session $ \idleState ->
   case toLazyMaybe (idleState ^. ideComputed) of
     Just computed -> f idleState computed
-    Nothing       -> fail "This session state does not admit queries."
+    Nothing       -> throwIO InvalidSessionStateQueries
+
+data InvalidSessionStateQueries = InvalidSessionStateQueries
+    deriving Typeable
+instance Show InvalidSessionStateQueries where
+    show InvalidSessionStateQueries = "This session state does not admit queries."
+instance Exception InvalidSessionStateQueries
 
 staticQuery :: (IdeStaticInfo -> IO a) -> Query a
 staticQuery f = f . ideStaticInfo
