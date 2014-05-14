@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell, ScopedTypeVariables, TupleSections #-}
--- | Invoke the executable that calls cabal functions.
-module IdeSession.ExeCabal (
+-- | Invoke the executable that calls cabal functions and communicate
+-- with it via RPC.
+module IdeSession.ExeCabalClient (
     invokeExeCabal
   ) where
 

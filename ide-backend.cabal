@@ -25,7 +25,7 @@ library
   other-modules:      IdeSession.State,
                       IdeSession.Config,
                       IdeSession.Cabal,
-                      IdeSession.ExeCabal
+                      IdeSession.ExeCabalClient,
                       IdeSession.Licenses,
                       IdeSession.Query,
                       IdeSession.Update,

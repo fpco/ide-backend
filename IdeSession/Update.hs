@@ -79,7 +79,7 @@ import Distribution.Simple (PackageDBStack, PackageDB(..))
 import IdeSession.State
 import IdeSession.Cabal
 import IdeSession.Config
-import IdeSession.ExeCabal (invokeExeCabal)
+import IdeSession.ExeCabalClient (invokeExeCabal)
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
 import IdeSession.Types.Private hiding (RunResult(..))
