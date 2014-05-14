@@ -34,7 +34,7 @@ invokeExeCabal IdeStaticInfo{..} args callback = do
       env <- envWithPathOverride configExtraPathDirs
       server <- forkRpcServer prog [] (Just ideDataDir) env
       exitCode <- rpcRunExeCabal server args callback
-      shutdown server  -- TODO: forceShutdown? getRpcExitCode server?
+      shutdown server  -- not long-running
       return exitCode
   where
     searchPath :: ProgramSearchPath

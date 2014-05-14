@@ -27,7 +27,7 @@ exeCabalEngine conv@RpcConversation{..} = do
           req <- get
           exitCode <- runExeCabal conv req
           put $ ExeCabalDone exitCode
-          go
+          go  -- not long-running, but we can't exit or RPC would crash
 
     go
 

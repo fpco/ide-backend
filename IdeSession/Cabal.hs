@@ -272,8 +272,8 @@ configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
       condExecutables = map condExe executables
   hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
   lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
-  -- Cabal can't find the code of @Main@, to be used as the main executable
-  -- module, in subdirectories or in @Foo.hs@. We need a @Main@ to build
+  -- Cabal can't find the code of @Main@ (to be used as the main executable
+  -- module) in subdirectories or in @Foo.hs@. We need a @Main@ to build
   -- an executable, so any other @Main@ modules have to be ignored.
   -- So, if another module depends on such a @Main@,
   -- we're in trouble, but if the @Main@ is only an executable, we are fine.
