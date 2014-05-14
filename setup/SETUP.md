@@ -265,8 +265,9 @@ long as we specify the right paths:
 
 (These environment variables are translated by the test-suite to the
 corresponding options in SessionConfig, they are *not* part of the ide-backend
-library itself. The path with `fpco-stock-7.4` is intended to make the 
-`ide-backend-exe-cabal` executable available --- modify it if you put the executable elsewhere.)
+library itself. The path with `fpco-stock-7.4` is intended to make the
+`ide-backend-exe-cabal` executable available --- modify it if you put
+the executable elsewhere.)
 
 Installing the patched versions of ghc
 ======================================

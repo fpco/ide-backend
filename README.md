@@ -32,6 +32,18 @@ Changelog
        for `updateTargets` and `buildExe` to be aware of the same set of
        source directories (#184).
 
+     * Invoking the Cabal functions that print to stdout and stderr
+       is now done via our RPC (#180) that starts a separate binary
+       ide-backend-exe-cabal. The stdout output it redirected to a log file
+       and analyzed to provide Progress updates. The binary has to be
+       present on the path. E.g., when you run ide-backend tests
+       you can add the extra fpco-stock-7.4 path component (see SETUP.md),
+       into which the binary is installed by default with 'cabal install':
+
+         IDE_BACKEND_EXTRA_PATH_DIRS=~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
+         IDE_BACKEND_PACKAGE_DB=~/env/fpco-patched-7.4/dot-ghc/snippet-db \
+         dist/build/ghc-errors/ghc-errors
+
      * ...
 
  *  Version 0.8.
