@@ -1,13 +1,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module IdeSession.Cabal (
     buildDeps, externalDeps
-  , BuildExeArgs(..), configureAndBuild, configureAndHaddock
+  , configureAndBuild, configureAndHaddock
   , buildLicenseCatenation
   , generateMacros, buildDotCabal
-  , RunCcArgs(..), runComponentCc
-  , ExeCabalRequest(..), ExeCabalResponse(..)
+  , runComponentCc
+  , BuildExeArgs(..), RunCcArgs(..), ExeCabalRequest(..), ExeCabalResponse(..)
   , buildLicsFromPkgs  -- for testing only
   ) where
 
@@ -45,6 +46,7 @@ import qualified Distribution.ModuleName
 import Distribution.PackageDescription
 import Distribution.PackageDescription.PrettyPrint (showGenericPackageDescription)
 import qualified Distribution.Package as Package
+import Distribution.Package (Dependency(..), PackageName(..))
 import Distribution.ParseUtils ( parseFields, simpleField, ParseResult (..)
                                , FieldDescr, parseLicenseQ, parseFilePathQ
                                , parseFreeText, showFilePath, showFreeText
@@ -52,7 +54,7 @@ import Distribution.ParseUtils ( parseFields, simpleField, ParseResult (..)
 import qualified Distribution.Simple.Build as Build
 import Distribution.Simple.Build.Macros
 import qualified Distribution.Simple.Haddock as Haddock
-import Distribution.Simple (PackageDBStack)
+import Distribution.Simple (PackageDBStack, PackageDB(..))
 import qualified Distribution.Simple.Compiler as Simple.Compiler
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.GHC (getInstalledPackages, componentCcGhcOptions,
@@ -72,7 +74,7 @@ import qualified Distribution.Simple.Program.HcPkg as HcPkg
 import Distribution.System (buildPlatform)
 import qualified Distribution.Text
 import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
-import Distribution.Version (anyVersion, thisVersion)
+import Distribution.Version (VersionRange, anyVersion, thisVersion)
 import Distribution.Verbosity (silent)
 import Language.Haskell.Extension (Extension(..), KnownExtension(..),
                                    Language (Haskell2010))
@@ -247,20 +249,6 @@ mkConfFlags ideDistDir configPackageDBStack progPathExtra =
     , Setup.configPackageDBs = Nothing : map Just configPackageDBStack
     , Setup.configProgramPathExtra = progPathExtra
     }
-
-data BuildExeArgs = BuildExeArgs
-  { bePackageDBStack :: PackageDBStack
-  , beExtraPathDirs :: [FilePath]
-  , beSourcesDir :: FilePath
-  , beDistDir :: FilePath
-  , beStdoutLog :: FilePath
-  , beStderrLog :: FilePath
-  , beRelativeIncludes :: [FilePath]
-  , beGhcOpts :: [String]
-  , beLibDeps :: [Package.Dependency]
-  , beLoadedMs :: [ModuleName]
-  }
-  deriving (Show, Read)
 
 configureAndBuild :: BuildExeArgs
                   -> [(ModuleName, FilePath)]
@@ -718,19 +706,6 @@ localBuildInfo buildDir withPackageDB configExtraPathDirs = LocalBuildInfo
   , progSuffix = undefined
   }
 
--- TODO: rename to document better
-data RunCcArgs = RunCcArgs
-  { rcPackageDBStack :: PackageDBStack
-  , rcExtraPathDirs :: [FilePath]
-  , rcDistDir :: FilePath
-  , rcStdoutLog :: FilePath
-  , rcStderrLog :: FilePath
-  , rcAbsC :: FilePath
-  , rcAbsObj :: FilePath
-  , rcPref :: FilePath
-  }
-  deriving (Show, Read)
-
 -- | Run gcc via ghc, with correct parameters.
 -- Copied from bits and pieces of @Distribution.Simple.GHC@.
 runComponentCc :: RunCcArgs -> IO ExitCode
@@ -793,6 +768,30 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
         whenProfLib (runGhcProg profCcOpts))
   return $! either id (const ExitSuccess) exitCode
 
+data BuildExeArgs = BuildExeArgs
+  { bePackageDBStack :: PackageDBStack
+  , beExtraPathDirs :: [FilePath]
+  , beSourcesDir :: FilePath
+  , beDistDir :: FilePath
+  , beStdoutLog :: FilePath
+  , beStderrLog :: FilePath
+  , beRelativeIncludes :: [FilePath]
+  , beGhcOpts :: [String]
+  , beLibDeps :: [Package.Dependency]
+  , beLoadedMs :: [ModuleName]
+  }
+
+data RunCcArgs = RunCcArgs
+  { rcPackageDBStack :: PackageDBStack
+  , rcExtraPathDirs :: [FilePath]
+  , rcDistDir :: FilePath
+  , rcStdoutLog :: FilePath
+  , rcStderrLog :: FilePath
+  , rcAbsC :: FilePath
+  , rcAbsObj :: FilePath
+  , rcPref :: FilePath
+  }
+
 data ExeCabalRequest =
     ReqExeBuild BuildExeArgs [(ModuleName, FilePath)]
   | ReqExeDoc BuildExeArgs
@@ -805,25 +804,98 @@ data ExeCabalResponse =
   deriving Typeable
 
 instance Binary ExeCabalRequest where
-  put (ReqExeBuild buildArgs ms) = putWord8 0 >> put (show buildArgs) >> put ms  -- TODO: get rid of show
-  put (ReqExeDoc buildArgs) = putWord8 0 >> put (show buildArgs)
-  put (ReqExeCc ccArgs) = putWord8 0 >> put (show ccArgs)
+  put (ReqExeBuild buildArgs ms) = putWord8 0 >> put buildArgs >> put ms
+  put (ReqExeDoc buildArgs) = putWord8 1 >> put buildArgs
+  put (ReqExeCc ccArgs) = putWord8 2 >> put ccArgs
 
   get = do
     header <- getWord8
     case header of
-      0 -> (\args ms -> ReqExeBuild (read args) ms) <$> get <*> get
-      1 -> ReqExeDoc . read <$> get
-      2 -> ReqExeCc . read <$> get
-      _ -> fail "ExeCabalResponse.get: invalid header"
+      0 -> ReqExeBuild <$> get <*> get
+      1 -> ReqExeDoc <$> get
+      2 -> ReqExeCc <$> get
+      _ -> fail "ExeCabalRequest.get: invalid header"
 
 instance Binary ExeCabalResponse where
   put (ExeCabalProgress progress) = putWord8 0 >> put progress
-  put (ExeCabalDone exitCode)     = putWord8 1 >> put (show exitCode)  -- TODO: get rid of show
+  put (ExeCabalDone exitCode)     = putWord8 1 >> put exitCode
 
   get = do
     header <- getWord8
     case header of
       0 -> ExeCabalProgress <$> get
-      1 -> ExeCabalDone . read <$> get
+      1 -> ExeCabalDone <$> get
       _ -> fail "ExeCabalResponse.get: invalid header"
+
+instance Binary BuildExeArgs where
+  put BuildExeArgs{..} = do
+    put bePackageDBStack
+    put beExtraPathDirs
+    put beSourcesDir
+    put beDistDir
+    put beStdoutLog
+    put beStderrLog
+    put beRelativeIncludes
+    put beGhcOpts
+    put beLibDeps
+    put beLoadedMs
+
+  get = BuildExeArgs <$> get <*> get <*> get
+                     <*> get <*> get <*> get
+                     <*> get <*> get <*> get <*> get
+
+instance Binary RunCcArgs where
+  put RunCcArgs{..} = do
+    put rcPackageDBStack
+    put rcExtraPathDirs
+    put rcDistDir
+    put rcStdoutLog
+    put rcStderrLog
+    put rcAbsC
+    put rcAbsObj
+    put rcPref
+
+  get = RunCcArgs <$> get <*> get <*> get
+                  <*> get <*> get <*> get
+                  <*> get <*> get
+
+instance Binary ExitCode where
+  put ExitSuccess = putWord8 0
+  put (ExitFailure code) = putWord8 1 >> put code
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return ExitSuccess
+      1 -> ExitFailure <$> get
+      _ -> fail "ExitCode.get: invalid header"
+
+instance Binary PackageDB where
+  put GlobalPackageDB = putWord8 0
+  put UserPackageDB = putWord8 1
+  put (SpecificPackageDB path) = putWord8 2 >> put path
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return GlobalPackageDB
+      1 -> return UserPackageDB
+      2 -> SpecificPackageDB <$> get
+      _ -> fail "GlobalPackageDB.get: invalid header"
+
+instance Binary Dependency where
+  put (Dependency pn vr) = do
+    put pn
+    put vr
+
+  get = Dependency <$> get <*> get
+
+instance Binary VersionRange where  -- very complex type, but compact String rep
+  put = put . show
+
+  get = read <$> get
+
+instance Binary PackageName where
+  put (PackageName n) = put n
+
+  get = PackageName <$> get
