@@ -918,7 +918,7 @@ buildExe extraOpts ms = do
                                   , beGhcOpts = ghcOpts
                                   , beLibDeps = libDeps
                                   , beLoadedMs = loadedMs }
-                invokeExeCabal ideStaticInfo (ExeBuild beArgs ms) callback)
+                invokeExeCabal ideStaticInfo (ReqExeBuild beArgs ms) callback)
     set ideBuildExeStatus (Just exitCode)
   where
     ignoreDoesNotExist :: IO () -> IO ()
@@ -969,7 +969,7 @@ buildDoc = do
                                     , beGhcOpts = ghcOpts
                                     , beLibDeps = libDeps
                                     , beLoadedMs = loadedMs }
-                  invokeExeCabal ideStaticInfo (ExeDoc beArgs) callback)
+                  invokeExeCabal ideStaticInfo (ReqExeDoc beArgs) callback)
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
@@ -1104,7 +1104,7 @@ runGcc absC absObj pref = do
   -- (_exitCode, _stdout, _stderr)
   --   <- readProcessWithExitCode _gcc _args _stdin
   -- The real deal; we call gcc via ghc via cabal functions:
-  exitCode <- invokeExeCabal ideStaticInfo (ExeCc runCcArgs) callback
+  exitCode <- invokeExeCabal ideStaticInfo (ReqExeCc runCcArgs) callback
   stdout <- readFile stdoutLog
   stderr <- readFile stderrLog
   case exitCode of

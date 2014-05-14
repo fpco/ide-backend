@@ -25,17 +25,15 @@ exeCabalEngine conv@RpcConversation{..} = do
     -- Start handling RPC calls
     let go = do
           req <- get
-          case req of
-            ReqExeCabalRun args -> do
-             exitCode <- runExeCabal conv args
-             put $ ExeCabalDone exitCode
+          exitCode <- runExeCabal conv req
+          put $ ExeCabalDone exitCode
           go
 
     go
 
 -- | Run the cabal functions inside the executable.
-runExeCabal :: RpcConversation -> ExeArgs -> IO ExitCode
-runExeCabal conv args = do
+runExeCabal :: RpcConversation -> ExeCabalRequest -> IO ExitCode
+runExeCabal conv req = do
    -- Create pipe
   (stdOutputRd, stdOutputWr) <- createPipe
 
@@ -49,19 +47,18 @@ runExeCabal conv args = do
   stdOutputRdHandle <- fdToHandle stdOutputRd
   IO.hSetBuffering stdOutputRdHandle IO.LineBuffering
 
-  let stdoutLog = case args of
-        ExeBuild buildExeArgs _ -> beStdoutLog buildExeArgs
-        ExeDoc buildExeArgs -> beStdoutLog buildExeArgs
-        ExeCc runCcArgs -> rcStdoutLog runCcArgs
-
+  let stdoutLog = case req of
+        ReqExeBuild buildExeArgs _ -> beStdoutLog buildExeArgs
+        ReqExeDoc buildExeArgs -> beStdoutLog buildExeArgs
+        ReqExeCc runCcArgs -> rcStdoutLog runCcArgs
   stdoutThread <- async $ readStdout conv stdOutputRdHandle stdoutLog
 
-  exitCode <- case args of
-    ExeBuild buildExeArgs modArgs ->
+  exitCode <- case req of
+    ReqExeBuild buildExeArgs modArgs ->
       configureAndBuild buildExeArgs modArgs
-    ExeDoc buildExeArgs ->
+    ReqExeDoc buildExeArgs ->
       configureAndHaddock buildExeArgs
-    ExeCc runCcArgs ->
+    ReqExeCc runCcArgs ->
       runComponentCc runCcArgs
 
   -- Restore stdout

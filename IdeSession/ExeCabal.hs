@@ -22,7 +22,8 @@ import IdeSession.Util
 
 -- | Invoke the executable that processes our custom functions that use
 -- the machinery of the cabal library.
-invokeExeCabal :: IdeStaticInfo -> ExeArgs -> (Progress -> IO ()) -> IO ExitCode
+invokeExeCabal :: IdeStaticInfo -> ExeCabalRequest -> (Progress -> IO ())
+               -> IO ExitCode
 invokeExeCabal IdeStaticInfo{..} args callback = do
   mLoc <- findProgramOnSearchPath normal searchPath "ide-backend-exe-cabal"
   case mLoc of
@@ -41,11 +42,11 @@ invokeExeCabal IdeStaticInfo{..} args callback = do
 
     SessionConfig{..} = ideConfig
 
-rpcRunExeCabal :: RpcServer -> ExeArgs -> (Progress -> IO ())
+rpcRunExeCabal :: RpcServer -> ExeCabalRequest -> (Progress -> IO ())
                -> IO ExitCode
-rpcRunExeCabal server args callback =
+rpcRunExeCabal server req callback =
   rpcConversation server $ \RpcConversation{..} -> do
-    put (ReqExeCabalRun args)
+    put req
 
     let go = do response <- get
                 case response of

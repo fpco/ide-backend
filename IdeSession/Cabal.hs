@@ -7,11 +7,11 @@ module IdeSession.Cabal (
   , buildLicenseCatenation
   , generateMacros, buildDotCabal
   , RunCcArgs(..), runComponentCc
-  , ExeArgs(..), ExeCabalRequest(..), ExeCabalResponse(..)
+  , ExeCabalRequest(..), ExeCabalResponse(..)
   , buildLicsFromPkgs  -- for testing only
   ) where
 
-import Control.Applicative ((<$>))
+import Control.Applicative ((<$>), (<*>))
 import qualified Control.Exception as Ex
 import Control.Monad
 import Data.Binary
@@ -793,16 +793,10 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
         whenProfLib (runGhcProg profCcOpts))
   return $! either id (const ExitSuccess) exitCode
 
-data ExeArgs =
-    ExeBuild BuildExeArgs [(ModuleName, FilePath)]
-  | ExeDoc BuildExeArgs
-  | ExeCc RunCcArgs
-  deriving (Show, Read)
-
-data ExeCabalRequest
-  = ReqExeCabalRun {
-        reqExeArgs :: ExeArgs  -- TODO: inline ExeArgs
-      }
+data ExeCabalRequest =
+    ReqExeBuild BuildExeArgs [(ModuleName, FilePath)]
+  | ReqExeDoc BuildExeArgs
+  | ReqExeCc RunCcArgs
   deriving Typeable
 
 data ExeCabalResponse =
@@ -811,9 +805,17 @@ data ExeCabalResponse =
   deriving Typeable
 
 instance Binary ExeCabalRequest where
-  put ReqExeCabalRun{..} = put $ show reqExeArgs  -- TODO: get rid of show
+  put (ReqExeBuild buildArgs ms) = putWord8 0 >> put (show buildArgs) >> put ms  -- TODO: get rid of show
+  put (ReqExeDoc buildArgs) = putWord8 0 >> put (show buildArgs)
+  put (ReqExeCc ccArgs) = putWord8 0 >> put (show ccArgs)
 
-  get = ReqExeCabalRun . read <$> get
+  get = do
+    header <- getWord8
+    case header of
+      0 -> (\args ms -> ReqExeBuild (read args) ms) <$> get <*> get
+      1 -> ReqExeDoc . read <$> get
+      2 -> ReqExeCc . read <$> get
+      _ -> fail "ExeCabalResponse.get: invalid header"
 
 instance Binary ExeCabalResponse where
   put (ExeCabalProgress progress) = putWord8 0 >> put progress
