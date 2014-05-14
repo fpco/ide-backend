@@ -30,14 +30,10 @@ import Control.Concurrent (killThread)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.MVar (newMVar)
-import Data.Maybe (fromMaybe)
-import Data.List (intercalate)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Char8      as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import System.Exit (ExitCode)
-import System.Environment (getEnvironment)
-import System.FilePath (splitSearchPath, searchPathSeparator)
 
 import IdeSession.Config
 import IdeSession.GHC.API
@@ -125,17 +121,6 @@ splitPackageDBStack dbstack = case dbstack of
     ierror :: a
     ierror = error $ "internal error: unexpected package db stack: "
                   ++ show dbstack
-
-envWithPathOverride :: [FilePath] -> IO (Maybe [(String, String)])
-envWithPathOverride []            = return Nothing
-envWithPathOverride extraPathDirs = do
-    env <- getEnvironment
-    let path  = fromMaybe "" (lookup "PATH" env)
-        path' = intercalate [searchPathSeparator]
-                  (splitSearchPath path ++ extraPathDirs)
-        env'  = ("PATH", path') : filter (\(var, _) -> var /= "PATH") env
-    return (Just env')
-
 
 shutdownGhcServer :: GhcServer -> IO ()
 shutdownGhcServer (OutProcess server) = shutdown server

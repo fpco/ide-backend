@@ -423,6 +423,7 @@ syntheticTests = [
         let m = "Maybes"
             upd = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd 4
+        assertNoErrors session
         status1 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status1
         out <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -467,9 +468,10 @@ syntheticTests = [
         let m = "Maybes"
             upd0 = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd0 4
+        assertNoErrors session
         status0 <- getBuildExeStatus session
         -- Expected failure! The updateRelativeIncludes below is really needed.
-        assertEqual "after exe build" (Just $ ExitFailure 1) status0
+        assertEqual "after exe build 1" (Just $ ExitFailure 1) status0
         updateSessionD session
                        (updateRelativeIncludes ["test/compiler/utils"])
                        4
@@ -479,7 +481,7 @@ syntheticTests = [
         let upd = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd 4
         status1 <- getBuildExeStatus session
-        assertEqual "after exe build" (Just ExitSuccess) status1
+        assertEqual "after exe build 2" (Just ExitSuccess) status1
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "Maybes exe output"
                     "False\n"
@@ -524,7 +526,7 @@ syntheticTests = [
         setCurrentDirectory "../../../"
         assertNoErrors session
         let upd = buildDoc
-        updateSessionD session upd 4
+        updateSessionD session upd 1
         status1 <- getBuildDocStatus session
         assertEqual "after doc build" (Just ExitSuccess) status1
         distDir <- getDistDir session
@@ -541,7 +543,7 @@ syntheticTests = [
         assertOneError session
         let upd = buildDoc
         -- Note that the stderr log file here is empty, but exit code is 1:
-        updateSessionD session upd 4
+        updateSessionD session upd 1
         status1 <- getBuildDocStatus session
         assertEqual "failure after doc build" (Just $ ExitFailure 1) status1
     )
@@ -567,7 +569,7 @@ syntheticTests = [
         assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "Main.hs")]
-        updateSessionD session upd 4
+        updateSessionD session upd 2
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "Main with cabal macro exe output" "5\n" mOut
@@ -592,7 +594,7 @@ syntheticTests = [
         -- TODO:
         -- let m = "Main"
         --     upd = buildExe [] [(Text.pack m, "Main.hs")]
-        -- updateSessionD session upd 4
+        -- updateSessionD session upd 1
         -- distDir <- getDistDir session
         -- mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         -- assertEqual "Main with cabal macro exe output" "5\n" mOut
@@ -622,7 +624,7 @@ syntheticTests = [
         assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
         let m = "M"
             upd = buildExe [] [(Text.pack m, "M.hs")]
-        updateSessionD session upd 4
+        updateSessionD session upd 2
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "M with cabal macro exe output" "5\n" mOut
@@ -646,7 +648,7 @@ syntheticTests = [
         assertEqual "result of ifdefed print 5" (BSLC.pack "False\n") output
         let m = "M"
             upd = buildExe [] [(Text.pack m, "M.hs")]
-        updateSessionD session upd 4
+        updateSessionD session upd 2
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "M with cabal macro exe output" "False\n" mOut
@@ -803,7 +805,7 @@ syntheticTests = [
           "test data\n" (BSLC.unpack output)
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "Main.hs")]
-        updateSessionD session upd 4
+        updateSessionD session upd 2
         distDir <- getDistDir session
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "CWD exe output" (BSLC.unpack output) out
@@ -844,7 +846,7 @@ syntheticTests = [
 
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "C" <.> "hs")]
-        updateSessionD session upd 4
+        updateSessionD session upd 7
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
@@ -865,7 +867,7 @@ syntheticTests = [
 
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "C" <.> "hs")]
-        updateSessionD session upd 4
+        updateSessionD session upd 7
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
@@ -897,7 +899,7 @@ syntheticTests = [
         assertNoErrors session
         let m = "TH.TH"
             upd = buildExe ["-rtsopts=all", "-O0"] [(Text.pack m, "TH/TH.hs")]
-        updateSessionD session upd 4
+        updateSessionD session upd 3
         distDir <- getDistDir session
         out <- readProcess (distDir </> "build" </> m </> m)
                            ["+RTS", "-K4M", "-RTS"] []
@@ -923,7 +925,7 @@ syntheticTests = [
         setCurrentDirectory "../"
         assertNoErrors session
         let upd = buildDoc
-        updateSessionD session upd 4
+        updateSessionD session upd 1
         distDir <- getDistDir session
         indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
         assertBool "TH.TH haddock files" indexExists
@@ -1929,7 +1931,7 @@ syntheticTests = [
         assertNoErrors session
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "test/FFI/Main2.hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 1
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
@@ -1961,7 +1963,7 @@ syntheticTests = [
         assertNoErrors session
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 3
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
@@ -1991,7 +1993,7 @@ syntheticTests = [
         assertNoErrors session
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 3
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
@@ -2039,7 +2041,7 @@ syntheticTests = [
 
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 3
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
@@ -2099,7 +2101,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
 
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 3
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
@@ -2138,7 +2140,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
 
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 3
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
@@ -2183,7 +2185,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
 
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 3
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
@@ -2233,7 +2235,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "B.hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 3
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
@@ -2246,7 +2248,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         setCurrentDirectory "../../"
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "ParFib.hs")]
-        updateSessionD session upd 4
+        updateSessionD session upd 3
         distDir <- getDistDir session
         fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "ParFib exe output"
@@ -2275,7 +2277,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         setCurrentDirectory "../../"
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "ParFib.hs")]
-        updateSessionD session upd 4
+        updateSessionD session upd 3
         distDir <- getDistDir session
         fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "ParFib exe output"
@@ -2301,8 +2303,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
             upd = buildExe [] [ (Text.pack m, "ParFib.Main.hs")
                               , (Text.pack "Main", "ParFib.hs") ]
         updateSessionD session upd 4
+        assertNoErrors session
         --let upd2 = buildExe [] [(Text.pack "Main", "ParFib.hs")]
-        --updateSessionD session upd2 4
+        --updateSessionD session upd2 1
         distDir <- getDistDir session
         fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "ParFib exe output"
@@ -2328,7 +2331,8 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
             upd = buildExe [] [(Text.pack m, "foooooooooooooooo.hs")]
         status0 <- getBuildExeStatus session
         assertEqual "before exe build" Nothing status0
-        updateSessionD session upd 4
+        updateSessionD session upd 1
+        assertNoErrors session
         status1 <- getBuildExeStatus session
         assertEqual "failure after exe build" (Just $ ExitFailure 1) status1
     )
@@ -2367,7 +2371,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
         setCurrentDirectory "../../"
         let upd = buildDoc
-        updateSessionD session upd 4
+        updateSessionD session upd 1
         distDir <- getDistDir session
         indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
         assertBool "ParFib haddock files" indexExists
@@ -3792,7 +3796,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main.hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 2
         distDir <- getDistDir session
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "DB exe output"
@@ -5599,12 +5603,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
 
         let updE = buildExe [] [(Text.pack "Main", "test/ABnoError/A.hs")]
-        updateSessionD session updE 4
+        updateSessionD session updE 3
         status <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status
 
         let updE2 = buildExe [] [(Text.pack "Main", "A.hs")]
-        updateSessionD session updE2 4
+        updateSessionD session updE2 3
         status2 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status2
     )
@@ -5622,13 +5626,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
 
         let updE = buildExe [] [(Text.pack "Main", "test/ABnoError/A.hs")]
-        updateSessionD session updE 4
+        updateSessionD session updE 3
         status <- getBuildExeStatus session
         -- Path "" no longer in include paths here!
         assertEqual "after exe build" (Just $ ExitFailure 1) status
 
         let updE2 = buildExe [] [(Text.pack "Main", "A.hs")]
-        updateSessionD session updE2 4
+        updateSessionD session updE2 3
         status2 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status2
     )
@@ -5658,7 +5662,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         distDir <- getDistDir session
         let m = "Main"
             updE = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
-        updateSessionD session updE 4
+        updateSessionD session updE 3
         status <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status
         (stExc, out, _) <-
@@ -5669,7 +5673,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     out
 
         let updE2 = buildExe [] [(Text.pack m, "A.hs")]
-        updateSessionD session updE2 4
+        updateSessionD session updE2 3
         status2 <- getBuildExeStatus session
         assertEqual "after exe build2" (Just ExitSuccess) status2
         (stExc2, out2, _) <-
@@ -5700,13 +5704,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         -- And this one works OK even without updateSourceFileDelete
         -- and even without session restart.
         let updE3 = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
-        updateSessionD session updE3 4
+        updateSessionD session updE3 3
         status3 <- getBuildExeStatus session
         -- Path "" no longer in include paths here!
         assertEqual "after exe build3" (Just $ ExitFailure 1) status3
 
         let updE4 = buildExe [] [(Text.pack m, "A.hs")]
-        updateSessionD session updE4 4
+        updateSessionD session updE4 3
         status4 <- getBuildExeStatus session
         assertEqual "after exe build4" (Just ExitSuccess) status4
         (stExc4, out4, _) <-
@@ -5738,7 +5742,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         distDir <- getDistDir session
         let m = "Main"
             updE = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
-        updateSessionD session updE 4
+        updateSessionD session updE 3
         status <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status
         (stExc, out, _) <-
@@ -5749,7 +5753,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     out
 
         let updE2 = buildExe [] [(Text.pack m, "A.hs")]
-        updateSessionD session updE2 4
+        updateSessionD session updE2 3
         status2 <- getBuildExeStatus session
         assertEqual "after exe build2" (Just ExitSuccess) status2
         (stExc2, out2, _) <-
@@ -5787,13 +5791,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "output3" (BSLC.pack "\"running A with another B\"\n") output3
 
         let updE3 = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
-        updateSessionD session updE3 4
+        updateSessionD session updE3 3
         status3 <- getBuildExeStatus session
         -- Path "" no longer in include paths here!
         assertEqual "after exe build3" (Just $ ExitFailure 1) status3
 
         let updE4 = buildExe [] [(Text.pack m, "A.hs")]
-        updateSessionD session updE4 4
+        updateSessionD session updE4 3
         status4 <- getBuildExeStatus session
         assertEqual "after exe build4" (Just ExitSuccess) status4
         (stExc4, out4, _) <-
@@ -5847,7 +5851,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         let m = "Main"
 
         let updE4 = buildExe [] [(Text.pack m, "A.hs")]
-        updateSessionD session updE4 4
+        updateSessionD session updE4 3
         status4 <- getBuildExeStatus session
         assertEqual "after exe build4" (Just $ ExitFailure 1) status4
           -- Failure due to no A in path.
@@ -5859,7 +5863,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
 
         -- buildExe with full paths works though, if the includes have ""
         let updE41 = buildExe [] [(Text.pack m, "test/ABnoError/A.hs")]
-        updateSessionD session updE41 4
+        updateSessionD session updE41 3
         status41 <- getBuildExeStatus session
         assertEqual "after exe build41" (Just ExitSuccess) status41
         (stExc41, out41, _) <-
@@ -5936,7 +5940,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertOneError session
 
         let upd2 = buildExe [] [(Text.pack "Main", "Main.hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 1
 
         distDir <- getDistDir session
         status <- getBuildExeStatus session
@@ -6091,7 +6095,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSessionD session update 2
         assertNoErrors session
         let updE = buildExe [] [(Text.pack "Main", "Main.hs")]
-        updateSessionD session updE 4
+        updateSessionD session updE 1
         status <- getBuildExeStatus session
         assertEqual "buildExe doesn't know 'main' is in IO"
           (Just $ ExitFailure 1) status
@@ -6110,7 +6114,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSessionD session update 2
         assertNoErrors session
         let updE = buildExe [] [(Text.pack "Main", "Main.hs")]
-        updateSessionD session updE 4
+        updateSessionD session updE 2
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "" "" buildStderr
@@ -6118,7 +6122,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "after exe build" (Just ExitSuccess) status
 
         let updDoc = buildDoc
-        updateSessionD session updDoc 4
+        updateSessionD session updDoc 1
         statusDoc <- getBuildDocStatus session
         assertEqual "after doc build" (Just ExitSuccess) statusDoc
 
@@ -6148,7 +6152,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "after exe build" (Just ExitSuccess) status
 
         let updDoc = buildDoc
-        updateSessionD session updDoc 4
+        updateSessionD session updDoc 1
         statusDoc <- getBuildDocStatus session
         assertEqual "after doc build" (Just ExitSuccess) statusDoc
 
@@ -6178,7 +6182,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "after exe build" (Just ExitSuccess) status
 
         let updDoc = buildDoc
-        updateSessionD session updDoc 4
+        updateSessionD session updDoc 1
         statusDoc <- getBuildDocStatus session
         assertEqual "after doc build" (Just ExitSuccess) statusDoc
 

@@ -1,7 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell, CPP #-}
 -- | Implementation of the server that controls the long-running GHC instance.
 -- This interacts with the ide-backend library through serialized data only.
-module Server (ghcServer, parseProgressMessage) where
+module Server (ghcServer) where
 
 import Prelude hiding (mod, span)
 import Control.Concurrent (ThreadId, throwTo, forkIO, myThreadId, threadDelay)
@@ -386,29 +386,6 @@ ghcHandleCompile RpcConversation{..}
     pkgDepsFor  m = allPkgDeps  .> StrictMap.accessorDefault Keep m
     expTypesFor m = allExpTypes .> StrictMap.accessorDefault Keep m
     useSitesFor m = allUseSites .> StrictMap.accessorDefault Keep m
-
-parseProgressMessage :: Text -> Either String (Int, Int, Text)
-parseProgressMessage = Att.parseOnly parser
-  where
-    parser :: Att.Parser (Int, Int, Text)
-    parser = do
-      _    <- Att.char '['                ; Att.skipSpace
-      step <- Att.decimal                 ; Att.skipSpace
-      _    <- Att.string (Text.pack "of") ; Att.skipSpace
-      numS <- Att.decimal                 ; Att.skipSpace
-      _    <- Att.char ']'                ; Att.skipSpace
-      rest <- parseCompiling `mplus` Att.takeText
-      return (step, numS, rest)
-
-    parseCompiling :: Att.Parser Text
-    parseCompiling = do
-      compiling <- Att.string (Text.pack "Compiling") ; Att.skipSpace
-      _         <- parseTH                            ; Att.skipSpace
-      modName   <- Att.takeTill isSpace
-      return $ Text.concat [compiling, Text.pack " ", modName]
-
-    parseTH :: Att.Parser ()
-    parseTH = Att.option () $ void $ Att.string (Text.pack "[TH]")
 
 -- | Handle a break request
 ghcHandleBreak :: RpcConversation -> ModuleName -> Public.SourceSpan -> Bool -> Ghc ()

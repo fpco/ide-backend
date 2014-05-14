@@ -79,6 +79,7 @@ import Distribution.Simple (PackageDBStack, PackageDB(..))
 import IdeSession.State
 import IdeSession.Cabal
 import IdeSession.Config
+import IdeSession.ExeCabalClient (invokeExeCabal)
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
 import IdeSession.Types.Private hiding (RunResult(..))
@@ -542,8 +543,6 @@ recompileObjectFiles = do
           srcDir = ideSourcesDir staticInfo
           distDir = ideDistDir staticInfo
           objDir = distDir </> "objs"
-          SessionConfig{ configPackageDBStack
-                       , configExtraPathDirs } = ideConfig staticInfo
 
           compiling, loading, unloading, skipped :: FilePath -> String
           compiling src = "Compiling " ++ makeRelative srcDir src
@@ -576,8 +575,7 @@ recompileObjectFiles = do
               callback (compiling fp)
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
               errs <- lift $ do
-                errs <- runGcc configPackageDBStack configExtraPathDirs
-                               distDir absC absObj objDir
+                errs <- runGcc absC absObj objDir
                 when (null errs) $ do
                   ts' <- updateFileTimes absObj
                   set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
@@ -872,26 +870,31 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildExe :: [String] -> [(ModuleName, FilePath)] -> IdeSessionUpdate ()
 buildExe extraOpts ms = do
-    IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    ideStaticInfo@ IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
     relativeIncludes  <- get ideRelativeIncludes
-    let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
+    let SessionConfig{..} = ideConfig
         -- Note that these do not contain the @packageDbArgs@ options.
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    let errors = case toLazyMaybe mcomputed of
+    -- Delete the build directory completely so that we trigger a full
+    -- recompilation. This is a workaround for #119.
+    liftIO $ do
+      ignoreDoesNotExist $ Dir.removeDirectoryRecursive $ ideDistDir </> "build"
+      Dir.createDirectoryIfMissing False $ ideDistDir </> "build"
+    let beStdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
+        beStderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
+        errors = case toLazyMaybe mcomputed of
           Nothing ->
             error "This session state does not admit artifact generation."
           Just Computed{computedErrors} -> toLazyList computedErrors
     exitCode <-
       if any (== KindError) $ map errorKind errors then do
         liftIO $ do
-          Dir.createDirectoryIfMissing False $ ideDistDir </> "build"
-          let stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
-          writeFile stderrLog
+          writeFile beStderrLog
             "Source errors encountered. Not attempting to build executables."
           return $ ExitFailure 1
       else do
@@ -902,10 +905,26 @@ buildExe extraOpts ms = do
           Dir.setCurrentDirectory
           (const $
              do Dir.setCurrentDirectory ideDataDir
-                buildExecutable ideConfig ideSourcesDir ideDistDir
-                                relativeIncludes ghcOpts
-                                mcomputed callback ms)
+                (loadedMs, pkgs) <- buildDeps mcomputed
+                libDeps <- externalDeps pkgs
+                let beArgs =
+                      BuildExeArgs{ bePackageDBStack = configPackageDBStack
+                                  , beExtraPathDirs = configExtraPathDirs
+                                  , beSourcesDir = ideSourcesDir
+                                  , beDistDir = ideDistDir
+                                  , beStdoutLog
+                                  , beStderrLog
+                                  , beRelativeIncludes = relativeIncludes
+                                  , beGhcOpts = ghcOpts
+                                  , beLibDeps = libDeps
+                                  , beLoadedMs = loadedMs }
+                invokeExeCabal ideStaticInfo (ReqExeBuild beArgs ms) callback)
     set ideBuildExeStatus (Just exitCode)
+  where
+    ignoreDoesNotExist :: IO () -> IO ()
+    ignoreDoesNotExist = Ex.handle $ \e ->
+      if isDoesNotExistError e then return ()
+                               else Ex.throwIO e
 
 -- | Build haddock documentation from sources added previously via
 -- the ide-backend updateSourceFile* mechanism. Similarly to 'buildExe',
@@ -920,23 +939,37 @@ buildExe extraOpts ms = do
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildDoc :: IdeSessionUpdate ()
 buildDoc = do
-    IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
     relativeIncludes  <- get ideRelativeIncludes
-    let SessionConfig{configGenerateModInfo, configStaticOpts} = ideConfig
+    let SessionConfig{..} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
+    liftIO $ Dir.createDirectoryIfMissing False $ ideDistDir </> "doc"
+    let ghcOpts = configStaticOpts ++ dynamicOpts
+        beStdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
+        beStderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
     exitCode <- liftIO $ Ex.bracket
       Dir.getCurrentDirectory
       Dir.setCurrentDirectory
       (const $ do Dir.setCurrentDirectory ideDataDir
-                  buildHaddock ideConfig ideSourcesDir ideDistDir
-                               relativeIncludes
-                               (dynamicOpts ++ configStaticOpts)
-                               mcomputed callback)
+                  (loadedMs, pkgs) <- buildDeps mcomputed
+                  libDeps <- externalDeps pkgs
+                  let beArgs =
+                        BuildExeArgs{ bePackageDBStack = configPackageDBStack
+                                    , beExtraPathDirs = configExtraPathDirs
+                                    , beSourcesDir = ideSourcesDir
+                                    , beDistDir = ideDistDir
+                                    , beStdoutLog
+                                    , beStderrLog
+                                    , beRelativeIncludes = relativeIncludes
+                                    , beGhcOpts = ghcOpts
+                                    , beLibDeps = libDeps
+                                    , beLoadedMs = loadedMs }
+                  invokeExeCabal ideStaticInfo (ReqExeDoc beArgs) callback)
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
@@ -1042,13 +1075,14 @@ nextLogicalTimestamp = do
   return newTS
 
 -- | Call gcc via ghc, with the same parameters cabal uses.
-runGcc :: PackageDBStack -> [FilePath]
-       -> FilePath -> FilePath -> FilePath -> FilePath
-       -> IdeSessionUpdate [SourceError]
-runGcc configPackageDBStack configExtraPathDirs
-       ideDistDir absC absObj pref = liftIO $ do
+runGcc :: FilePath -> FilePath -> FilePath -> IdeSessionUpdate [SourceError]
+runGcc absC absObj pref = do
+ ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+ callback  <- asks ideSessionUpdateCallback
+ liftIO $ do
   -- Direct call to gcc, for testing only:
-  let _gcc :: FilePath
+  let SessionConfig{configPackageDBStack, configExtraPathDirs} = ideConfig
+      _gcc :: FilePath
       _gcc = "/usr/bin/gcc"
       _args :: [String]
       _args = [ "-c"
@@ -1057,12 +1091,22 @@ runGcc configPackageDBStack configExtraPathDirs
               ]
       _stdin :: String
       _stdin = ""
+      stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
+      stderrLog = ideDistDir </> "ide-backend-cc.stderr"
+      runCcArgs = RunCcArgs{ rcPackageDBStack = configPackageDBStack
+                           , rcExtraPathDirs = configExtraPathDirs
+                           , rcDistDir = ideDistDir
+                           , rcStdoutLog = stdoutLog
+                           , rcStderrLog = stderrLog
+                           , rcAbsC = absC
+                           , rcAbsObj = absObj
+                           , rcPref = pref }
   -- (_exitCode, _stdout, _stderr)
   --   <- readProcessWithExitCode _gcc _args _stdin
   -- The real deal; we call gcc via ghc via cabal functions:
-  (exitCode, stdout, stderr)
-    <- runComponentCc configPackageDBStack configExtraPathDirs
-                      ideDistDir absC absObj pref
+  exitCode <- invokeExeCabal ideStaticInfo (ReqExeCc runCcArgs) callback
+  stdout <- readFile stdoutLog
+  stderr <- readFile stderrLog
   case exitCode of
     ExitSuccess   -> return []
     ExitFailure _ -> return (parseErrorMsgs stdout stderr)

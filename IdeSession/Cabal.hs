@@ -1,13 +1,21 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module IdeSession.Cabal (
-    buildExecutable, buildHaddock, buildLicenseCatenation
-  , generateMacros, buildDotCabal, runComponentCc
+    buildDeps, externalDeps
+  , configureAndBuild, configureAndHaddock
+  , buildLicenseCatenation
+  , generateMacros, buildDotCabal
+  , runComponentCc
+  , BuildExeArgs(..), RunCcArgs(..), ExeCabalRequest(..), ExeCabalResponse(..)
   , buildLicsFromPkgs  -- for testing only
   ) where
 
+import Control.Applicative ((<$>), (<*>))
 import qualified Control.Exception as Ex
 import Control.Monad
+import Data.Binary
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.Function (on)
@@ -16,6 +24,7 @@ import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Monoid (Monoid(..))
 import Data.Time
   ( getCurrentTime, utcToLocalTime, toGregorian, localDay, getCurrentTimeZone )
+import Data.Typeable (Typeable)
 import Data.Version (Version (..), parseVersion)
 import qualified Data.Text as Text
 import Text.ParserCombinators.ReadP (readP_to_S)
@@ -23,14 +32,10 @@ import System.Exit (ExitCode (ExitSuccess, ExitFailure), exitFailure)
 import System.FilePath ( (</>), takeFileName, makeRelative
                        , takeDirectory, replaceExtension )
 import System.FilePath.Find (find, always, extension)
-import System.Directory (
-    doesFileExist
-  , createDirectoryIfMissing
-  , removeDirectoryRecursive
-  )
+import System.Directory (doesFileExist)
 import System.IO.Temp (createTempDirectory)
 import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr, hPutStrLn, stderr)
-import System.IO.Error (isDoesNotExistError, isUserError, catchIOError)
+import System.IO.Error (isUserError, catchIOError)
 
 import Distribution.InstalledPackageInfo
   (InstalledPackageInfo_ ( InstalledPackageInfo
@@ -41,6 +46,7 @@ import qualified Distribution.ModuleName
 import Distribution.PackageDescription
 import Distribution.PackageDescription.PrettyPrint (showGenericPackageDescription)
 import qualified Distribution.Package as Package
+import Distribution.Package (Dependency(..), PackageName(..))
 import Distribution.ParseUtils ( parseFields, simpleField, ParseResult (..)
                                , FieldDescr, parseLicenseQ, parseFilePathQ
                                , parseFreeText, showFilePath, showFreeText
@@ -48,7 +54,7 @@ import Distribution.ParseUtils ( parseFields, simpleField, ParseResult (..)
 import qualified Distribution.Simple.Build as Build
 import Distribution.Simple.Build.Macros
 import qualified Distribution.Simple.Haddock as Haddock
-import Distribution.Simple (PackageDBStack)
+import Distribution.Simple (PackageDBStack, PackageDB(..))
 import qualified Distribution.Simple.Compiler as Simple.Compiler
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.GHC (getInstalledPackages, componentCcGhcOptions,
@@ -68,7 +74,7 @@ import qualified Distribution.Simple.Program.HcPkg as HcPkg
 import Distribution.System (buildPlatform)
 import qualified Distribution.Text
 import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
-import Distribution.Version (anyVersion, thisVersion)
+import Distribution.Version (VersionRange, anyVersion, thisVersion)
 import Distribution.Verbosity (silent)
 import Language.Haskell.Extension (Extension(..), KnownExtension(..),
                                    Language (Haskell2010))
@@ -244,30 +250,30 @@ mkConfFlags ideDistDir configPackageDBStack progPathExtra =
     , Setup.configProgramPathExtra = progPathExtra
     }
 
-configureAndBuild :: SessionConfig -> FilePath -> FilePath -> [FilePath]
-                  -> [String]
-                  -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
+configureAndBuild :: BuildExeArgs
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
-configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
-                  ghcOpts pkgs loadedMs callback ms = do
-  -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
-  -- meaningful,  and if so, replace the Nothings with Just meaningful messages
-  callback $ Progress 1 4 Nothing Nothing
-  libDeps <- externalDeps pkgs
+configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
+                              , beExtraPathDirs = configExtraPathDirs
+                              , beSourcesDir = ideSourcesDir
+                              , beDistDir = ideDistDir
+                              , beRelativeIncludes = relativeIncludes
+                              , beGhcOpts = ghcOpts
+                              , beLibDeps = libDeps
+                              , beLoadedMs = loadedMs
+                              , .. } ms = do
   let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         relativeIncludes
   executables <-
     mapM (exeDesc sourcesDirs [ideSourcesDir] ideDistDir ghcOpts) ms
-  callback $ Progress 2 4 Nothing Nothing
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
   hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
   lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
-  -- Cabal can't find the code of @Main@, to be used as the main executable
-  -- module, in subdirectories or in @Foo.hs@. We need a @Main@ to build
+  -- Cabal can't find the code of @Main@ (to be used as the main executable
+  -- module) in subdirectories or in @Foo.hs@. We need a @Main@ to build
   -- an executable, so any other @Main@ modules have to be ignored.
   -- So, if another module depends on such a @Main@,
   -- we're in trouble, but if the @Main@ is only an executable, we are fine.
@@ -296,29 +302,19 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
       preprocessors :: [PPSuffixHandler]
       preprocessors = []
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
-
-  -- Delete the build directory completely so that we trigger a full
-  -- recompilation. This is a workaround for #119.
-  ignoreDoesNotExist $ removeDirectoryRecursive $ ideDistDir </> "build"
-
-  createDirectoryIfMissing False $ ideDistDir </> "build"
   let confAndBuild = do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
         -- Setting @withPackageDB@ here is too late, @configure@ would fail
         -- already. Hence we set it in @mkConfFlags@ (can be reverted,
         -- when/if we construct @lbi@ without @configure@).
-        callback $ Progress 3 4 Nothing Nothing
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
-        callback $ Progress 4 4 Nothing Nothing
   -- Handle various exceptions and stderr/stdout printouts.
-  let stdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
-      stderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
   exitCode :: Either ExitCode () <- Ex.bracket
-    (do stdOutputBackup <- redirectStdOutput stdoutLog
-        stdErrorBackup  <- redirectStdError  stderrLog
-        return (stdOutputBackup, stdErrorBackup))
-    (\(stdOutputBackup, stdErrorBackup) -> do
-        restoreStdOutput stdOutputBackup
+    (do  -- stdOutputBackup <- redirectStdOutput beStdoutLog
+        stdErrorBackup  <- redirectStdError  beStderrLog
+        return ({-stdOutputBackup,-} stdErrorBackup))
+    (\({-stdOutputBackup,-} stdErrorBackup) -> do
+        -- restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ catchIOError confAndBuild
                       (\e -> if isUserError e
@@ -333,26 +329,18 @@ configureAndBuild SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
                                exitFailure
                              else ioError e))
   return $! either id (const ExitSuccess) exitCode
-  -- TODO: add a callback hook to Cabal that is applied to GHC messages
-  -- as they are emitted, similarly as log_action in GHC API,
-  -- or filter stdout and display progress on each good line.
-  where
-    ignoreDoesNotExist :: IO () -> IO ()
-    ignoreDoesNotExist = Ex.handle $ \e ->
-      if isDoesNotExistError e then return ()
-                               else Ex.throwIO e
 
-configureAndHaddock :: SessionConfig -> FilePath -> FilePath -> [FilePath]
-                    -> [String]
-                    -> [PackageId] -> [ModuleName] -> (Progress -> IO ())
+configureAndHaddock :: BuildExeArgs
                     -> IO ExitCode
-configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
-                    ghcNewOpts pkgs loadedMs callback = do
-  -- TODO: Check if this 1/4 .. 4/4 sequence of progress messages is
-  -- meaningful,  and if so, replace the Nothings with Just meaningful messages
-  callback $ Progress 1 4 Nothing Nothing
-  libDeps <- externalDeps pkgs
-  callback $ Progress 2 4 Nothing Nothing
+configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
+                                , beExtraPathDirs = configExtraPathDirs
+                                , beSourcesDir = ideSourcesDir
+                                , beDistDir = ideDistDir
+                                , beRelativeIncludes = relativeIncludes
+                                , beGhcOpts = ghcOpts
+                                , beLibDeps = libDeps
+                                , beLoadedMs = loadedMs
+                                , .. } = do
   let condExecutables = []
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         relativeIncludes
@@ -362,7 +350,7 @@ configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
   let soundMs | hsFound || lhsFound = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
-  library <- libDesc False sourcesDirs [ideSourcesDir] ghcNewOpts projectMs
+  library <- libDesc False sourcesDirs [ideSourcesDir] ghcOpts projectMs
   let gpDesc = GenericPackageDescription
         { packageDescription = pkgDesc
         , genPackageFlags    = []  -- seem unused
@@ -382,29 +370,21 @@ configureAndHaddock SessionConfig{..} ideSourcesDir ideDistDir relativeIncludes
         , Setup.haddockVerbosity = Setup.Flag minBound
         }
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
-  createDirectoryIfMissing False $ ideDistDir </> "doc"
-  let stdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
-      stderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
   exitCode :: Either ExitCode () <- Ex.bracket
-    (do stdOutputBackup <- redirectStdOutput stdoutLog
-        stdErrorBackup  <- redirectStdError  stderrLog
-        return (stdOutputBackup, stdErrorBackup))
-    (\(stdOutputBackup, stdErrorBackup) -> do
-        restoreStdOutput stdOutputBackup
+    (do  -- stdOutputBackup <- redirectStdOutput beStdoutLog
+        stdErrorBackup  <- redirectStdError  beStderrLog
+        return ({-stdOutputBackup,-} stdErrorBackup))
+    (\({-stdOutputBackup,-} stdErrorBackup) -> do
+        -- restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
-        callback $ Progress 3 4 Nothing Nothing
-        Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
-        callback $ Progress 4 4 Nothing Nothing)
+        Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags)
   return $! either id (const ExitSuccess) exitCode
-  -- TODO: add a callback hook to Cabal that is applied to GHC messages
-  -- as they are emitted, similarly as log_action in GHC API,
-  -- or filter stdout and display progress on each good line.
 
 buildDotCabal :: FilePath -> [FilePath] -> [String] -> Computed
               -> IO (String -> Version -> BSL.ByteString)
-buildDotCabal ideSourcesDir relativeIncludes ghcNewOpts computed = do
+buildDotCabal ideSourcesDir relativeIncludes ghcOpts computed = do
   (loadedMs, pkgs) <- buildDeps $ just computed
   libDeps <- externalDeps pkgs
   -- We ignore any @Main@ modules (even in subdirectories or in @Foo.hs@)
@@ -420,7 +400,7 @@ buildDotCabal ideSourcesDir relativeIncludes ghcNewOpts computed = do
         sort $ map (Distribution.ModuleName.fromString . Text.unpack) soundMs
   library <- libDesc True -- relative C files paths
                      (filter (/= "") relativeIncludes) [ideSourcesDir]
-                     ghcNewOpts projectMs
+                     ghcOpts projectMs
   let libE = library {libExposed = True}
       gpDesc libName version = GenericPackageDescription
         { packageDescription = pkgDescFromName libName version
@@ -432,26 +412,6 @@ buildDotCabal ideSourcesDir relativeIncludes ghcNewOpts computed = do
         }
   return $ \libName version ->
     BSL8.pack $ showGenericPackageDescription $ gpDesc libName version
-
-buildExecutable :: SessionConfig -> FilePath -> FilePath -> [FilePath]
-                -> [String]
-                -> Strict Maybe Computed -> (Progress -> IO ())
-                -> [(ModuleName, FilePath)]
-                -> IO ExitCode
-buildExecutable ideConfig ideSourcesDir ideDistDir relativeIncludes ghcOpts
-                mcomputed callback ms = do
-  (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndBuild ideConfig ideSourcesDir ideDistDir relativeIncludes ghcOpts
-                    pkgs loadedMs callback ms
-
-buildHaddock :: SessionConfig -> FilePath -> FilePath -> [FilePath] -> [String]
-             -> Strict Maybe Computed -> (Progress -> IO ())
-             -> IO ExitCode
-buildHaddock ideConfig ideSourcesDir ideDistDir relativeIncludes ghcNewOpts
-             mcomputed callback = do
-  (loadedMs, pkgs) <- buildDeps mcomputed
-  configureAndHaddock ideConfig ideSourcesDir ideDistDir relativeIncludes
-                      ghcNewOpts pkgs loadedMs callback
 
 lFieldDescrs :: [FieldDescr (Maybe License, Maybe FilePath, Maybe String)]
 lFieldDescrs =
@@ -748,11 +708,14 @@ localBuildInfo buildDir withPackageDB configExtraPathDirs = LocalBuildInfo
 
 -- | Run gcc via ghc, with correct parameters.
 -- Copied from bits and pieces of @Distribution.Simple.GHC@.
-runComponentCc :: PackageDBStack -> [FilePath]
-               -> FilePath -> FilePath -> FilePath -> FilePath
-               -> IO (ExitCode, String, String)
-runComponentCc configPackageDBStack configExtraPathDirs
-               ideDistDir absC absObj pref = do
+runComponentCc :: RunCcArgs -> IO ExitCode
+runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
+                        , rcExtraPathDirs = configExtraPathDirs
+                        , rcDistDir = ideDistDir
+                        , rcAbsC = absC
+                        , rcAbsObj = absObj
+                        , rcPref = pref
+                        , .. } = do
   let verbosity = silent
       -- TODO: create dist.23412/build? see cabalMacrosLocation
       buildDir = ideDistDir
@@ -780,14 +743,12 @@ runComponentCc configPackageDBStack configExtraPathDirs
                        }
       odir          = Setup.fromFlag (ghcOptObjDir vanillaCcOpts)
 
-  let stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
-      stderrLog = ideDistDir </> "ide-backend-cc.stderr"
   exitCode :: Either ExitCode () <- Ex.bracket
-    (do stdOutputBackup <- redirectStdOutput stdoutLog
-        stdErrorBackup  <- redirectStdError  stderrLog
-        return (stdOutputBackup, stdErrorBackup))
-    (\(stdOutputBackup, stdErrorBackup) -> do
-        restoreStdOutput stdOutputBackup
+    (do  -- stdOutputBackup <- redirectStdOutput rcStdoutLog
+        stdErrorBackup  <- redirectStdError rcStderrLog
+        return ({-stdOutputBackup,-} stdErrorBackup))
+    (\({-stdOutputBackup,-} stdErrorBackup) -> do
+        -- restoreStdOutput stdOutputBackup
         restoreStdError  stdErrorBackup)
     (\_ -> Ex.try $ do
         createDirectoryIfMissingVerbose verbosity True odir
@@ -805,7 +766,136 @@ runComponentCc configPackageDBStack configExtraPathDirs
 
         whenSharedLib forceSharedLib (runGhcProg sharedCcOpts)
         whenProfLib (runGhcProg profCcOpts))
-  sout <- readFile stdoutLog
-  serr <- readFile stderrLog
-  let exitC = either id (const ExitSuccess) exitCode
-  return (exitC, sout, serr)
+  return $! either id (const ExitSuccess) exitCode
+
+data BuildExeArgs = BuildExeArgs
+  { bePackageDBStack :: PackageDBStack
+  , beExtraPathDirs :: [FilePath]
+  , beSourcesDir :: FilePath
+  , beDistDir :: FilePath
+  , beStdoutLog :: FilePath
+  , beStderrLog :: FilePath
+  , beRelativeIncludes :: [FilePath]
+  , beGhcOpts :: [String]
+  , beLibDeps :: [Package.Dependency]
+  , beLoadedMs :: [ModuleName]
+  }
+
+data RunCcArgs = RunCcArgs
+  { rcPackageDBStack :: PackageDBStack
+  , rcExtraPathDirs :: [FilePath]
+  , rcDistDir :: FilePath
+  , rcStdoutLog :: FilePath
+  , rcStderrLog :: FilePath
+  , rcAbsC :: FilePath
+  , rcAbsObj :: FilePath
+  , rcPref :: FilePath
+  }
+
+data ExeCabalRequest =
+    ReqExeBuild BuildExeArgs [(ModuleName, FilePath)]
+  | ReqExeDoc BuildExeArgs
+  | ReqExeCc RunCcArgs
+  deriving Typeable
+
+data ExeCabalResponse =
+    ExeCabalProgress Progress
+  | ExeCabalDone ExitCode
+  deriving Typeable
+
+instance Binary ExeCabalRequest where
+  put (ReqExeBuild buildArgs ms) = putWord8 0 >> put buildArgs >> put ms
+  put (ReqExeDoc buildArgs) = putWord8 1 >> put buildArgs
+  put (ReqExeCc ccArgs) = putWord8 2 >> put ccArgs
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> ReqExeBuild <$> get <*> get
+      1 -> ReqExeDoc <$> get
+      2 -> ReqExeCc <$> get
+      _ -> fail "ExeCabalRequest.get: invalid header"
+
+instance Binary ExeCabalResponse where
+  put (ExeCabalProgress progress) = putWord8 0 >> put progress
+  put (ExeCabalDone exitCode)     = putWord8 1 >> put exitCode
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> ExeCabalProgress <$> get
+      1 -> ExeCabalDone <$> get
+      _ -> fail "ExeCabalResponse.get: invalid header"
+
+instance Binary BuildExeArgs where
+  put BuildExeArgs{..} = do
+    put bePackageDBStack
+    put beExtraPathDirs
+    put beSourcesDir
+    put beDistDir
+    put beStdoutLog
+    put beStderrLog
+    put beRelativeIncludes
+    put beGhcOpts
+    put beLibDeps
+    put beLoadedMs
+
+  get = BuildExeArgs <$> get <*> get <*> get
+                     <*> get <*> get <*> get
+                     <*> get <*> get <*> get <*> get
+
+instance Binary RunCcArgs where
+  put RunCcArgs{..} = do
+    put rcPackageDBStack
+    put rcExtraPathDirs
+    put rcDistDir
+    put rcStdoutLog
+    put rcStderrLog
+    put rcAbsC
+    put rcAbsObj
+    put rcPref
+
+  get = RunCcArgs <$> get <*> get <*> get
+                  <*> get <*> get <*> get
+                  <*> get <*> get
+
+instance Binary ExitCode where
+  put ExitSuccess = putWord8 0
+  put (ExitFailure code) = putWord8 1 >> put code
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return ExitSuccess
+      1 -> ExitFailure <$> get
+      _ -> fail "ExitCode.get: invalid header"
+
+instance Binary PackageDB where
+  put GlobalPackageDB = putWord8 0
+  put UserPackageDB = putWord8 1
+  put (SpecificPackageDB path) = putWord8 2 >> put path
+
+  get = do
+    header <- getWord8
+    case header of
+      0 -> return GlobalPackageDB
+      1 -> return UserPackageDB
+      2 -> SpecificPackageDB <$> get
+      _ -> fail "GlobalPackageDB.get: invalid header"
+
+instance Binary Dependency where
+  put (Dependency pn vr) = do
+    put pn
+    put vr
+
+  get = Dependency <$> get <*> get
+
+instance Binary VersionRange where  -- very complex type, but compact String rep
+  put = put . show
+
+  get = read <$> get
+
+instance Binary PackageName where
+  put (PackageName n) = put n
+
+  get = PackageName <$> get

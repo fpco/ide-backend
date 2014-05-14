@@ -5,9 +5,11 @@ module IdeSession.Util (
     showExWithClass
   , accessorName
   , lookup'
+  , envWithPathOverride
   , writeFileAtomic
   , setupEnv
   , relInclToOpts
+  , parseProgressMessage
     -- * Simple diffs
   , Diff(..)
   , applyMapDiff
@@ -19,7 +21,7 @@ module IdeSession.Util (
   , restoreStdError
   ) where
 
-import Control.Monad (void, forM_)
+import Control.Monad (void, forM_, mplus)
 import Data.Typeable (typeOf)
 import qualified Control.Exception as Ex
 import Data.Accessor (Accessor, accessor)
@@ -32,6 +34,8 @@ import qualified Data.Binary                  as Bin
 import qualified Data.Binary.Get.Internal     as Bin (readNWith)
 import qualified Data.Binary.Put              as Bin (putBuilder)
 import qualified Data.Binary.Builder.Internal as Bin (writeN)
+import Data.List (intercalate)
+import Data.Maybe (fromMaybe)
 import Foreign.Ptr (castPtr)
 import Control.Applicative ((<$>))
 import Crypto.Types (BitLength)
@@ -39,8 +43,13 @@ import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
 import System.FilePath (splitFileName, (<.>), (</>))
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
 import System.IO (Handle, hClose, openBinaryTempFile, hFlush, stdout, stderr)
+import Data.Char (isSpace)
+import qualified Data.Attoparsec.Text as Att
 import Data.Text (Text)
+import qualified Data.Text as Text
 import qualified Data.Text.Foreign as Text
+import System.Environment (getEnvironment)
+import System.FilePath (splitSearchPath, searchPathSeparator)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import qualified System.Posix.Files as Files
@@ -84,6 +93,16 @@ lookup' key =
     delete a ((a', b') : xs)
       | a == a'   = xs
       | otherwise = (a', b') : delete a xs
+
+envWithPathOverride :: [FilePath] -> IO (Maybe [(String, String)])
+envWithPathOverride []            = return Nothing
+envWithPathOverride extraPathDirs = do
+    env <- getEnvironment
+    let path  = fromMaybe "" (lookup "PATH" env)
+        path' = intercalate [searchPathSeparator]
+                  (splitSearchPath path ++ extraPathDirs)
+        env'  = ("PATH", path') : filter (\(var, _) -> var /= "PATH") env
+    return (Just env')
 
 -- | Writes a file atomically.
 --
@@ -153,6 +172,29 @@ relInclToOpts :: FilePath -> [FilePath] -> [String]
 relInclToOpts sourcesDir relIncl =
    ["-i"]  -- reset to empty
    ++ map (\path -> "-i" ++ sourcesDir </> path) relIncl
+
+parseProgressMessage :: Text -> Either String (Int, Int, Text)
+parseProgressMessage = Att.parseOnly parser
+  where
+    parser :: Att.Parser (Int, Int, Text)
+    parser = do
+      _    <- Att.char '['                ; Att.skipSpace
+      step <- Att.decimal                 ; Att.skipSpace
+      _    <- Att.string (Text.pack "of") ; Att.skipSpace
+      numS <- Att.decimal                 ; Att.skipSpace
+      _    <- Att.char ']'                ; Att.skipSpace
+      rest <- parseCompiling `mplus` Att.takeText
+      return (step, numS, rest)
+
+    parseCompiling :: Att.Parser Text
+    parseCompiling = do
+      compiling <- Att.string (Text.pack "Compiling") ; Att.skipSpace
+      _         <- parseTH                            ; Att.skipSpace
+      modName   <- Att.takeTill isSpace
+      return $ Text.concat [compiling, Text.pack " ", modName]
+
+    parseTH :: Att.Parser ()
+    parseTH = Att.option () $ void $ Att.string (Text.pack "[TH]")
 
 {------------------------------------------------------------------------------
   Simple diffs
