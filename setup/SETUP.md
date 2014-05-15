@@ -289,10 +289,8 @@ ghc 7.4
 
 * Get the 7.4.2 release of the core libraries:
 
-```
       ./sync-all --no-dph -r git://git.haskell.org get
       ./sync-all checkout -b ghc-7.4.2 ghc-7.4.2-release
-```
 
 * Make sure we're still in the experimental branch of ghc:
 
@@ -354,7 +352,7 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
 * Get the corresponding version of the core libraries:
 
-      ./sync-all --extra --nofib -r git://git.haskell.org get -b ghc-7.8
+      ./sync-all --extra --no-dph --nofib -r git://git.haskell.org get -b ghc-7.8
 
 * Create build.mk
 
