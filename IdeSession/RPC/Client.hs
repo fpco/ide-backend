@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, CPP #-}
 module IdeSession.RPC.Client (
     RpcServer
   , RpcConversation(..)
@@ -13,8 +13,19 @@ module IdeSession.RPC.Client (
   , getRpcExitCode
   ) where
 
+import Control.Applicative ((<$>))
+import Control.Concurrent.MVar (MVar, newMVar)
+import Control.Monad (void, unless)
+import Data.Binary (Binary, encode, decode)
+import Data.IORef (writeIORef, readIORef, newIORef)
+import Data.Typeable (Typeable)
 import Prelude hiding (take)
+import System.Directory (canonicalizePath, getPermissions, executable)
+import System.Exit (ExitCode)
 import System.IO (Handle)
+import System.Posix.IO (createPipe, closeFd, fdToHandle)
+import System.Posix.Signals (signalProcess, sigKILL)
+import System.Posix.Types (Fd)
 import System.Process
   ( createProcess
   , proc
@@ -23,18 +34,9 @@ import System.Process
   , CreateProcess(cwd, env)
   , getProcessExitCode
   )
-import System.Exit (ExitCode)
-import System.Posix.Types (Fd)
-import System.Posix.IO (createPipe, closeFd, fdToHandle)
-import System.Directory (canonicalizePath, getPermissions, executable)
-import Data.Typeable (Typeable)
-import Control.Applicative ((<$>))
-import Control.Monad (void, unless)
+import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
 import qualified Control.Exception as Ex
-import Control.Concurrent.MVar (MVar, newMVar)
 import qualified Data.ByteString.Lazy.Char8 as BSL
-import Data.Binary (Binary, encode, decode)
-import Data.IORef (writeIORef, readIORef, newIORef)
 
 import IdeSession.Util.BlockingOps (putMVar, takeMVar)
 import IdeSession.RPC.API
@@ -205,8 +207,20 @@ terminate server = do
 -- | Force-terminate the external process
 forceTerminate :: RpcServer -> IO ()
 forceTerminate server = do
-    ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode RequestForceShutdown)
-    void $ waitForProcess (rpcProc server)
+    withProcessHandle (rpcProc server) $ \p_ ->
+      case p_ of
+        ClosedHandle _ ->
+          leaveHandleAsIs p_
+        OpenHandle pID -> do
+          signalProcess sigKILL pID
+          leaveHandleAsIs p_
+  where
+    leaveHandleAsIs _p =
+#if MIN_VERSION_process(1,2,0)
+      return ()
+#else
+      return (_p, ())
+#endif
 
 -- | Like modifyMVar, but terminate the server on exceptions
 withRpcServer :: RpcServer

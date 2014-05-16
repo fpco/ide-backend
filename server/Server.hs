@@ -8,16 +8,13 @@ import Control.Concurrent (ThreadId, throwTo, forkIO, myThreadId, threadDelay)
 import Control.Concurrent.Async (async)
 import Control.Concurrent.MVar (MVar, newEmptyMVar)
 import qualified Control.Exception as Ex
-import Control.Monad (void, unless, when, mplus)
+import Control.Monad (void, unless, when)
 import Control.Monad.State (StateT, runStateT)
 import Control.Monad.Trans.Class (lift)
-import Data.Char (isSpace)
 import qualified Data.ByteString as BSS (hGetSome, hPut, null)
-import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.List as List
 import Data.Function (on)
-import qualified Data.Attoparsec.Text as Att
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
 import System.IO (Handle, hFlush)

@@ -60,9 +60,7 @@ data RpcConversation = RpcConversation {
   , put :: forall a. (Typeable a, Binary a) => a -> IO ()
   }
 
-data Request  = Request IncBS
-              | RequestShutdown
-              | RequestForceShutdown
+data Request = Request IncBS | RequestShutdown
   deriving Show
 
 newtype Response = Response IncBS
@@ -70,14 +68,12 @@ newtype Response = Response IncBS
 instance Binary Request where
   put (Request bs)         = Binary.putWord8 0 >> Binary.put bs
   put RequestShutdown      = Binary.putWord8 1
-  put RequestForceShutdown = Binary.putWord8 2
 
   get = do
     header <- Binary.getWord8
     case header of
       0 -> Request <$> Binary.get
       1 -> return RequestShutdown
-      2 -> return RequestForceShutdown
       _ -> fail "Request.get: invalid header"
 
 instance Binary Response where

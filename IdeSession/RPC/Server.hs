@@ -14,8 +14,6 @@ import System.IO
   )
 import System.Posix.Types (Fd)
 import System.Posix.IO (closeFd, fdToHandle)
-import System.Posix.Process (exitImmediately)
-import System.Exit (ExitCode(ExitFailure))
 import Control.Monad (forever)
 import qualified Control.Exception as Ex
 import Control.Concurrent (threadDelay)
@@ -94,7 +92,6 @@ readRequests h ch = newStream h >>= go
       case req of
         Request req'         -> writeChan ch (unIncBS req') >> go input
         RequestShutdown      -> return ()
-        RequestForceShutdown -> exitImmediately (ExitFailure 1)
 
 -- | Encode messages from a channel and forward them on a handle
 writeResponses :: Chan BSL.ByteString -> Handle -> IO ()
