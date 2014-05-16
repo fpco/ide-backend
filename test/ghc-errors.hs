@@ -286,7 +286,7 @@ multipleTests =
         let update3 = updateCodeGeneration True
         updateSessionD session update3 0  -- 0: nothing to generate code from
         exitCodeBefore <- getGhcExitCode serverBefore
-        assertEqual "exitCodeBefore" (Just (ExitFailure 1)) exitCodeBefore
+        assertEqual "exitCodeBefore" (Just ExitSuccess) exitCodeBefore
       )
   ]
 
@@ -1386,7 +1386,7 @@ syntheticTests = [
     , restartRun [ "module M where"
                  , "loop :: IO ()"
                  , "loop = loop"
-                 ] (ExitFailure 1)
+                 ] ExitSuccess
     )
   , ( "Restart session (snippet swallows all exceptions; after .1 sec)"
     , restartRun [ "module M where"
@@ -1399,7 +1399,7 @@ syntheticTests = [
                  , ""
                  , "loop :: IO ()"
                  , "loop = Ex.catch innerLoop $ \\e -> let _ = e :: Ex.SomeException in loop"
-                 ] (ExitFailure 1)
+                 ] ExitSuccess
     )
   , ( "Restart session (black hole, swallow all exceptions; after .1 sec)"
     , restartRun [ "module M where"
@@ -1412,7 +1412,7 @@ syntheticTests = [
                  , ""
                  , "loop :: IO ()"
                  , "loop = Ex.catch innerLoop $ \\e -> let _ = e :: Ex.SomeException in loop"
-                 ] (ExitFailure 1)
+                 ] ExitSuccess
     )
   , ( "Restart session (evil snippet with infinite stack of exception handlers; after .1 sec)"
     , restartRun [ "module M where"
@@ -1421,7 +1421,7 @@ syntheticTests = [
                  , ""
                  , "loop :: IO ()"
                  , "loop = Ex.catch loop $ \\e -> let _ = e :: Ex.SomeException in loop"
-                 ] (ExitFailure 1)
+                 ] ExitSuccess
     )
   , ( "Make sure environment is restored after session restart"
     , withSession defaultSession $ \session -> do
@@ -1454,7 +1454,7 @@ syntheticTests = [
 
         -- Make sure the old server exited
         exitCodeBefore <- getGhcExitCode serverBefore
-        assertEqual "exitCodeBefore" (Just (ExitFailure 1)) exitCodeBefore
+        assertEqual "exitCodeBefore" (Just ExitSuccess) exitCodeBefore
 
         -- Make sure the new server is still alive
         serverAfter <- getGhcServer session
