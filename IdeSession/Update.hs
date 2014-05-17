@@ -76,6 +76,7 @@ import System.IO.Error (isDoesNotExistError)
 import qualified Data.Text as Text
 import System.Environment (getEnv)
 import System.Exit (ExitCode(..))
+import System.Posix.IO.ByteString
 import System.Process (proc, CreateProcess(..), StdStream(..), createProcess, waitForProcess, interruptProcessGroupOf, terminateProcess)
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
@@ -798,22 +799,23 @@ runExe session m = do
         fail $ "No compiled executable file "
                ++ m ++ " exists at path "
                ++ exePath ++ "."
+      (stdRd, stdWr) <- liftIO createPipe
+      std_rd_hdl <- fdToHandle stdRd
+      std_wr_hdl <- fdToHandle stdWr
       let cproc = (proc exePath []) { cwd = Just dataDir
 --                                    , env = menv
                                     , create_group = True
                                         -- for interruptProcessGroupOf
                                     , std_in = CreatePipe
-                                    , std_out = CreatePipe
-                                    , std_err = CreatePipe
+                                    , std_out = UseHandle std_wr_hdl
+                                    , std_err = UseHandle std_wr_hdl
                                     }
       -- TODO: buffering; should I compile RTS into the exe?
-      -- TODO: redirect stderr to stdout, as with snippets
       -- TODO: check env, ReqSetArgs and all other state that snippets get
-      (Just stdin_hdl, Just stdout_hdl, Just ___stderr_hdl, ph)
-        <- createProcess cproc
+      (Just stdin_hdl, Nothing, Nothing, ph) <- createProcess cproc
       return $ RunActions
         { runWait = do
-            bs <- BSS.hGetSome stdout_hdl blockSize
+            bs <- BSS.hGetSome std_rd_hdl blockSize
             if BSS.null bs
               then Right <$> waitForProcess ph
               else return $ Left bs
@@ -825,6 +827,7 @@ runExe session m = do
               f status
         , forceCancel = terminateProcess ph
         }
+      -- We don't need to close any handles. At the lasted GC closes them.
  where
   -- TODO: What is a good value here?
   blockSize :: Int
