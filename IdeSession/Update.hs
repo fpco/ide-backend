@@ -31,6 +31,7 @@ module IdeSession.Update (
   , buildLicenses
     -- * Running code
   , runStmt
+  , runExe
   , resume
   , setBreakpoint
   , printVar
@@ -42,7 +43,7 @@ module IdeSession.Update (
   where
 
 import Prelude hiding (mod, span)
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (threadDelay, forkIO)
 import Control.Monad (when, void, forM, unless)
 import Control.Monad.State (MonadState, StateT, execStateT, runStateT)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
@@ -58,6 +59,7 @@ import Data.Accessor (Accessor, (.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString.Char8 as BSS
+import qualified Data.ByteString as BSS (hGetSome)
 import Data.Foldable (forM_)
 import qualified System.Directory as Dir
 import System.FilePath (
@@ -68,11 +70,13 @@ import System.FilePath (
   , dropFileName
   )
 import System.Posix.Files (setFileTimes)
+import qualified System.IO as IO
 import System.IO.Temp (createTempDirectory)
 import System.IO.Error (isDoesNotExistError)
 import qualified Data.Text as Text
 import System.Environment (getEnv)
 import System.Exit (ExitCode(..))
+import System.Process (proc, CreateProcess(..), StdStream(..), createProcess, waitForProcess, interruptProcessGroupOf, terminateProcess)
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
 
@@ -82,6 +86,7 @@ import IdeSession.Config
 import IdeSession.ExeCabalClient (invokeExeCabal)
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
+import qualified IdeSession.Query as Query
 import IdeSession.Types.Private hiding (RunResult(..))
 import IdeSession.Types.Public (RunBufferMode(..))
 import IdeSession.Types.Translation (removeExplicitSharing)
@@ -766,6 +771,65 @@ runStmt ideSession m fun = runCmd ideSession $ \idleState -> RunStmt {
   , runCmdStderr   = idleState ^. ideStderrBufferMode
   }
 
+-- | Run the main function from the last compiled executable.
+--
+-- 'runExe' will throw an exception if there were no executables
+-- compiled since session init, or if the last compilation was not
+-- successful (checked as in @getBuildExeStatus@)
+-- or if none of the executables last compiled have the supplied name
+-- or when the server is in a dead state (i.e., when ghc has crashed). In the
+-- last case 'getSourceErrors' will report the ghc exception; it is the
+-- responsibility of the client code to check for this.
+runExe :: IdeSession -> String -> IO (RunActions ExitCode)
+runExe session m = do
+  mstatus <- Query.getBuildExeStatus session
+  case mstatus of
+    Nothing ->
+      fail $ "No executable compilation initiated since session init."
+    (Just status@ExitFailure{}) ->
+      fail $ "Last executable compilation failed with status "
+             ++ show status ++ "."
+    Just ExitSuccess -> do
+      distDir <- Query.getDistDir session
+      dataDir <- Query.getDataDir session
+      let exePath = distDir </> "build" </> m </> m
+      exeExists <- Dir.doesFileExist exePath
+      unless exeExists $
+        fail $ "No compiled executable file "
+               ++ m ++ " exists at path "
+               ++ exePath ++ "."
+      let cproc = (proc exePath []) { cwd = Just dataDir
+--                                    , env = menv
+                                    , create_group = True
+                                        -- for interruptProcessGroupOf
+                                    , std_in = CreatePipe
+                                    , std_out = CreatePipe
+                                    , std_err = CreatePipe
+                                    }
+      -- TODO: buffering; should I compile RTS into the exe?
+      -- TODO: redirect stderr to stdout, as with snippets
+      -- TODO: check env, ReqSetArgs and all other state that snippets get
+      (Just stdin_hdl, Just stdout_hdl, Just ___stderr_hdl, ph)
+        <- createProcess cproc
+      return $ RunActions
+        { runWait = do
+            bs <- BSS.hGetSome stdout_hdl blockSize
+            if BSS.null bs
+              then Right <$> waitForProcess ph
+              else return $ Left bs
+        , interrupt = interruptProcessGroupOf ph
+        , supplyStdin = \bs -> BSS.hPut stdin_hdl bs >> IO.hFlush stdin_hdl
+        , registerTerminationCallback = \f ->
+            void $ forkIO $ do
+              status <- waitForProcess ph
+              f status
+        , forceCancel = terminateProcess ph
+        }
+ where
+  -- TODO: What is a good value here?
+  blockSize :: Int
+  blockSize = 4096
+
 -- | Resume a previously interrupted statement
 resume :: IdeSession -> IO (RunActions Public.RunResult)
 resume ideSession = runCmd ideSession (const Resume)
@@ -886,7 +950,7 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
 buildExe :: [String] -> [(ModuleName, FilePath)] -> IdeSessionUpdate ()
 buildExe extraOpts ms = do
-    ideStaticInfo@ IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts

@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, TypeSynonymInstances, FlexibleInstances, RecordWildCards, OverlappingInstances #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, TypeSynonymInstances, FlexibleInstances, RecordWildCards, OverlappingInstances, OverloadedStrings #-}
 module Main (main) where
 
 import Control.Concurrent (threadDelay)
@@ -430,6 +430,12 @@ syntheticTests = [
         assertEqual "Maybes exe output"
                     "False\n"
                     out
+        runActions1 <- runExe session m
+        (outExe1, statusExe1) <- runWaitAll runActions1
+        assertEqual "Maybes exe output from runExe 1"
+                    "False\n"
+                    outExe1
+        assertEqual "after runExe 1" ExitSuccess statusExe1
 
         let m2 = "Exception"
             upd2 = buildExe [] [(Text.pack m2, m2 <.> "hs")]
@@ -438,6 +444,12 @@ syntheticTests = [
         assertEqual "Exception exe output"
                     ""
                     out2
+        runActions2 <- runExe session m2
+        (outExe2, statusExe2) <- runWaitAll runActions2
+        assertEqual "Maybes exe output from runExe 2"
+                    ""
+                    outExe2
+        assertEqual "after runExe 2" ExitSuccess statusExe2
 
         let m3 = "Main"
             upd3 = buildExe [] [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
@@ -446,6 +458,12 @@ syntheticTests = [
         assertEqual "Main exe output"
                     ""
                     out3
+        runActions3 <- runExe session m3
+        (outExe3, statusExe3) <- runWaitAll runActions3
+        assertEqual "Maybes exe output from runExe 3"
+                    ""
+                    outExe3
+        assertEqual "after runExe 3" ExitSuccess statusExe3
 
         let upd4 = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd4 4
@@ -486,6 +504,12 @@ syntheticTests = [
         assertEqual "Maybes exe output"
                     "False\n"
                     out
+        runActions1 <- runExe session m
+        (outExe1, statusExe1) <- runWaitAll runActions1
+        assertEqual "Maybes exe output from runExe 1"
+                    "False\n"
+                    outExe1
+        assertEqual "after runExe 1" ExitSuccess statusExe1
 
         let m2 = "Exception"
             upd2 = buildExe [] [(Text.pack m2, m2 <.> "hs")]
@@ -494,6 +518,12 @@ syntheticTests = [
         assertEqual "Exception exe output"
                     ""
                     out2
+        runActions2 <- runExe session m2
+        (outExe2, statusExe2) <- runWaitAll runActions2
+        assertEqual "Maybes exe output from runExe 2"
+                    ""
+                    outExe2
+        assertEqual "after runExe 2" ExitSuccess statusExe2
 
         let m3 = "Main"
             upd3 = buildExe [] [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
@@ -502,6 +532,12 @@ syntheticTests = [
         assertEqual "Main exe output"
                     ""
                     out3
+        runActions3 <- runExe session m3
+        (outExe3, statusExe3) <- runWaitAll runActions3
+        assertEqual "Maybes exe output from runExe 3"
+                    ""
+                    outExe3
+        assertEqual "after runExe 3" ExitSuccess statusExe3
 
         let upd4 = buildExe [] [(Text.pack m, m <.> "lhs")]
         updateSessionD session upd4 4
