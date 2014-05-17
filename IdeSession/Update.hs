@@ -74,7 +74,7 @@ import qualified System.IO as IO
 import System.IO.Temp (createTempDirectory)
 import System.IO.Error (isDoesNotExistError)
 import qualified Data.Text as Text
-import System.Environment (getEnv)
+import System.Environment (getEnv, getEnvironment)
 import System.Exit (ExitCode(..))
 import System.Posix.IO.ByteString
 import System.Process (proc, CreateProcess(..), StdStream(..), createProcess, waitForProcess, interruptProcessGroupOf, terminateProcess)
@@ -783,6 +783,7 @@ runStmt ideSession m fun = runCmd ideSession $ \idleState -> RunStmt {
 -- responsibility of the client code to check for this.
 runExe :: IdeSession -> String -> IO (RunActions ExitCode)
 runExe session m = do
+  -- TODO: catch InvalidSessionStateQueries and fail with "executable compilation"; or inspect session once to get the idle state
   mstatus <- Query.getBuildExeStatus session
   case mstatus of
     Nothing ->
@@ -793,6 +794,14 @@ runExe session m = do
     Just ExitSuccess -> do
       distDir <- Query.getDistDir session
       dataDir <- Query.getDataDir session
+      args <- Query.getArgs session
+      envInherited <- getEnvironment
+      envOverride <- Query.getEnv session
+      let overrideVar :: (String, Maybe String) -> Strict (Map String) String
+                      -> Strict (Map String) String
+          overrideVar (var, Just val) env = Map.insert var val env
+          overrideVar (var, Nothing) env = Map.delete var env
+          envMap = foldr overrideVar (Map.fromList envInherited) envOverride
       let exePath = distDir </> "build" </> m </> m
       exeExists <- Dir.doesFileExist exePath
       unless exeExists $
@@ -802,16 +811,15 @@ runExe session m = do
       (stdRd, stdWr) <- liftIO createPipe
       std_rd_hdl <- fdToHandle stdRd
       std_wr_hdl <- fdToHandle stdWr
-      let cproc = (proc exePath []) { cwd = Just dataDir
---                                    , env = menv
-                                    , create_group = True
-                                        -- for interruptProcessGroupOf
-                                    , std_in = CreatePipe
-                                    , std_out = UseHandle std_wr_hdl
-                                    , std_err = UseHandle std_wr_hdl
-                                    }
-      -- TODO: buffering; should I compile RTS into the exe?
-      -- TODO: check env, ReqSetArgs and all other state that snippets get
+      let cproc = (proc exePath args) { cwd = Just dataDir
+                                      , env = Just $ Map.toList envMap
+                                      , create_group = True
+                                          -- for interruptProcessGroupOf
+                                      , std_in = CreatePipe
+                                      , std_out = UseHandle std_wr_hdl
+                                      , std_err = UseHandle std_wr_hdl
+                                      }
+      -- TODO: buffering and timeout; should I compile RTS into the exe?
       (Just stdin_hdl, Nothing, Nothing, ph) <- createProcess cproc
       return $ RunActions
         { runWait = do
