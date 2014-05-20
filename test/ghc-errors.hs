@@ -164,8 +164,8 @@ withConfigDir dir (initParams, config) = (
 
 -- Set of api calls and checks to perform on each project.
 --
--- TODO: we need much more tests to recover the functionality of the old,
--- undreadable set, and then we need to much more to test all API functions.
+-- TODO: we need much more tests to recover the functionality of the old set,
+-- and then we need to much more to test all API functions.
 -- E.g., check that the values of Progress do not exceeed the number of files.
 -- Also, check ModuleDelete and all the DataFileChange constructors,
 -- getSourceModule an getDataFile.
@@ -633,13 +633,21 @@ syntheticTests = [
         runActions <- runStmt session "Main" "main"
         (output, _) <- runWaitAll runActions
         assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
-        -- TODO:
-        -- let m = "Main"
-        --     upd = buildExe [] [(Text.pack m, "Main.hs")]
-        -- updateSessionD session upd 1
-        -- distDir <- getDistDir session
-        -- mOut <- readProcess (distDir </> "build" </> m </> m) [] []
-        -- assertEqual "Main with cabal macro exe output" "5\n" mOut
+{- FIXME
+        let m = "Main"
+            upd = buildExe [] [(Text.pack m, "Main.hs")]
+        updateSessionD session upd 2
+        assertNoErrors session
+        distDir <- getDistDir session
+        mOut <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "Main with cabal macro exe output" "5\n" mOut
+
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "5\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe -}
     )
   , ( "Use cabal macro VERSION by checking if defined"
     , withSession (withOpts ["-XCPP"]) $ \session -> do
@@ -733,6 +741,15 @@ syntheticTests = [
            runActions <- runStmt session "Main" "main"
            (output, _) <- runWaitAll runActions
            assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
+           let m = "Main"
+               updExe = buildExe [] [(Text.pack m, "Main.hs")]
+           updateSessionD session updExe 2
+           runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "Output from runExe"
+                       "5\n"
+                       outExe
+           assertEqual "after runExe" ExitSuccess statusExe
          let customMacros = BSLC.pack "#define HELLO 1"
          withSession (withOpts ["-XCPP"] . withMacros customMacros) $ \session -> do
            let update = (updateCodeGeneration True)
@@ -748,6 +765,15 @@ syntheticTests = [
            runActions <- runStmt session "Main" "main"
            (output, _) <- runWaitAll runActions
            assertEqual "result of ifdefed print 6" (BSLC.pack "6\n") output
+           let m = "Main"
+               updExe = buildExe [] [(Text.pack m, "Main.hs")]
+           updateSessionD session updExe 2
+           runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "Output from runExe"
+                       "7\n"  -- FIXME
+                       outExe
+           assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , withSession (withOpts ["-hide-package monads-tf"]) $ \session -> do
@@ -833,6 +859,15 @@ syntheticTests = [
         (output, _) <- runWaitAll runActions
         assertEqual "compare test data content"
           (BSLC.pack "test data content\n") output
+        let m = "Main"
+            updExe = buildExe [] [(Text.pack m, "Main.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "test data content\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
         let update4 = updateDataFile "datafile.dat"
                                      (BSLC.pack "new content")
                       <> update2
@@ -841,6 +876,14 @@ syntheticTests = [
         (output2, _) <- runWaitAll runActions2
         assertEqual "compare new content"
           (BSLC.pack "new content\n") output2
+        let updExe2 = buildExe [] [(Text.pack m, "Main.hs")]
+        updateSessionD session updExe2 2
+        runActionsExe2 <- runExe session m
+        (outExe2, statusExe2) <- runWaitAll runActionsExe2
+        assertEqual "Output from runExe"
+                    "new content\n"
+                    outExe2
+        assertEqual "after runExe" ExitSuccess statusExe2
     )
   , ( "Test CWD in executable building"
     , withSession (withOpts []) $ \session -> do
@@ -1213,6 +1256,8 @@ syntheticTests = [
                     [ "module M where"
                     , "echo :: IO ()"
                     , "echo = getLine >>= putStrLn"
+                    , "main :: IO ()"
+                    , "main = echo"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
@@ -1221,6 +1266,16 @@ syntheticTests = [
         (output, result) <- runWaitAll runActions
         assertEqual "" result RunOk
         assertEqual "" (BSLC.pack "ECHO!\n") output
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        supplyStdin runActionsExe (BSSC.pack "ECHO!\n")
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "ECHO!\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Capture stdin (infinite echo process)"
     , withSession defaultSession $ \session -> do
@@ -1232,6 +1287,8 @@ syntheticTests = [
                     , "echo :: IO ()"
                     , "echo = do hSetBuffering stdout LineBuffering"
                     , "          forever $ getLine >>= putStrLn"
+                    , "main :: IO ()"
+                    , "main = echo"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
@@ -1249,6 +1306,61 @@ syntheticTests = [
            resOrEx <- runWait runActions
            case resOrEx of
              Right result -> assertBool "" (isAsyncException result)
+             _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+    )
+  , ( "Capture stdin (infinite echo process) with runStmt and runExe"
+    , withSession defaultSession $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.IO"
+                    , "import Control.Monad"
+                    , "echo :: IO ()"
+                    , "echo = do hSetBuffering stdout LineBuffering"
+                    , "          forever $ getLine >>= putStrLn"
+                    , "main :: IO ()"
+                    , "main = echo"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+
+        runActions <- runStmt session "M" "echo"
+        runActionsExe <- runExe session m
+
+        do supplyStdin runActions (BSSC.pack "ECHO 1!\n")
+           result <- runWait runActions
+           assertEqual "" (Left (BSSC.pack "ECHO 1!\n")) result
+
+        do supplyStdin runActionsExe (BSSC.pack "ECHO 1!\n")
+           result <- runWait runActionsExe
+           assertEqual "" (Left (BSSC.pack "ECHO 1!\n")) result
+
+        do supplyStdin runActions (BSSC.pack "ECHO 2!\n")
+           result <- runWait runActions
+           assertEqual "" (Left (BSSC.pack "ECHO 2!\n")) result
+
+        do supplyStdin runActionsExe (BSSC.pack "ECHO 2!\n")
+           result <- runWait runActionsExe
+           assertEqual "" (Left (BSSC.pack "ECHO 2!\n")) result
+
+        do interrupt runActions
+           resOrEx <- runWait runActions
+           case resOrEx of
+             Right result -> assertBool "" (isAsyncException result)
+             _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+
+        do supplyStdin runActionsExe (BSSC.pack "ECHO 3!\n")
+           result <- runWait runActionsExe
+           assertEqual "" (Left (BSSC.pack "ECHO 3!\n")) result
+
+        do interrupt runActionsExe
+           resOrEx <- runWait runActionsExe
+           case resOrEx of
+             Right result -> assertEqual "after runExe" (ExitFailure 2) result
              _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
   , ( "Two calls to runStmt"
@@ -1276,6 +1388,33 @@ syntheticTests = [
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "ECHO!\n") output
     )
+  , ( "Two calls to runExe"
+    , withSession defaultSession $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "main :: IO ()"
+                    , "main = getLine >>= putStrLn . reverse"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+
+        do runActions <- runExe session "M"
+           supplyStdin runActions (BSSC.pack "!OHCE\n")
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result ExitSuccess
+           assertEqual "" (BSLC.pack "ECHO!\n") output
+
+        do runActions <- runExe session "M"
+           supplyStdin runActions (BSSC.pack "!OHCE\n")
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result ExitSuccess
+           assertEqual "" (BSLC.pack "ECHO!\n") output
+    )
   , ( "Make sure we can terminate the IDE session when code is running"
     , withSession defaultSession $ \session -> do
         let upd = (updateCodeGeneration True)
@@ -1287,6 +1426,24 @@ syntheticTests = [
         updateSessionD session upd 1
         assertNoErrors session
         _runActions <- runStmt session "M" "echo"
+        return ()
+     )
+  , ( "Make sure we can terminate the IDE session when exe is running"
+    , withSession defaultSession $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "main :: IO ()"
+                    , "main = (getLine >>= putStrLn) >> main"
+                    ])
+        updateSessionD session upd 1
+
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+
+        assertNoErrors session
+        _runActions <- runExe session "M"
         return ()
      )
   , ( "Capture stderr"
@@ -1334,6 +1491,45 @@ syntheticTests = [
                           ++ "Hello World 7"
                           ++ "Hello World 8"
         assertEqual "" result RunOk
+        assertEqual "" (BSLC.pack expectedOutput) output
+    )
+  , ( "Merge stdout and stderr in runExe"
+    , withSession defaultSession $ \session -> do
+        -- Note that we have to set buffering here, to match the default
+        -- buffering for snippets.
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.IO"
+                    , "main :: IO ()"
+                    , "main  = do hSetBuffering stdout NoBuffering"
+                    , "           hPutStrLn stderr \"Hello World 1\""
+                    , "           hPutStrLn stdout \"Hello World 2\""
+                    , "           hPutStr   stderr \"Hello World 3\""
+                    , "           hPutStr   stdout \"Hello World 4\""
+                    , "           hPutStrLn stderr \"Hello World 5\""
+                    , "           hPutStrLn stdout \"Hello World 6\""
+                    , "           hPutStr   stderr \"Hello World 7\""
+                    , "           hPutStr   stdout \"Hello World 8\""
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+
+        runActions <- runExe session "M"
+        (output, result) <- runWaitAll runActions
+        let expectedOutput = "Hello World 1\n"
+                          ++ "Hello World 2\n"
+                          ++ "Hello World 3"
+                          ++ "Hello World 4"
+                          ++ "Hello World 5\n"
+                          ++ "Hello World 6\n"
+                          ++ "Hello World 7"
+                          ++ "Hello World 8"
+        assertEqual "" result ExitSuccess
         assertEqual "" (BSLC.pack expectedOutput) output
     )
   , ( "Set environment variables"
@@ -1415,14 +1611,25 @@ syntheticTests = [
                     [ "{-# OPTIONS_GHC -Wall #-}"
                     , "module M where"
                     , "loop = loop"
-                    ])
+                    , "main :: IO ()"
+                    , "main = loop"
+                   ])
         updateSessionD session upd 1
         assertSourceErrors' session ["Top-level binding with no type signature"]
+
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
 
         msgs1 <- getSourceErrors session
         _ract <- runStmt session "M" "loop"
         msgs2 <- getSourceErrors session
         assertEqual "Running code does not affect getSourceErrors" msgs1 msgs2
+
+        _runActionsExe <- runExe session m
+
+        msgs3 <- getSourceErrors session
+        assertEqual "Running exes does not affect getSourceErrors" msgs1 msgs3
     )
   , ( "getLoadedModules during run"
     , withSession defaultSession $ \session -> do
@@ -1461,6 +1668,9 @@ syntheticTests = [
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "1234\n") output
     )
+  -- TODO: the same as below for runExe? but the behaviour is different
+  -- so we'd probably just get a trivial result in each case?
+  -- but still, we'd test runExe with some very, very evil code...
   , ( "Restart session (snippet doesn't swallow exceptions; after .1 sec)"
     , restartRun [ "module M where"
                  , "loop :: IO ()"
@@ -3492,7 +3702,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
           ]
     )
     -- TODO: Autocomplete test that checks import errors
-    -- - Explicitly importing somthing that wasn't exported
+    -- - Explicitly importing something that wasn't exported
     -- - Explicitly hiding something that wasn't exported
     -- - Use of PackageImports without the flag
   , ( "GHC crash 1: No delay, no further requests"
@@ -5195,6 +5405,8 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     , "foreign import ccall \"foo\" c_f :: CInt"
                     , "hello :: IO ()"
                     , "hello = print c_f"
+                    , "main :: IO ()"
+                    , "main = hello"
                     ])
                <> (updateSourceFile "MC.c" . BSLC.pack . unlines $
                     [ "int foo() {"
@@ -5214,6 +5426,16 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "12345\n") output
 
+        do let m = "M"
+               updExe = buildExe [] [(Text.pack m, "M.hs")]
+           updateSessionD session updExe 2
+           runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "Output from runExe"
+                       "12345\n"
+                       outExe
+           assertEqual "after runExe" ExitSuccess statusExe
+
         -- Update the Haskell module without updating the C module
         let upd2 = (updateSourceFile "M.hs" . BSLC.pack . unlines $
                     [ "module M where"
@@ -5221,6 +5443,8 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     , "foreign import ccall \"foo\" c_f :: CInt"
                     , "hello :: IO ()"
                     , "hello = print (c_f + 1)"
+                    , "main :: IO ()"
+                    , "main = hello"
                     ])
         updateSessionP session upd2 [
             (1, 1, "Compiling M")
@@ -5230,6 +5454,16 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "12346\n") output
+
+        do let m = "M"
+               updExe = buildExe [] [(Text.pack m, "M.hs")]
+           updateSessionD session updExe 2
+           runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "Output from runExe"
+                       "12346\n"
+                       outExe
+           assertEqual "after runExe" ExitSuccess statusExe
 
         -- Update the C code without updating the Haskell module
         let upd3 = (updateSourceFile "MC.c" . BSLC.pack . unlines $
@@ -5248,6 +5482,15 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "54322\n") output
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "54322\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Using C files 2: C files in subdirs"
     , withSession defaultSession $ \session -> do
@@ -5259,6 +5502,8 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     , "foreign import ccall \"bar\" c_g :: CInt"
                     , "hello :: IO ()"
                     , "hello = print (c_f + c_g)"
+                    , "main :: IO ()"
+                    , "main = hello"
                     ])
                <> (updateSourceFile "a/MC.c" . BSLC.pack . unlines $
                     [ "int foo() {"
@@ -5283,6 +5528,15 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "79\n") output
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "79\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Using C files 3: Errors and warnings in the C code"
     , withSession defaultSession $ \session -> do
@@ -7301,7 +7555,7 @@ defaultSessionConfig = unsafePerformIO $ do
   return IdeSession.defaultSessionConfig {
              configPackageDBStack = packageDbStack
            , configExtraPathDirs  = splitSearchPath extraPathDirs
---           , configDeleteTempFiles = False
+           , configDeleteTempFiles = False
            }
 
 {------------------------------------------------------------------------------
