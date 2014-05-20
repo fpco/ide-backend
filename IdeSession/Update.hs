@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes, ScopedTypeVariables #-}
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
@@ -783,7 +783,9 @@ runStmt ideSession m fun = runCmd ideSession $ \idleState -> RunStmt {
 -- responsibility of the client code to check for this.
 runExe :: IdeSession -> String -> IO (RunActions ExitCode)
 runExe session m = do
-  -- TODO: catch InvalidSessionStateQueries and fail with "executable compilation"; or inspect session once to get the idle state
+ let handleQueriesExc (_ :: Query.InvalidSessionStateQueries) =
+       fail $ "Wrong session state when trying to run an executable."
+ Ex.handle handleQueriesExc $ do
   mstatus <- Query.getBuildExeStatus session
   case mstatus of
     Nothing ->
@@ -819,7 +821,6 @@ runExe session m = do
                                       , std_out = UseHandle std_wr_hdl
                                       , std_err = UseHandle std_wr_hdl
                                       }
-      -- TODO: buffering and timeout; should I compile RTS into the exe?
       (Just stdin_hdl, Nothing, Nothing, ph) <- createProcess cproc
       return $ RunActions
         { runWait = do
