@@ -609,6 +609,12 @@ syntheticTests = [
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "Main with cabal macro exe output" "5\n" mOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "5\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Use cabal macro MIN_VERSION for a package we don't really depend on"
     , withSession (withOpts ["-XCPP"]) $ \session -> do
@@ -664,6 +670,12 @@ syntheticTests = [
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "M with cabal macro exe output" "5\n" mOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "5\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Use cabal macro VERSION by including an external macros file"
     , withSession (withOpts ["-XCPP"]) $ \session -> do
@@ -688,6 +700,13 @@ syntheticTests = [
         distDir <- getDistDir session
         mOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "M with cabal macro exe output" "False\n" mOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "False\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
+
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -845,6 +864,12 @@ syntheticTests = [
         distDir <- getDistDir session
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "CWD exe output" (BSLC.unpack output) out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    output
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
 {- Now that we always load the RTS, we're never in this situation
   , ("Reject getSourceErrors without updateSession"
@@ -890,6 +915,12 @@ syntheticTests = [
         assertEqual "after exe build" (Just ExitSuccess) status
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "" "C\n" out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "C\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Test recursive modules with dynamic include path change"
     , withSession defaultSession $ \session -> do
@@ -911,6 +942,12 @@ syntheticTests = [
         assertEqual "after exe build" (Just ExitSuccess) status
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "" "C\n" out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "C\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Test TH; code generation on"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
@@ -942,6 +979,12 @@ syntheticTests = [
         assertEqual "TH.TH exe output"
                     "(True,43)\n"
                     out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "(True,43)\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -1973,6 +2016,12 @@ syntheticTests = [
         assertEqual "buildStderr empty" "" buildStderr
         exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "FFI exe output" "42\n" exeOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "42\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -2005,6 +2054,12 @@ syntheticTests = [
         assertEqual "buildStderr empty" "" buildStderr
         exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "FFI exe output" "84\n" exeOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "84\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -2035,6 +2090,12 @@ syntheticTests = [
         assertEqual "buildStderr empty" "" buildStderr
         exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "FFI exe output" "84\n" exeOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "84\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -2083,6 +2144,12 @@ syntheticTests = [
         assertEqual "buildStderr empty" "" buildStderr
         exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "FFI exe output" "84\n" exeOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "84\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -2143,6 +2210,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "buildStderr empty" "" buildStderr
         exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "FFI exe output" "84\n" exeOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "84\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -2182,6 +2255,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "buildStderr empty" "" buildStderr
         exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "FFI exe output" "84\n" exeOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "84\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -2227,6 +2306,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "buildStderr empty" "" buildStderr
         exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "FFI exe output" "84\n" exeOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "84\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -2290,6 +2375,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "main" $ Version [1, 0] []
@@ -2319,6 +2410,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
@@ -2347,6 +2444,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "ParFib exe output"
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     fibOut
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 7] []
@@ -3838,6 +3941,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "DB exe output"
                     "42\n"
                     out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "42\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
         deletePackage "test/simple-lib17"
 
         dotCabalFromName <- getDotCabal session
@@ -4291,6 +4400,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         update $ buildExe [] [(Text.pack "Main", "src/Main.hs")]
         out1 <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
         assertEqual "" "Version 1\n" out1
+        runActionsExe <- runExe sess "Main"
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "Version 1\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
 
         -- Update the code and execute again
 
@@ -4301,6 +4416,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         update $ buildExe [] [(Text.pack "Main", "src/Main.hs")]
         out2 <- readProcess (distDir </> "build" </> "Main" </> "Main") [] []
         assertEqual "" "Version 2\n" out2
+        runActionsExe2 <- runExe sess "Main"
+        (outExe2, statusExe2) <- runWaitAll runActionsExe2
+        assertEqual "Output from runExe"
+                    "Version 2\n"
+                    outExe2
+        assertEqual "after runExe" ExitSuccess statusExe2
     )
   , ( "Subexpression types 1: Simple expressions"
     , withSession (withOpts ["-XNoMonomorphismRestriction"]) $ \session -> do
@@ -5535,6 +5656,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         out <- readProcess (distDir </> "build" </> m </> m)
                            ["+RTS", "-C0.005", "-RTS"] []
         assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "[1,1,2,3,5,8,13,21,34,55]\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Support for lhs-boot files (#155)"
     , withSession defaultSession $ \session -> do
@@ -5578,6 +5705,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "after exe build" (Just ExitSuccess) status
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "[1,1,2,3,5,8,13,21,34,55]\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Support for hs-boot files from a subdirectory (#177)"
     , withSession (withIncludes "src") $ \session -> do
@@ -5601,6 +5734,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "after exe build" (Just ExitSuccess) status
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "" "42\n" out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "42\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Support for hs-boot files from a subdirectory (#177) with dynamic include path change"
     , withSession defaultSession $ \session -> do
@@ -5629,6 +5768,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "after exe build" (Just ExitSuccess) status
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "" "42\n" out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "42\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Relative include paths (#156)"
     , withSession (withIncludes "test/ABnoError") $ \session -> do
@@ -5707,6 +5852,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "exe output with old include path"
                     "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
                     out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\nMain: A.hs throws exception\n"
+                    outExe
+        assertEqual "after runExe" (ExitFailure 1) statusExe
 
         let updE2 = buildExe [] [(Text.pack m, "A.hs")]
         updateSessionD session updE2 3
@@ -5718,6 +5869,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "exe output with old include path"
                     "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
                     out2
+        runActionsExe2 <- runExe session m
+        (outExe2, statusExe2) <- runWaitAll runActionsExe2
+        assertEqual "Output from runExe 2"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\nMain: A.hs throws exception\n"
+                    outExe2
+        assertEqual "after runExe" (ExitFailure 1) statusExe2
 
         updateSessionD session
                        (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
@@ -5755,6 +5912,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "exe output with new include path"
                     "\"running A with another B\"\n"
                     out4
+        runActionsExe4 <- runExe session m
+        (outExe4, statusExe4) <- runWaitAll runActionsExe4
+        assertEqual "Output from runExe 4"
+                    "\"running A with another B\"\nMain: A.hs throws exception\n"
+                    outExe4
+        assertEqual "after runExe" (ExitFailure 1) statusExe4
     )
   , ( "Switch from one to another relative include path for the same module name with TargetsExclude"
     , withSession defaultSession $ \session -> do
@@ -5787,6 +5950,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "exe output with old include path"
                     "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
                     out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\nMain: A.hs throws exception\n"
+                    outExe
+        assertEqual "after runExe" (ExitFailure 1) statusExe
+
 
         let updE2 = buildExe [] [(Text.pack m, "A.hs")]
         updateSessionD session updE2 3
@@ -5798,6 +5968,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "exe output with old include path"
                     "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
                     out2
+        runActionsExe2 <- runExe session m
+        (outExe2, statusExe2) <- runWaitAll runActionsExe2
+        assertEqual "Output from runExe 2"
+                    "\"running 'A depends on B, no errors' from test/ABnoError\"\nMain: A.hs throws exception\n"
+                    outExe2
+        assertEqual "after runExe" (ExitFailure 1) statusExe2
 
         updateSessionD session
                        (updateSourceFileDelete "test/ABnoError/B.hs")
@@ -5842,6 +6018,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "exe output with new include path"
                     "\"running A with another B\"\n"
                     out4
+        runActionsExe4 <- runExe session m
+        (outExe4, statusExe4) <- runWaitAll runActionsExe4
+        assertEqual "Output from runExe 4"
+                    "\"running A with another B\"\nMain: A.hs throws exception\n"
+                    outExe4
+        assertEqual "after runExe" (ExitFailure 1) statusExe4
     )
   , ( "Switch from one to another relative include path with TargetsInclude and the main module not in path"
     , withSession defaultSession $ \session -> do
@@ -5908,6 +6090,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "exe output with new include path"
                     "\"running A with another B\"\n"
                     out41
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe 41"
+                    "\"running A with another B\"\nMain: A.hs throws exception\n"
+                    outExe
+        assertEqual "after runExe" (ExitFailure 1) statusExe
 
         updateSessionD session
                        (updateRelativeIncludes ["test/AnotherB", "test/ABnoError"])  -- A again in path
@@ -5928,6 +6116,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "exe output with new include path"
                     "\"running A with another B\"\n"
                     out45
+        runActionsExe4 <- runExe session m
+        (outExe4, statusExe4) <- runWaitAll runActionsExe4
+        assertEqual "Output from runExe 45"
+                    "\"running A with another B\"\nMain: A.hs throws exception\n"
+                    outExe4
+        assertEqual "after runExe" (ExitFailure 1) statusExe4
 
         updateSessionD session
                        (updateRelativeIncludes ["test/ABnoError"])
