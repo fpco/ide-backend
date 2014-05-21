@@ -2,6 +2,7 @@
 module Main (main) where
 
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.MVar
 import qualified Control.Exception as Ex
 import Control.Monad
 import Control.DeepSeq (rnf)
@@ -445,7 +446,16 @@ syntheticTests = [
                     ""
                     out2
         runActions2 <- runExe session m2
+        varBool <- newMVar False
+        let f ExitSuccess = void $ swapMVar varBool True
+            f _ = return ()
+            g _= return ()
+        registerTerminationCallback runActions2 g
+        registerTerminationCallback runActions2 f
+        registerTerminationCallback runActions2 g
         (outExe2, statusExe2) <- runWaitAll runActions2
+        b <- takeMVar varBool
+        assertEqual "registerTerminationCallback" b True
         assertEqual "Maybes exe output from runExe 2"
                     ""
                     outExe2

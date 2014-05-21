@@ -816,12 +816,17 @@ runExe session m = do
       let cproc = (proc exePath args) { cwd = Just dataDir
                                       , env = Just $ Map.toList envMap
                                       , create_group = True
-                                          -- for interruptProcessGroupOf
+                                          -- ^ for interruptProcessGroupOf
                                       , std_in = CreatePipe
                                       , std_out = UseHandle std_wr_hdl
                                       , std_err = UseHandle std_wr_hdl
                                       }
       (Just stdin_hdl, Nothing, Nothing, ph) <- createProcess cproc
+      terminationCallback <- newMVar $ \_ -> return ()
+      void $ forkIO $ do
+        status <- waitForProcess ph
+        f <- takeMVar terminationCallback
+        f status
       return $ RunActions
         { runWait = do
             bs <- BSS.hGetSome std_rd_hdl blockSize
@@ -831,12 +836,11 @@ runExe session m = do
         , interrupt = interruptProcessGroupOf ph
         , supplyStdin = \bs -> BSS.hPut stdin_hdl bs >> IO.hFlush stdin_hdl
         , registerTerminationCallback = \f ->
-            void $ forkIO $ do
-              status <- waitForProcess ph
-              f status
+            modifyMVar_ terminationCallback $ \curCallback ->
+              return (\res -> curCallback res >> f res)
         , forceCancel = terminateProcess ph
         }
-      -- We don't need to close any handles. At the lasted GC closes them.
+      -- We don't need to close any handles. At the latest GC closes them.
  where
   -- TODO: What is a good value here?
   blockSize :: Int
