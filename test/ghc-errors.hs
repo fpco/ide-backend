@@ -1843,9 +1843,6 @@ syntheticTests = [
            assertEqual "after runExe" ExitSuccess statusExe
 
     )
-  -- TODO: the same as below for runExe? but the behaviour is different
-  -- so we'd probably just get a trivial result in each case?
-  -- but still, we'd test runExe with some very, very evil code...
   , ( "Restart session (snippet doesn't swallow exceptions; after .1 sec)"
     , restartRun [ "module M where"
                  , "loop :: IO ()"
@@ -4324,15 +4321,28 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     , "import System.Environment (getArgs)"
                     , "printArgs :: IO ()"
                     , "printArgs = getArgs >>= print"
+                    , "main :: IO ()"
+                    , "main = printArgs"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
+
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
 
         -- Check that default is []
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "[]\n") output
+
+        do runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "after runExe" ExitSuccess statusExe
+           assertEqual "Output from runExe"
+                       "[]\n"
+                       outExe
 
         -- Check that we can set command line arguments
         updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
@@ -4341,6 +4351,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
 
+        do runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "after runExe" ExitSuccess statusExe
+           assertEqual "Output from runExe"
+                       "[\"A\",\"B\",\"C\"]\n"
+                       outExe
+
         -- Check that we can change command line arguments
         updateSession session (updateArgs ["D", "E"]) (\_ -> return ())
         do runActions <- runStmt session "M" "printArgs"
@@ -4348,12 +4365,26 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "[\"D\",\"E\"]\n") output
 
+        do runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "after runExe" ExitSuccess statusExe
+           assertEqual "Output from runExe"
+                       "[\"D\",\"E\"]\n"
+                       outExe
+
         -- Check that we can clear command line arguments
         updateSession session (updateArgs []) (\_ -> return ())
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "[]\n") output
+
+        do runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "after runExe" ExitSuccess statusExe
+           assertEqual "Output from runExe"
+                       "[]\n"
+                       outExe
     )
   , ( "Check that command line arguments survive restartSession"
     , withSession defaultSession $ \session -> do
@@ -4363,9 +4394,15 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     , "import System.Environment (getArgs)"
                     , "printArgs :: IO ()"
                     , "printArgs = getArgs >>= print"
+                    , "main :: IO ()"
+                    , "main = printArgs"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
+
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
 
         -- Sanity check: check before restart session
         updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
@@ -4373,6 +4410,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
+
+        do runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "after runExe" ExitSuccess statusExe
+           assertEqual "Output from runExe"
+                       "[\"A\",\"B\",\"C\"]\n"
+                       outExe
 
         -- Restart and update the session
         restartSession session Nothing
@@ -4384,6 +4428,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
+
+        do runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "after runExe" ExitSuccess statusExe
+           assertEqual "Output from runExe"
+                       "[\"A\",\"B\",\"C\"]\n"
+                       outExe
     )
   , ( "Register a package, don't restart session, don't see the package"
     , do deletePackage "test/simple-lib17"
@@ -7829,7 +7880,7 @@ defaultSessionConfig = unsafePerformIO $ do
   return IdeSession.defaultSessionConfig {
              configPackageDBStack = packageDbStack
            , configExtraPathDirs  = splitSearchPath extraPathDirs
-           , configDeleteTempFiles = False
+--         , configDeleteTempFiles = False
            }
 
 {------------------------------------------------------------------------------
