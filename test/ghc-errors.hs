@@ -1168,6 +1168,96 @@ syntheticTests = [
         result <- runWait runActions
         assertEqual "" (Left (BSSC.pack "Hi!\n")) result
     )
+  , ( "Interrupt runExe (after 1 sec)"
+    , withSession defaultSession $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Control.Concurrent (threadDelay)"
+                    , "main :: IO ()"
+                    , "main = threadDelay 100000 >> main"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        threadDelay 1000000
+        interrupt runActionsExe
+        resOrEx <- runWait runActionsExe
+        case resOrEx of
+          Right result -> assertEqual "after runExe" (ExitFailure 2) result
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+    )
+  , ( "Interrupt runExe (immediately)"
+    , withSession defaultSession $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Control.Concurrent (threadDelay)"
+                    , "main :: IO ()"
+                    , "main = threadDelay 100000 >> main"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        interrupt runActionsExe
+        resOrEx <- runWait runActionsExe
+        case resOrEx of
+          Right result -> assertEqual "after runExe" (ExitFailure 2) result
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+    )
+  , ( "Interrupt runExe (black hole; after 1 sec)"
+    , withSession defaultSession $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "main :: IO ()"
+                    , "main = main"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        threadDelay 1000000
+        interrupt runActionsExe
+        resOrExe <- runWait runActionsExe
+        -- Here the result differs from runStmt, because the loop is detected
+        -- and reported.
+        case resOrExe of
+          Left result -> assertEqual "after runExe" "M: <<loop>>\n" result
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrExe
+    )
+  , ( "Interrupt runExe many times, preferably without deadlock :) (#58)"
+    , withSession defaultSession $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "Main.hs" . BSLC.pack $
+                    "main = putStrLn \"Hi!\" >> getLine")
+               <> (updateStdoutBufferMode (RunLineBuffering Nothing))
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        let m = "Main"
+            updExe = buildExe [] [(Text.pack m, "Main.hs")]
+        updateSessionD session updExe 2
+{- FIXME: deadlocks :(
+        replicateM_ 100 $ do
+          runActionsExe <- runExe session m
+          interrupt runActionsExe
+          (_output, result) <- runWaitAll runActionsExe
+          assertEqual "" (ExitFailure 2) result
+
+        runActions <- runExe session m
+        result <- runWait runActions
+        assertEqual "" (Left (BSSC.pack "Hi!\n")) result
+-}
+    )
   , ( "Capture stdout (single putStrLn)"
     , withSession defaultSession $ \session -> do
         let upd = (updateCodeGeneration True)
