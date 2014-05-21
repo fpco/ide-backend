@@ -1679,6 +1679,74 @@ syntheticTests = [
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "Value2") output
     )
+  , ( "Set environment variables and use them in runExe"
+    , withSession defaultSession $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import System.Environment"
+                    , "main :: IO ()"
+                    , "main = do"
+                    , "  args <- getArgs"
+                    , "  case args of"
+                    , "    [\"Foo\"] -> getEnv \"Foo\" >>= putStr"
+                    , "    [\"Bar\"] -> getEnv \"Bar\" >>= putStr"
+                    , "    _ -> fail \"wrong args\""
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        assertNoErrors session
+
+        -- At the start, both Foo and Bar are undefined
+        do updateSessionD session (updateArgs ["Foo"]) 1
+           runActions <- runExe session "M"
+           (_, result) <- runWaitAll runActions
+           assertEqual "" result (ExitFailure 1)
+        do updateSessionD session (updateArgs ["Bar"]) 1
+           runActions <- runExe session "M"
+           (_, result) <- runWaitAll runActions
+           assertEqual "" result (ExitFailure 1)
+
+        -- Update Foo, leave Bar undefined
+        updateSession session (updateEnv "Foo" (Just "Value1")) (\_ -> return ())
+        do updateSessionD session (updateArgs ["Foo"]) 1
+           runActions <- runExe session "M"
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result ExitSuccess
+           assertEqual "" (BSLC.pack "Value1") output
+        do updateSessionD session (updateArgs ["Bar"]) 1
+           runActions <- runExe session "M"
+           (_, result) <- runWaitAll runActions
+           assertEqual "" result (ExitFailure 1)
+
+        -- Update Bar, leave Foo defined
+        updateSession session (updateEnv "Bar" (Just "Value2")) (\_ -> return ())
+        do updateSessionD session (updateArgs ["Foo"]) 1
+           runActions <- runExe session "M"
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result ExitSuccess
+           assertEqual "" (BSLC.pack "Value1") output
+        do updateSessionD session (updateArgs ["Bar"]) 1
+           runActions <- runExe session "M"
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result ExitSuccess
+           assertEqual "" (BSLC.pack "Value2") output
+
+        -- Unset Foo, leave Bar defined
+        updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
+        do updateSessionD session (updateArgs ["Foo"]) 1
+           runActions <- runExe session "M"
+           (_, result) <- runWaitAll runActions
+           assertEqual "" result (ExitFailure 1)
+        do updateSessionD session (updateArgs ["Bar"]) 1
+           runActions <- runExe session "M"
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result ExitSuccess
+           assertEqual "" (BSLC.pack "Value2") output
+    )
   , ( "Update during run"
     , withSession defaultSession $ \session -> do
         let upd = (updateCodeGeneration True)
@@ -1810,6 +1878,8 @@ syntheticTests = [
                     , "import System.Environment (getEnv)"
                     , "printFoo :: IO ()"
                     , "printFoo = getEnv \"Foo\" >>= putStr"
+                    , "main :: IO ()"
+                    , "main = printFoo"
                     ])
 
         -- Set environment
@@ -1822,6 +1892,16 @@ syntheticTests = [
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "Value1") output
+
+        do let m = "M"
+               updExe = buildExe [] [(Text.pack m, "M.hs")]
+           updateSessionD session updExe 2
+           runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "Output from runExe"
+                       "Value1"
+                       outExe
+           assertEqual "after runExe" ExitSuccess statusExe
 
         -- Start a new server
         serverBefore <- getGhcServer session
@@ -1845,6 +1925,16 @@ syntheticTests = [
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "Value1") output
+
+        do let m = "M"
+               updExe = buildExe [] [(Text.pack m, "M.hs")]
+           updateSessionD session updExe 2
+           runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "Output from runExe"
+                       "Value1"
+                       outExe
+           assertEqual "after runExe" ExitSuccess statusExe
     )
   , ( "Buffer modes: RunNoBuffering"
     , testBufferMode RunNoBuffering
