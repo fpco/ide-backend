@@ -1819,12 +1819,29 @@ syntheticTests = [
            interrupt runActions
            randomRIO (0, 1000000) >>= threadDelay -- Wait between 0 and 1sec
            void $ runWaitAll runActions
-
+{- FIXME
+        do let m = "Main"
+               updExe = buildExe [] [(Text.pack m, "Main.hs")]
+           updateSessionD session updExe 2
+           runActionsExe <- runExe session m
+           void $ runWaitAll runActionsExe
+-}
         do updateSessionD session upd2 1
            runActions <- runStmt session "Main" "main"
            (output, result) <- runWaitAll runActions
            assertEqual "" result RunOk
            assertEqual "" (BSLC.pack "1234\n") output
+
+        do let m = "Main"
+               updExe = buildExe [] [(Text.pack m, "Main.hs")]
+           updateSessionD session updExe 2
+           runActionsExe <- runExe session m
+           (outExe, statusExe) <- runWaitAll runActionsExe
+           assertEqual "Output from runExe"
+                       "1234\n"
+                       outExe
+           assertEqual "after runExe" ExitSuccess statusExe
+
     )
   -- TODO: the same as below for runExe? but the behaviour is different
   -- so we'd probably just get a trivial result in each case?
@@ -1963,6 +1980,8 @@ syntheticTests = [
                          [ "module M where"
                          , "hello :: IO ()"
                          , "hello = putStr \"Hello World\""
+                         , "main :: IO ()"
+                         , "main = hello"
                          ])
              updateSessionD session upd 1
              assertNoErrors session
@@ -1970,6 +1989,18 @@ syntheticTests = [
              (output, result) <- runWaitAll runActions
              assertEqual "" result RunOk
              assertEqual "" (BSLC.pack "Hello World") output
+
+             {- This fails, but it's probably not supposed to work anyway.
+             let m = "M"
+                 updExe = buildExe [] [(Text.pack m, "M.hs")]
+             updateSessionD session updExe 2
+             runActionsExe <- runExe session m
+             (outExe, statusExe) <- runWaitAll runActionsExe
+             assertEqual "Output from runExe"
+                         "Hello World"
+                         outExe
+             assertEqual "after runExe" ExitSuccess statusExe
+             -}
     )
   , ( "Call runWait after termination (normal termination)"
     , withSession defaultSession $ \session -> do
@@ -1978,6 +2009,8 @@ syntheticTests = [
                     [ "module M where"
                     , "hello :: IO ()"
                     , "hello = putStrLn \"Hello World\""
+                    , "main :: IO ()"
+                    , "main = hello"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
@@ -1987,6 +2020,19 @@ syntheticTests = [
         assertEqual "" (BSLC.pack "Hello World\n") output
         result' <- runWait runActions
         assertEqual "" result' (Right RunOk)
+
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "Hello World\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
+
+        result2 <- runWait runActionsExe
+        assertEqual "" result2 (Right ExitSuccess)
     )
   , ( "Call runWait after termination (interrupted)"
     , withSession defaultSession $ \session -> do
@@ -1996,14 +2042,30 @@ syntheticTests = [
                     , "import Control.Concurrent (threadDelay)"
                     , "loop :: IO ()"
                     , "loop = threadDelay 100000 >> loop"
+                    , "main :: IO ()"
+                    , "main = loop"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
+
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        threadDelay 1000000
+        interrupt runActionsExe
+        resOrEx <- runWait runActionsExe
+        case resOrEx of
+          Right result -> assertEqual "after runExe" (ExitFailure 2) result
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+        result' <- runWait runActionsExe
+        assertEqual "" result' (Right $ ExitFailure 2)
+
         runActions <- runStmt session "M" "loop"
         threadDelay 1000000
         interrupt runActions
-        resOrEx <- runWait runActions
-        case resOrEx of
+        resOrEx2 <- runWait runActions
+        case resOrEx2 of
           Right result -> assertBool "" (isAsyncException result)
           _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
         resOrEx' <- runWait runActions
@@ -2019,20 +2081,39 @@ syntheticTests = [
                     , "import Control.Concurrent (threadDelay)"
                     , "loop :: IO ()"
                     , "loop = threadDelay 100000 >> loop"
+                    , "main :: IO ()"
+                    , "main = loop"
                     ])
         updateSessionD session upd 1
         assertNoErrors session
         runActions <- runStmt session "M" "loop"
         threadDelay 1000000
         restartSession session Nothing
-        resOrEx <- runWait runActions
-        case resOrEx of
+        resOrEx2 <- runWait runActions
+        case resOrEx2 of
           Right RunForceCancelled -> return ()
-          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx2
         resOrEx' <- runWait runActions
         case resOrEx' of
           Right RunForceCancelled -> return ()
           _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show resOrEx'
+
+        updateSessionD session mempty 1  -- needed to load the code again
+
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        threadDelay 1000000
+        -- This would not work, since session restart doesn't stop the exe:
+        -- restartSession session Nothing
+        interrupt runActionsExe
+        resOrEx <- runWait runActionsExe
+        case resOrEx of
+          Right result -> assertEqual "after runExe" (ExitFailure 2) result
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+        result' <- runWait runActionsExe
+        assertEqual "" result' (Right $ ExitFailure 2)
     )
   , ( "Call runWait after termination (started new snippet in meantime)"
     , withSession defaultSession $ \session -> do
@@ -2262,15 +2343,28 @@ syntheticTests = [
         let upd = (updateCodeGeneration True)
                <> (updateSourceFile "M.hs" . BSL8.fromString . unlines $
                     [ "module M where"
-                    , "hello :: IO ()"
-                    , "hello = putStrLn \"你好\""
+                    , "main :: IO ()"
+                    , "main = putStrLn \"你好\""
                     ])
         updateSessionD session upd 1
         assertNoErrors session
-        runActions <- runStmt session "M" "hello"
+        runActions <- runStmt session "M" "main"
         (output, result) <- runWaitAll runActions
         assertEqual "" result RunOk
         assertEqual "" (BSL8.fromString "你好\n") output
+
+        {- This is probably not fixable, because the code itself would need
+        -- to specify IO.utf8, and we don't want to modify it.
+        let m = "M"
+            updExe = buildExe [] [(Text.pack m, "M.hs")]
+        updateSessionD session updExe 2
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                   "你好\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
+        -}
     )
   , ( "Using something from a different package (no \"Loading package\" msg)"
       -- We pick something from the haskell platform but that doesn't come with ghc itself
