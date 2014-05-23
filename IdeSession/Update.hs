@@ -170,7 +170,6 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
                     , _ideUpdatedEnv       = False
                     , _ideUpdatedArgs      = False -- Server default is []
                     , _ideUpdatedGhcOpts   = False
-                    , _ideUpdatedRestart   = False
                       -- Make sure 'ideComputed' is set on first call
                       -- to updateSession
                     , _ideUpdatedCode      = True
@@ -314,7 +313,6 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
                  . (ideUpdatedArgs    ^= True)
                  . (ideUpdatedCode    ^= True)
                  . (ideUpdatedGhcOpts ^= True)
-                 . (ideUpdatedRestart ^= False)
                  . (ideGhcServer      ^= server)
                  . (ideGhcVersion     ^= version)
                  . (ideObjectFiles    ^= [])
@@ -338,6 +336,9 @@ data IdeSessionUpdate a where
   Done    :: a -> IdeSessionUpdate a
   Run     :: (IdeSessionUpdateEnv -> IdeIdleState -> IO (a, IdeIdleState)) -> (a -> IdeSessionUpdate b) -> IdeSessionUpdate b
   Restart :: IdeSessionUpdate a -> IdeSessionUpdate a
+
+restartSession' :: IdeSessionUpdate ()
+restartSession' = Restart (Done ())
 
 instance Functor IdeSessionUpdate where
   fmap f (Done x)    = Done (f x)
@@ -407,124 +408,127 @@ runSessionUpdate staticInfo callback = go
 -- The update can be a long running operation, so we support a callback
 -- which can be used to monitor progress of the operation.
 updateSession :: IdeSession -> IdeSessionUpdate () -> (Progress -> IO ()) -> IO ()
-updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
-    go False False
+updateSession = flip . updateSession'
+
+updateSession' :: IdeSession -> (Progress -> IO ()) -> IdeSessionUpdate () -> IO ()
+updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
+    go False (update >> recompileObjectFiles)
   where
-    go :: Bool -> Bool -> IO ()
-    go alreadyRestartedDead alreadyRestartedDueToUpdate = do
+    go :: Bool -> IdeSessionUpdate (Int, [SourceError]) -> IO ()
+    go justRestarted update = do
       -- We don't want to call 'restartSession' while we hold the lock
-      (shouldRestartDead, shouldRestartDueToUpdate)
-       <- modifyMVar ideState $ \state -> case state of
+      shouldRestart <- modifyMVar ideState $ \state -> case state of
+
         IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
-         (UpdateComplete (), idleState0) <-
-           if alreadyRestartedDueToUpdate
-           then return (UpdateComplete (), idleState)
-           else runSessionUpdate ideStaticInfo
-                                 callback
-                                 idleState
-                                 update
+          (result, idleState') <- runSessionUpdate ideStaticInfo
+                                                   callback
+                                                   idleState
+                                                   update
 
-         if idleState0 ^. ideUpdatedRestart then do
-           -- To avoid "<stdout> hPutChar: resource vanished (Broken pipe)":
-           threadDelay 100000
-           return (IdeSessionIdle idleState0, (False, True))
-         else do
+          case result of
+            RestartThenRun update' -> do
+              -- To avoid "<stdout> hPutChar: resource vanished (Broken pipe)":
+              -- TODO: Why is this necessary?
+              threadDelay 100000
 
-          (UpdateComplete (numActions, cErrors), idleState') <-
-            runSessionUpdate ideStaticInfo
-                             callback
-                             idleState0
-                             recompileObjectFiles
+              -- We ignore justRestarted when we get an explicit RestartThenRun
+              return (IdeSessionIdle idleState', Just update')
 
-          let callback' p = callback p {
-                  progressStep     = progressStep     p + numActions
-                , progressNumSteps = progressNumSteps p + numActions
-                }
+            UpdateComplete (numActions, cErrors) -> do
+               let callback' p = callback p {
+                       progressStep     = progressStep     p + numActions
+                     , progressNumSteps = progressNumSteps p + numActions
+                     }
 
-          -- Update environment
-          when (idleState' ^. ideUpdatedEnv) $
-            rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
+               -- Update environment
+               when (idleState' ^. ideUpdatedEnv) $
+                 rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
 
-          when (idleState' ^. ideUpdatedArgs) $
-            rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
+               when (idleState' ^. ideUpdatedArgs) $
+                 rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
 
-          -- Update options
-          optionWarnings <- if (idleState' ^. ideUpdatedGhcOpts)
-            then do
-              -- relative include path is part of the state rather than the
-              -- config as of c0bf0042
-              let relIncl    = idleState' ^. ideRelativeIncludes
-                  sourcesDir = ideSourcesDir ideStaticInfo
-                  unrecognized str = "Unrecognized option " ++ show str
-              (leftover, warnings) <-
-                rpcSetGhcOpts (idleState ^. ideGhcServer)
-                              (idleState' ^. ideDynamicOpts
-                                   ++ relInclToOpts sourcesDir relIncl)
-              return $ force $
-                [ SourceError {
-                      errorKind = KindWarning
-                    , errorSpan = TextSpan (Text.pack "No location information")
-                    , errorMsg  = Text.pack w
-                    }
-                | w <- warnings ++ map unrecognized leftover
-                ]
-            else
-              return $ force []
+               -- Update options
+               optionWarnings <- if (idleState' ^. ideUpdatedGhcOpts)
+                 then do
+                   -- relative include path is part of the state rather than the
+                   -- config as of c0bf0042
+                   let relIncl    = idleState' ^. ideRelativeIncludes
+                       sourcesDir = ideSourcesDir ideStaticInfo
+                       unrecognized str = "Unrecognized option " ++ show str
+                   (leftover, warnings) <-
+                     rpcSetGhcOpts (idleState ^. ideGhcServer)
+                                   (idleState' ^. ideDynamicOpts
+                                        ++ relInclToOpts sourcesDir relIncl)
+                   return $ force $
+                     [ SourceError {
+                           errorKind = KindWarning
+                         , errorSpan = TextSpan (Text.pack "No location information")
+                         , errorMsg  = Text.pack w
+                         }
+                     | w <- warnings ++ map unrecognized leftover
+                     ]
+                 else
+                   return $ force []
 
-          -- Recompile
-          computed <- if (idleState' ^. ideUpdatedCode)
-            then do
-              GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
-                                                 (idleState' ^. ideGenerateCode)
-                                                 (idleState' ^. ideTargets)
-                                                 callback'
+               -- Recompile
+               computed <- if (idleState' ^. ideUpdatedCode)
+                 then do
+                   GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
+                                                      (idleState' ^. ideGenerateCode)
+                                                      (idleState' ^. ideTargets)
+                                                      callback'
 
-              let applyDiff :: Strict (Map ModuleName) (Diff v)
-                            -> (Computed -> Strict (Map ModuleName) v)
-                            -> Strict (Map ModuleName) v
-                  applyDiff diff f = applyMapDiff diff
-                                   $ Maybe.maybe Map.empty f
-                                   $ idleState' ^. ideComputed
+                   let applyDiff :: Strict (Map ModuleName) (Diff v)
+                                 -> (Computed -> Strict (Map ModuleName) v)
+                                 -> Strict (Map ModuleName) v
+                       applyDiff diff f = applyMapDiff diff
+                                        $ Maybe.maybe Map.empty f
+                                        $ idleState' ^. ideComputed
 
-              let diffSpan  = Map.map (fmap mkIdMap)  ghcCompileSpanInfo
-                  diffTypes = Map.map (fmap mkExpMap) ghcCompileExpTypes
-                  diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
+                   let diffSpan  = Map.map (fmap mkIdMap)  ghcCompileSpanInfo
+                       diffTypes = Map.map (fmap mkExpMap) ghcCompileExpTypes
+                       diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
 
-              return $ Maybe.just Computed {
-                  computedErrors        = force cErrors List.++ ghcCompileErrors List.++ optionWarnings
-                , computedLoadedModules = ghcCompileLoaded
-                , computedImports       = ghcCompileImports  `applyDiff` computedImports
-                , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
-                , computedSpanInfo      = diffSpan           `applyDiff` computedSpanInfo
-                , computedExpTypes      = diffTypes          `applyDiff` computedExpTypes
-                , computedUseSites      = ghcCompileUseSites `applyDiff` computedUseSites
-                , computedPkgDeps       = ghcCompilePkgDeps  `applyDiff` computedPkgDeps
-                , computedCache         = mkRelative ghcCompileCache
-                }
-            else return $ idleState' ^. ideComputed
+                   return $ Maybe.just Computed {
+                       computedErrors        = force cErrors List.++ ghcCompileErrors List.++ optionWarnings
+                     , computedLoadedModules = ghcCompileLoaded
+                     , computedImports       = ghcCompileImports  `applyDiff` computedImports
+                     , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
+                     , computedSpanInfo      = diffSpan           `applyDiff` computedSpanInfo
+                     , computedExpTypes      = diffTypes          `applyDiff` computedExpTypes
+                     , computedUseSites      = ghcCompileUseSites `applyDiff` computedUseSites
+                     , computedPkgDeps       = ghcCompilePkgDeps  `applyDiff` computedPkgDeps
+                     , computedCache         = mkRelative ghcCompileCache
+                     }
+                 else return $ idleState' ^. ideComputed
 
-          -- Update state
-          return ( IdeSessionIdle
-                 . (ideComputed       ^= computed)
-                 . (ideUpdatedEnv     ^= False)
-                 . (ideUpdatedCode    ^= False)
-                 . (ideUpdatedArgs    ^= False)
-                 . (ideUpdatedGhcOpts ^= False)
-                 $ idleState'
-                 , (False, False)
-                 )
+               -- Update state
+               return ( IdeSessionIdle
+                      . (ideComputed       ^= computed)
+                      . (ideUpdatedEnv     ^= False)
+                      . (ideUpdatedCode    ^= False)
+                      . (ideUpdatedArgs    ^= False)
+                      . (ideUpdatedGhcOpts ^= False)
+                      $ idleState'
+                      , Nothing
+                      )
 
         IdeSessionServerDied _ _ ->
-          return (state, (not alreadyRestartedDead, False))
+          if not justRestarted
+            then return (state, Just update)
+            else return (state, Nothing)
 
         IdeSessionRunning _ _ ->
           Ex.throwIO (userError "Cannot update session in running mode")
         IdeSessionShutdown ->
           Ex.throwIO (userError "Session already shut down.")
 
-      when (shouldRestartDead || shouldRestartDueToUpdate) $ do
-        restartSession session Nothing
-        go shouldRestartDead shouldRestartDueToUpdate
+      case shouldRestart of
+        Just update' -> do
+          restartSession session Nothing
+          go True update'
+        Nothing ->
+          return ()
 
     mkRelative :: ExplicitSharingCache -> ExplicitSharingCache
     mkRelative ExplicitSharingCache{..} =
@@ -535,8 +539,8 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
       , idPropCache   = idPropCache
       }
 
-    handleExternal :: IdeIdleState -> ExternalException -> IO (IdeSessionState, (Bool, Bool))
-    handleExternal idleState e = return (IdeSessionServerDied e idleState, (False, False))
+    handleExternal :: IdeIdleState -> ExternalException -> IO (IdeSessionState, Maybe (IdeSessionUpdate a))
+    handleExternal idleState e = return (IdeSessionServerDied e idleState, Nothing)
 
     constructAuto :: ExplicitSharingCache -> Strict [] IdInfo
                   -> Strict Trie (Strict [] IdInfo)
@@ -721,7 +725,7 @@ updateRelativeIncludes relIncl = do
   set ideRelativeIncludes relIncl
   set ideUpdatedGhcOpts   True
   set ideUpdatedCode      True -- In case we need to recompile due to new paths
-  set ideUpdatedRestart   True
+  restartSession'
 
 -- | Enable or disable code generation in addition
 -- to type-checking. Required by 'runStmt'.
@@ -785,7 +789,7 @@ updateTargets targets = do
         Public.TargetsExclude l ->
           Public.TargetsExclude $ map (ideSourcesDir </>) l
   set ideTargets dirTargets
-  set ideUpdatedRestart True
+  restartSession'
 
 -- | Run a given function in a given module (the name of the module
 -- is the one between @module ... end@, which may differ from the file name).
