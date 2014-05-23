@@ -21,6 +21,7 @@ module IdeSession.Query (
     -- * Queries that do not rely on computed state
   , getCodeGeneration
   , getEnv
+  , getArgs
   , getGhcServer
   , getGhcVersion
   , getManagedFiles
@@ -148,6 +149,10 @@ getCodeGeneration = simpleQuery $ getVal ideGenerateCode
 -- | Get all current environment overrides
 getEnv :: Query [(String, Maybe String)]
 getEnv = simpleQuery $ getVal ideEnv
+
+-- | Get all current snippet args
+getArgs :: Query [String]
+getArgs = simpleQuery $ getVal ideArgs
 
 -- | Get the RPC server used by the session.
 getGhcServer :: Query GhcServer

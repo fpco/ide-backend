@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes, ScopedTypeVariables #-}
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
@@ -31,6 +31,7 @@ module IdeSession.Update (
   , buildLicenses
     -- * Running code
   , runStmt
+  , runExe
   , resume
   , setBreakpoint
   , printVar
@@ -58,6 +59,7 @@ import Data.Accessor (Accessor, (.>), (^.), (^=))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString.Char8 as BSS
+import qualified Data.ByteString as BSS (hGetSome)
 import Data.Foldable (forM_)
 import qualified System.Directory as Dir
 import System.FilePath (
@@ -68,11 +70,14 @@ import System.FilePath (
   , dropFileName
   )
 import System.Posix.Files (setFileTimes)
+import qualified System.IO as IO
 import System.IO.Temp (createTempDirectory)
 import System.IO.Error (isDoesNotExistError)
 import qualified Data.Text as Text
-import System.Environment (getEnv)
+import System.Environment (getEnv, getEnvironment)
 import System.Exit (ExitCode(..))
+import System.Posix.IO.ByteString
+import System.Process (proc, CreateProcess(..), StdStream(..), createProcess, waitForProcess, interruptProcessGroupOf, terminateProcess)
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
 
@@ -82,6 +87,7 @@ import IdeSession.Config
 import IdeSession.ExeCabalClient (invokeExeCabal)
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
+import qualified IdeSession.Query as Query
 import IdeSession.Types.Private hiding (RunResult(..))
 import IdeSession.Types.Public (RunBufferMode(..))
 import IdeSession.Types.Translation (removeExplicitSharing)
@@ -265,7 +271,8 @@ shutdownSession IdeSession{ideState, ideStaticInfo} = do
 -- | Restarts a session. Technically, a new session is created under the old
 -- @IdeSession@ handle, with a state cloned from the old session,
 -- which is then shut down. The only behavioural difference between
--- the restarted session and the old one is that any running code is stopped
+-- the restarted session and the old one is that any running snippet code
+-- (but not the executable binaries invoked with @runExe@) is stopped
 -- (even if it was stuck and didn't respond to interrupt requests)
 -- and that no modules are loaded, though all old modules and data files
 -- are still contained in the new session and ready to be compiled with
@@ -766,6 +773,100 @@ runStmt ideSession m fun = runCmd ideSession $ \idleState -> RunStmt {
   , runCmdStderr   = idleState ^. ideStderrBufferMode
   }
 
+-- | Run the main function from the last compiled executable.
+--
+-- 'runExe' will throw an exception if there were no executables
+-- compiled since session init, or if the last compilation was not
+-- successful (checked as in @getBuildExeStatus@)
+-- or if none of the executables last compiled have the supplied name
+-- or when the server is in a dead state (i.e., when ghc has crashed). In the
+-- last case 'getSourceErrors' will report the ghc exception; it is the
+-- responsibility of the client code to check for this.
+runExe :: IdeSession -> String -> IO (RunActions ExitCode)
+runExe session m = do
+ let handleQueriesExc (_ :: Query.InvalidSessionStateQueries) =
+       fail $ "Wrong session state when trying to run an executable."
+ Ex.handle handleQueriesExc $ do
+  mstatus <- Query.getBuildExeStatus session
+  case mstatus of
+    Nothing ->
+      fail $ "No executable compilation initiated since session init."
+    (Just status@ExitFailure{}) ->
+      fail $ "Last executable compilation failed with status "
+             ++ show status ++ "."
+    Just ExitSuccess -> do
+      distDir <- Query.getDistDir session
+      dataDir <- Query.getDataDir session
+      args <- Query.getArgs session
+      envInherited <- getEnvironment
+      envOverride <- Query.getEnv session
+      let overrideVar :: (String, Maybe String) -> Strict (Map String) String
+                      -> Strict (Map String) String
+          overrideVar (var, Just val) env = Map.insert var val env
+          overrideVar (var, Nothing) env = Map.delete var env
+          envMap = foldr overrideVar (Map.fromList envInherited) envOverride
+      let exePath = distDir </> "build" </> m </> m
+      exeExists <- Dir.doesFileExist exePath
+      unless exeExists $
+        fail $ "No compiled executable file "
+               ++ m ++ " exists at path "
+               ++ exePath ++ "."
+      (stdRd, stdWr) <- liftIO createPipe
+      std_rd_hdl <- fdToHandle stdRd
+      std_wr_hdl <- fdToHandle stdWr
+      let cproc = (proc exePath args) { cwd = Just dataDir
+                                      , env = Just $ Map.toList envMap
+                                      , create_group = True
+                                          -- ^ for interruptProcessGroupOf
+                                      , std_in = CreatePipe
+                                      , std_out = UseHandle std_wr_hdl
+                                      , std_err = UseHandle std_wr_hdl
+                                      }
+      (Just stdin_hdl, Nothing, Nothing, ph) <- createProcess cproc
+
+      -- The runActionState initially is the termination callback to be called
+      -- when the snippet terminates. After termination
+      -- it becomes (Right outcome).
+      -- This means that we will only execute the termination callback once,
+      -- avoid the race condition between mutliople @waitForProcess@
+      -- and the user can safely call runWait after termination and get the same
+      -- result.
+      runActionsState <- newMVar (Left $ \_ -> return ())
+
+      forceTermination <- newMVar False
+
+      return $ RunActions
+        { runWait = modifyMVar runActionsState $ \st -> case st of
+            Right outcome ->
+              return (Right outcome, Right outcome)
+            Left terminationCallback -> do
+              bs <- BSS.hGetSome std_rd_hdl blockSize
+              if BSS.null bs
+                then do
+                  res <- waitForProcess ph
+                  forceTerm <- takeMVar forceTermination
+                  unless forceTerm $ terminationCallback res
+                  return (Right res, Right res)
+                else
+                  return (Left terminationCallback, Left bs)
+        , interrupt = interruptProcessGroupOf ph
+        , supplyStdin = \bs -> BSS.hPut stdin_hdl bs >> IO.hFlush stdin_hdl
+        , registerTerminationCallback = \callback' ->
+            modifyMVar_ runActionsState $ \st -> case st of
+              Right outcome ->
+                return (Right outcome)
+              Left callback ->
+                return (Left (\res -> callback res >> callback' res))
+        , forceCancel = do
+            swapMVar forceTermination True
+            terminateProcess ph
+        }
+      -- We don't need to close any handles. At the latest GC closes them.
+ where
+  -- TODO: What is a good value here?
+  blockSize :: Int
+  blockSize = 4096
+
 -- | Resume a previously interrupted statement
 resume :: IdeSession -> IO (RunActions Public.RunResult)
 resume ideSession = runCmd ideSession (const Resume)
@@ -884,9 +985,12 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 -- in the 'Query.getDistDir' directory.
 --
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
+-- Also, after session restart, one has to call @updateSession@ at least once
+-- (even with empty updates list) before calling it for @buildExe@.
+-- This ensures the code is compiled again and the results made accessible.
 buildExe :: [String] -> [(ModuleName, FilePath)] -> IdeSessionUpdate ()
 buildExe extraOpts ms = do
-    ideStaticInfo@ IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts

@@ -190,7 +190,8 @@ type ObjectFiles = [(FilePath, (FilePath, LogicalTimestamp))]
 data GhcServer = OutProcess RpcServer
                | InProcess RpcConversation ThreadId
 
--- | Handles to the running code, through which one can interact with the code.
+-- | Handles to the running code snippet, through which one can interact
+-- with the snippet.
 --
 -- Requirement: concurrent uses of @supplyStdin@ should be possible,
 -- e.g., two threads that share a @RunActions@ should be able to provide
@@ -211,7 +212,7 @@ data RunActions a = RunActions {
     -- The callback will only be invoked once.
     --
     -- A call to 'registerTerminationCallback' after the snippet has terminated
-    -- has no effect. The termination handler is NOT called when the the
+    -- has no effect. The termination handler is NOT called when the
     -- 'RunActions' is 'forceCancel'ed.
   , registerTerminationCallback :: (a -> IO ()) -> IO ()
     -- | Force terminate the runaction
