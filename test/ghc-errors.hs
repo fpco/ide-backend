@@ -5930,6 +5930,101 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         -- We expect two warnings (one deprecated, one unrecognized)
         assertEqual "" 2 (length errs)
     )
+  , ( "Hiding and unhiding a package (#185-2)"
+    , withSession defaultSession $ \session -> do
+
+        -- We want to test that:
+        --
+        -- 1. The package flags work at all
+        -- 2. Transitions
+        -- 3. Statelessness of updateDynamicOpts
+
+        let runCode = do
+              runActions <- runStmt session "A" "test"
+              (output, result) <- runWaitAll runActions
+              assertEqual "" result RunOk
+              assertEqual "" (BSLC.pack "9\n") output
+
+        -- First, check that we can import stuff from the unix package
+        do let upd = (updateSourceFile "A.hs" . BSLC.pack $ unlines [
+                         "module A (test) where"
+                       , "import System.Posix"
+                       , "test :: IO ()"
+                       , "test = print sigKILL"
+                       ])
+                  <> (updateCodeGeneration True)
+           updateSessionD session upd 1
+           assertNoErrors session
+           runCode
+
+        -- Hide the package
+        do let upd = updateDynamicOpts ["-hide-package unix"]
+           updateSessionD session upd 1
+           assertOneError session
+
+        -- Reveal the package again with an explicit flag
+        do let upd = updateDynamicOpts ["-package unix"]
+           updateSessionD session upd 1
+           assertNoErrors session
+           runCode
+
+        -- Hide once more
+        do let upd = updateDynamicOpts ["-hide-package unix"]
+           updateSessionD session upd 1
+           assertOneError session
+
+        -- Reveal it again by using the default package flags
+        -- (statelessness of updateDynamicOpts)
+        do let upd = updateDynamicOpts []
+           updateSessionD session upd 1
+           assertNoErrors session
+           runCode
+    )
+  , ( "Unhiding and hiding a package (#185-3; converse of #185-2)"
+    , withSession defaultSession $ \session -> do
+        ghcVersion <- getGhcVersion session
+        let runCode = do
+              runActions <- runStmt session "A" "test"
+              (output, result) <- runWaitAll runActions
+              assertEqual "" result RunOk
+              case ghcVersion of
+                GHC742 -> assertEqual "" (BSLC.pack "7.4\n") output
+                GHC78  -> assertEqual "" (BSLC.pack "7.8\n") output
+
+        -- First, check that we cannot import from the ghc package
+        do let upd = (updateSourceFile "A.hs" . BSLC.pack $ unlines [
+                         "module A (test) where"
+                       , "import Config"
+                       , "test :: IO ()"
+                       , "test = putStrLn (take 3 cProjectVersion)"
+                       ])
+                  <> (updateCodeGeneration True)
+           updateSessionD session upd 1
+           assertOneError session
+
+        -- Reveal the package again with an explicit flag
+        do let upd = updateDynamicOpts ["-package ghc"]
+           updateSessionD session upd 1
+           assertNoErrors session
+           runCode
+
+        -- Hide the package
+        do let upd = updateDynamicOpts ["-hide-package ghc"]
+           updateSessionD session upd 1
+           assertOneError session
+
+        -- Reveal once more
+        do let upd = updateDynamicOpts ["-package ghc"]
+           updateSessionD session upd 1
+           assertNoErrors session
+           runCode
+
+        -- Hide it again by using the default package flags
+        -- (statelessness of updateDynamicOpts)
+        do let upd = updateDynamicOpts []
+           updateSessionD session upd 1
+           assertOneError session
+    )
   , ( "GHC bug #8333 (#145)"
     , withSession defaultSession $ \session -> do
         let upd1 = (updateCodeGeneration True)

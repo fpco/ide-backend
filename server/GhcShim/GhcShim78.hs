@@ -41,16 +41,10 @@ import DataCon (dataConRepType)
 import DynFlags
 import ErrUtils
 import FastString
-import GHC (Ghc, getSessionDynFlags, setSessionDynFlags)
-import HsBinds
-import HsDecls
-import HsExpr
-import HsLit
-import HsPat
-import HsTypes
+import GHC hiding (getBreak)
 import HscTypes
+import Linker
 import MonadUtils
-import Name
 import Outputable hiding (showSDoc)
 import Pair
 import PprTyThing
@@ -61,9 +55,6 @@ import TcHsSyn
 import TcType
 import Type
 import TysWiredIn
-import Var
-
-import BreakArray (BreakArray)
 import qualified BreakArray
 
 import GhcShim.API
@@ -163,9 +154,21 @@ packageDBFlags userDB specificDBs =
 setGhcOptions :: [String] -> Ghc ([String], [String])
 setGhcOptions opts = do
   dflags <- restoreDynFlags
-  (dflags', leftover, warnings) <- parseDynamicFilePragma dflags (map noLoc opts)
-  void $ setSessionDynFlags dflags'
+  (dflags', leftover, warnings) <- parseDynamicFlags dflags (map noLoc opts)
+  setupLinkerState =<< setSessionDynFlags dflags'
   return (map unLoc leftover, map unLoc warnings)
+
+-- | Setup linker state to deal with changed package flags
+--
+-- This follows newDynFlags in ghci, except that in 7.8 there is also the
+-- notion of "interactive dynflags", which we are ignoring completely.
+-- I'm not sure if that's ok or not.
+setupLinkerState :: [PackageId] -> Ghc ()
+setupLinkerState newPackages = do
+  dflags <- getSessionDynFlags
+  setTargets []
+  load LoadAllTargets
+  liftIO $ linkPackages dflags newPackages
 
 {------------------------------------------------------------------------------
   Backup DynFlags
