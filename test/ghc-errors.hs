@@ -1236,7 +1236,6 @@ syntheticTests = [
         updateSessionD session updExe 2
         runActionsExe <- runExe session m
         threadDelay 1000000
-        interrupt runActionsExe
         resOrExe <- runWait runActionsExe
         -- Here the result differs from runStmt, because the loop is detected
         -- and reported.
