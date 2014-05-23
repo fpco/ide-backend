@@ -5922,6 +5922,14 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         when (any (== KindError) $ map errorKind errs2) $
           assertFailure $ "Expected only warnings in " ++ show3errors errs2
     )
+  , ( "Invalid GHC option and option warnings (#185-1) "
+    , withSession defaultSession $ \session -> do
+        let upd = updateDynamicOpts ["-fglasgow-exts","-thisOptionDoesNotExist"]
+        updateSessionD session upd 0
+        errs <- getSourceErrors session
+        -- We expect two warnings (one deprecated, one unrecognized)
+        assertEqual "" 2 (length errs)
+    )
   , ( "GHC bug #8333 (#145)"
     , withSession defaultSession $ \session -> do
         let upd1 = (updateCodeGeneration True)

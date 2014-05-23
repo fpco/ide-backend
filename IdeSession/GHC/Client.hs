@@ -165,7 +165,7 @@ rpcSetArgs (InProcess _ _) _ =
   error "rpcSetArgs not supported for in-process server"
 
 -- | Set ghc options
-rpcSetGhcOpts :: GhcServer -> [String] -> IO ()
+rpcSetGhcOpts :: GhcServer -> [String] -> IO ([String], [String])
 rpcSetGhcOpts (OutProcess server) opts =
   rpc server (ReqSetGhcOpts opts)
 rpcSetGhcOpts (InProcess _ _) _ =

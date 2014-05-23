@@ -153,13 +153,19 @@ packageDBFlags userDB specificDBs =
      ["-no-user-package-db" | userDB]
   ++ concat [["-package-db", db] | db <- specificDBs]
 
--- | TODO: Make this stateless
-setGhcOptions :: [String] -> Ghc ()
+-- | Set GHC options
+--
+-- This is meant to be stateless. It is important to call storeDynFlags at least
+-- once before calling setGhcOptions so that we know what state to restore to
+-- before setting the options.
+--
+-- Returns unrecognized options and warnings
+setGhcOptions :: [String] -> Ghc ([String], [String])
 setGhcOptions opts = do
   dflags <- restoreDynFlags
-  -- TODO: look at errors and warnings
-  (dflags', _, _) <- parseDynamicFilePragma dflags (map noLoc opts)
+  (dflags', leftover, warnings) <- parseDynamicFilePragma dflags (map noLoc opts)
   void $ setSessionDynFlags dflags'
+  return (map unLoc leftover, map unLoc warnings)
 
 {------------------------------------------------------------------------------
   Backup DynFlags
@@ -182,6 +188,9 @@ restoreDynFlags = do
 
 -- | Copy over all fields of DynFlags that are affected by dynamic_flags
 -- (and only those)
+--
+-- This was obtained by looking at dynamic_flags in the ghc sources and
+-- inspecting the effect of each option.
 restoreDynFlagsFrom :: DynFlags -> DynFlags -> DynFlags
 restoreDynFlagsFrom new old = new {
     avx                   = avx                   old

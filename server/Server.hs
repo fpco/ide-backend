@@ -538,8 +538,8 @@ ghcHandleSetEnv RpcConversation{put} env = liftIO $ do
 -- | Set ghc options
 ghcHandleSetOpts :: RpcConversation -> [String] -> Ghc ()
 ghcHandleSetOpts RpcConversation{put} opts = do
-  setGhcOptions opts
-  liftIO $ put ()
+  (leftover, warnings) <- setGhcOptions opts
+  liftIO $ put (leftover, warnings)
 
 -- | Handle a crash request (debugging)
 ghcHandleCrash :: Maybe Int -> Ghc ()

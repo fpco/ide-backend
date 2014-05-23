@@ -410,12 +410,28 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
           when (idleState' ^. ideUpdatedArgs) $
             rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
 
-          let relIncl = idleState' ^. ideRelativeIncludes
-              sourcesDir = ideSourcesDir ideStaticInfo
-          when (idleState' ^. ideUpdatedGhcOpts) $
-            rpcSetGhcOpts (idleState ^. ideGhcServer)
-                          (idleState' ^. ideDynamicOpts
-                           ++ relInclToOpts sourcesDir relIncl)
+          -- Update options
+          optionWarnings <- if (idleState' ^. ideUpdatedGhcOpts)
+            then do
+              -- relative include path is part of the state rather than the
+              -- config as of c0bf0042
+              let relIncl    = idleState' ^. ideRelativeIncludes
+                  sourcesDir = ideSourcesDir ideStaticInfo
+                  unrecognized str = "Unrecognized option " ++ show str
+              (leftover, warnings) <-
+                rpcSetGhcOpts (idleState ^. ideGhcServer)
+                              (idleState' ^. ideDynamicOpts
+                                   ++ relInclToOpts sourcesDir relIncl)
+              return $ force $
+                [ SourceError {
+                      errorKind = KindWarning
+                    , errorSpan = TextSpan (Text.pack "No location information")
+                    , errorMsg  = Text.pack w
+                    }
+                | w <- warnings ++ map unrecognized leftover
+                ]
+            else
+              return $ force []
 
           -- Recompile
           computed <- if (idleState' ^. ideUpdatedCode)
@@ -437,7 +453,7 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
                   diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
 
               return $ Maybe.just Computed {
-                  computedErrors        = force cErrors List.++ ghcCompileErrors
+                  computedErrors        = force cErrors List.++ ghcCompileErrors List.++ optionWarnings
                 , computedLoadedModules = ghcCompileLoaded
                 , computedImports       = ghcCompileImports  `applyDiff` computedImports
                 , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
