@@ -1192,15 +1192,13 @@ syntheticTests = [
         let m = "M"
             updExe = buildExe [] [(Text.pack m, "M.hs")]
         updateSessionD session updExe 2
---        runActionsExe <- runExe session m
+        runActionsExe <- runExe session m
         threadDelay 1000000
-        -- FIXME: neither of these two work:
---        interrupt runActionsExe
---        forceCancel runActionsExe
---        resOrEx <- runWait runActionsExe
---        case resOrEx of
---          Right result -> assertEqual "after runExe" (ExitFailure 2) result
---          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+        interrupt runActionsExe
+        resOrEx <- runWait runActionsExe
+        case resOrEx of
+          Right result -> assertEqual "after runExe" (ExitFailure 2) result
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
   , ( "Interrupt runExe (immediately)"
     , withSession defaultSession $ \session -> do
@@ -1433,23 +1431,23 @@ syntheticTests = [
         updateSessionD session updExe 2
 
         runActions <- runStmt session "M" "echo"
--- FIXME        runActionsExe <- runExe session m
+        runActionsExe <- runExe session m
 
         do supplyStdin runActions (BSSC.pack "ECHO 1!\n")
            result <- runWait runActions
            assertEqual "" (Left (BSSC.pack "ECHO 1!\n")) result
 
---        do supplyStdin runActionsExe (BSSC.pack "ECHO 1!\n")
---           result <- runWait runActionsExe
---           assertEqual "" (Left (BSSC.pack "ECHO 1!\n")) result
+        do supplyStdin runActionsExe (BSSC.pack "ECHO 1!\n")
+           result <- runWait runActionsExe
+           assertEqual "" (Left (BSSC.pack "ECHO 1!\n")) result
 
         do supplyStdin runActions (BSSC.pack "ECHO 2!\n")
            result <- runWait runActions
            assertEqual "" (Left (BSSC.pack "ECHO 2!\n")) result
 
---        do supplyStdin runActionsExe (BSSC.pack "ECHO 2!\n")
---           result <- runWait runActionsExe
---           assertEqual "" (Left (BSSC.pack "ECHO 2!\n")) result
+        do supplyStdin runActionsExe (BSSC.pack "ECHO 2!\n")
+           result <- runWait runActionsExe
+           assertEqual "" (Left (BSSC.pack "ECHO 2!\n")) result
 
         do interrupt runActions
            resOrEx <- runWait runActions
@@ -1457,15 +1455,15 @@ syntheticTests = [
              Right result -> assertBool "" (isAsyncException result)
              _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
 
---        do supplyStdin runActionsExe (BSSC.pack "ECHO 3!\n")
---           result <- runWait runActionsExe
---           assertEqual "" (Left (BSSC.pack "ECHO 3!\n")) result
+        do supplyStdin runActionsExe (BSSC.pack "ECHO 3!\n")
+           result <- runWait runActionsExe
+           assertEqual "" (Left (BSSC.pack "ECHO 3!\n")) result
 
---        do interrupt runActionsExe
---           resOrEx <- runWait runActionsExe
---           case resOrEx of
---             Right result -> assertEqual "after runExe" (ExitFailure 2) result
---             _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+        do interrupt runActionsExe
+           resOrEx <- runWait runActionsExe
+           case resOrEx of
+             Right result -> assertEqual "after runExe" (ExitFailure 2) result
+             _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
     )
   , ( "Two calls to runStmt"
     , withSession defaultSession $ \session -> do
@@ -1507,17 +1505,17 @@ syntheticTests = [
             updExe = buildExe [] [(Text.pack m, "M.hs")]
         updateSessionD session updExe 2
 
--- FIXME:        do runActions <- runExe session "M"
---           supplyStdin runActions (BSSC.pack "!OHCE\n")
---           (output, result) <- runWaitAll runActions
---           assertEqual "" result ExitSuccess
---           assertEqual "" (BSLC.pack "ECHO!\n") output
+        do runActions <- runExe session "M"
+           supplyStdin runActions (BSSC.pack "!OHCE\n")
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result ExitSuccess
+           assertEqual "" (BSLC.pack "ECHO!\n") output
 
---        do runActions <- runExe session "M"
---           supplyStdin runActions (BSSC.pack "!OHCE\n")
---           (output, result) <- runWaitAll runActions
---           assertEqual "" result ExitSuccess
---           assertEqual "" (BSLC.pack "ECHO!\n") output
+        do runActions <- runExe session "M"
+           supplyStdin runActions (BSSC.pack "!OHCE\n")
+           (output, result) <- runWaitAll runActions
+           assertEqual "" result ExitSuccess
+           assertEqual "" (BSLC.pack "ECHO!\n") output
     )
   , ( "Make sure we can terminate the IDE session when code is running"
     , withSession defaultSession $ \session -> do
@@ -1547,7 +1545,7 @@ syntheticTests = [
         updateSessionD session updExe 2
 
         assertNoErrors session
--- FIXME        _runActions <- runExe session "M"
+        _runActions <- runExe session "M"
         return ()
      )
   , ( "Capture stderr"
@@ -2116,22 +2114,18 @@ syntheticTests = [
         let m = "M"
             updExe = buildExe [] [(Text.pack m, "M.hs")]
         updateSessionD session updExe 2
-        -- FIXME: no way to cancel this, so cannot start:
-        -- runActionsExe <- runExe session m
+        runActionsExe <- runExe session m
         threadDelay 1000000
         restartSession session Nothing
         -- restartSession would not suffice, since session restart
         -- doesn't stop the exe, so we need to interrupt manually.
-        -- FIXME: interrupt doesn't work in this case, why?
-        -- interrupt runActionsExe
-        -- FIXME: even forceCancel doesn't work in this case, why?
-        -- forceCancel runActionsExe
---        resOrEx <- runWait runActionsExe
---        case resOrEx of
---          Right result -> assertEqual "after runExe" (ExitFailure 2) result
---          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
---        result' <- runWait runActionsExe
---        assertEqual "" result' (Right $ ExitFailure 2)
+        interrupt runActionsExe
+        resOrEx <- runWait runActionsExe
+        case resOrEx of
+          Right result -> assertEqual "after runExe" (ExitFailure 2) result
+          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+        result' <- runWait runActionsExe
+        assertEqual "" result' (Right $ ExitFailure 2)
     )
   , ( "Call runWait after termination (started new snippet in meantime)"
     , withSession defaultSession $ \session -> do

@@ -271,7 +271,8 @@ shutdownSession IdeSession{ideState, ideStaticInfo} = do
 -- | Restarts a session. Technically, a new session is created under the old
 -- @IdeSession@ handle, with a state cloned from the old session,
 -- which is then shut down. The only behavioural difference between
--- the restarted session and the old one is that any running code is stopped
+-- the restarted session and the old one is that any running snippet code
+-- (but not the executable binaries invoked with @runExe@) is stopped
 -- (even if it was stuck and didn't respond to interrupt requests)
 -- and that no modules are loaded, though all old modules and data files
 -- are still contained in the new session and ready to be compiled with
@@ -984,6 +985,9 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 -- in the 'Query.getDistDir' directory.
 --
 -- Note: currently it requires @configGenerateModInfo@ to be set (see #86).
+-- Also, after session restart, one has to call @updateSession@ at least once
+-- (even with empty updates list) before calling it for @buildExe@.
+-- This ensures the code is compiled again and the results made accessible.
 buildExe :: [String] -> [(ModuleName, FilePath)] -> IdeSessionUpdate ()
 buildExe extraOpts ms = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
