@@ -6002,7 +6002,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            updateSessionD session upd 1
            assertOneError session
 
-        -- Reveal the package again with an explicit flag
+        -- Reveal the package with an explicit flag
         do let upd = updateDynamicOpts ["-package ghc"]
            updateSessionD session upd 1
            assertNoErrors session
@@ -6020,6 +6020,47 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            runCode
 
         -- Hide it again by using the default package flags
+        -- (statelessness of updateDynamicOpts)
+        do let upd = updateDynamicOpts []
+           updateSessionD session upd 1
+           assertOneError session
+    )
+  , ( "Trusting and distrusting packages (#185-4)"
+    , withSession (withOpts ["-XSafe", "-fpackage-trust"]) $ \session -> do
+        let runCode = do
+              runActions <- runStmt session "A" "test"
+              (output, result) <- runWaitAll runActions
+              assertEqual "" result RunOk
+              assertEqual "" (BSLC.pack "Hello\n") output
+
+        -- First, check that base is untrusted
+        do let upd = (updateSourceFile "A.hs" . BSLC.pack $ unlines [
+                         "module A (test) where"
+                       , "test :: IO ()"
+                       , "test = putStrLn \"Hello\""
+                       ])
+                  <> (updateCodeGeneration True)
+           updateSessionD session upd 1
+           assertOneError session
+
+        -- Trust base
+        do let upd = updateDynamicOpts ["-trust base"]
+           updateSessionD session upd 1
+           assertNoErrors session
+           runCode
+
+        -- Untrust it
+        do let upd = updateDynamicOpts ["-distrust base"]
+           updateSessionD session upd 1
+           assertOneError session
+
+        -- Trust it once more
+        do let upd = updateDynamicOpts ["-trust base"]
+           updateSessionD session upd 1
+           assertNoErrors session
+           runCode
+
+        -- Untrust it again by using the default package flags
         -- (statelessness of updateDynamicOpts)
         do let upd = updateDynamicOpts []
            updateSessionD session upd 1
