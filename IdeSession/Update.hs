@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes, ScopedTypeVariables, MultiParamTypeClasses, GADTs #-}
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
@@ -44,13 +44,13 @@ module IdeSession.Update (
 
 import Prelude hiding (mod, span)
 import Control.Concurrent (threadDelay)
-import Control.Monad (when, void, forM, unless)
-import Control.Monad.State (MonadState, StateT, execStateT, runStateT)
-import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
+import Control.Monad (when, void, forM, unless, (>=>))
+import Control.Monad.State (MonadState, StateT, execStateT)
+import Control.Monad.Reader (MonadReader(..), asks)
 import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Applicative (Applicative, (<$>), (<*>))
+import Control.Applicative (Applicative(..), (<$>), (<*>))
 import qualified Control.Exception as Ex
 import qualified Control.Monad.State as St
 import Data.List (elemIndices)
@@ -78,6 +78,7 @@ import System.Environment (getEnv, getEnvironment)
 import System.Exit (ExitCode(..))
 import System.Posix.IO.ByteString
 import System.Process (proc, CreateProcess(..), StdStream(..), createProcess, waitForProcess, interruptProcessGroupOf, terminateProcess)
+import qualified Control.Monad.State as State
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
 
@@ -324,43 +325,47 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
                  . (ideGhcVersion  ^= Ex.throw e)
                  $ idleState
 
-{------------------------------------------------------------------------------
-  Session updates
-------------------------------------------------------------------------------}
+{-------------------------------------------------------------------------------
+  Datatype describing session updates
+-------------------------------------------------------------------------------}
 
 data IdeSessionUpdateEnv = IdeSessionUpdateEnv {
     ideSessionUpdateStaticInfo :: IdeStaticInfo
   , ideSessionUpdateCallback   :: forall m. MonadIO m => Progress -> m ()
   }
 
--- | We use the 'IdeSessionUpdate' type to represent the accumulation of a
--- bunch of updates.
---
--- In particular it is an instance of 'Monoid', so multiple primitive updates
--- can be easily combined. Updates can override each other left to right.
-newtype IdeSessionUpdate a = IdeSessionUpdate {
-    _runSessionUpdate :: ReaderT IdeSessionUpdateEnv (StateT IdeIdleState IO) a
-  }
-  deriving ( Functor
-           , Applicative
-           , Monad
-           , MonadReader IdeSessionUpdateEnv
-           , MonadState IdeIdleState
-           , MonadIO
-           )
+data IdeSessionUpdate a where
+  Done    :: a -> IdeSessionUpdate a
+  Run     :: (IdeSessionUpdateEnv -> IdeIdleState -> IO (a, IdeIdleState)) -> (a -> IdeSessionUpdate b) -> IdeSessionUpdate b
+  Restart :: IdeSessionUpdate a -> IdeSessionUpdate a
 
-runSessionUpdate :: IdeSessionUpdate a
-                 -> IdeStaticInfo
-                 -> (Progress -> IO ())
-                 -> IdeIdleState
-                 -> IO (a, IdeIdleState)
-runSessionUpdate upd staticInfo callback idleState =
-    runStateT (runReaderT (_runSessionUpdate upd) env) idleState
-  where
-    env = IdeSessionUpdateEnv {
-              ideSessionUpdateStaticInfo = staticInfo
-            , ideSessionUpdateCallback   = liftIO . callback
-            }
+instance Functor IdeSessionUpdate where
+  fmap f (Done x)    = Done (f x)
+  fmap f (Run g k)   = Run g (fmap f . k)
+  fmap f (Restart k) = Restart (fmap f k)
+
+instance Applicative IdeSessionUpdate where
+  pure      = return
+  mf <*> mx = do f <- mf ; x <- mx ; return (f x)
+
+instance Monad IdeSessionUpdate where
+  return = Done
+  Done x    >>= f = f x
+  Run g k   >>= f = Run g (k >=> f)
+  Restart k >>= f = Restart (k >>= f)
+
+instance MonadReader IdeSessionUpdateEnv IdeSessionUpdate where
+  ask = Run (\env st -> return (env, st)) Done
+  local _ (Done x)    = Done x
+  local f (Run g k)   = Run (\env st -> g (f env) st) (local f . k)
+  local f (Restart k) = Restart (local f k)
+
+instance MonadState IdeIdleState IdeSessionUpdate where
+  get    = Run (\_ st -> return (st, st)) Done
+  put st = Run (\_ _  -> return ((), st)) Done
+
+instance MonadIO IdeSessionUpdate where
+  liftIO act = Run (\_ st -> do a <- act ; return (a, st)) Done
 
 -- We assume, if updates are combined within the monoid, they can all
 -- be applied in the context of the same session.
@@ -368,6 +373,32 @@ runSessionUpdate upd staticInfo callback idleState =
 instance Monoid a => Monoid (IdeSessionUpdate a) where
   mempty        = return mempty
   f `mappend` g = mappend <$> f <*> g
+
+data IdeSessionUpdateResult a =
+    UpdateComplete a
+  | RestartThenRun (IdeSessionUpdate a)
+
+runSessionUpdate :: IdeStaticInfo
+                 -> (Progress -> IO ())
+                 -> IdeIdleState
+                 -> IdeSessionUpdate a
+                 -> IO (IdeSessionUpdateResult a, IdeIdleState)
+runSessionUpdate staticInfo callback = go
+  where
+    go :: IdeIdleState -> IdeSessionUpdate a -> IO (IdeSessionUpdateResult a, IdeIdleState)
+    go st (Done x)    = return (UpdateComplete x, st)
+    go st (Run g k)   = do (a, st') <- g env st ; go st' (k a)
+    go st (Restart k) = return (RestartThenRun k, st)
+
+    env :: IdeSessionUpdateEnv
+    env = IdeSessionUpdateEnv {
+              ideSessionUpdateStaticInfo = staticInfo
+            , ideSessionUpdateCallback   = liftIO . callback
+            }
+
+{------------------------------------------------------------------------------
+  Session updates
+------------------------------------------------------------------------------}
 
 -- | Given the current IDE session state, go ahead and
 -- update the session, eventually resulting in a new session state,
@@ -385,13 +416,13 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
       (shouldRestartDead, shouldRestartDueToUpdate)
        <- modifyMVar ideState $ \state -> case state of
         IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
-         ((), idleState0) <-
+         (UpdateComplete (), idleState0) <-
            if alreadyRestartedDueToUpdate
-           then return ((), idleState)
-           else runSessionUpdate update
-                                 ideStaticInfo
+           then return (UpdateComplete (), idleState)
+           else runSessionUpdate ideStaticInfo
                                  callback
                                  idleState
+                                 update
 
          if idleState0 ^. ideUpdatedRestart then do
            -- To avoid "<stdout> hPutChar: resource vanished (Broken pipe)":
@@ -399,11 +430,11 @@ updateSession session@IdeSession{ideStaticInfo, ideState} update callback =
            return (IdeSessionIdle idleState0, (False, True))
          else do
 
-          ((numActions, cErrors), idleState') <-
-            runSessionUpdate recompileObjectFiles
-                             ideStaticInfo
+          (UpdateComplete (numActions, cErrors), idleState') <-
+            runSessionUpdate ideStaticInfo
                              callback
                              idleState0
+                             recompileObjectFiles
 
           let callback' p = callback p {
                   progressStep     = progressStep     p + numActions
