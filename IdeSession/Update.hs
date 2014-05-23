@@ -43,7 +43,7 @@ module IdeSession.Update (
   where
 
 import Prelude hiding (mod, span)
-import Control.Concurrent (threadDelay, forkIO)
+import Control.Concurrent (threadDelay)
 import Control.Monad (when, void, forM, unless)
 import Control.Monad.State (MonadState, StateT, execStateT, runStateT)
 import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, asks)
@@ -822,23 +822,43 @@ runExe session m = do
                                       , std_err = UseHandle std_wr_hdl
                                       }
       (Just stdin_hdl, Nothing, Nothing, ph) <- createProcess cproc
-      terminationCallback <- newMVar $ \_ -> return ()
-      void $ forkIO $ do
-        status <- waitForProcess ph
-        f <- takeMVar terminationCallback
-        f status
+
+      -- The runActionState initially is the termination callback to be called
+      -- when the snippet terminates. After termination
+      -- it becomes (Right outcome).
+      -- This means that we will only execute the termination callback once,
+      -- avoid the race condition between mutliople @waitForProcess@
+      -- and the user can safely call runWait after termination and get the same
+      -- result.
+      runActionsState <- newMVar (Left $ \_ -> return ())
+
+      forceTermination <- newMVar False
+
       return $ RunActions
-        { runWait = do
-            bs <- BSS.hGetSome std_rd_hdl blockSize
-            if BSS.null bs
-              then Right <$> waitForProcess ph
-              else return $ Left bs
+        { runWait = modifyMVar runActionsState $ \st -> case st of
+            Right outcome ->
+              return (Right outcome, Right outcome)
+            Left terminationCallback -> do
+              bs <- BSS.hGetSome std_rd_hdl blockSize
+              if BSS.null bs
+                then do
+                  res <- waitForProcess ph
+                  forceTerm <- takeMVar forceTermination
+                  unless forceTerm $ terminationCallback res
+                  return (Right res, Right res)
+                else
+                  return (Left terminationCallback, Left bs)
         , interrupt = interruptProcessGroupOf ph
         , supplyStdin = \bs -> BSS.hPut stdin_hdl bs >> IO.hFlush stdin_hdl
-        , registerTerminationCallback = \f ->
-            modifyMVar_ terminationCallback $ \curCallback ->
-              return (\res -> curCallback res >> f res)
-        , forceCancel = terminateProcess ph
+        , registerTerminationCallback = \callback' ->
+            modifyMVar_ runActionsState $ \st -> case st of
+              Right outcome ->
+                return (Right outcome)
+              Left callback ->
+                return (Left (\res -> callback res >> callback' res))
+        , forceCancel = do
+            swapMVar forceTermination True
+            terminateProcess ph
         }
       -- We don't need to close any handles. At the latest GC closes them.
  where
