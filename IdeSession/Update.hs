@@ -250,11 +250,14 @@ forceShutdownSession = shutdownSession' True
 shutdownSession' :: Bool -> IdeSession -> IO ()
 shutdownSession' forceTerminate IdeSession{ideState, ideStaticInfo} = do
   snapshot <- modifyMVar ideState $ \state -> return (IdeSessionShutdown, state)
+  IO.writeFile "/tmp/modify" "asdf"
   case snapshot of
     IdeSessionRunning runActions idleState -> do
       if forceTerminate
         then
+          IO.writeFile "/tmp/modify2" "asdf"
           forceShutdownGhcServer $ _ideGhcServer idleState
+          IO.writeFile "/tmp/modify3" "asdf"
         else do
           -- We need to terminate the running program before we can shut down
           -- the session, because the RPC layer will sequentialize all concurrent

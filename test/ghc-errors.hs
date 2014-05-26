@@ -107,7 +107,7 @@ withSession setup io = inTempDir $ \tempDir -> do
       mDidShutdown <- timeout 2000000 $ shutdownSession session
       case mDidShutdown of
         Just () -> return ()
-        Nothing -> do putStrLn "WARNING: Failed to shutdown session (timeout)"
+        Nothing -> do putStrLn "WARNING: Failed to shutdaxfasdfown session (timeout)"
                       forceShutdownSession session
 
     isDefaultConfigDir = configDir config == configDir defaultSessionConfig
@@ -5353,6 +5353,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
 
         assertNoErrors sess
         mRunActions <- timeout 2000000 $ runStmt sess "Main" "main"
+--        threadDelay 2000000
+        BSLC.writeFile "/tmp/pre" "asdf"
+        forceShutdownSession sess
+        BSLC.writeFile "/tmp/post" "asdf"
+
+{-
         case mRunActions of
           Just runActions -> do
             mRunResult <- timeout 2000000 $ runWaitAll runActions
@@ -5361,7 +5367,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
               Nothing -> assertFailure "Timeout in runWaitAll"
               _       -> assertFailure "Unexpected run result"
           Nothing ->
-            assertFailure "Timeout in runStmt"
+            assertFailure "Timeout in runStmt" -}
     )
   , ( "Use sites 1: Global values"
     , withSession defaultSession $ \session -> do
