@@ -254,7 +254,7 @@ shutdownSession' forceTerminate IdeSession{ideState, ideStaticInfo} = do
   case snapshot of
     IdeSessionRunning runActions idleState -> do
       if forceTerminate
-        then
+        then do
           IO.writeFile "/tmp/modify2" "asdf"
           forceShutdownGhcServer $ _ideGhcServer idleState
           IO.writeFile "/tmp/modify3" "asdf"
@@ -263,20 +263,28 @@ shutdownSession' forceTerminate IdeSession{ideState, ideStaticInfo} = do
           -- the session, because the RPC layer will sequentialize all concurrent
           -- calls (and if code is still running we still have an active
           -- RPC conversation)
+          IO.writeFile "/tmp/modify32" "asdf"
           interrupt runActions
+          IO.writeFile "/tmp/modify33" "asdf"
           void $ runWaitAll runActions
+          IO.writeFile "/tmp/modify34" "asdf"
           shutdownGhcServer $ _ideGhcServer idleState
+          IO.writeFile "/tmp/modify35" "asdf"
       cleanupDirs
     IdeSessionIdle idleState -> do
       if forceTerminate
-        then
+        then do
+          IO.writeFile "/tmp/modify42" "asdf"
           forceShutdownGhcServer $ _ideGhcServer idleState
+          IO.writeFile "/tmp/modify43" "asdf"
         else
           shutdownGhcServer $ _ideGhcServer idleState
       cleanupDirs
-    IdeSessionShutdown ->
+    IdeSessionShutdown -> do
+      IO.writeFile "/tmp/modify52" "asdf"
       return ()
-    IdeSessionServerDied _ _ ->
+    IdeSessionServerDied _ _ -> do
+      IO.writeFile "/tmp/modify62" "asdf"
       cleanupDirs
  where
   cleanupDirs = when (configDeleteTempFiles . ideConfig $ ideStaticInfo) $ do

@@ -5353,10 +5353,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
 
         assertNoErrors sess
         mRunActions <- timeout 2000000 $ runStmt sess "Main" "main"
---        threadDelay 2000000
+        threadDelay 2000000
         BSLC.writeFile "/tmp/pre" "asdf"
-        forceShutdownSession sess
+        timeout 2000000 $ shutdownSession sess
+        threadDelay 2000000
         BSLC.writeFile "/tmp/post" "asdf"
+        forceShutdownSession sess
+
 
 {-
         case mRunActions of
