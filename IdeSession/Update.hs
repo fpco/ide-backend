@@ -254,7 +254,7 @@ shutdownSession' forceTerminate IdeSession{ideState, ideStaticInfo} = do
     IdeSessionRunning runActions idleState -> do
       if forceTerminate
         then
-          ignoreAllExceptions $ forceShutdownGhcServer $ _ideGhcServer idleState
+          forceShutdownGhcServer $ _ideGhcServer idleState
         else do
           -- We need to terminate the running program before we can shut down
           -- the session, because the RPC layer will sequentialize all concurrent
@@ -267,7 +267,7 @@ shutdownSession' forceTerminate IdeSession{ideState, ideStaticInfo} = do
     IdeSessionIdle idleState -> do
       if forceTerminate
         then
-          ignoreAllExceptions $ forceShutdownGhcServer $ _ideGhcServer idleState
+          forceShutdownGhcServer $ _ideGhcServer idleState
         else
           shutdownGhcServer $ _ideGhcServer idleState
       cleanupDirs
@@ -320,7 +320,7 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
   where
     restart :: IdeIdleState -> IO IdeSessionState
     restart idleState = do
-      ignoreAllExceptions $ forceShutdownGhcServer $ _ideGhcServer idleState
+      forceShutdownGhcServer $ _ideGhcServer idleState
       mServer <- forkGhcServer ideStaticInfo
       case mServer of
         Right (server, version) ->
@@ -1316,13 +1316,6 @@ modifyIdleState IdeSession{..} act = modifyMVar ideState $ \state -> case state 
 -- | Variaton on 'tell' for the State monad rather than writer monad
 tellSt :: (Monoid w, MonadState w m) => w -> m ()
 tellSt w = St.modify (`mappend` w)
-
--- | Silently ignore all exceptions
-ignoreAllExceptions :: IO () -> IO ()
-ignoreAllExceptions = Ex.handle ignore
-  where
-    ignore :: Ex.SomeException -> IO ()
-    ignore _ = return ()
 
 {-------------------------------------------------------------------------------
   Managed files

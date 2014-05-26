@@ -14,7 +14,7 @@ module IdeSession.RPC.Client (
   ) where
 
 import Control.Applicative ((<$>))
-import Control.Concurrent.MVar (MVar, newMVar)
+import Control.Concurrent.MVar (MVar, newMVar, tryTakeMVar)
 import Control.Monad (void, unless)
 import Data.Binary (Binary, encode, decode)
 import Data.IORef (writeIORef, readIORef, newIORef)
@@ -191,12 +191,32 @@ shutdown server = withRpcServer server $ \_ -> do
   let ex = Ex.toException (userError "Manual shutdown")
   return (RpcStopped ex, ())
 
--- | Force shutdown. Don't let any thread wait until other threads terminate.
+-- | Force shutdown.
+--
+-- In order to faciliate a force shutdown while another thread may be
+-- communicating with the RPC server, we _try_ to update the MVar underlying
+-- the RPC server, but if we fail, we terminate the server anyway. This means
+-- that this may leave the 'RpcServer' in an invalid state -- so you shouldn't
+-- be using it anymore after calling forceShutdown!
 forceShutdown :: RpcServer -> IO ()
-forceShutdown server = withRpcServer server $ \_ -> do
-  forceTerminate server
+forceShutdown server = Ex.mask_ $ do
+  mst <- tryTakeMVar (rpcState server)
+
+  ignoreAllExceptions $ forceTerminate server
   let ex = Ex.toException (userError "Forced manual shutdown")
-  return (RpcStopped ex, ())
+
+  case mst of
+    Nothing -> -- We failed to take the MVar. Shrug.
+      return ()
+    Just _ ->
+      $putMVar (rpcState server) (RpcStopped ex)
+
+-- | Silently ignore all exceptions
+ignoreAllExceptions :: IO () -> IO ()
+ignoreAllExceptions = Ex.handle ignore
+  where
+    ignore :: Ex.SomeException -> IO ()
+    ignore _ = return ()
 
 -- | Terminate the external process
 terminate :: RpcServer -> IO ()
