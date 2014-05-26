@@ -22,7 +22,7 @@ import qualified Data.ByteString.Lazy.Char8 as BSL
 import Control.Concurrent.Async (async)
 import Data.Binary (encode, decode)
 
-import IdeSession.Util.BlockingOps (readChan, waitAnyCatchCancel, waitCatch)
+import IdeSession.Util.BlockingOps (readChan, waitAnyCatchCancel)
 import IdeSession.RPC.API
 import IdeSession.RPC.Stream
 
@@ -67,7 +67,6 @@ rpcServer' hin hout herr server = do
     handler <- async $ channelHandler requests responses server
 
     $waitAnyCatchCancel [reader, writer, handler] >>= tryShowException . snd
-    mapM_ $waitCatch [reader, writer, handler]
     threadDelay 100000
   where
     tryShowException :: Either Ex.SomeException () -> IO ()
