@@ -7162,6 +7162,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         checkWarns <- checkPackage pkgDir
         assertCheckWarns checkWarns
     )
+  , ( "Start server without bracket (need MANUAL check that server will die; #194)"
+    , do let (initParams, config) = defaultSession (defaultSessionInitParams, defaultSessionConfig)
+         _session <- initSession initParams config
+         putStrLn "Server started.. waiting 2sec"
+         threadDelay 2000000
+         putStrLn "PLEASE VERIFY THAT SERVER HAS TERMINATED"
+    )
   ]
 
 buildExeTargetHsSucceeds :: IdeSession -> String -> IO ()
