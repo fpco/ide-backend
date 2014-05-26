@@ -248,33 +248,41 @@ forceShutdownSession = shutdownSession' True
 
 -- | Internal generalization of 'shutdownSession' and 'forceShutdownSession'
 shutdownSession' :: Bool -> IdeSession -> IO ()
-shutdownSession' forceTerminate IdeSession{ideState, ideStaticInfo} = do
-  snapshot <- modifyMVar ideState $ \state -> return (IdeSessionShutdown, state)
-  case snapshot of
-    IdeSessionRunning runActions idleState -> do
-      if forceTerminate
-        then
-          forceShutdownGhcServer $ _ideGhcServer idleState
-        else do
-          -- We need to terminate the running program before we can shut down
-          -- the session, because the RPC layer will sequentialize all concurrent
-          -- calls (and if code is still running we still have an active
-          -- RPC conversation)
-          interrupt runActions
-          void $ runWaitAll runActions
-          shutdownGhcServer $ _ideGhcServer idleState
-      cleanupDirs
-    IdeSessionIdle idleState -> do
-      if forceTerminate
-        then
-          forceShutdownGhcServer $ _ideGhcServer idleState
-        else
-          shutdownGhcServer $ _ideGhcServer idleState
-      cleanupDirs
-    IdeSessionShutdown ->
+shutdownSession' forceTerminate session@IdeSession{ideState, ideStaticInfo} = do
+  -- Try to terminate the server, unless we currently have a snippet running
+  mStillRunning <- modifyMVar ideState $ \state ->
+    case state of
+      IdeSessionRunning runActions idleState -> do
+        if forceTerminate
+          then do forceShutdownGhcServer $ _ideGhcServer idleState
+                  cleanupDirs
+                  return (IdeSessionShutdown, Nothing)
+          else return (state, Just runActions)
+      IdeSessionIdle idleState -> do
+        if forceTerminate
+          then forceShutdownGhcServer $ _ideGhcServer idleState
+          else shutdownGhcServer      $ _ideGhcServer idleState
+        cleanupDirs
+        return (IdeSessionShutdown, Nothing)
+      IdeSessionShutdown ->
+        return (IdeSessionShutdown, Nothing)
+      IdeSessionServerDied _ _ -> do
+        cleanupDirs
+        return (IdeSessionShutdown, Nothing)
+
+  case mStillRunning of
+    Just runActions -> do
+      -- If there is a snippet running, interrupt it and wait for it to finish.
+      --
+      -- We cannot do this while we hold the session lock, because the
+      -- runactions will change the state of the session to Idle when the
+      -- snippet terminates
+      interrupt runActions
+      void $ runWaitAll runActions
+      shutdownSession' forceTerminate session
+    Nothing ->
+      -- We're done
       return ()
-    IdeSessionServerDied _ _ ->
-      cleanupDirs
  where
   cleanupDirs = when (configDeleteTempFiles . ideConfig $ ideStaticInfo) $ do
     let dataDir    = ideDataDir ideStaticInfo
