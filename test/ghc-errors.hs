@@ -107,7 +107,8 @@ withSession setup io = inTempDir $ \tempDir -> do
       mDidShutdown <- timeout 2000000 $ shutdownSession session
       case mDidShutdown of
         Just () -> return ()
-        Nothing -> putStrLn "WARNING: Failed to shutdown session (timeout)"
+        Nothing -> do putStrLn "WARNING: Failed to shutdown session (timeout)"
+                      forceShutdownSession session
 
     isDefaultConfigDir = configDir config == configDir defaultSessionConfig
 

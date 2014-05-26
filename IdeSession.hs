@@ -111,6 +111,7 @@ module IdeSession (
   , SessionInitParams(..)
   , defaultSessionInitParams
   , shutdownSession
+  , forceShutdownSession
   , restartSession
     -- ** Session updates
   , IdeSessionUpdate -- Abstract

@@ -8,6 +8,7 @@ module IdeSession.Update (
   , SessionInitParams(..)
   , defaultSessionInitParams
   , shutdownSession
+  , forceShutdownSession
   , restartSession
     -- * Session updates
   , IdeSessionUpdate -- Abstract
@@ -239,20 +240,36 @@ writeMacros IdeStaticInfo{ ideConfig = SessionConfig {..}
 --
 -- If code is still running, it will be interrupted.
 shutdownSession :: IdeSession -> IO ()
-shutdownSession IdeSession{ideState, ideStaticInfo} = do
+shutdownSession = shutdownSession' False
+
+-- | Like shutdownSession, but don't be nice about it (SIGKILL)
+forceShutdownSession :: IdeSession -> IO ()
+forceShutdownSession = shutdownSession' True
+
+-- | Internal generalization of 'shutdownSession' and 'forceShutdownSession'
+shutdownSession' :: Bool -> IdeSession -> IO ()
+shutdownSession' forceTerminate IdeSession{ideState, ideStaticInfo} = do
   snapshot <- modifyMVar ideState $ \state -> return (IdeSessionShutdown, state)
   case snapshot of
     IdeSessionRunning runActions idleState -> do
-      -- We need to terminate the running program before we can shut down
-      -- the session, because the RPC layer will sequentialize all concurrent
-      -- calls (and if code is still running we still have an active
-      -- RPC conversation)
-      interrupt runActions
-      void $ runWaitAll runActions
-      shutdownGhcServer $ _ideGhcServer idleState
+      if forceTerminate
+        then
+          ignoreAllExceptions $ forceShutdownGhcServer $ _ideGhcServer idleState
+        else do
+          -- We need to terminate the running program before we can shut down
+          -- the session, because the RPC layer will sequentialize all concurrent
+          -- calls (and if code is still running we still have an active
+          -- RPC conversation)
+          interrupt runActions
+          void $ runWaitAll runActions
+          shutdownGhcServer $ _ideGhcServer idleState
       cleanupDirs
     IdeSessionIdle idleState -> do
-      shutdownGhcServer $ _ideGhcServer idleState
+      if forceTerminate
+        then
+          ignoreAllExceptions $ forceShutdownGhcServer $ _ideGhcServer idleState
+        else
+          shutdownGhcServer $ _ideGhcServer idleState
       cleanupDirs
     IdeSessionShutdown ->
       return ()
