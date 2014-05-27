@@ -4,6 +4,8 @@
 module IdeSession.State
   ( -- * Types
     Computed(..)
+  , PendingRemoteChanges(..)
+  , noPendingRemoteChanges
   , IdeSession(..)
   , IdeStaticInfo(..)
   , IdeSessionState(..)
@@ -30,10 +32,6 @@ module IdeSession.State
   , ideGhcVersion
   , ideStdoutBufferMode
   , ideStderrBufferMode
-  , ideUpdatedEnv
-  , ideUpdatedCode
-  , ideUpdatedArgs
-  , ideUpdatedGhcOpts
   , ideBreakInfo
   , ideTargets
   , managedSource
@@ -107,14 +105,53 @@ data IdeStaticInfo = IdeStaticInfo {
   , ideDistDir    :: FilePath
   }
 
+data PendingRemoteChanges = PendingRemoteChanges {
+    -- | Has the code diverged from what has been loaded into GHC on the last
+    -- call to 'updateSession'?
+    pendingUpdatedCode :: Bool
+
+    -- | Has the environment (as recorded in this state) diverged from the
+    -- environment on the server?
+    --
+    -- Since we have a "cumulative" API for environments, rather than replacing
+    -- the entire environment on very call, this is interpreted as a list of
+    -- changes: the empty list means no changes. The list of changes is recorded
+    -- _in reverse order_: the change that is meant to be applied last is
+    -- the first change in the list.
+  , pendingUpdatedEnv :: [(String, Maybe String)]
+
+    -- | Has the value of ideArgs diverged from what's recorded on the server?
+  , pendingUpdatedArgs :: Maybe [String]
+
+    -- | Has the value of ideDynamicOpts diverged from what's recorded on the server?
+  , pendingUpdatedOpts :: Maybe [String]
+
+    -- | Was the value of relative includes changed?
+  , pendingUpdatedIncl :: Maybe [FilePath]
+  }
+
+noPendingRemoteChanges :: PendingRemoteChanges
+noPendingRemoteChanges = PendingRemoteChanges {
+    pendingUpdatedCode = False
+  , pendingUpdatedEnv  = []
+  , pendingUpdatedArgs = Nothing
+  , pendingUpdatedOpts = Nothing
+  , pendingUpdatedIncl = Nothing
+  }
+
 data IdeSessionState =
     IdeSessionIdle IdeIdleState
   | IdeSessionRunning (RunActions Public.RunResult) IdeIdleState
+  | IdeSessionPendingChanges PendingRemoteChanges IdeIdleState
   | IdeSessionShutdown
   | IdeSessionServerDied ExternalException IdeIdleState
 
 type LogicalTimestamp = EpochTime
 
+-- TODO: We should split this into local state and (cached) "remote" state.
+-- Then we can change IdeSessionUpdate to have access to the local state only
+-- (IdeSessionUpdates _schedules_ remote updates, but doesn't run them; this
+-- happens only in updateSession).
 data IdeIdleState = IdeIdleState {
     -- | A workaround for http://hackage.haskell.org/trac/ghc/ticket/7473.
     -- Logical timestamps (used to force ghc to recompile files)
@@ -157,16 +194,6 @@ data IdeIdleState = IdeIdleState {
   , _ideStdoutBufferMode :: !Public.RunBufferMode
     -- | Buffer mode for standard error for 'runStmt'
   , _ideStderrBufferMode :: !Public.RunBufferMode
-    -- | Has the environment (as recorded in this state) diverged from the
-    -- environment on the server?
-  , _ideUpdatedEnv       :: !Bool
-    -- | Has the code diverged from what has been loaded into GHC on the last
-    -- call to 'updateSession'?
-  , _ideUpdatedCode      :: !Bool
-    -- | Has the value of ideArgs diverged from what's recorded on the server?
-  , _ideUpdatedArgs      :: !Bool
-    -- | Has the value of ideDynamicOpts diverged from what's recorded on the server?
-  , _ideUpdatedGhcOpts   :: !Bool
     -- | Are we currently in a breakpoint?
   , _ideBreakInfo        :: !(Strict Maybe Public.BreakInfo)
     -- | Targets for compilation
@@ -239,17 +266,13 @@ ideGhcServer           :: Accessor IdeIdleState GhcServer
 ideGhcVersion          :: Accessor IdeIdleState GhcVersion
 ideStdoutBufferMode    :: Accessor IdeIdleState Public.RunBufferMode
 ideStderrBufferMode    :: Accessor IdeIdleState Public.RunBufferMode
-ideUpdatedEnv          :: Accessor IdeIdleState Bool
-ideUpdatedCode         :: Accessor IdeIdleState Bool
-ideUpdatedArgs         :: Accessor IdeIdleState Bool
-ideUpdatedGhcOpts      :: Accessor IdeIdleState Bool
 ideBreakInfo           :: Accessor IdeIdleState (Strict Maybe Public.BreakInfo)
 ideTargets             :: Accessor IdeIdleState Public.Targets
 
 ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
 ideDynamicOpts      = accessor _ideDynamicOpts      $ \x s -> s { _ideDynamicOpts      = x }
-ideRelativeIncludes      = accessor _ideRelativeIncludes $ \x s -> s { _ideRelativeIncludes = x }
+ideRelativeIncludes = accessor _ideRelativeIncludes $ \x s -> s { _ideRelativeIncludes = x }
 ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCode     = x }
 ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }
 ideObjectFiles      = accessor _ideObjectFiles      $ \x s -> s { _ideObjectFiles      = x }
@@ -263,10 +286,6 @@ ideGhcServer        = accessor _ideGhcServer        $ \x s -> s { _ideGhcServer 
 ideGhcVersion       = accessor _ideGhcVersion       $ \x s -> s { _ideGhcVersion       = x }
 ideStdoutBufferMode = accessor _ideStdoutBufferMode $ \x s -> s { _ideStdoutBufferMode = x }
 ideStderrBufferMode = accessor _ideStderrBufferMode $ \x s -> s { _ideStderrBufferMode = x }
-ideUpdatedEnv       = accessor _ideUpdatedEnv       $ \x s -> s { _ideUpdatedEnv       = x }
-ideUpdatedCode      = accessor _ideUpdatedCode      $ \x s -> s { _ideUpdatedCode      = x }
-ideUpdatedArgs      = accessor _ideUpdatedArgs      $ \x s -> s { _ideUpdatedArgs      = x }
-ideUpdatedGhcOpts   = accessor _ideUpdatedGhcOpts   $ \x s -> s { _ideUpdatedGhcOpts   = x }
 ideBreakInfo        = accessor _ideBreakInfo        $ \x s -> s { _ideBreakInfo        = x }
 ideTargets          = accessor _ideTargets          $ \x s -> s { _ideTargets          = x }
 

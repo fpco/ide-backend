@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes, ScopedTypeVariables, MultiParamTypeClasses, GADTs #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes, ScopedTypeVariables, MultiParamTypeClasses, ExistentialQuantification #-}
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
@@ -12,6 +12,7 @@ module IdeSession.Update (
   , restartSession
     -- * Session updates
   , IdeSessionUpdate -- Abstract
+  , canExecuteWhileRunning
   , updateSession
   , updateSourceFile
   , updateSourceFileFromFile
@@ -45,8 +46,9 @@ module IdeSession.Update (
 
 import Prelude hiding (mod, span)
 import Control.Concurrent (threadDelay)
-import Control.Monad (when, void, forM, unless, (>=>))
-import Control.Monad.State (MonadState, StateT, execStateT)
+import Control.Applicative ((<|>))
+import Control.Monad (when, void, forM, unless)
+import Control.Monad.State (MonadState, StateT, execStateT, runStateT)
 import Control.Monad.Reader (MonadReader(..), asks)
 import Control.Monad.Writer (MonadWriter, WriterT, execWriterT, tell)
 import Control.Monad.Trans.Class (lift)
@@ -54,6 +56,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Applicative (Applicative(..), (<$>), (<*>))
 import qualified Control.Exception as Ex
 import qualified Control.Monad.State as St
+import Data.Digest.Pure.MD5 (MD5Digest)
 import Data.List (elemIndices)
 import Data.Monoid (Monoid(..))
 import Data.Accessor (Accessor, (.>), (^.), (^=))
@@ -146,8 +149,8 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
   -- Start the GHC server (as a separate process)
   mServer <- forkGhcServer ideStaticInfo
   let (state, server, version) = case mServer of
-         Right (s, v) -> (IdeSessionIdle,         s,          v)
-         Left e       -> (IdeSessionServerDied e, Ex.throw e, Ex.throw e)
+         Right (s, v) -> (        IdeSessionPendingChanges,  s,          v)
+         Left e       -> (const $ IdeSessionServerDied e,    Ex.throw e, Ex.throw e)
 
   -- The value of _ideLogicalTimestamp field is a workaround for
   -- the problems with 'invalidateModSummaryCache', which itself is
@@ -156,32 +159,37 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
   -- trigger an exception (http://hackage.haskell.org/trac/ghc/ticket/7567).
   -- We rather arbitrary start at Jan 2, 1970.
   let idleState = IdeIdleState {
-                      _ideLogicalTimestamp = 86400
-                    , _ideComputed         = Maybe.nothing
-                    , _ideDynamicOpts      = []
-                    , _ideRelativeIncludes = configRelativeIncludes
-                    , _ideGenerateCode     = False
-                    , _ideManagedFiles     = ManagedFilesInternal [] []
-                    , _ideObjectFiles      = []
-                    , _ideBuildExeStatus   = Nothing
-                    , _ideBuildDocStatus   = Nothing
-                    , _ideBuildLicensesStatus = Nothing
-                    , _ideEnv              = []
-                    , _ideArgs             = []
-                    , _ideUpdatedEnv       = False
-                    , _ideUpdatedArgs      = False -- Server default is []
-                    , _ideUpdatedGhcOpts   = False
-                      -- Make sure 'ideComputed' is set on first call
-                      -- to updateSession
-                    , _ideUpdatedCode      = True
-                    , _ideStdoutBufferMode = RunNoBuffering
-                    , _ideStderrBufferMode = RunNoBuffering
-                    , _ideBreakInfo        = Maybe.nothing
-                    , _ideGhcServer        = server
-                    , _ideGhcVersion       = version
-                    , _ideTargets          = Public.TargetsExclude []
-                    }
-  ideState <- newMVar (state idleState)
+          _ideLogicalTimestamp = 86400
+        , _ideComputed         = Maybe.nothing
+        , _ideDynamicOpts      = []
+        , _ideRelativeIncludes = configRelativeIncludes
+        , _ideGenerateCode     = False
+        , _ideManagedFiles     = ManagedFilesInternal [] []
+        , _ideObjectFiles      = []
+        , _ideBuildExeStatus   = Nothing
+        , _ideBuildDocStatus   = Nothing
+        , _ideBuildLicensesStatus = Nothing
+        , _ideEnv              = []
+        , _ideArgs             = []
+        , _ideStdoutBufferMode = RunNoBuffering
+        , _ideStderrBufferMode = RunNoBuffering
+        , _ideBreakInfo        = Maybe.nothing
+        , _ideGhcServer        = server
+        , _ideGhcVersion       = version
+        , _ideTargets          = Public.TargetsExclude []
+        }
+
+  let pendingRemoteChanges = PendingRemoteChanges {
+          -- Make sure 'ideComputed' is set on first call to updateSession
+          -- TODO: Would be nicer if we did this a different way
+          pendingUpdatedCode = True
+        , pendingUpdatedEnv  = []
+        , pendingUpdatedArgs = Nothing -- Server default is []
+        , pendingUpdatedOpts = Nothing
+        , pendingUpdatedIncl = Nothing
+        }
+
+  ideState <- newMVar (state pendingRemoteChanges idleState)
   return IdeSession{..}
 
 -- | Set up the initial state of the session according to the given parameters
@@ -264,6 +272,12 @@ shutdownSession' forceTerminate session@IdeSession{ideState, ideStaticInfo} = do
           else shutdownGhcServer      $ _ideGhcServer idleState
         cleanupDirs
         return (IdeSessionShutdown, Nothing)
+      IdeSessionPendingChanges _pendingChanges idleState -> do
+        if forceTerminate
+          then forceShutdownGhcServer $ _ideGhcServer idleState
+          else shutdownGhcServer      $ _ideGhcServer idleState
+        cleanupDirs
+        return (IdeSessionShutdown, Nothing)
       IdeSessionShutdown ->
         return (IdeSessionShutdown, Nothing)
       IdeSessionServerDied _ _ -> do
@@ -317,31 +331,40 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
     modifyMVar_ ideState $ \state ->
       case state of
         IdeSessionIdle idleState ->
-          restart idleState
+          restart noPendingRemoteChanges idleState
         IdeSessionRunning runActions idleState -> do
           forceCancel runActions
-          restart idleState
+          restart noPendingRemoteChanges idleState
+        IdeSessionPendingChanges pendingChanges idleState ->
+          restart pendingChanges idleState
         IdeSessionShutdown ->
           fail "Shutdown session cannot be restarted."
         IdeSessionServerDied _externalException idleState ->
-          restart idleState
+          restart noPendingRemoteChanges idleState
   where
-    restart :: IdeIdleState -> IO IdeSessionState
-    restart idleState = do
+    restart :: PendingRemoteChanges -> IdeIdleState -> IO IdeSessionState
+    restart pendingChanges idleState = do
       forceShutdownGhcServer $ _ideGhcServer idleState
       mServer <- forkGhcServer ideStaticInfo
       case mServer of
-        Right (server, version) ->
-          return . IdeSessionIdle
-                 . (ideComputed       ^= Maybe.nothing)
-                 . (ideUpdatedEnv     ^= True)
-                 . (ideUpdatedArgs    ^= True)
-                 . (ideUpdatedCode    ^= True)
-                 . (ideUpdatedGhcOpts ^= True)
-                 . (ideGhcServer      ^= server)
-                 . (ideGhcVersion     ^= version)
-                 . (ideObjectFiles    ^= [])
-                 $ idleState
+        Right (server, version) -> do
+          let idleState' =
+                  (ideComputed       ^= Maybe.nothing)
+                . (ideGhcServer      ^= server)
+                . (ideGhcVersion     ^= version)
+                . (ideObjectFiles    ^= [])
+                $ idleState
+              -- TODO: We could optimize this, and avoid a few RPC calls, by
+              -- setting these fields to Nothing if the current value in
+              -- idleState happens to be the server default.
+              pendingRemoteChanges = pendingChanges {
+                  pendingUpdatedCode = True
+                , pendingUpdatedEnv  = pendingUpdatedEnv  pendingChanges ++        idleState ^. ideEnv
+                , pendingUpdatedArgs = pendingUpdatedArgs pendingChanges <|> Just (idleState ^. ideArgs)
+                , pendingUpdatedOpts = pendingUpdatedOpts pendingChanges <|> Just (idleState ^. ideDynamicOpts)
+                , pendingUpdatedIncl = pendingUpdatedIncl pendingChanges <|> Just (idleState ^. ideRelativeIncludes)
+                }
+          return $ IdeSessionPendingChanges pendingRemoteChanges idleState'
         Left e ->
           return . IdeSessionServerDied e
                  . (ideGhcServer   ^= Ex.throw e)
@@ -357,41 +380,90 @@ data IdeSessionUpdateEnv = IdeSessionUpdateEnv {
   , ideSessionUpdateCallback   :: forall m. MonadIO m => Progress -> m ()
   }
 
-data IdeSessionUpdate a where
-  Done    :: a -> IdeSessionUpdate a
-  Run     :: (IdeSessionUpdateEnv -> IdeIdleState -> IO (a, IdeIdleState)) -> (a -> IdeSessionUpdate b) -> IdeSessionUpdate b
-  Restart :: IdeSessionUpdate a -> IdeSessionUpdate a
+data IdeSingleUpdate r =
+    -- | Run an arbitrary IO action
+    --
+    -- As soon we as have to execute a single Run action we will mark the action
+    -- as not executable while the session is in Running state
+    forall a. Run (IO a) (a -> r)
 
-restartSession' :: IdeSessionUpdate ()
-restartSession' = Restart (Done ())
+    -- | Restart the session
+    --
+    -- Will mark the session as not updateable in Running mode.
+  | Restart r
+
+    -- | Get the static info
+  | GetEnv (IdeSessionUpdateEnv -> r)
+
+    -- | Get the state
+  | GetState (IdeIdleState -> r)
+
+    -- | Set the state
+  | PutState IdeIdleState r
+
+    -- | Write a file
+  | FileCmd FileCmd (Bool -> r)
+
+    -- | Schedule a remote change
+  | Schedule (PendingRemoteChanges -> PendingRemoteChanges) r
+
+instance Functor IdeSingleUpdate where
+  fmap f (Run      act k) = Run      act (f . k)
+  fmap f (Restart      k) = Restart      (f k)
+  fmap f (GetEnv       k) = GetEnv       (f . k)
+  fmap f (GetState     k) = GetState     (f . k)
+  fmap f (PutState st  k) = PutState st  (f k)
+  fmap f (FileCmd  cmd k) = FileCmd  cmd (f . k)
+  fmap f (Schedule g   k) = Schedule g   (f k)
+
+data IdeSessionUpdate a = Pure a | Free (IdeSingleUpdate (IdeSessionUpdate a))
 
 instance Functor IdeSessionUpdate where
-  fmap f (Done x)    = Done (f x)
-  fmap f (Run g k)   = Run g (fmap f . k)
-  fmap f (Restart k) = Restart (fmap f k)
+  fmap f (Pure x) = Pure (f x)
+  fmap f (Free x) = Free (fmap (fmap f) x)
+
+instance Monad IdeSessionUpdate where
+  return = Pure
+  Pure x >>= f = f x
+  Free x >>= f = Free (fmap (>>= f) x)
 
 instance Applicative IdeSessionUpdate where
   pure      = return
   mf <*> mx = do f <- mf ; x <- mx ; return (f x)
 
-instance Monad IdeSessionUpdate where
-  return = Done
-  Done x    >>= f = f x
-  Run g k   >>= f = Run g (k >=> f)
-  Restart k >>= f = Restart (k >>= f)
-
 instance MonadReader IdeSessionUpdateEnv IdeSessionUpdate where
-  ask = Run (\env st -> return (env, st)) Done
-  local _ (Done x)    = Done x
-  local f (Run g k)   = Run (\env st -> g (f env) st) (local f . k)
-  local f (Restart k) = Restart (local f k)
+  ask = Free (GetEnv Pure)
+  local _ (Pure x)          = Pure x
+  local f (Free (GetEnv k)) = Free (fmap (local f) (GetEnv (k . f)))
+  local f (Free x)          = Free (fmap (local f) x)
 
 instance MonadState IdeIdleState IdeSessionUpdate where
-  get    = Run (\_ st -> return (st, st)) Done
-  put st = Run (\_ _  -> return ((), st)) Done
+  get    = Free (GetState Pure)
+  put st = Free (PutState st (Pure ()))
 
 instance MonadIO IdeSessionUpdate where
-  liftIO act = Run (\_ st -> do a <- act ; return (a, st)) Done
+  liftIO act = Free (Run act Pure)
+
+canExecuteWhileRunning :: IdeSession -> IdeSessionUpdate a -> Bool
+canExecuteWhileRunning IdeSession{ideStaticInfo = staticInfo} = go
+  where
+    go :: IdeSessionUpdate a -> Bool
+    go (Pure _)              = True
+    go (Free (Run      _ _)) = False
+    go (Free (Restart    _)) = False
+    go (Free (GetEnv     k)) = go (k $ IdeSessionUpdateEnv staticInfo dummyCallback)
+    go (Free (GetState   _)) = False
+    go (Free (PutState _ _)) = False
+    go (Free (FileCmd  _ k)) = go (k True) && go (k False)
+    go (Free (Schedule _ _)) = False
+
+    dummyCallback _ = return ()
+
+restartSession' :: IdeSessionUpdate ()
+restartSession' = Free (Restart (Pure ()))
+
+schedule :: (PendingRemoteChanges -> PendingRemoteChanges) -> IdeSessionUpdate ()
+schedule g = Free (Schedule g (Pure ()))
 
 -- We assume, if updates are combined within the monoid, they can all
 -- be applied in the context of the same session.
@@ -407,14 +479,23 @@ data IdeSessionUpdateResult a =
 runSessionUpdate :: IdeStaticInfo
                  -> (Progress -> IO ())
                  -> IdeIdleState
+                 -> PendingRemoteChanges
                  -> IdeSessionUpdate a
-                 -> IO (IdeSessionUpdateResult a, IdeIdleState)
+                 -> IO (IdeSessionUpdateResult a, IdeIdleState, PendingRemoteChanges)
 runSessionUpdate staticInfo callback = go
   where
-    go :: IdeIdleState -> IdeSessionUpdate a -> IO (IdeSessionUpdateResult a, IdeIdleState)
-    go st (Done x)    = return (UpdateComplete x, st)
-    go st (Run g k)   = do (a, st') <- g env st ; go st' (k a)
-    go st (Restart k) = return (RestartThenRun k, st)
+    go :: IdeIdleState -> PendingRemoteChanges
+       -> IdeSessionUpdate a
+       -> IO (IdeSessionUpdateResult a, IdeIdleState, PendingRemoteChanges)
+    go st r (Pure x)                = return (UpdateComplete x, st, r)
+    go st r (Free (Run      g   k)) = do a <- g ; go st r (k a)
+    go st r (Free (Restart      k)) = return (RestartThenRun k, st, r)
+    go st r (Free (GetEnv       k)) = go st  r (k env)
+    go st r (Free (GetState     k)) = go st  r (k st)
+    go _  r (Free (PutState st' k)) = go st' r k
+    go st r (Free (FileCmd  cmd k)) = do (filesChanged, st') <- runStateT (executeFileCmd staticInfo cmd) st
+                                         go st' r (k filesChanged)
+    go st r (Free (Schedule g   k)) = go st (g r) k
 
     env :: IdeSessionUpdateEnv
     env = IdeSessionUpdateEnv {
@@ -441,112 +522,20 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
   where
     go :: Bool -> IdeSessionUpdate (Int, [SourceError]) -> IO ()
     go justRestarted update = do
-      -- We don't want to call 'restartSession' while we hold the lock
-      shouldRestart <- modifyMVar ideState $ \state -> case state of
-
-        IdeSessionIdle idleState -> Ex.handle (handleExternal idleState) $ do
-          (result, idleState') <- runSessionUpdate ideStaticInfo
-                                                   callback
-                                                   idleState
-                                                   update
-
-          case result of
-            RestartThenRun update' -> do
-              -- To avoid "<stdout> hPutChar: resource vanished (Broken pipe)":
-              -- TODO: Why is this necessary?
-              threadDelay 100000
-
-              -- We ignore justRestarted when we get an explicit RestartThenRun
-              return (IdeSessionIdle idleState', Just update')
-
-            UpdateComplete (numActions, cErrors) -> do
-               let callback' p = callback p {
-                       progressStep     = progressStep     p + numActions
-                     , progressNumSteps = progressNumSteps p + numActions
-                     }
-
-               -- Update environment
-               when (idleState' ^. ideUpdatedEnv) $
-                 rpcSetEnv (idleState ^. ideGhcServer) (idleState' ^. ideEnv)
-
-               when (idleState' ^. ideUpdatedArgs) $
-                 rpcSetArgs (idleState ^. ideGhcServer) (idleState' ^. ideArgs)
-
-               -- Update options
-               optionWarnings <- if (idleState' ^. ideUpdatedGhcOpts)
-                 then do
-                   -- relative include path is part of the state rather than the
-                   -- config as of c0bf0042
-                   let relIncl    = idleState' ^. ideRelativeIncludes
-                       sourcesDir = ideSourcesDir ideStaticInfo
-                       unrecognized str = "Unrecognized option " ++ show str
-                   (leftover, warnings) <-
-                     rpcSetGhcOpts (idleState ^. ideGhcServer)
-                                   (idleState' ^. ideDynamicOpts
-                                        ++ relInclToOpts sourcesDir relIncl)
-                   return $ force $
-                     [ SourceError {
-                           errorKind = KindWarning
-                         , errorSpan = TextSpan (Text.pack "No location information")
-                         , errorMsg  = Text.pack w
-                         }
-                     | w <- warnings ++ map unrecognized leftover
-                     ]
-                 else
-                   return $ force []
-
-               -- Recompile
-               computed <- if (idleState' ^. ideUpdatedCode)
-                 then do
-                   GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
-                                                      (idleState' ^. ideGenerateCode)
-                                                      (idleState' ^. ideTargets)
-                                                      callback'
-
-                   let applyDiff :: Strict (Map ModuleName) (Diff v)
-                                 -> (Computed -> Strict (Map ModuleName) v)
-                                 -> Strict (Map ModuleName) v
-                       applyDiff diff f = applyMapDiff diff
-                                        $ Maybe.maybe Map.empty f
-                                        $ idleState' ^. ideComputed
-
-                   let diffSpan  = Map.map (fmap mkIdMap)  ghcCompileSpanInfo
-                       diffTypes = Map.map (fmap mkExpMap) ghcCompileExpTypes
-                       diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
-
-                   return $ Maybe.just Computed {
-                       computedErrors        = force cErrors List.++ ghcCompileErrors List.++ optionWarnings
-                     , computedLoadedModules = ghcCompileLoaded
-                     , computedImports       = ghcCompileImports  `applyDiff` computedImports
-                     , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
-                     , computedSpanInfo      = diffSpan           `applyDiff` computedSpanInfo
-                     , computedExpTypes      = diffTypes          `applyDiff` computedExpTypes
-                     , computedUseSites      = ghcCompileUseSites `applyDiff` computedUseSites
-                     , computedPkgDeps       = ghcCompilePkgDeps  `applyDiff` computedPkgDeps
-                     , computedCache         = mkRelative ghcCompileCache
-                     }
-                 else return $ idleState' ^. ideComputed
-
-               -- Update state
-               return ( IdeSessionIdle
-                      . (ideComputed       ^= computed)
-                      . (ideUpdatedEnv     ^= False)
-                      . (ideUpdatedCode    ^= False)
-                      . (ideUpdatedArgs    ^= False)
-                      . (ideUpdatedGhcOpts ^= False)
-                      $ idleState'
-                      , Nothing
-                      )
-
-        IdeSessionServerDied _ _ ->
-          if not justRestarted
-            then return (state, Just update)
-            else return (state, Nothing)
-
-        IdeSessionRunning _ _ ->
-          Ex.throwIO (userError "Cannot update session in running mode")
-        IdeSessionShutdown ->
-          Ex.throwIO (userError "Session already shut down.")
+      shouldRestart <- modifyMVar ideState $ \state ->
+        case state of
+          IdeSessionIdle idleState ->
+            goAtomic noPendingRemoteChanges idleState update
+          IdeSessionPendingChanges pendingChanges idleState ->
+            goAtomic pendingChanges idleState update
+          IdeSessionServerDied _ _ ->
+            if not justRestarted
+              then return (state, Just update)
+              else return (state, Nothing)
+          IdeSessionRunning _ _ ->
+            Ex.throwIO (userError "Cannot update session in running mode")
+          IdeSessionShutdown ->
+            Ex.throwIO (userError "Session already shut down.")
 
       case shouldRestart of
         Just update' -> do
@@ -554,6 +543,138 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
           go True update'
         Nothing ->
           return ()
+
+    -- The real work happens here. We will have the lock on the session while
+    -- this executes. Returns Just an update if we need to restart the session
+    -- before we can continue (we don't want to restart the session while we
+    -- hold the lock).
+    goAtomic :: PendingRemoteChanges
+             -> IdeIdleState
+             -> IdeSessionUpdate (Int, [SourceError])
+             -> IO (IdeSessionState, Maybe (IdeSessionUpdate (Int, [SourceError])))
+    goAtomic pendingChanges idleState update = Ex.handle (handleExternal idleState) $ do
+      (result, idleState', pendingChanges') <- runSessionUpdate ideStaticInfo
+                                                                callback
+                                                                idleState
+                                                                pendingChanges
+                                                                update
+
+      case result of
+        RestartThenRun update' -> do
+          -- To avoid "<stdout> hPutChar: resource vanished (Broken pipe)":
+          -- TODO: Why is this necessary?
+          threadDelay 100000
+
+          -- We ignore justRestarted when we get an explicit RestartThenRun
+          return (IdeSessionPendingChanges pendingChanges' idleState', Just update')
+
+        UpdateComplete (numActions, cErrors) -> do
+           let callback' p = callback p {
+                   progressStep     = progressStep     p + numActions
+                 , progressNumSteps = progressNumSteps p + numActions
+                 }
+
+           -- Update environment
+           ideEnv' <- case pendingUpdatedEnv pendingChanges' of
+             [] -> return $ idleState' ^. ideEnv
+             cs -> do let newEnv :: [(String, Maybe String)] -> [(String, Maybe String)]
+                          newEnv [] =
+                            idleState' ^. ideEnv
+                          newEnv ((var, val) : cs') =
+                            lookup' var ^= Just val $ newEnv cs'
+
+                          ideEnv' = newEnv cs
+
+                      rpcSetEnv (idleState ^. ideGhcServer) ideEnv'
+                      return ideEnv'
+
+           -- Update command line arguments
+           ideArgs' <- case pendingUpdatedArgs pendingChanges' of
+             Nothing   -> return $ idleState' ^. ideArgs
+             Just args -> do rpcSetArgs (idleState ^. ideGhcServer) args
+                             return args
+
+           -- Update ghc options
+           let (ideDynamicOpts', ideRelativeIncludes', needSetOpts) =
+                 case (pendingUpdatedOpts pendingChanges', pendingUpdatedIncl pendingChanges') of
+                   (Nothing,   Nothing)   -> ( idleState' ^. ideDynamicOpts
+                                             , idleState' ^. ideRelativeIncludes
+                                             , False
+                                             )
+                   (Just opts, Nothing)   -> ( opts
+                                             , idleState' ^. ideRelativeIncludes
+                                             , True
+                                             )
+                   (Nothing,   Just incl) -> ( idleState' ^. ideDynamicOpts
+                                             , incl
+                                             , True
+                                             )
+                   (Just opts, Just incl) -> ( opts
+                                             , incl
+                                             , True
+                                             )
+           optionWarnings <- if needSetOpts
+             then do
+               -- relative include path is part of the state rather than the
+               -- config as of c0bf0042
+               let relOpts = relInclToOpts (ideSourcesDir ideStaticInfo)
+                                           ideRelativeIncludes'
+               (leftover, warnings) <- rpcSetGhcOpts (idleState ^. ideGhcServer)
+                                                     (ideDynamicOpts' ++ relOpts)
+               return $ force $
+                 [ SourceError {
+                       errorKind = KindWarning
+                     , errorSpan = TextSpan (Text.pack "No location information")
+                     , errorMsg  = Text.pack w
+                     }
+                 | w <- warnings ++ map unrecognized leftover
+                 ]
+             else
+               return $ force []
+
+           -- Recompile
+           computed <- if pendingUpdatedCode pendingChanges'
+             then do
+               GhcCompileResult{..} <- rpcCompile (idleState' ^. ideGhcServer)
+                                                  (idleState' ^. ideGenerateCode)
+                                                  (idleState' ^. ideTargets)
+                                                  callback'
+
+               let applyDiff :: Strict (Map ModuleName) (Diff v)
+                             -> (Computed -> Strict (Map ModuleName) v)
+                             -> Strict (Map ModuleName) v
+                   applyDiff diff f = applyMapDiff diff
+                                    $ Maybe.maybe Map.empty f
+                                    $ idleState' ^. ideComputed
+
+               let diffSpan  = Map.map (fmap mkIdMap)  ghcCompileSpanInfo
+                   diffTypes = Map.map (fmap mkExpMap) ghcCompileExpTypes
+                   diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
+
+               return $ Maybe.just Computed {
+                   computedErrors        = force cErrors List.++ ghcCompileErrors List.++ optionWarnings
+                 , computedLoadedModules = ghcCompileLoaded
+                 , computedImports       = ghcCompileImports  `applyDiff` computedImports
+                 , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
+                 , computedSpanInfo      = diffSpan           `applyDiff` computedSpanInfo
+                 , computedExpTypes      = diffTypes          `applyDiff` computedExpTypes
+                 , computedUseSites      = ghcCompileUseSites `applyDiff` computedUseSites
+                 , computedPkgDeps       = ghcCompilePkgDeps  `applyDiff` computedPkgDeps
+                 , computedCache         = mkRelative ghcCompileCache
+                 }
+             else return $ idleState' ^. ideComputed
+
+           -- Update state
+           let idleState'' = (ideComputed         ^= computed)
+                           . (ideDynamicOpts      ^= ideDynamicOpts')
+                           . (ideRelativeIncludes ^= ideRelativeIncludes')
+                           . (ideEnv              ^= ideEnv')
+                           . (ideArgs             ^= ideArgs')
+                           $ idleState'
+           return (IdeSessionIdle idleState'', Nothing)
+
+    unrecognized :: String -> String
+    unrecognized str = "Unrecognized option " ++ show str
 
     mkRelative :: ExplicitSharingCache -> ExplicitSharingCache
     mkRelative ExplicitSharingCache{..} =
@@ -712,18 +833,39 @@ recompileObjectFiles = do
 -- Usually the two names are equal, but they needn't be.
 --
 updateSourceFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
-updateSourceFile = updateFile ideSourcesDir managedSource
+updateSourceFile fp bs =
+  let fileInfo = FileInfo {
+          fileInfoRemoteFile = fp
+        , fileInfoRemoteDir  = ideSourcesDir
+        , fileInfoAccessor   = managedSource
+        }
+  in do filesChanged <- Free (FileCmd (FileWrite fileInfo bs) Pure)
+        when filesChanged $ schedule (\r -> r { pendingUpdatedCode = True })
 
 -- | Like 'updateSourceFile' except that instead of passing the source by
 -- value, it's given by reference to an existing file, which will be copied.
 --
 updateSourceFileFromFile :: FilePath -> IdeSessionUpdate ()
-updateSourceFileFromFile p = updateFileFromFile ideSourcesDir managedSource p p
+updateSourceFileFromFile fp =
+  let fileInfo = FileInfo {
+          fileInfoRemoteFile = fp
+        , fileInfoRemoteDir  = ideSourcesDir
+        , fileInfoAccessor   = managedSource
+        }
+  in do filesChanged <- Free (FileCmd (FileCopy fileInfo fp) Pure)
+        when filesChanged $ schedule (\r -> r { pendingUpdatedCode = True })
 
 -- | A session update that deletes an existing source file.
 --
 updateSourceFileDelete :: FilePath -> IdeSessionUpdate ()
-updateSourceFileDelete = updateFileDelete ideSourcesDir managedSource
+updateSourceFileDelete fp =
+  let fileInfo = FileInfo {
+          fileInfoRemoteFile = fp
+        , fileInfoRemoteDir  = ideSourcesDir
+        , fileInfoAccessor   = managedSource
+        }
+  in do filesChanged <- Free (FileCmd (FileDelete fileInfo) Pure)
+        when filesChanged $ schedule (\r -> r { pendingUpdatedCode = True })
 
 -- | Set ghc dynamic options
 --
@@ -732,9 +874,10 @@ updateSourceFileDelete = updateFileDelete ideSourcesDir managedSource
 -- call to updateDynamicOptions.
 updateDynamicOpts :: [String] -> IdeSessionUpdate ()
 updateDynamicOpts opts = do
-  set ideDynamicOpts    opts
-  set ideUpdatedGhcOpts True
-  set ideUpdatedCode    True -- In case we need to recompile due to new opts
+  schedule $ \r -> r {
+      pendingUpdatedCode = True -- In case we need to recompile due to new opts
+    , pendingUpdatedOpts = Just opts
+    }
 
 -- | Set include paths (equivalent of GHC's @-i@ parameter).
 -- In general, this requires session restart,
@@ -747,9 +890,10 @@ updateDynamicOpts opts = do
 -- are wiped out and overwritten in each call to updateRelativeIncludes.
 updateRelativeIncludes :: [FilePath] -> IdeSessionUpdate ()
 updateRelativeIncludes relIncl = do
-  set ideRelativeIncludes relIncl
-  set ideUpdatedGhcOpts   True
-  set ideUpdatedCode      True -- In case we need to recompile due to new paths
+  schedule $ \r -> r {
+      pendingUpdatedCode = True -- In case we need to recompile due to new opts:
+    , pendingUpdatedIncl = Just relIncl
+    }
   restartSession'
 
 -- | Enable or disable code generation in addition
@@ -757,42 +901,60 @@ updateRelativeIncludes relIncl = do
 updateCodeGeneration :: Bool -> IdeSessionUpdate ()
 updateCodeGeneration b = do
   set ideGenerateCode b
-  set ideUpdatedCode True
+  -- TODO: Shouldn't we do this only if b == True?
+  schedule (\r -> r { pendingUpdatedCode = True })
 
 -- | A session update that changes a data file by giving a new value for the
 -- file. This can be used to add a new file or update an existing one.
--- Since source files can include data files (e.g., via TH), we set
--- @ideUpdatedCode@ to force recompilation (see #94).
 --
 updateDataFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
-updateDataFile = updateFile ideDataDir managedData
+updateDataFile fp bs =
+  let fileInfo = FileInfo {
+          fileInfoRemoteFile = fp
+        , fileInfoRemoteDir  = ideDataDir
+        , fileInfoAccessor   = managedData
+        }
+  in do filesChanged <- Free (FileCmd (FileWrite fileInfo bs) Pure)
+        when filesChanged $ schedule (\r -> r { pendingUpdatedCode = True })
 
 -- | Like 'updateDataFile' except that instead of passing the file content by
 -- value, it's given by reference to an existing file (the second argument),
 -- which will be copied.
 --
 updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate ()
-updateDataFileFromFile = updateFileFromFile ideDataDir managedData
+updateDataFileFromFile remoteFile localFile =
+  let fileInfo = FileInfo {
+          fileInfoRemoteFile = remoteFile
+        , fileInfoRemoteDir  = ideDataDir
+        , fileInfoAccessor   = managedData
+        }
+  in do filesChanged <- Free (FileCmd (FileCopy fileInfo localFile) Pure)
+        when filesChanged $ schedule (\r -> r { pendingUpdatedCode = True })
 
--- | A session update that deletes an existing data file.
+-- | Deletes an existing data file.
 --
 updateDataFileDelete :: FilePath -> IdeSessionUpdate ()
-updateDataFileDelete = updateFileDelete ideDataDir managedData
+updateDataFileDelete fp =
+  let fileInfo = FileInfo {
+          fileInfoRemoteFile = fp
+        , fileInfoRemoteDir  = ideDataDir
+        , fileInfoAccessor   = managedData
+        }
+  in do filesChanged <- Free (FileCmd (FileDelete fileInfo) Pure)
+        when filesChanged $ schedule (\r -> r { pendingUpdatedCode = True })
 
 -- | Set an environment variable
 --
 -- Use @updateEnv var Nothing@ to unset @var@.
 updateEnv :: String -> Maybe String -> IdeSessionUpdate ()
-updateEnv var val = do
-  set (ideEnv .> lookup' var) (Just val)
-  set ideUpdatedEnv True
+updateEnv var val =
+  schedule $ \r -> r { pendingUpdatedEnv = (var, val) : pendingUpdatedEnv r }
 
 -- | Set command line arguments for snippets
 -- (i.e., the expected value of `getArgs`)
 updateArgs :: [String] -> IdeSessionUpdate ()
-updateArgs args = do
-  set ideArgs args
-  set ideUpdatedArgs True
+updateArgs args =
+  schedule $ \r -> r { pendingUpdatedArgs = Just args }
 
 -- | Set buffering mode for snippets' stdout
 updateStdoutBufferMode :: RunBufferMode -> IdeSessionUpdate ()
@@ -938,6 +1100,7 @@ runCmd session mkCmd = modifyIdleState session $ \idleState ->
     (Just comp, True) -> do
       let cmd   = mkCmd idleState
           cache = computedCache comp
+
       checkStateOk comp cmd
       isBreak    <- newEmptyMVar
       runActions <- rpcRun (idleState ^. ideGhcServer)
@@ -969,6 +1132,8 @@ runCmd session mkCmd = modifyIdleState session $ \idleState ->
       mBreakInfo <- readMVar isBreak
       modifyMVar_ (ideState session) $ \state -> case state of
         IdeSessionIdle _ ->
+          Ex.throwIO (userError "The impossible happened!")
+        IdeSessionPendingChanges _ _ ->
           Ex.throwIO (userError "The impossible happened!")
         IdeSessionRunning _ idleState -> do
           let upd = ideBreakInfo ^= fmap (removeExplicitSharing cache) mBreakInfo
@@ -1100,11 +1265,6 @@ buildExe extraOpts ms = do
                                   , beLoadedMs = loadedMs }
                 invokeExeCabal ideStaticInfo (ReqExeBuild beArgs ms) callback)
     set ideBuildExeStatus (Just exitCode)
-  where
-    ignoreDoesNotExist :: IO () -> IO ()
-    ignoreDoesNotExist = Ex.handle $ \e ->
-      if isDoesNotExistError e then return ()
-                               else Ex.throwIO e
 
 -- | Build haddock documentation from sources added previously via
 -- the ide-backend updateSourceFile* mechanism. Similarly to 'buildExe',
@@ -1206,8 +1366,14 @@ forceRecompile = markAsUpdated (const True)
 -- @Nothing@, crash immediately; otherwise, set up a thread that throws
 -- an exception to the main thread after the delay.
 crashGhcServer :: IdeSession -> Maybe Int -> IO ()
-crashGhcServer session delay = withIdleState session $ \idleState ->
-  rpcCrash (idleState ^. ideGhcServer) delay
+crashGhcServer IdeSession{..} delay = withMVar ideState $ \state ->
+  case state of
+    IdeSessionIdle idleState ->
+      rpcCrash (idleState ^. ideGhcServer) delay
+    IdeSessionPendingChanges _ idleState ->
+      rpcCrash (idleState ^. ideGhcServer) delay
+    _ ->
+      Ex.throwIO $ userError "State not idle"
 
 {------------------------------------------------------------------------------
   Internal session updates
@@ -1234,14 +1400,14 @@ markAsUpdated shouldMark = do
   sources  <- get (ideManagedFiles .> managedSource)
   sources' <- forM sources $ \(path, (digest, oldTS)) ->
     if shouldMark path
-      then do set ideUpdatedCode True
+      then do schedule (\r -> r { pendingUpdatedCode = True })
               newTS <- updateFileTimes (ideSourcesDir </> path)
               return (path, (digest, newTS))
       else return (path, (digest, oldTS))
   set (ideManagedFiles .> managedSource) sources'
 
 -- | Update the file times of the given file with the next logical timestamp
-updateFileTimes :: FilePath -> IdeSessionUpdate LogicalTimestamp
+updateFileTimes :: (MonadState IdeIdleState m, MonadIO m) => FilePath -> m LogicalTimestamp
 updateFileTimes path = do
   ts <- nextLogicalTimestamp
   liftIO $ setFileTimes path ts ts
@@ -1300,7 +1466,6 @@ runGcc absC absObj pref = do
     , errorMsg  = Text.pack (stdout ++ stderr)
     }]
 
-
 {------------------------------------------------------------------------------
   Aux
 ------------------------------------------------------------------------------}
@@ -1319,61 +1484,75 @@ withIdleState session act = modifyIdleState session $ \idleState -> do
 modifyIdleState :: IdeSession -> (IdeIdleState -> IO (IdeSessionState, a)) -> IO a
 modifyIdleState IdeSession{..} act = modifyMVar ideState $ \state -> case state of
   IdeSessionIdle idleState -> act idleState
-  _                        -> Ex.throwIO $ userError "State not idle"
+  _ -> Ex.throwIO $ userError "State not idle"
 
 -- | Variaton on 'tell' for the State monad rather than writer monad
 tellSt :: (Monoid w, MonadState w m) => w -> m ()
 tellSt w = St.modify (`mappend` w)
 
 {-------------------------------------------------------------------------------
-  Managed files
+  File commands
 -------------------------------------------------------------------------------}
 
--- | Generalization of updateSourceFile and updateDataFile
-updateFile :: (IdeStaticInfo -> FilePath)
-           -> Accessor ManagedFilesInternal [ManagedFile]
-           -> FilePath
-           -> BSL.ByteString
-           -> IdeSessionUpdate ()
-updateFile base acc file bs = do
-  staticInfo <- asks ideSessionUpdateStaticInfo
-  let internal = base staticInfo </> file
-  old <- get (ideManagedFiles .> acc .> lookup' file)
-  -- We always overwrite the file, and then later set the timestamp back
-  -- to what it was if it turns out the hash was the same. If we compute
-  -- the hash first, we would force the entire lazy bytestring into memory
-  newHash <- liftIO $ writeFileAtomic internal bs
-  case old of
-    Just (oldHash, oldTS) | oldHash == newHash ->
-      liftIO $ setFileTimes internal oldTS oldTS
-    _ -> do
-      newTS <- updateFileTimes internal
-      set (ideManagedFiles .> acc .> lookup' file) (Just (newHash, newTS))
-      set ideUpdatedCode True
+data FileInfo = FileInfo {
+    fileInfoRemoteDir  :: IdeStaticInfo -> FilePath
+  , fileInfoRemoteFile :: FilePath
+  , fileInfoAccessor   :: Accessor ManagedFilesInternal [ManagedFile]
+  }
 
--- | Generalization of updateSourceFileFromFile and updateDataFileFromFile
-updateFileFromFile :: (IdeStaticInfo -> FilePath)
-                   -> Accessor ManagedFilesInternal [ManagedFile]
-                   -> FilePath
-                   -> FilePath
-                   -> IdeSessionUpdate ()
-updateFileFromFile base acc target source = do
-  -- We just call 'updateFile' because we need to read the file anyway to
-  -- compute the hash.
-  bs <- liftIO $ BSL.readFile source
-  updateFile base acc target bs
+data FileCmd =
+    -- | Write a file from a bytestring
+    FileWrite FileInfo BSL.ByteString
 
--- | Generalization of updateSourceFileDelete and updateDataFileDelete
-updateFileDelete :: (IdeStaticInfo -> FilePath)
-                 -> Accessor ManagedFilesInternal [ManagedFile]
-                 -> FilePath
-                 -> IdeSessionUpdate ()
-updateFileDelete base acc file = do
-  staticInfo <- asks ideSessionUpdateStaticInfo
-  let internal = base staticInfo </> file
-  liftIO $ Dir.removeFile (internal)
-      `Ex.catch` \e -> if isDoesNotExistError e
-                       then return ()
-                       else Ex.throwIO e
-  set (ideManagedFiles .> acc .> lookup' file) Nothing
-  set ideUpdatedCode True
+    -- | Copy a local file (the FilePath is interpreted as an absolute path)
+  | FileCopy FileInfo FilePath
+
+    -- | Delete a file
+  | FileDelete FileInfo
+
+-- | Execute a file command
+--
+-- Returns 'True' if any files were changed.
+executeFileCmd :: (MonadState IdeIdleState m, MonadIO m) => IdeStaticInfo -> FileCmd -> m Bool
+executeFileCmd staticInfo cmd = case cmd of
+    FileWrite _ bs -> do
+      old <- get cachedInfo
+      -- We always overwrite the file, and then later set the timestamp back
+      -- to what it was if it turns out the hash was the same. If we compute
+      -- the hash first, we would force the entire lazy bytestring into memory
+      newHash <- liftIO $ writeFileAtomic remotePath bs
+      case old of
+        Just (oldHash, oldTS) | oldHash == newHash -> do
+          liftIO $ setFileTimes remotePath oldTS oldTS
+          return False
+        _ -> do
+          newTS <- updateFileTimes remotePath
+          set cachedInfo (Just (newHash, newTS))
+          return True
+    FileCopy _ localFile -> do
+      -- We just call 'FileWrite' because we need to read the file anyway to
+      -- compute the hash. Note that `localPath` is interpreted relative to the
+      -- current directory
+      bs <- liftIO $ BSL.readFile localFile
+      executeFileCmd staticInfo (FileWrite info bs)
+    FileDelete _ -> do
+      liftIO $ ignoreDoesNotExist $ Dir.removeFile remotePath
+      set cachedInfo Nothing
+      -- TODO: We should really return True only if the file existed
+      return True
+  where
+    remotePath :: FilePath
+    remotePath = fileInfoRemoteDir info staticInfo </> fileInfoRemoteFile info
+
+    info :: FileInfo
+    info = case cmd of FileWrite  i _ -> i
+                       FileCopy   i _ -> i
+                       FileDelete i   -> i
+
+    cachedInfo :: Accessor IdeIdleState (Maybe (MD5Digest, LogicalTimestamp))
+    cachedInfo = ideManagedFiles .> fileInfoAccessor info .> lookup' (fileInfoRemoteFile info)
+
+ignoreDoesNotExist :: IO () -> IO ()
+ignoreDoesNotExist = Ex.handle $ \e ->
+  if isDoesNotExistError e then return ()
+                           else Ex.throwIO e

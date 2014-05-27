@@ -366,10 +366,11 @@ withIdleState :: IdeSession -> (IdeIdleState -> IO a) -> IO a
 withIdleState IdeSession{ideState} f =
   withMVar ideState $ \st ->
     case st of
-      IdeSessionIdle         idleState -> f idleState
-      IdeSessionRunning _    idleState -> f idleState
-      IdeSessionServerDied e idleState -> f (reportExAsErr e idleState)
-      IdeSessionShutdown               -> fail "Session already shut down."
+      IdeSessionIdle             idleState -> f idleState
+      IdeSessionRunning        _ idleState -> f idleState
+      IdeSessionPendingChanges _ idleState -> f idleState
+      IdeSessionServerDied     e idleState -> f (reportExAsErr e idleState)
+      IdeSessionShutdown                   -> fail "Session already shut down."
   where
     reportExAsErr :: ExternalException -> IdeIdleState -> IdeIdleState
     reportExAsErr e = ideComputed ^:
