@@ -7316,7 +7316,7 @@ installPackage pkgDir = do
       newEnvMap = Map.adjust adjustPATH "PATH" oldEnvMap
       newEnv = Map.toList newEnvMap
   forM_ [ ["clean"]
-        , ["configure", "--package-db=" ++ packageDb]
+        , ["configure", "--package-db=" ++ packageDb, "--disable-library-profiling"]
         , ["build"]
         , ["copy"]
         , ["register"] ] $ \cmd -> do
