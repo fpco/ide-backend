@@ -2,6 +2,7 @@
 {-# OPTIONS_GHC -Wall #-}
 module IdeSession.RPC.Server
   ( rpcServer
+  , concurrentConversation
   , RpcConversation(..)
   ) where
 
@@ -11,6 +12,8 @@ import System.IO
   , hSetBinaryMode
   , hSetBuffering
   , BufferMode(BlockBuffering)
+  , openFile
+  , IOMode(..)
   )
 import System.Posix.Types (Fd)
 import System.Posix.IO (closeFd, fdToHandle)
@@ -21,6 +24,7 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Control.Concurrent.Async (async)
 import Data.Binary (encode, decode)
+import GHC.IO.Handle.FD (openFileBlocking)
 
 import IdeSession.Util.BlockingOps (readChan, waitAnyCatchCancel)
 import IdeSession.RPC.API
@@ -31,7 +35,8 @@ import IdeSession.RPC.Stream
 --------------------------------------------------------------------------------
 
 -- Start the RPC server. For an explanation of the command line arguments, see
--- 'forkRpcServer'. This function does not return unless there is an error.
+-- 'forkRpcServer'. This function does not return until the client requests
+-- termination of the RPC conversation (or there is an error).
 rpcServer :: (RpcConversation -> IO ()) -- ^ Request server
           -> [String]                   -- ^ Command line args
           -> IO ()
@@ -49,6 +54,18 @@ rpcServer handler fds = do
   errorsW'   <- fdToHandle errorsW
 
   rpcServer' requestR' responseW' errorsW' handler
+
+-- | Start a concurrent conversation.
+concurrentConversation :: FilePath -- ^ stdin named pipe
+                       -> FilePath -- ^ stdout named pipe
+                       -> FilePath -- ^ stderr named pipe
+                       -> (RpcConversation -> IO ())
+                       -> IO ()
+concurrentConversation requestR responseW errorsW server = do
+  hin  <- openFile         requestR  ReadMode
+  hout <- openFileBlocking responseW WriteMode
+  herr <- openFileBlocking errorsW   WriteMode
+  rpcServer' hin hout herr server
 
 -- | Start the RPC server
 rpcServer' :: Handle                     -- ^ Input

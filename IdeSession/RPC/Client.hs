@@ -3,6 +3,7 @@ module IdeSession.RPC.Client (
     RpcServer
   , RpcConversation(..)
   , forkRpcServer
+  , connectToRpcServer
   , rpc
   , rpcConversation
   , shutdown
@@ -22,7 +23,7 @@ import Data.Typeable (Typeable)
 import Prelude hiding (take)
 import System.Directory (canonicalizePath, getPermissions, executable)
 import System.Exit (ExitCode)
-import System.IO (Handle)
+import System.IO (Handle, IOMode(..), openFile)
 import System.Posix.IO (createPipe, closeFd, fdToHandle)
 import System.Posix.Signals (signalProcess, sigKILL)
 import System.Posix.Types (Fd)
@@ -37,6 +38,7 @@ import System.Process
 import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
+import GHC.IO.Handle.FD (openFileBlocking)
 
 import IdeSession.Util.BlockingOps (putMVar, takeMVar)
 import IdeSession.RPC.API
@@ -53,7 +55,11 @@ data RpcServer = RpcServer {
     -- | Handle to read server errors from
   , rpcErrorsR   :: Handle
     -- | Handle on the server process itself
-  , rpcProc :: ProcessHandle
+    --
+    -- This is Nothing if we connected to an existing RPC server
+    -- ('connectToRpcServer') rather than started a new server
+    -- ('forkRpcServer')
+  , rpcProc :: Maybe ProcessHandle
     -- | IORef containing the server response stream
   , rpcResponseR :: Stream Response
     -- | Server state
@@ -62,7 +68,7 @@ data RpcServer = RpcServer {
 
 -- | RPC server state
 data RpcClientSideState =
-    -- | The server is running. We record the server's unconsumed output.
+    -- | The server is running.
     RpcRunning
     -- | The server was stopped, either manually or because of an exception
   | RpcStopped Ex.SomeException
@@ -94,7 +100,6 @@ forkRpcServer path args workingDir menv = do
   (responseR, responseW) <- createPipe
   (errorsR,   errorsW)   <- createPipe
 
-  -- We create a file for the server to store exceptions in
   let showFd :: Fd -> String
       showFd fd = show (fromIntegral fd :: Int)
 
@@ -123,7 +128,7 @@ forkRpcServer path args workingDir menv = do
   return RpcServer {
       rpcRequestW  = requestW'
     , rpcErrorsR   = errorsR'
-    , rpcProc      = ph
+    , rpcProc      = Just ph
     , rpcState     = st
     , rpcResponseR = input
     }
@@ -135,6 +140,29 @@ forkRpcServer path args workingDir menv = do
       if executable permissions
         then return fullPath
         else Ex.throwIO . userError $ relPath ++ " not executable"
+
+-- | Connect to an existing RPC server
+--
+-- It is the responsibility of the caller to make sure that each triplet
+-- of named pipes is only used for RPC connection.
+connectToRpcServer :: FilePath   -- ^ stdin named pipe
+                   -> FilePath   -- ^ stdout named pipe
+                   -> FilePath   -- ^ stderr named pipe
+                   -> IO RpcServer
+connectToRpcServer requestW responseR errorsR = do
+  -- TODO: here and in forkRpcServer, deal with exceptions
+  responseR' <- openFile         responseR ReadMode
+  errorsR'   <- openFile         errorsR   ReadMode
+  requestW'  <- openFileBlocking requestW  WriteMode
+  st         <- newMVar RpcRunning
+  input      <- newStream responseR'
+  return RpcServer {
+      rpcRequestW  = requestW'
+    , rpcErrorsR   = errorsR'
+    , rpcProc      = Nothing
+    , rpcState     = st
+    , rpcResponseR = input
+    }
 
 -- | Specialized form of 'rpcConversation' to do single request and wait for
 -- a single response.
@@ -218,22 +246,33 @@ ignoreAllExceptions = Ex.handle ignore
     ignore :: Ex.SomeException -> IO ()
     ignore _ = return ()
 
--- | Terminate the external process
+-- | Terminate the RPC connection
+--
+-- If we connected using 'forkRpcServer' (rather than 'connectToRpcServer')
+-- we wait for the remote process to terminate.
 terminate :: RpcServer -> IO ()
 terminate server = do
     ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode RequestShutdown)
-    void $ waitForProcess (rpcProc server)
+    case rpcProc server of
+      Just ph -> void $ waitForProcess ph
+      Nothing -> return ()
 
 -- | Force-terminate the external process
+--
+-- Throws an exception when we are connected to an existing RPC server
 forceTerminate :: RpcServer -> IO ()
-forceTerminate server = do
-    withProcessHandle (rpcProc server) $ \p_ ->
-      case p_ of
-        ClosedHandle _ ->
-          leaveHandleAsIs p_
-        OpenHandle pID -> do
-          signalProcess sigKILL pID
-          leaveHandleAsIs p_
+forceTerminate server =
+    case rpcProc server of
+      Just ph ->
+        withProcessHandle ph $ \p_ ->
+          case p_ of
+            ClosedHandle _ ->
+              leaveHandleAsIs p_
+            OpenHandle pID -> do
+              signalProcess sigKILL pID
+              leaveHandleAsIs p_
+      Nothing ->
+        Ex.throwIO $ userError "forceTerminate: parallel connection"
   where
     leaveHandleAsIs _p =
 #if MIN_VERSION_process(1,2,0)
@@ -262,8 +301,13 @@ withRpcServer server io =
         Ex.throwIO ex
 
 -- | Get the exit code of the RPC server, unless still running.
+--
+-- Thross an exception for connections to existing RPC servers.
 getRpcExitCode :: RpcServer -> IO (Maybe ExitCode)
-getRpcExitCode RpcServer{rpcProc} = getProcessExitCode rpcProc
+getRpcExitCode RpcServer{rpcProc} =
+  case rpcProc of
+    Just ph -> getProcessExitCode ph
+    Nothing -> Ex.throwIO $ userError "getRpcExitCode: parallel connection"
 
 {------------------------------------------------------------------------------
   Aux
