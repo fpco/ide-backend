@@ -86,7 +86,9 @@ forkGhcServer IdeStaticInfo{..} = do
     (userDB, specificDBs) = splitPackageDBStack configPackageDBStack
 
     opts :: [String]
-    opts = configStaticOpts ++ relInclToOpts ideSourcesDir configRelativeIncludes
+    opts = "-XHaskell2010"  -- see #190
+           : configStaticOpts
+           ++ relInclToOpts ideSourcesDir configRelativeIncludes
 
     searchPath :: ProgramSearchPath
     searchPath = ProgramSearchPathDefault

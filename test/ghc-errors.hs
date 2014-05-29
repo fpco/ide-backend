@@ -7170,6 +7170,112 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
          threadDelay 2000000
          putStrLn "PLEASE VERIFY THAT SERVER HAS TERMINATED"
     )
+  , ( "Test NondecreasingIndentation: GHC API should fail without -XNondecreasingIndentation"
+    , withSession defaultSession $ \session -> do
+        let src = "module Main where\n\
+                  \main = do\n\
+                  \    let foo = do\n\
+                  \        putStrLn \"hello\"\n\
+                  \    foo"
+            upd = updateSourceFile "src/Main.hs" src
+        updateSessionD session upd 1
+        -- The error messages are different in 7.4 and 7.8.
+        assertOneError session
+    )
+  , ( "Test NondecreasingIndentation: buildExe should fail without -XNondecreasingIndentation"
+    , withSession defaultSession $ \session -> do
+        let src = "module Main where\n\
+                  \main = do\n\
+                  \    let foo = do\n\
+                  \        putStrLn \"hello\"\n\
+                  \    foo"
+            upd = updateSourceFile "src/Main.hs" src
+                  <> updateDynamicOpts ["-XHaskell98"]
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        let m = "Main"
+            updE = buildExe ["-XHaskell2010"] [(m, "src/Main.hs")]
+        updateSessionD session updE 1
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        -- The error messages are different in 7.4 and 7.8.
+        assertEqual "buildStderr empty" False (null buildStderr)
+    )
+  , ( "Test NondecreasingIndentation: both should pass with -XNondecreasingIndentation"
+    , withSession defaultSession $ \session -> do
+        let src = "module Main where\n\
+                  \main = do\n\
+                  \    let foo = do\n\
+                  \        putStrLn \"hello\"\n\
+                  \    foo"
+            upd = updateSourceFile "src/Main.hs" src
+                  <> updateDynamicOpts ["-XNondecreasingIndentation"]
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        let m = "Main"
+            updE = buildExe [] [(m, "src/Main.hs")]
+        updateSessionD session updE 1
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" True (null buildStderr)
+    )
+  , ( "Test NondecreasingIndentation: both should pass with -XNondecreasingIndentation in SessionConfig"
+    , withSession (withOpts ["-XNondecreasingIndentation"]) $ \session -> do
+        let src = "module Main where\n\
+                  \main = do\n\
+                  \    let foo = do\n\
+                  \        putStrLn \"hello\"\n\
+                  \    foo"
+            upd = updateSourceFile "src/Main.hs" src
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        let m = "Main"
+            updE = buildExe [] [(m, "src/Main.hs")]
+        updateSessionD session updE 1
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" True (null buildStderr)
+    )
+  , ( "Test NondecreasingIndentation: both should pass with -XHaskell98"
+    , withSession defaultSession $ \session -> do
+        let src = "module Main where\n\
+                  \main = do\n\
+                  \    let foo = do\n\
+                  \        putStrLn \"hello\"\n\
+                  \    foo"
+            upd = updateSourceFile "src/Main.hs" src
+                  <> updateDynamicOpts ["-XHaskell98"]
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        let m = "Main"
+            updE = buildExe [] [(m, "src/Main.hs")]
+        updateSessionD session updE 1
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" True (null buildStderr)
+    )
+  , ( "Test NondecreasingIndentation: both should pass with -XHaskell98 in SessionConfig"
+    , withSession (withOpts ["-XHaskell98"]) $ \session -> do
+        let src = "module Main where\n\
+                  \main = do\n\
+                  \    let foo = do\n\
+                  \        putStrLn \"hello\"\n\
+                  \    foo"
+            upd = updateSourceFile "src/Main.hs" src
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        let m = "Main"
+            updE = buildExe [] [(m, "src/Main.hs")]
+        updateSessionD session updE 1
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" True (null buildStderr)
+    )
   ]
 
 buildExeTargetHsSucceeds :: IdeSession -> String -> IO ()
