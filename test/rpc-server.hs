@@ -2,15 +2,18 @@
 module Main where
 
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.MVar (MVar, modifyMVar_, newMVar)
+import Control.Concurrent.MVar
 import qualified Control.Exception as Ex
-import Control.Monad (forM_, forever)
+import Control.Monad (forM_, forever, replicateM_)
 import Control.Applicative ((<$>), (<*>))
 import Data.Function (on)
 import Data.List (isInfixOf)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
 import System.Posix.Signals (sigKILL)
+import System.Posix.Files (createNamedPipe)
+import System.IO.Temp (withTempDirectory)
+import System.FilePath ((</>))
 import Data.Binary (Binary)
 import Data.Typeable (Typeable)
 import qualified Data.Binary as Binary
@@ -53,8 +56,8 @@ assertRpcEquals server req resps =
   assertRpc server (Put req $ foldr Get Done resps)
 
 data Conversation =
-    forall req.  (Typeable req, Binary req) => Put req  Conversation
-  | forall resp. (Typeable resp, Binary resp, Show resp, Eq resp) => Get resp Conversation
+    forall req.  (Show req,  Typeable req,  Binary req) => Put req  Conversation
+  | forall resp. (Show resp, Typeable resp, Binary resp, Eq resp) => Get resp Conversation
   | Done
 
 assertRpc :: RpcServer -> Conversation -> Assertion
@@ -198,9 +201,9 @@ testConcurrentGetPutServer RpcConversation{..} = forever $ do
 --------------------------------------------------------------------------------
 
 data StartGame  = StartGame Int Int
-  deriving Typeable
+  deriving (Show, Typeable)
 data Guess = Guess Int | GiveUp | Yay
-  deriving (Eq, Show, Typeable)
+  deriving (Show, Typeable, Eq)
 data GuessReply = GuessCorrect | GuessIncorrect
   deriving (Show, Typeable)
 
@@ -252,12 +255,16 @@ testConversation server = do
     $ Put GuessIncorrect
     $ Get GiveUp
     $ Done
+  {- DISABLED. Whether or not we get this exception, or just sit here and wait,
+     depends on circumstances. Perhaps it would be nicer if we did tag messages
+     with some type information so that can catch these errors properly.
   assertRaises "" typeError $
     assertRpcEqual server GuessCorrect GiveUp
   where
     typeError :: ExternalException -> Bool
     typeError ExternalException{externalStdErr} =
       "not enough bytes" `isInfixOf` externalStdErr
+  -}
 
 testConversationServer :: RpcConversation -> IO ()
 testConversationServer RpcConversation{..} = forever $ do
@@ -435,6 +442,62 @@ testInvalidRespType server =
 -}
 
 --------------------------------------------------------------------------------
+-- Concurrent conversations                                                   --
+--------------------------------------------------------------------------------
+
+-- Just to echo, Nothing to start a new conversation
+type EchoOrSpawn = Maybe String
+
+testConcurrentServer :: RpcConversation -> IO ()
+testConcurrentServer RpcConversation{..} = forever $ do
+  req <- get :: IO EchoOrSpawn
+  case req of
+    Just str ->
+      put str
+    Nothing  -> do
+      pipes <- newEmptyMVar :: IO (MVar (String, String, String))
+      forkIO $ do
+        withTempDirectory "." "rpc" $ \tempDir -> do
+          let stdin  = tempDir </> "stdin"
+              stdout = tempDir </> "stdout"
+              stderr = tempDir </> "stderr"
+
+          createNamedPipe stdin  0o600
+          createNamedPipe stdout 0o600
+          createNamedPipe stderr 0o600
+
+          -- Once we have created the pipes we can tell the client
+          putMVar pipes (stdin, stdout, stderr)
+          concurrentConversation stdin stdout stderr testConversationServer
+
+      (stdin, stdout, stderr) <- readMVar pipes
+      put (stdin, stdout, stderr)
+
+testConcurrent :: RpcServer -> Assertion
+testConcurrent server = do
+  -- test sequentially: echo, spawn conversation, run that conversation, repeat
+  replicateM_ 3 $ do
+    -- test we can echo
+    assertRpcEqual server (Just "ping" :: EchoOrSpawn) "ping"
+
+    (stdin, stdout, stderr) <- rpc server (Nothing :: EchoOrSpawn)
+    server' <- connectToRpcServer stdin stdout stderr
+    testConversation server'
+
+  -- test concurrent execution: spawn a bunch of servers, have conversations
+  -- with all of them concurrently, while still communicating on the original
+  -- conversation, too (note that the calls to 'rpc' to start the concurrent
+  -- conversations will be sequentialized)
+  replicateM_ 10 $ forkIO $ do
+    (stdin, stdout, stderr) <- rpc server (Nothing :: EchoOrSpawn)
+    server' <- connectToRpcServer stdin stdout stderr
+    testConversation server'
+
+  replicateM_ 100 $
+    -- Echo on the original conversation while we have the other conversations
+    assertRpcEqual server (Just "ping" :: EchoOrSpawn) "ping"
+
+--------------------------------------------------------------------------------
 -- Driver                                                                     --
 --------------------------------------------------------------------------------
 
@@ -466,6 +529,9 @@ tests = [
          testRPC "illscoped"        testIllscoped
        , testRPC "invalidReqType"   testInvalidReqType
 --       , testRPC "invalidRespType"  testInvalidRespType
+       ]
+   , testGroup "Concurrent conversations" [
+         testRPC "concurrent" testConcurrent
        ]
   ]
   where
@@ -504,5 +570,6 @@ main = do
       "killAsyncMulti"   -> rpcServer testKillAsyncMultiServer args'
       "invalidReqType"   -> rpcServer testEchoServer args'
       "invalidRespType"  -> rpcServer testEchoServer args'
+      "concurrent"       -> rpcServer testConcurrentServer args'
       _ -> error $ "Invalid server " ++ show test
     _ -> defaultMain tests
