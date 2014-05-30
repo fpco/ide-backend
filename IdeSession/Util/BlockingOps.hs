@@ -40,6 +40,15 @@ module IdeSession.Util.BlockingOps (
   , modifyMVar_
   , withMVar
   , readMVar
+  , swapMVar
+    -- * Same for strict MVars
+  , putStrictMVar
+  , takeStrictMVar
+  , modifyStrictMVar
+  , modifyStrictMVar_
+  , withStrictMVar
+  , readStrictMVar
+  , swapStrictMVar
     -- * Blocking Chan ops
   , readChan
     -- * Blocking Async ops
@@ -53,6 +62,8 @@ import qualified Control.Concurrent as C
 import qualified Control.Concurrent.Async as Async
 import System.IO (hPutStrLn, stderr)
 import qualified Control.Exception as Ex
+
+import qualified IdeSession.Strict.MVar as StrictMVar
 
 lineNumber :: ExpQ
 lineNumber = do
@@ -74,7 +85,7 @@ traceOnException str io = Ex.catch io $ \e -> do
   hPutStrLn stderr (str ++ ": " ++ show e)
   Ex.throwIO (e :: Ex.SomeException)
 
-#define DEBUGGING 0
+#define DEBUGGING 1
 
 #if DEBUGGING == 1
 
@@ -89,6 +100,10 @@ rethrowWithLineNumber2 expr =
   [| \arg1 arg2 -> mapExceptionShow (\e -> $lineNumber ++ ": " ++ e)
                                     ($expr arg1 arg2)
    |]
+
+{-------------------------------------------------------------------------------
+  MVar
+-------------------------------------------------------------------------------}
 
 takeMVar :: ExpQ
 takeMVar = rethrowWithLineNumber1 [| C.takeMVar |]
@@ -108,8 +123,44 @@ modifyMVar_ = rethrowWithLineNumber2 [| C.modifyMVar_ |]
 withMVar :: ExpQ
 withMVar = rethrowWithLineNumber2 [| C.withMVar |]
 
+swapMVar :: ExpQ
+swapMVar = rethrowWithLineNumber2 [| C.swapMVar |]
+
+{-------------------------------------------------------------------------------
+  StrictMVar
+-------------------------------------------------------------------------------}
+
+takeStrictMVar :: ExpQ
+takeStrictMVar = rethrowWithLineNumber1 [| StrictMVar.takeMVar |]
+
+putStrictMVar :: ExpQ
+putStrictMVar = rethrowWithLineNumber2 [| StrictMVar.putMVar |]
+
+readStrictMVar :: ExpQ
+readStrictMVar = rethrowWithLineNumber1 [| StrictMVar.readMVar |]
+
+modifyStrictMVar :: ExpQ
+modifyStrictMVar = rethrowWithLineNumber2 [| StrictMVar.modifyMVar |]
+
+modifyStrictMVar_ :: ExpQ
+modifyStrictMVar_ = rethrowWithLineNumber2 [| StrictMVar.modifyMVar_ |]
+
+withStrictMVar :: ExpQ
+withStrictMVar = rethrowWithLineNumber2 [| StrictMVar.withMVar |]
+
+swapStrictMVar :: ExpQ
+swapStrictMVar = rethrowWithLineNumber2 [| StrictMVar.swapMVar |]
+
+{-------------------------------------------------------------------------------
+  Chan
+-------------------------------------------------------------------------------}
+
 readChan :: ExpQ
 readChan = rethrowWithLineNumber1 [| C.readChan |]
+
+{-------------------------------------------------------------------------------
+  Async
+-------------------------------------------------------------------------------}
 
 wait :: ExpQ
 wait = rethrowWithLineNumber1 [| Async.wait |]
@@ -121,6 +172,10 @@ waitAnyCatchCancel :: ExpQ
 waitAnyCatchCancel = rethrowWithLineNumber1 [| Async.waitAnyCatchCancel |]
 
 #else
+
+{-------------------------------------------------------------------------------
+  MVar
+-------------------------------------------------------------------------------}
 
 takeMVar :: ExpQ
 takeMVar = [| C.takeMVar |]
@@ -140,8 +195,38 @@ modifyMVar_ = [| C.modifyMVar_ |]
 withMVar :: ExpQ
 withMVar = [| C.withMVar |]
 
+{-------------------------------------------------------------------------------
+  StrictMVar
+-------------------------------------------------------------------------------}
+
+takeStrictMVar :: ExpQ
+takeStrictMVar = [| StrictMVar.takeMVar |]
+
+putStrictMVar :: ExpQ
+putStrictMVar = [| StrictMVar.putMVar |]
+
+readStrictMVar :: ExpQ
+readStrictMVar = [| StrictMVar.readMVar |]
+
+modifyStrictMVar :: ExpQ
+modifyStrictMVar = [| StrictMVar.modifyMVar |]
+
+modifyStrictMVar_ :: ExpQ
+modifyStrictMVar_ = [| StrictMVar.modifyMVar_ |]
+
+withStrictMVar :: ExpQ
+withStrictMVar = [| StrictMVar.withMVar |]
+
+{-------------------------------------------------------------------------------
+  Chan
+-------------------------------------------------------------------------------}
+
 readChan :: ExpQ
 readChan = [| C.readChan |]
+
+{-------------------------------------------------------------------------------
+  Async
+-------------------------------------------------------------------------------}
 
 wait :: ExpQ
 wait = [| Async.wait |]

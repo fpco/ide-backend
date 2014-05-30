@@ -40,7 +40,7 @@ import qualified Control.Exception as Ex
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import GHC.IO.Handle.FD (openFileBlocking)
 
-import IdeSession.Util.BlockingOps (putMVar, takeMVar)
+import IdeSession.Util.BlockingOps
 import IdeSession.RPC.API
 import IdeSession.RPC.Stream
 
