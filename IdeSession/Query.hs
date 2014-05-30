@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveDataTypeable, TemplateHaskell #-}
 -- | Session queries
 --
 -- We have to be very careful in the types in this module. We should not be
@@ -44,37 +44,37 @@ module IdeSession.Query (
   ) where
 
 import Prelude hiding (mod, span)
-import Data.Maybe (listToMaybe, maybeToList)
-import Data.List (isInfixOf, sortBy)
-import Data.Accessor ((^.), (^:), getVal)
-import Data.Version (Version)
-import Data.Typeable (Typeable)
-import qualified System.FilePath.Find as Find
-import qualified Data.ByteString.Lazy as BSL
-import qualified Data.ByteString.Char8 as BSSC
-import System.Exit (ExitCode)
-import System.FilePath ((</>))
 import Control.Exception (Exception, throwIO)
 import Control.Monad (forM_)
+import Data.Accessor ((^.), (^:), getVal)
+import Data.List (isInfixOf, sortBy)
+import Data.Maybe (listToMaybe, maybeToList)
 import Data.Text (Text)
+import Data.Typeable (Typeable)
+import Data.Version (Version)
+import System.Exit (ExitCode)
+import System.FilePath ((</>))
+import qualified Data.ByteString.Char8 as BSSC
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as Text (pack, unpack)
+import qualified System.FilePath.Find as Find
 
 import IdeSession.Cabal
 import IdeSession.Config
-import IdeSession.State
 import IdeSession.GHC.API
-import IdeSession.Types.Translation
-import IdeSession.Types.Public
-import qualified IdeSession.Types.Private as Private
 import IdeSession.RPC.Client (ExternalException(..))
+import IdeSession.State
 import IdeSession.Strict.Container
-import qualified IdeSession.Strict.Map    as StrictMap
-import qualified IdeSession.Strict.List   as StrictList
-import qualified IdeSession.Strict.Trie   as StrictTrie
-import qualified IdeSession.Strict.Maybe  as StrictMaybe
+import IdeSession.Types.Public
+import IdeSession.Types.Translation
+import IdeSession.Util.BlockingOps
 import qualified IdeSession.Strict.IntMap as StrictIntMap
 import qualified IdeSession.Strict.IntervalMap as StrictIntervalMap
-import IdeSession.Strict.MVar (withMVar)
+import qualified IdeSession.Strict.List   as StrictList
+import qualified IdeSession.Strict.Map    as StrictMap
+import qualified IdeSession.Strict.Maybe  as StrictMaybe
+import qualified IdeSession.Strict.Trie   as StrictTrie
+import qualified IdeSession.Types.Private as Private
 
 {------------------------------------------------------------------------------
   Types
@@ -364,7 +364,7 @@ dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
 -- state is a regular state, but we report the exception as a 'SourceError'
 withIdleState :: IdeSession -> (IdeIdleState -> IO a) -> IO a
 withIdleState IdeSession{ideState} f =
-  withMVar ideState $ \st ->
+  $withStrictMVar ideState $ \st ->
     case st of
       IdeSessionIdle             idleState -> f idleState
       IdeSessionRunning        _ idleState -> f idleState

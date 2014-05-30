@@ -7,32 +7,35 @@ import Prelude hiding (mod, span)
 import Control.Concurrent (ThreadId, throwTo, forkIO, myThreadId, threadDelay)
 import Control.Concurrent.Async (async)
 import Control.Concurrent.MVar (MVar, newEmptyMVar)
-import qualified Control.Exception as Ex
 import Control.Monad (void, unless, when)
 import Control.Monad.State (StateT, runStateT)
 import Control.Monad.Trans.Class (lift)
-import qualified Data.ByteString as BSS (hGetSome, hPut, null)
-import qualified Data.Text as Text
-import qualified Data.List as List
-import Data.Function (on)
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
+import Data.Function (on)
+import System.Environment (withArgs)
+import System.FilePath ((</>))
 import System.IO (Handle, hFlush)
+import System.IO.Temp (withTempDirectory)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
-import System.Environment (withArgs)
+import System.Posix.Files (createNamedPipe)
+import qualified Control.Exception as Ex
+import qualified Data.ByteString as BSS (hGetSome, hPut, null)
+import qualified Data.List as List
+import qualified Data.Text as Text
 
 import IdeSession.GHC.API
 import IdeSession.RPC.Server
+import IdeSession.Strict.Container
+import IdeSession.Strict.IORef
 import IdeSession.Types.Private
-import qualified IdeSession.Types.Public as Public
 import IdeSession.Types.Progress
 import IdeSession.Util
-import IdeSession.Util.BlockingOps (withMVar, wait, putMVar, modifyMVar_)
-import IdeSession.Strict.IORef
-import IdeSession.Strict.Container
-import qualified IdeSession.Strict.Map  as StrictMap
+import IdeSession.Util.BlockingOps
 import qualified IdeSession.Strict.List as StrictList
+import qualified IdeSession.Strict.Map  as StrictMap
+import qualified IdeSession.Types.Public as Public
 
 import qualified GHC
 import GhcMonad(Ghc(..))
@@ -124,7 +127,9 @@ ghcServerEngine conv@RpcConversation{..} = do
                 genCode targets configGenerateModInfo
               return args
             ReqRun runCmd -> do
-              ghcWithArgs args $ ghcHandleRun conv runCmd
+              (stdin, stdout, stderr) <- startConcurrentConversation sessionDir $ \conv' -> do
+                 ghcWithArgs args $ ghcHandleRun conv' runCmd
+              liftIO $ put (stdin, stdout, stderr)
               return args
             ReqSetEnv env -> do
               ghcHandleSetEnv conv env
@@ -166,6 +171,29 @@ ghcServerEngine conv@RpcConversation{..} = do
         _ ->
           -- Ignore messages we cannot parse
           return ()
+
+startConcurrentConversation :: FilePath -> (RpcConversation -> Ghc ()) -> Ghc (FilePath, FilePath, FilePath)
+startConcurrentConversation sessionDir server = do
+  pipes <- liftIO newEmptyMVar
+
+  -- TODO: Should we do anything with this thread ID?
+  _threadId <- forkGhc $ do
+    ghcWithTempDirectory sessionDir "rpc." $ \tempDir -> do
+      let stdin  = tempDir </> "stdin"
+          stdout = tempDir </> "stdout"
+          stderr = tempDir </> "stderr"
+
+      liftIO $ do
+        createNamedPipe stdin  0o600
+        createNamedPipe stdout 0o600
+        createNamedPipe stderr 0o600
+
+        -- Once we have created the pipes we can tell the client
+        $putMVar pipes (stdin, stdout, stderr)
+
+      ghcConcurrentConversation stdin stdout stderr server
+
+  liftIO $ $readMVar pipes
 
 -- | We cache our own "module summaries" in between compile requests
 data ModSummary = ModSummary {
@@ -573,6 +601,28 @@ suppressGhcStdout p = do
 unsafeLiftIO :: (IO a -> IO b) -> Ghc a -> Ghc b
 unsafeLiftIO f (Ghc ghc) = Ghc $ \session -> f (ghc session)
 
+-- | Generalization of 'unsafeLiftIO'
+unsafeLiftIO' :: ((c -> IO a) -> IO b) -> (c -> Ghc a) -> Ghc b
+unsafeLiftIO' f g = Ghc $ \session ->
+  f $ \c -> case g c of Ghc ghc -> ghc session
+
 -- | Lift `withArgs` to the `Ghc` monad. Relies on `unsafeLiftIO`.
 ghcWithArgs :: [String] -> Ghc a -> Ghc a
 ghcWithArgs = unsafeLiftIO . withArgs
+
+-- | Work within the `Ghc` monad. Use with extreme caution!
+forkGhc :: Ghc () -> Ghc ThreadId
+forkGhc = unsafeLiftIO forkIO
+
+-- | Lifted version of withTempDirectory
+ghcWithTempDirectory :: FilePath -> String -> (FilePath -> Ghc a) -> Ghc a
+ghcWithTempDirectory fp str = unsafeLiftIO' (withTempDirectory fp str)
+
+-- | Lifted version of concurrentConversation
+ghcConcurrentConversation :: FilePath
+                          -> FilePath
+                          -> FilePath
+                          -> (RpcConversation -> Ghc ())
+                          -> Ghc ()
+ghcConcurrentConversation requestR responseW errorsW =
+  unsafeLiftIO' (concurrentConversation requestR responseW errorsW)

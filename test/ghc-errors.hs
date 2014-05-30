@@ -227,7 +227,7 @@ multipleTests =
         assertNoErrors session
         runActions <- runStmt session "Central.TotallyMain" "main"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" output (BSLC.pack "\"test run\"\n")
       )
     , ( "Make sure deleting modules removes them from the directory"
@@ -379,7 +379,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "Maybes" "main"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" output (BSLC.pack "False\n")
     )
   , ( "Build executable from some .lhs files"
@@ -978,7 +978,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "TH.TH" "main"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" output (BSLC.pack "(True,43)\n")
     )
   , ( "Build executable from TH"
@@ -1247,7 +1247,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSLC.pack "Hello World\n") output
     )
   , ( "Capture stdout (single putStr)"
@@ -1262,7 +1262,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSLC.pack "Hello World") output
     )
   , ( "Capture stdout (single putStr with delay)"
@@ -1279,7 +1279,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSLC.pack "hellohi") output
     )
   , ( "Capture stdout (multiple putStrLn)"
@@ -1296,7 +1296,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSLC.pack "Hello World 1\nHello World 2\nHello World 3\n") output
     )
   , ( "Capture stdout (mixed putStr and putStrLn)"
@@ -1313,7 +1313,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSLC.pack "Hello World 1\nHello World 2Hello World 3\n") output
     )
   , ( "Capture stdin (simple echo process)"
@@ -1331,7 +1331,7 @@ syntheticTests = [
         runActions <- runStmt session "M" "echo"
         supplyStdin runActions (BSSC.pack "ECHO!\n")
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSLC.pack "ECHO!\n") output
         let m = "M"
             updExe = buildExe [] [(Text.pack m, "M.hs")]
@@ -1446,13 +1446,13 @@ syntheticTests = [
         do runActions <- runStmt session "M" "echo"
            supplyStdin runActions (BSSC.pack "ECHO!\n")
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "ECHO!\n") output
 
         do runActions <- runStmt session "M" "echoReverse"
            supplyStdin runActions (BSSC.pack "!OHCE\n")
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "ECHO!\n") output
     )
   , ( "Two calls to runExe"
@@ -1526,7 +1526,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSLC.pack "Hello World\n") output
     )
   , ( "Merge stdout and stderr"
@@ -1557,7 +1557,7 @@ syntheticTests = [
                           ++ "Hello World 6\n"
                           ++ "Hello World 7"
                           ++ "Hello World 8"
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSLC.pack expectedOutput) output
     )
   , ( "Merge stdout and stderr in runExe"
@@ -1629,7 +1629,7 @@ syntheticTests = [
         updateSession session (updateEnv "Foo" (Just "Value1")) (\_ -> return ())
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "Value1") output
         do runActions <- runStmt session "M" "printBar"
            (_, result) <- runWaitAll runActions
@@ -1639,11 +1639,11 @@ syntheticTests = [
         updateSession session (updateEnv "Bar" (Just "Value2")) (\_ -> return ())
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "Value1") output
         do runActions <- runStmt session "M" "printBar"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "Value2") output
 
         -- Unset Foo, leave Bar defined
@@ -1653,7 +1653,7 @@ syntheticTests = [
            assertEqual "" result (RunProgException "IOException: Foo: getEnv: does not exist (no environment variable)")
         do runActions <- runStmt session "M" "printBar"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "Value2") output
     )
   , ( "Set environment variables and use them in runExe"
@@ -1808,7 +1808,7 @@ syntheticTests = [
         do updateSessionD session upd2 1
            runActions <- runStmt session "Main" "main"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "1234\n") output
 
         do let m = "Main"
@@ -1883,7 +1883,7 @@ syntheticTests = [
         assertNoErrors session
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "Value1") output
 
         do let m = "M"
@@ -1916,7 +1916,7 @@ syntheticTests = [
         -- Make sure environment is restored
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "Value1") output
 
         do let m = "M"
@@ -1961,7 +1961,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSLC.pack "Hello World\n") output
         result' <- runWait runActions
         assertEqual "" result' (Right RunOk)
@@ -2078,7 +2078,7 @@ syntheticTests = [
         -- Start first snippet and wait for it to terminate
         runActions1 <- runStmt session "M" "hello"
         do (output, result) <- runWaitAll runActions1
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "Hello World\n") output
 
         -- Start second snippet
@@ -2098,7 +2098,7 @@ syntheticTests = [
         -- Now call runWait on the *new* runActions and make sure we
         -- get the right result
         do (output, result) <- runWaitAll runActions2
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "Oh, hello\n") output
     )
   , ( "Don't recompile unnecessarily (single module)"
@@ -2183,7 +2183,7 @@ syntheticTests = [
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-        assertEqual "" out3b RunOk
+        assertEqual "" RunOk out3b
         assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "First snippet closes stdin (interrupted 'interact'); next snippet unaffected"
@@ -2234,7 +2234,7 @@ syntheticTests = [
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-        assertEqual "" out3b RunOk
+        assertEqual "" RunOk out3b
         assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "First snippet closes stderr; next snippet unaffected"
@@ -2254,7 +2254,7 @@ syntheticTests = [
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-        assertEqual "" out3b RunOk
+        assertEqual "" RunOk out3b
         assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "Snippet closes stderr, using timeout buffering"
@@ -2296,7 +2296,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "M" "main"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSL8.fromString "你好\n") output
 
         {- This is probably not fixable, because the code itself would need
@@ -2327,7 +2327,7 @@ syntheticTests = [
         assertNoErrors session
         runActions <- runStmt session "M" "hello"
         (output, result) <- runWaitAll runActions
-        assertEqual "" result RunOk
+        assertEqual "" RunOk result
         assertEqual "" (BSL8.fromString "5\n") output
     )
   , ( "Using the FFI via GHC API"
@@ -3981,7 +3981,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         -- The code should have recompiled and we should be able to execute it
         do runActions <- runStmt session "M" "printFoo"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "Value2") output
     )
   , ( "GHC crash 5: Repeated crashes and restarts"
@@ -4016,7 +4016,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
           -- The code should have recompiled and we should be able to execute it
           do runActions <- runStmt session "M" "printFoo"
              (output, result) <- runWaitAll runActions
-             assertEqual "" result RunOk
+             assertEqual "" RunOk result
              assertEqual "" (BSLC.pack "Value2") output
     )
   , ( "GHC crash 6: Add additional code after update"
@@ -4055,7 +4055,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         -- The code should have recompiled and we should be able to execute it
         do runActions <- runStmt session "B" "printAB"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "AB") output
     )
   , ( "GHC crash 7: Update imported module after update"
@@ -4100,7 +4100,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         -- The code should have recompiled and we should be able to execute it
         do runActions <- runStmt session "B" "printAB"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "A2B") output
     )
   , ( "GHC crash 8: Update importing module after update"
@@ -4146,7 +4146,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         -- The code should have recompiled and we should be able to execute it
         do runActions <- runStmt session "B" "printAB"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "AB2") output
     )
   , ( "Parse ghc 'Compiling' messages"
@@ -4283,7 +4283,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         -- Check that default is []
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "[]\n") output
 
         do runActionsExe <- runExe session m
@@ -4297,7 +4297,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
 
         do runActionsExe <- runExe session m
@@ -4311,7 +4311,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSession session (updateArgs ["D", "E"]) (\_ -> return ())
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "[\"D\",\"E\"]\n") output
 
         do runActionsExe <- runExe session m
@@ -4325,7 +4325,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSession session (updateArgs []) (\_ -> return ())
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "[]\n") output
 
         do runActionsExe <- runExe session m
@@ -4357,7 +4357,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
 
         do runActionsExe <- runExe session m
@@ -4375,7 +4375,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         -- Check that arguments are still here
         do runActions <- runStmt session "M" "printArgs"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "[\"A\",\"B\",\"C\"]\n") output
 
         do runActionsExe <- runExe session m
@@ -5647,7 +5647,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         do runActions <- resume session
            (finalOutput, finalResult) <- runWaitAll runActions
            let output = BSL.concat $ outputs ++ [finalOutput]
-           assertEqual "" finalResult RunOk
+           assertEqual "" RunOk finalResult
            assertEqual "" (show (sort inputList) ++ "\n") (BSLC.unpack output)
            mBreakInfo <- getBreakInfo session
            assertEqual "" Nothing mBreakInfo
@@ -5697,7 +5697,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
         do runActions <- runStmt session "M" "hello"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "12345\n") output
 
         do let m = "M"
@@ -5726,7 +5726,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
         do runActions <- runStmt session "M" "hello"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "12346\n") output
 
         do let m = "M"
@@ -5754,7 +5754,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
         do runActions <- runStmt session "M" "hello"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "54322\n") output
         let m = "M"
             updExe = buildExe [] [(Text.pack m, "M.hs")]
@@ -5800,7 +5800,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
         do runActions <- runStmt session "M" "hello"
            (output, result) <- runWaitAll runActions
-           assertEqual "" result RunOk
+           assertEqual "" RunOk result
            assertEqual "" (BSLC.pack "79\n") output
         let m = "M"
             updExe = buildExe [] [(Text.pack m, "M.hs")]
@@ -6132,13 +6132,15 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
 
         do runActions <- runStmt session "Main" "main"
-           (output, _result) <- runWaitAll runActions
+           (output, result) <- runWaitAll runActions
+           assertEqual "" RunOk result
            assertEqual "" (str 1) output
 
         forM_ [2 .. 99] $ \i -> do
           update $ updateDataFile "foo.hamlet" (str i)
           runActions <- runStmt session "Main" "main"
-          (output, _result) <- runWaitAll runActions
+          (output, result) <- runWaitAll runActions
+          assertEqual "" RunOk result
           assertEqual "" (str i) output
     )
   , ( "Support for hs-boot files (#155)"
@@ -6700,7 +6702,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         let runCode = do
               runActions <- runStmt session "A" "test"
               (output, result) <- runWaitAll runActions
-              assertEqual "" result RunOk
+              assertEqual "" RunOk result
               assertEqual "" (BSLC.pack "9\n") output
 
         -- First, check that we can import stuff from the unix package
@@ -6744,7 +6746,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         let runCode = do
               runActions <- runStmt session "A" "test"
               (output, result) <- runWaitAll runActions
-              assertEqual "" result RunOk
+              assertEqual "" RunOk result
               case ghcVersion of
                 GHC742 -> assertEqual "" (BSLC.pack "7.4\n") output
                 GHC78  -> assertEqual "" (BSLC.pack "7.8\n") output
@@ -6788,7 +6790,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         let runCode = do
               runActions <- runStmt session "A" "test"
               (output, result) <- runWaitAll runActions
-              assertEqual "" result RunOk
+              assertEqual "" RunOk result
               assertEqual "" (BSLC.pack "Hello\n") output
 
         -- First, check that base is untrusted

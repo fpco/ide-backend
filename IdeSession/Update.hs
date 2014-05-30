@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes, ScopedTypeVariables, MultiParamTypeClasses, ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, RankNTypes, ScopedTypeVariables, MultiParamTypeClasses, ExistentialQuantification, TemplateHaskell #-}
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
@@ -87,28 +87,29 @@ import qualified Control.Monad.State as State
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
 
-import IdeSession.State
 import IdeSession.Cabal
 import IdeSession.Config
 import IdeSession.ExeCabalClient (invokeExeCabal)
 import IdeSession.GHC.API
 import IdeSession.GHC.Client
-import qualified IdeSession.Query as Query
+import IdeSession.RPC.Client (ExternalException)
+import IdeSession.State
+import IdeSession.Strict.Container
+import IdeSession.Strict.MVar (newMVar, newEmptyMVar, StrictMVar)
 import IdeSession.Types.Private hiding (RunResult(..))
+import IdeSession.Types.Progress
 import IdeSession.Types.Public (RunBufferMode(..))
 import IdeSession.Types.Translation (removeExplicitSharing)
-import qualified IdeSession.Types.Private as Private
-import qualified IdeSession.Types.Public  as Public
-import IdeSession.Types.Progress
 import IdeSession.Util
-import IdeSession.Strict.Container
-import IdeSession.RPC.Client (ExternalException)
+import IdeSession.Util.BlockingOps
+import qualified IdeSession.Query as Query
 import qualified IdeSession.Strict.IntMap as IntMap
+import qualified IdeSession.Strict.List   as List
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
-import qualified IdeSession.Strict.List   as List
 import qualified IdeSession.Strict.Trie   as Trie
-import IdeSession.Strict.MVar
+import qualified IdeSession.Types.Private as Private
+import qualified IdeSession.Types.Public  as Public
 
 {------------------------------------------------------------------------------
   Starting and stopping
@@ -261,7 +262,7 @@ forceShutdownSession = shutdownSession' True
 shutdownSession' :: Bool -> IdeSession -> IO ()
 shutdownSession' forceTerminate session@IdeSession{ideState, ideStaticInfo} = do
   -- Try to terminate the server, unless we currently have a snippet running
-  mStillRunning <- modifyMVar ideState $ \state ->
+  mStillRunning <- $modifyStrictMVar ideState $ \state ->
     case state of
       IdeSessionRunning runActions idleState -> do
         if forceTerminate
@@ -328,7 +329,7 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
     forM_ mInitParams (execInitParams ideStaticInfo)
 
     -- Restart the session
-    modifyMVar_ ideState $ \state ->
+    $modifyStrictMVar_ ideState $ \state ->
       case state of
         IdeSessionIdle idleState ->
           restart noPendingRemoteChanges idleState
@@ -522,7 +523,7 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
   where
     go :: Bool -> IdeSessionUpdate (Int, [SourceError]) -> IO ()
     go justRestarted update = do
-      shouldRestart <- modifyMVar ideState $ \state ->
+      shouldRestart <- $modifyStrictMVar ideState $ \state ->
         case state of
           IdeSessionIdle idleState ->
             goAtomic noPendingRemoteChanges idleState update
@@ -1058,7 +1059,7 @@ runExe session m = do
       forceTermination <- newMVar False
 
       return $ RunActions
-        { runWait = modifyMVar runActionsState $ \st -> case st of
+        { runWait = $modifyStrictMVar runActionsState $ \st -> case st of
             Right outcome ->
               return (Right outcome, Right outcome)
             Left terminationCallback -> do
@@ -1066,7 +1067,7 @@ runExe session m = do
               if BSS.null bs
                 then do
                   res <- waitForProcess ph
-                  forceTerm <- takeMVar forceTermination
+                  forceTerm <- $takeStrictMVar forceTermination
                   unless forceTerm $ terminationCallback res
                   return (Right res, Right res)
                 else
@@ -1074,13 +1075,13 @@ runExe session m = do
         , interrupt = interruptProcessGroupOf ph
         , supplyStdin = \bs -> BSS.hPut stdin_hdl bs >> IO.hFlush stdin_hdl
         , registerTerminationCallback = \callback' ->
-            modifyMVar_ runActionsState $ \st -> case st of
+            $modifyStrictMVar_ runActionsState $ \st -> case st of
               Right outcome ->
                 return (Right outcome)
               Left callback ->
                 return (Left (\res -> callback res >> callback' res))
         , forceCancel = do
-            swapMVar forceTermination True
+            $swapStrictMVar forceTermination True
             terminateProcess ph
         }
       -- We don't need to close any handles. At the latest GC closes them.
@@ -1129,8 +1130,8 @@ runCmd session mkCmd = modifyIdleState session $ \idleState ->
 
     restoreToIdle :: ExplicitSharingCache -> StrictMVar (Strict Maybe BreakInfo) -> Public.RunResult -> IO ()
     restoreToIdle cache isBreak _ = do
-      mBreakInfo <- readMVar isBreak
-      modifyMVar_ (ideState session) $ \state -> case state of
+      mBreakInfo <- $readStrictMVar isBreak
+      $modifyStrictMVar_ (ideState session) $ \state -> case state of
         IdeSessionIdle _ ->
           Ex.throwIO (userError "The impossible happened!")
         IdeSessionPendingChanges _ _ ->
@@ -1147,16 +1148,16 @@ runCmd session mkCmd = modifyIdleState session $ \idleState ->
                        -> Maybe Private.RunResult
                        -> IO Public.RunResult
     translateRunResult isBreak (Just Private.RunOk) = do
-      putMVar isBreak Maybe.nothing
+      $putStrictMVar isBreak Maybe.nothing
       return $ Public.RunOk
     translateRunResult isBreak (Just (Private.RunProgException str)) = do
-      putMVar isBreak Maybe.nothing
+      $putStrictMVar isBreak Maybe.nothing
       return $ Public.RunProgException str
     translateRunResult isBreak (Just (Private.RunGhcException str)) = do
-      putMVar isBreak Maybe.nothing
+      $putStrictMVar isBreak Maybe.nothing
       return $ Public.RunGhcException str
     translateRunResult isBreak (Just (Private.RunBreak breakInfo)) = do
-      putMVar isBreak (Maybe.just breakInfo)
+      $putStrictMVar isBreak (Maybe.just breakInfo)
       return $ Public.RunBreak
     translateRunResult _isBreak Nothing =
       -- Termination handler not called in this case, no need to update _isBreak
@@ -1389,7 +1390,7 @@ forceRecompile = markAsUpdated (const True)
 -- @Nothing@, crash immediately; otherwise, set up a thread that throws
 -- an exception to the main thread after the delay.
 crashGhcServer :: IdeSession -> Maybe Int -> IO ()
-crashGhcServer IdeSession{..} delay = withMVar ideState $ \state ->
+crashGhcServer IdeSession{..} delay = $withStrictMVar ideState $ \state ->
   case state of
     IdeSessionIdle idleState ->
       rpcCrash (idleState ^. ideGhcServer) delay
@@ -1507,7 +1508,7 @@ withIdleState session act = modifyIdleState session $ \idleState -> do
   return (IdeSessionIdle idleState, result)
 
 modifyIdleState :: IdeSession -> (IdeIdleState -> IO (IdeSessionState, a)) -> IO a
-modifyIdleState IdeSession{..} act = modifyMVar ideState $ \state -> case state of
+modifyIdleState IdeSession{..} act = $modifyStrictMVar ideState $ \state -> case state of
   IdeSessionIdle idleState -> act idleState
   _ -> Ex.throwIO $ userError "State not idle"
 
