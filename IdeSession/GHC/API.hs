@@ -15,6 +15,11 @@ module IdeSession.GHC.API (
   , cHeaderExtensions
   , sourceExtensions
   , cabalMacrosLocation
+    -- * Paths
+  , ideSessionSourceDir
+  , ideSessionDataDir
+  , ideSessionDistDir
+  , ideSessionObjDir
   ) where
 
 import System.FilePath ((</>))
@@ -27,7 +32,7 @@ import IdeSession.GHC.Responses
 -- We use a Unix timestamp for this so that these API versions have some
 -- semantics (http://www.epochconverter.com/, GMT).
 ideBackendApiVersion :: Int
-ideBackendApiVersion = 1400834630
+ideBackendApiVersion = 1401451222
 
 {------------------------------------------------------------------------------
   Configuration
@@ -60,3 +65,26 @@ sourceExtensions = hsExtensions
 -- Cabal.autogenModulesDir can use it for compilation of C files?
 cabalMacrosLocation :: FilePath -> FilePath
 cabalMacrosLocation ideDistDir = ideDistDir </> "cabal_macros.h"
+
+{-------------------------------------------------------------------------------
+  Paths
+
+  These are all meant to be relative to the session dir
+-------------------------------------------------------------------------------}
+
+-- | The directory to use for managing source files.
+ideSessionSourceDir :: FilePath -> FilePath
+ideSessionSourceDir sessionDir = sessionDir </> "src"
+
+-- | The directory to use for data files that may be accessed by the
+-- running program. The running program will have this as its CWD.
+ideSessionDataDir :: FilePath -> FilePath
+ideSessionDataDir sessionDir = sessionDir </> "data"
+
+-- | Cabal "dist" prefix.
+ideSessionDistDir :: FilePath -> FilePath
+ideSessionDistDir sessionDir = sessionDir </> "dist"
+
+-- | Directory where we store compiled C files (objects)
+ideSessionObjDir :: FilePath -> FilePath
+ideSessionObjDir sessionDir = sessionDir </> "ffi"

@@ -59,7 +59,7 @@ import Distribution.Simple.Program.Find ( -- From our patched cabal
 
 -- | Start the ghc server
 forkGhcServer :: IdeStaticInfo -> IO (Either ExternalException (GhcServer, GhcVersion))
-forkGhcServer IdeStaticInfo{..} = do
+forkGhcServer IdeStaticInfo{ideConfig, ideSessionDir} = do
   when configInProcess $
     fail "In-process ghc server not currently supported"
 
@@ -69,7 +69,7 @@ forkGhcServer IdeStaticInfo{..} = do
       fail $ "Could not find ide-backend-server"
     Just prog -> do
       env     <- envWithPathOverride configExtraPathDirs
-      server  <- OutProcess <$> forkRpcServer prog [] (Just ideDataDir) env
+      server  <- OutProcess <$> forkRpcServer prog [] (Just (ideSessionDataDir ideSessionDir)) env
       version <- Ex.try $ do
         GhcInitResponse{..} <- rpcInit server GhcInitRequest {
             ghcInitClientApiVersion   = ideBackendApiVersion
@@ -77,8 +77,7 @@ forkGhcServer IdeStaticInfo{..} = do
           , ghcInitOpts               = opts
           , ghcInitUserPackageDB      = userDB
           , ghcInitSpecificPackageDBs = specificDBs
-          , ghcInitSourceDir          = ideSourcesDir
-          , ghcInitDistDir            = ideDistDir
+          , ghcInitSessionDir         = ideSessionDir
           }
         return ghcInitVersion
       return ((server,) <$> version)
@@ -88,7 +87,7 @@ forkGhcServer IdeStaticInfo{..} = do
     opts :: [String]
     opts = "-XHaskell2010"  -- see #190
            : configStaticOpts
-           ++ relInclToOpts ideSourcesDir configRelativeIncludes
+           ++ relInclToOpts (ideSessionSourceDir ideSessionDir) configRelativeIncludes
 
     searchPath :: ProgramSearchPath
     searchPath = ProgramSearchPathDefault

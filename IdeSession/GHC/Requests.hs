@@ -19,14 +19,18 @@ import GHC.Generics
 
 import IdeSession.Types.Public
 
+-- | Initial handshake with the ghc server
+--
+-- Ideally we'd send over the entire IdeStaticInfo but this includes some
+-- Cabal fields, and the ghc server does -not- compile against Cabal
+-- (although this isn't so important anymore now that we use Cabal-ide-backend)
 data GhcInitRequest = GhcInitRequest {
     ghcInitClientApiVersion   :: Int
   , ghcInitGenerateModInfo    :: Bool
   , ghcInitOpts               :: [String]
   , ghcInitUserPackageDB      :: Bool
   , ghcInitSpecificPackageDBs :: [String]
-  , ghcInitSourceDir          :: FilePath
-  , ghcInitDistDir            :: FilePath
+  , ghcInitSessionDir         :: FilePath
   }
   deriving (Typeable, Generic)
 
@@ -97,11 +101,9 @@ instance Binary GhcInitRequest where
     put ghcInitOpts
     put ghcInitUserPackageDB
     put ghcInitSpecificPackageDBs
-    put ghcInitSourceDir
-    put ghcInitDistDir
+    put ghcInitSessionDir
 
   get = GhcInitRequest <$> get
-                       <*> get
                        <*> get
                        <*> get
                        <*> get

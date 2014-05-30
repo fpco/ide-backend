@@ -137,11 +137,15 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
   verifyConfig ideConfig
 
   configDirCanon <- Dir.canonicalizePath configDir
-  ideSourcesDir  <- createTempDirectory configDirCanon "src."
-  ideDataDir     <- createTempDirectory configDirCanon "data."
-  ideDistDir     <- createTempDirectory configDirCanon "dist."
-
+  ideSessionDir  <- createTempDirectory configDirCanon "session."
   let ideStaticInfo = IdeStaticInfo{..}
+
+  -- Create the common subdirectories of session.nnnn so that we don't have to
+  -- worry about creating these elsewhere
+  Dir.createDirectoryIfMissing True (ideSessionSourceDir ideSessionDir)
+  Dir.createDirectoryIfMissing True (ideSessionDataDir   ideSessionDir)
+  Dir.createDirectoryIfMissing True (ideSessionDistDir   ideSessionDir)
+  Dir.createDirectoryIfMissing True (ideSessionObjDir    ideSessionDir)
 
   -- Local initialization
   execInitParams ideStaticInfo initParams
@@ -230,14 +234,12 @@ checkPackageDbEnvVar = do
 
 -- | Write per-package CPP macros.
 writeMacros :: IdeStaticInfo -> Maybe BSL.ByteString -> IO ()
-writeMacros IdeStaticInfo{ ideConfig = SessionConfig {..}
-                         , ideDistDir
-                         }
+writeMacros IdeStaticInfo{ideConfig = SessionConfig {..}, ..}
             configCabalMacros = do
   macros <- case configCabalMacros of
               Nothing     -> generateMacros configPackageDBStack configExtraPathDirs
               Just macros -> return (BSL.unpack macros)
-  writeFile (cabalMacrosLocation ideDistDir) macros
+  writeFile (cabalMacrosLocation (ideSessionDistDir ideSessionDir)) macros
 
 -- | Close a session down, releasing the resources.
 --
@@ -297,15 +299,12 @@ shutdownSession' forceTerminate session@IdeSession{ideState, ideStaticInfo} = do
     Nothing ->
       -- We're done
       return ()
- where
-  cleanupDirs = when (configDeleteTempFiles . ideConfig $ ideStaticInfo) $ do
-    let dataDir    = ideDataDir ideStaticInfo
-        sourcesDir = ideSourcesDir ideStaticInfo
-    -- TODO: this has a race condition (not sure we care; if not, say why not)
-    dataExists <- Dir.doesDirectoryExist dataDir
-    when dataExists $ Dir.removeDirectoryRecursive dataDir
-    sourceExists <- Dir.doesDirectoryExist sourcesDir
-    when sourceExists $ Dir.removeDirectoryRecursive sourcesDir
+  where
+    cleanupDirs :: IO ()
+    cleanupDirs =
+      when (configDeleteTempFiles . ideConfig $ ideStaticInfo) $
+        ignoreDoesNotExist $
+          Dir.removeDirectoryRecursive (ideSessionDir ideStaticInfo)
 
 -- | Restarts a session. Technically, a new session is created under the old
 -- @IdeSession@ handle, with a state cloned from the old session,
@@ -617,7 +616,7 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
              then do
                -- relative include path is part of the state rather than the
                -- config as of c0bf0042
-               let relOpts = relInclToOpts (ideSourcesDir ideStaticInfo)
+               let relOpts = relInclToOpts (ideSessionSourceDir (ideSessionDir ideStaticInfo))
                                            ideRelativeIncludes'
                (leftover, warnings) <- rpcSetGhcOpts (idleState ^. ideGhcServer)
                                                      (ideDynamicOpts' ++ relOpts)
@@ -679,7 +678,7 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
     mkRelative :: ExplicitSharingCache -> ExplicitSharingCache
     mkRelative ExplicitSharingCache{..} =
       let aux :: BSS.ByteString -> BSS.ByteString
-          aux = BSS.pack . makeRelative (ideSourcesDir ideStaticInfo) . BSS.unpack
+          aux = BSS.pack . makeRelative (ideSessionSourceDir (ideSessionDir ideStaticInfo)) . BSS.unpack
       in ExplicitSharingCache {
         filePathCache = IntMap.map aux filePathCache
       , idPropCache   = idPropCache
@@ -735,8 +734,8 @@ recompileObjectFiles = do
   where
     recompile :: WriterT [RecompileAction] IdeSessionUpdate ()
     recompile = do
-      staticInfo   <- asks ideSessionUpdateStaticInfo
-      managedFiles <- get (ideManagedFiles .> managedSource)
+      IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+      managedFiles      <- get (ideManagedFiles .> managedSource)
 
       let cFiles :: [(FilePath, LogicalTimestamp)]
           cFiles = filter ((`elem` cExtensions) . takeExtension . fst)
@@ -744,14 +743,13 @@ recompileObjectFiles = do
                  $ managedFiles
 
           srcDir, objDir :: FilePath
-          srcDir = ideSourcesDir staticInfo
-          distDir = ideDistDir staticInfo
-          objDir = distDir </> "objs"
+          srcDir = ideSessionSourceDir ideSessionDir
+          objDir = ideSessionObjDir    ideSessionDir
 
           compiling, loading, unloading, skipped :: FilePath -> String
-          compiling src = "Compiling " ++ makeRelative srcDir src
-          loading   obj = "Loading "   ++ makeRelative objDir obj
-          unloading obj = "Unloading " ++ makeRelative objDir obj
+          compiling src = "Compiling "       ++ makeRelative srcDir src
+          loading   obj = "Loading "         ++ makeRelative objDir obj
+          unloading obj = "Unloading "       ++ makeRelative objDir obj
           skipped   obj = "Skipped loading " ++ makeRelative objDir obj
 
       forM_ cFiles $ \(fp, ts) -> do
@@ -836,7 +834,7 @@ updateSourceFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
 updateSourceFile fp bs =
   let fileInfo = FileInfo {
           fileInfoRemoteFile = fp
-        , fileInfoRemoteDir  = ideSourcesDir
+        , fileInfoRemoteDir  = ideSessionSourceDir
         , fileInfoAccessor   = managedSource
         }
   in do filesChanged <- Free (FileCmd (FileWrite fileInfo bs) Pure)
@@ -849,7 +847,7 @@ updateSourceFileFromFile :: FilePath -> IdeSessionUpdate ()
 updateSourceFileFromFile fp =
   let fileInfo = FileInfo {
           fileInfoRemoteFile = fp
-        , fileInfoRemoteDir  = ideSourcesDir
+        , fileInfoRemoteDir  = ideSessionSourceDir
         , fileInfoAccessor   = managedSource
         }
   in do filesChanged <- Free (FileCmd (FileCopy fileInfo fp) Pure)
@@ -861,7 +859,7 @@ updateSourceFileDelete :: FilePath -> IdeSessionUpdate ()
 updateSourceFileDelete fp =
   let fileInfo = FileInfo {
           fileInfoRemoteFile = fp
-        , fileInfoRemoteDir  = ideSourcesDir
+        , fileInfoRemoteDir  = ideSessionSourceDir
         , fileInfoAccessor   = managedSource
         }
   in do filesChanged <- Free (FileCmd (FileDelete fileInfo) Pure)
@@ -911,7 +909,7 @@ updateDataFile :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
 updateDataFile fp bs =
   let fileInfo = FileInfo {
           fileInfoRemoteFile = fp
-        , fileInfoRemoteDir  = ideDataDir
+        , fileInfoRemoteDir  = ideSessionDataDir
         , fileInfoAccessor   = managedData
         }
   in do filesChanged <- Free (FileCmd (FileWrite fileInfo bs) Pure)
@@ -925,7 +923,7 @@ updateDataFileFromFile :: FilePath -> FilePath -> IdeSessionUpdate ()
 updateDataFileFromFile remoteFile localFile =
   let fileInfo = FileInfo {
           fileInfoRemoteFile = remoteFile
-        , fileInfoRemoteDir  = ideDataDir
+        , fileInfoRemoteDir  = ideSessionDataDir
         , fileInfoAccessor   = managedData
         }
   in do filesChanged <- Free (FileCmd (FileCopy fileInfo localFile) Pure)
@@ -937,7 +935,7 @@ updateDataFileDelete :: FilePath -> IdeSessionUpdate ()
 updateDataFileDelete fp =
   let fileInfo = FileInfo {
           fileInfoRemoteFile = fp
-        , fileInfoRemoteDir  = ideDataDir
+        , fileInfoRemoteDir  = ideSessionDataDir
         , fileInfoAccessor   = managedData
         }
   in do filesChanged <- Free (FileCmd (FileDelete fileInfo) Pure)
@@ -969,12 +967,13 @@ updateStderrBufferMode = set ideStderrBufferMode
 -- or include paths change, but only when files change.
 updateTargets :: Public.Targets -> IdeSessionUpdate ()
 updateTargets targets = do
-  IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
+  IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+  let sourceDir = ideSessionSourceDir ideSessionDir
   let dirTargets = case targets of
         Public.TargetsInclude l ->
-          Public.TargetsInclude $ map (ideSourcesDir </>) l
+          Public.TargetsInclude $ map (sourceDir </>) l
         Public.TargetsExclude l ->
-          Public.TargetsExclude $ map (ideSourcesDir </>) l
+          Public.TargetsExclude $ map (sourceDir </>) l
   set ideTargets dirTargets
   restartSession'
 
@@ -1216,11 +1215,15 @@ printVar session var bind forceEval = withBreakInfo session $ \idleState _ ->
 buildExe :: [String] -> [(ModuleName, FilePath)] -> IdeSessionUpdate ()
 buildExe extraOpts ms = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    let SessionConfig{..} = ideConfig
+    let ideDistDir   = ideSessionDistDir   ideSessionDir
+        ideDataDir   = ideSessionDataDir   ideSessionDir
+        ideSourceDir = ideSessionSourceDir ideSessionDir
+
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
     relativeIncludes  <- get ideRelativeIncludes
-    let SessionConfig{..} = ideConfig
         -- Note that these do not contain the @packageDbArgs@ options.
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
@@ -1253,16 +1256,17 @@ buildExe extraOpts ms = do
                 (loadedMs, pkgs) <- buildDeps mcomputed
                 libDeps <- externalDeps pkgs
                 let beArgs =
-                      BuildExeArgs{ bePackageDBStack = configPackageDBStack
-                                  , beExtraPathDirs = configExtraPathDirs
-                                  , beSourcesDir = ideSourcesDir
-                                  , beDistDir = ideDistDir
+                      BuildExeArgs{ bePackageDBStack   = configPackageDBStack
+                                  , beExtraPathDirs    = configExtraPathDirs
+                                  , beSourcesDir       = ideSourceDir
+                                  , beDistDir          = ideDistDir
+                                  , beRelativeIncludes = relativeIncludes
+                                  , beGhcOpts          = ghcOpts
+                                  , beLibDeps          = libDeps
+                                  , beLoadedMs         = loadedMs
                                   , beStdoutLog
                                   , beStderrLog
-                                  , beRelativeIncludes = relativeIncludes
-                                  , beGhcOpts = ghcOpts
-                                  , beLibDeps = libDeps
-                                  , beLoadedMs = loadedMs }
+                                  }
                 invokeExeCabal ideStaticInfo (ReqExeBuild beArgs ms) callback)
     set ideBuildExeStatus (Just exitCode)
 
@@ -1280,11 +1284,15 @@ buildExe extraOpts ms = do
 buildDoc :: IdeSessionUpdate ()
 buildDoc = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    let SessionConfig{..} = ideConfig
+    let ideDistDir   = ideSessionDistDir   ideSessionDir
+        ideDataDir   = ideSessionDataDir   ideSessionDir
+        ideSourceDir = ideSessionSourceDir ideSessionDir
+
     callback          <- asks ideSessionUpdateCallback
     mcomputed         <- get ideComputed
     dynamicOpts       <- get ideDynamicOpts
     relativeIncludes  <- get ideRelativeIncludes
-    let SessionConfig{..} = ideConfig
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
@@ -1299,16 +1307,17 @@ buildDoc = do
                   (loadedMs, pkgs) <- buildDeps mcomputed
                   libDeps <- externalDeps pkgs
                   let beArgs =
-                        BuildExeArgs{ bePackageDBStack = configPackageDBStack
-                                    , beExtraPathDirs = configExtraPathDirs
-                                    , beSourcesDir = ideSourcesDir
-                                    , beDistDir = ideDistDir
+                        BuildExeArgs{ bePackageDBStack   = configPackageDBStack
+                                    , beExtraPathDirs    = configExtraPathDirs
+                                    , beSourcesDir       = ideSourceDir
+                                    , beDistDir          = ideDistDir
+                                    , beRelativeIncludes = relativeIncludes
+                                    , beGhcOpts          = ghcOpts
+                                    , beLibDeps          = libDeps
+                                    , beLoadedMs         = loadedMs
                                     , beStdoutLog
                                     , beStderrLog
-                                    , beRelativeIncludes = relativeIncludes
-                                    , beGhcOpts = ghcOpts
-                                    , beLibDeps = libDeps
-                                    , beLoadedMs = loadedMs }
+                                    }
                   invokeExeCabal ideStaticInfo (ReqExeDoc beArgs) callback)
     set ideBuildDocStatus (Just exitCode)
 
@@ -1344,9 +1353,11 @@ buildDoc = do
 buildLicenses :: FilePath -> IdeSessionUpdate ()
 buildLicenses cabalsDir = do
     IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
-    callback          <- asks ideSessionUpdateCallback
-    mcomputed         <- get ideComputed
     let SessionConfig{configGenerateModInfo} = ideConfig
+    let ideDistDir = ideSessionDistDir ideSessionDir
+
+    callback  <- asks ideSessionUpdateCallback
+    mcomputed <- get ideComputed
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
@@ -1396,12 +1407,12 @@ unloadObject path = do
 -- TODO: Should we update data files here too?
 markAsUpdated :: (FilePath -> Bool) -> IdeSessionUpdate ()
 markAsUpdated shouldMark = do
-  IdeStaticInfo{ideSourcesDir} <- asks ideSessionUpdateStaticInfo
+  IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
   sources  <- get (ideManagedFiles .> managedSource)
   sources' <- forM sources $ \(path, (digest, oldTS)) ->
     if shouldMark path
       then do schedule (\r -> r { pendingUpdatedCode = True })
-              newTS <- updateFileTimes (ideSourcesDir </> path)
+              newTS <- updateFileTimes (ideSessionSourceDir ideSessionDir </> path)
               return (path, (digest, newTS))
       else return (path, (digest, oldTS))
   set (ideManagedFiles .> managedSource) sources'
@@ -1423,48 +1434,50 @@ nextLogicalTimestamp = do
 -- | Call gcc via ghc, with the same parameters cabal uses.
 runGcc :: FilePath -> FilePath -> FilePath -> IdeSessionUpdate [SourceError]
 runGcc absC absObj pref = do
- ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
- callback  <- asks ideSessionUpdateCallback
- liftIO $ do
-  -- Direct call to gcc, for testing only:
-  let SessionConfig{configPackageDBStack, configExtraPathDirs} = ideConfig
-      _gcc :: FilePath
-      _gcc = "/usr/bin/gcc"
-      _args :: [String]
-      _args = [ "-c"
-              , "-o", absObj
-              , absC
-              ]
-      _stdin :: String
-      _stdin = ""
-      stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
-      stderrLog = ideDistDir </> "ide-backend-cc.stderr"
-      runCcArgs = RunCcArgs{ rcPackageDBStack = configPackageDBStack
-                           , rcExtraPathDirs = configExtraPathDirs
-                           , rcDistDir = ideDistDir
-                           , rcStdoutLog = stdoutLog
-                           , rcStderrLog = stderrLog
-                           , rcAbsC = absC
-                           , rcAbsObj = absObj
-                           , rcPref = pref }
-  -- (_exitCode, _stdout, _stderr)
-  --   <- readProcessWithExitCode _gcc _args _stdin
-  -- The real deal; we call gcc via ghc via cabal functions:
-  exitCode <- invokeExeCabal ideStaticInfo (ReqExeCc runCcArgs) callback
-  stdout <- readFile stdoutLog
-  stderr <- readFile stderrLog
-  case exitCode of
-    ExitSuccess   -> return []
-    ExitFailure _ -> return (parseErrorMsgs stdout stderr)
- where
-  -- TODO: Parse the error messages returned by gcc. For now, we just
-  -- return all output as a single, unlocated, error.
-  parseErrorMsgs :: String -> String -> [SourceError]
-  parseErrorMsgs stdout stderr = [SourceError
-    { errorKind = KindError
-    , errorSpan = TextSpan (Text.pack "<gcc error>")
-    , errorMsg  = Text.pack (stdout ++ stderr)
-    }]
+    ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    let ideDistDir = ideSessionDistDir ideSessionDir
+
+    callback  <- asks ideSessionUpdateCallback
+    liftIO $ do
+     -- Direct call to gcc, for testing only:
+     let SessionConfig{configPackageDBStack, configExtraPathDirs} = ideConfig
+         _gcc :: FilePath
+         _gcc = "/usr/bin/gcc"
+         _args :: [String]
+         _args = [ "-c"
+                 , "-o", absObj
+                 , absC
+                 ]
+         _stdin :: String
+         _stdin = ""
+         stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
+         stderrLog = ideDistDir </> "ide-backend-cc.stderr"
+         runCcArgs = RunCcArgs{ rcPackageDBStack = configPackageDBStack
+                              , rcExtraPathDirs = configExtraPathDirs
+                              , rcDistDir = ideDistDir
+                              , rcStdoutLog = stdoutLog
+                              , rcStderrLog = stderrLog
+                              , rcAbsC = absC
+                              , rcAbsObj = absObj
+                              , rcPref = pref }
+     -- (_exitCode, _stdout, _stderr)
+     --   <- readProcessWithExitCode _gcc _args _stdin
+     -- The real deal; we call gcc via ghc via cabal functions:
+     exitCode <- invokeExeCabal ideStaticInfo (ReqExeCc runCcArgs) callback
+     stdout <- readFile stdoutLog
+     stderr <- readFile stderrLog
+     case exitCode of
+       ExitSuccess   -> return []
+       ExitFailure _ -> return (parseErrorMsgs stdout stderr)
+  where
+    -- TODO: Parse the error messages returned by gcc. For now, we just
+    -- return all output as a single, unlocated, error.
+    parseErrorMsgs :: String -> String -> [SourceError]
+    parseErrorMsgs stdout stderr = [SourceError
+      { errorKind = KindError
+      , errorSpan = TextSpan (Text.pack "<gcc error>")
+      , errorMsg  = Text.pack (stdout ++ stderr)
+      }]
 
 {------------------------------------------------------------------------------
   Aux
@@ -1495,7 +1508,7 @@ tellSt w = St.modify (`mappend` w)
 -------------------------------------------------------------------------------}
 
 data FileInfo = FileInfo {
-    fileInfoRemoteDir  :: IdeStaticInfo -> FilePath
+    fileInfoRemoteDir  :: FilePath -> FilePath
   , fileInfoRemoteFile :: FilePath
   , fileInfoAccessor   :: Accessor ManagedFilesInternal [ManagedFile]
   }
@@ -1514,7 +1527,7 @@ data FileCmd =
 --
 -- Returns 'True' if any files were changed.
 executeFileCmd :: (MonadState IdeIdleState m, MonadIO m) => IdeStaticInfo -> FileCmd -> m Bool
-executeFileCmd staticInfo cmd = case cmd of
+executeFileCmd staticInfo@IdeStaticInfo{..} cmd = case cmd of
     FileWrite _ bs -> do
       old <- get cachedInfo
       -- We always overwrite the file, and then later set the timestamp back
@@ -1542,7 +1555,7 @@ executeFileCmd staticInfo cmd = case cmd of
       return True
   where
     remotePath :: FilePath
-    remotePath = fileInfoRemoteDir info staticInfo </> fileInfoRemoteFile info
+    remotePath = fileInfoRemoteDir info ideSessionDir </> fileInfoRemoteFile info
 
     info :: FileInfo
     info = case cmd of FileWrite  i _ -> i

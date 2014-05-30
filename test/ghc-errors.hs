@@ -35,7 +35,6 @@ import System.Exit (ExitCode (..))
 import System.FilePath
 import System.FilePath.Find (always, extension, find)
 import System.IO as IO
-import System.IO.Temp (withTempDirectory, createTempDirectory)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process (readProcess, readProcessWithExitCode)
 import qualified System.Process as Process
@@ -97,9 +96,8 @@ type SessionSetup = ((SessionInitParams, SessionConfig) -> (SessionInitParams, S
 -- | Run the specified action with a new IDE session, configured to use a
 -- temporary directory
 withSession :: SessionSetup -> (IdeSession -> IO a) -> IO a
-withSession setup io = inTempDir $ \tempDir -> do
-    let config' = config { configDir = tempDir}
-    Ex.bracket (initSession initParams config') tryShutdownSession io
+withSession setup io =
+    Ex.bracket (initSession initParams config) tryShutdownSession io
   where
     (initParams, config) = setup (defaultSessionInitParams, defaultSessionConfig)
 
@@ -109,21 +107,6 @@ withSession setup io = inTempDir $ \tempDir -> do
         Just () -> return ()
         Nothing -> do putStrLn "WARNING: Failed to shutdown session (timeout)"
                       forceShutdownSession session
-
-    isDefaultConfigDir = configDir config == configDir defaultSessionConfig
-
-    -- Only actually use the temp dir if it's not specifically overriden
-    inTempDir act
-      | isDefaultConfigDir && configDeleteTempFiles config = do
-          slashTmp <- getTemporaryDirectory
-          withTempDirectory slashTmp "ide-backend-test." act
-      | not isDefaultConfigDir && configDeleteTempFiles config =
-          act (configDir config)
-      | isDefaultConfigDir && not (configDeleteTempFiles config) = do
-          tempDir <- createTempDirectory "." "ide-backend-test."
-          act tempDir
-      | otherwise = do
-          Ex.throwIO (userError "inTempDir: unsupported setup")
 
 defaultSession :: SessionSetup
 defaultSession = id
@@ -156,12 +139,6 @@ withDBStack :: PackageDBStack -> SessionSetup
 withDBStack dbStack (initParams, config) = (
     initParams
   , config { configPackageDBStack = dbStack }
-  )
-
-withConfigDir :: FilePath -> SessionSetup
-withConfigDir dir (initParams, config) = (
-    initParams
-  , config { configDir = dir }
   )
 
 -- Set of api calls and checks to perform on each project.
@@ -370,23 +347,14 @@ syntheticTests = [
   , ( "Permit a session within a session and duplicated shutdownSession"
     , withSession defaultSession $ \session -> do
         loadModulesFrom session "test/ABnoError"
-        config <- getSessionConfig session
 
-        [withNewDir2, withNewDir3, withNewDir4, withNewDir5] <- forM [2 .. 5] $ \n -> do
-          let newDir = configDir config </> "new" ++ show (n :: Int)
-          createDirectory newDir
-          return $ \(initParams, sessionConfig) -> (
-              initParams
-            , sessionConfig { configDir = newDir }
-            )
-
-        withSession withNewDir2 $ \s2 -> do
-         withSession withNewDir3 $ \s3 -> do
-          withSession withNewDir4 $ \_s4 -> do
+        withSession defaultSession $ \s2 -> do
+         withSession defaultSession $ \s3 -> do
+          withSession defaultSession $ \_s4 -> do
            let update2 = loadModule "M.hs" "a = unknownX"
            updateSessionD s2 update2 1
            assertOneError s2
-           withSession withNewDir5 $ \s5 -> do
+           withSession defaultSession $ \s5 -> do
             let update3 = loadModule "M.hs" "a = 3"
             updateSessionD s3 update3 1
             assertNoErrors session
@@ -1981,37 +1949,6 @@ syntheticTests = [
     )
   , ( "Buffer modes: RunBlockBuffering, buffer never fills, with timeout"
     , testBufferMode (RunBlockBuffering (Just 4096) (Just 1000000))
-    )
-  , ( "Use relative path in SessionConfig"
-    , do withTempDirectory "." "ide-backend-test." $ \fullPath -> do
-           relativePath <- makeRelativeToCurrentDirectory fullPath
-           withSession (withConfigDir relativePath) $ \session -> do
-             let upd = (updateCodeGeneration True)
-                    <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
-                         [ "module M where"
-                         , "hello :: IO ()"
-                         , "hello = putStr \"Hello World\""
-                         , "main :: IO ()"
-                         , "main = hello"
-                         ])
-             updateSessionD session upd 1
-             assertNoErrors session
-             runActions <- runStmt session "M" "hello"
-             (output, result) <- runWaitAll runActions
-             assertEqual "" result RunOk
-             assertEqual "" (BSLC.pack "Hello World") output
-
-             {- This fails, but it's probably not supposed to work anyway.
-             let m = "M"
-                 updExe = buildExe [] [(Text.pack m, "M.hs")]
-             updateSessionD session updExe 2
-             runActionsExe <- runExe session m
-             (outExe, statusExe) <- runWaitAll runActionsExe
-             assertEqual "Output from runExe"
-                         "Hello World"
-                         outExe
-             assertEqual "after runExe" ExitSuccess statusExe
-             -}
     )
   , ( "Call runWait after termination (normal termination)"
     , withSession defaultSession $ \session -> do
@@ -6171,7 +6108,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         errs <- getSourceErrors session
         let none p = all (not . p)
         let containsFullPath e =
-              "ide-backend-test" `isInfixOf` Text.unpack (errorMsg e)
+              "session." `isInfixOf` Text.unpack (errorMsg e)
         _fixme session "#32" $ assertBool "" (none containsFullPath errs)
     )
   , ( "Updating dependent data files multiple times per second (#134)"
@@ -8002,13 +7939,15 @@ defaultSessionConfig = unsafePerformIO $ do
                      `Ex.catch` (\(_ :: Ex.IOException) -> return "")
   extraPathDirs <- (System.Environment.getEnv "IDE_BACKEND_EXTRA_PATH_DIRS")
                      `Ex.catch` (\(_ :: Ex.IOException) -> return "")
+  keepTempFiles <- (System.Environment.getEnv "IDE_BACKEND_KEEP_TEMP_FILES")
+                     `Ex.catch` (\(_ :: Ex.IOException) -> return "")
   let packageDbStack
         | null packageDb = configPackageDBStack IdeSession.defaultSessionConfig
         | otherwise      = [GlobalPackageDB, SpecificPackageDB packageDb]
   return IdeSession.defaultSessionConfig {
-             configPackageDBStack = packageDbStack
-           , configExtraPathDirs  = splitSearchPath extraPathDirs
---         , configDeleteTempFiles = False
+             configPackageDBStack  = packageDbStack
+           , configExtraPathDirs   = splitSearchPath extraPathDirs
+           , configDeleteTempFiles = null keepTempFiles
            }
 
 {------------------------------------------------------------------------------

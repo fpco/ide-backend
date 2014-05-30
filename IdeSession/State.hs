@@ -39,18 +39,19 @@ module IdeSession.State
   ) where
 
 import Control.Concurrent (ThreadId)
-import Data.Digest.Pure.MD5 (MD5Digest)
 import Data.Accessor (Accessor, accessor)
-import qualified Data.ByteString as BSS
+import Data.Digest.Pure.MD5 (MD5Digest)
 import System.Exit (ExitCode)
 import System.Posix.Types (EpochTime)
-import IdeSession.Types.Private hiding (RunResult)
-import qualified IdeSession.Types.Public as Public
+import qualified Data.ByteString as BSS
+
 import IdeSession.Config
+import IdeSession.GHC.API (GhcVersion)
+import IdeSession.RPC.Client (RpcServer, RpcConversation, ExternalException)
 import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
-import IdeSession.RPC.Client (RpcServer, RpcConversation, ExternalException)
-import IdeSession.GHC.API (GhcVersion)
+import IdeSession.Types.Private hiding (RunResult)
+import qualified IdeSession.Types.Public as Public
 
 data Computed = Computed {
     -- | Last compilation and run errors
@@ -96,13 +97,13 @@ data IdeSession = IdeSession {
 data IdeStaticInfo = IdeStaticInfo {
     -- | Configuration
     ideConfig     :: SessionConfig
-    -- | The directory to use for managing source files.
-  , ideSourcesDir :: FilePath
-    -- | The directory to use for data files that may be accessed by the
-    -- running program. The running program will have this as its CWD.
-  , ideDataDir    :: FilePath
-    -- Cabal "dist" prefix.
-  , ideDistDir    :: FilePath
+    -- | (Temporary) directory for session files
+    --
+    -- See also:
+    -- * 'ideSessionSourceDir'
+    -- * 'ideSessionDataDir',
+    -- * 'ideSessionDistDir'
+  , ideSessionDir :: FilePath
   }
 
 data PendingRemoteChanges = PendingRemoteChanges {

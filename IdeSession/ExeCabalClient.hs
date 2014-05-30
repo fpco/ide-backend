@@ -16,9 +16,10 @@ import Distribution.Simple.Program.Find (
 
 import IdeSession.Cabal
 import IdeSession.Config
-import IdeSession.Types.Progress
+import IdeSession.GHC.API
 import IdeSession.RPC.Client (RpcServer, RpcConversation(..), forkRpcServer, rpcConversation, shutdown)
 import IdeSession.State
+import IdeSession.Types.Progress
 import IdeSession.Util
 
 -- | Invoke the executable that processes our custom functions that use
@@ -32,7 +33,7 @@ invokeExeCabal IdeStaticInfo{..} args callback = do
       fail $ "Could not find ide-backend-exe-cabal"
     Just prog -> do
       env <- envWithPathOverride configExtraPathDirs
-      server <- forkRpcServer prog [] (Just ideDataDir) env
+      server <- forkRpcServer prog [] (Just (ideSessionDataDir ideSessionDir)) env
       exitCode <- rpcRunExeCabal server args callback
       shutdown server  -- not long-running
       return exitCode
