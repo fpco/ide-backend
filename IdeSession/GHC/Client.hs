@@ -24,26 +24,28 @@ module IdeSession.GHC.Client (
   , rpcSetGhcOpts
   ) where
 
-import Control.Monad (when)
 import Control.Applicative ((<$>))
 import Control.Concurrent (killThread)
-import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.Async (async, cancel, withAsync)
+import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (newMVar)
+import Control.Monad (when)
+import Data.Typeable (Typeable)
+import Data.Binary (Binary)
+import System.Exit (ExitCode)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Char8      as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
-import System.Exit (ExitCode)
 
 import IdeSession.Config
 import IdeSession.GHC.API
 import IdeSession.RPC.Client
-import IdeSession.Types.Progress
-import qualified IdeSession.Types.Public as Public
+import IdeSession.State
 import IdeSession.Types.Private (RunResult(..))
+import IdeSession.Types.Progress
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
-import IdeSession.State
+import qualified IdeSession.Types.Public as Public
 
 import Distribution.Verbosity (normal)
 import Distribution.Simple (PackageDB(..), PackageDBStack)
@@ -179,7 +181,7 @@ rpcCompile :: GhcServer           -- ^ GHC server
            -> (Progress -> IO ()) -- ^ Progress callback
            -> IO GhcCompileResult
 rpcCompile server genCode targets callback =
-  conversation server $ \RpcConversation{..} -> do
+  ghcConversation server $ \RpcConversation{..} -> do
     put (ReqCompile genCode targets)
 
     let go = do response <- get
@@ -198,9 +200,7 @@ rpcBreakpoint :: GhcServer
               -> Bool
               -> IO (Maybe Bool)
 rpcBreakpoint server reqBreakpointModule reqBreakpointSpan reqBreakpointValue =
-  conversation server $ \RpcConversation{..} -> do
-    put ReqBreakpoint{..}
-    get
+  ghcRpc server ReqBreakpoint{..}
 
 data SnippetAction a =
        SnippetOutput BSS.ByteString
@@ -218,9 +218,11 @@ rpcRun server cmd translateResult = do
   runWaitChan <- newChan :: IO (Chan (SnippetAction a))
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
-  conv <- async . Ex.handle (handleExternalException runWaitChan) $
-    conversation server $ \RpcConversation{..} -> do
-      put (ReqRun cmd)
+  conv <- async . Ex.handle (handleExternalException runWaitChan) $ do
+    (stdin, stdout, stderr) <- ghcRpc server (ReqRun cmd)
+    server' <- OutProcess <$> connectToRpcServer stdin stdout stderr
+
+    ghcConversation server' $ \RpcConversation{..} -> do
       withAsync (sendRequests put reqChan) $ \sentAck -> do
         let go = do resp <- get
                     case resp of
@@ -291,31 +293,30 @@ rpcRun server cmd translateResult = do
 
 -- | Print a variable
 rpcPrint :: GhcServer -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv
-rpcPrint server var bind forceEval = conversation server $ \RpcConversation{..} -> do
-  put (ReqPrint var bind forceEval)
-  get
+rpcPrint server var bind forceEval = ghcRpc server (ReqPrint var bind forceEval)
 
 -- | Load an object file
 rpcLoad :: GhcServer -> FilePath -> Bool -> IO ()
-rpcLoad server path unload = conversation server $ \RpcConversation{..} -> do
-  put (ReqLoad path unload)
-  get
+rpcLoad server path unload = ghcRpc server (ReqLoad path unload)
 
 -- | Crash the GHC server (for debugging purposes)
 rpcCrash :: GhcServer -> Maybe Int -> IO ()
-rpcCrash server delay = conversation server $ \RpcConversation{..} ->
+rpcCrash server delay = ghcConversation server $ \RpcConversation{..} ->
   put (ReqCrash delay)
 
 -- | Handshake with the server
 rpcInit :: GhcServer -> GhcInitRequest -> IO GhcInitResponse
-rpcInit server req = conversation server $ \RpcConversation{..} -> do
-  put req
-  get
+rpcInit = ghcRpc
 
 {------------------------------------------------------------------------------
   Internal
 ------------------------------------------------------------------------------}
 
-conversation :: GhcServer -> (RpcConversation -> IO a) -> IO a
-conversation (OutProcess server) = rpcConversation server
-conversation (InProcess conv _)  = ($ conv)
+ghcConversation :: GhcServer -> (RpcConversation -> IO a) -> IO a
+ghcConversation (OutProcess server) = rpcConversation server
+ghcConversation (InProcess conv _)  = ($ conv)
+
+ghcRpc :: (Typeable req, Typeable resp, Binary req, Binary resp)
+       => GhcServer -> req -> IO resp
+ghcRpc (OutProcess server) = rpc server
+ghcRpc (InProcess _ _)     = error "ghcRpc not implemented for in-process server"
