@@ -12,7 +12,6 @@ import System.IO
   , hSetBinaryMode
   , hSetBuffering
   , BufferMode(BlockBuffering)
-  , openFile
   , IOMode(..)
   )
 import System.Posix.Types (Fd)
@@ -62,7 +61,7 @@ concurrentConversation :: FilePath -- ^ stdin named pipe
                        -> (RpcConversation -> IO ())
                        -> IO ()
 concurrentConversation requestR responseW errorsW server = do
-  hin  <- openFile         requestR  ReadMode
+  hin  <- openFileBlocking requestR  ReadMode
   hout <- openFileBlocking responseW WriteMode
   herr <- openFileBlocking errorsW   WriteMode
   rpcServer' hin hout herr server

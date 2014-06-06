@@ -23,7 +23,7 @@ import Data.Typeable (Typeable)
 import Prelude hiding (take)
 import System.Directory (canonicalizePath, getPermissions, executable)
 import System.Exit (ExitCode)
-import System.IO (Handle, IOMode(..), openFile)
+import System.IO (Handle, IOMode(..))
 import System.Posix.IO (createPipe, closeFd, fdToHandle)
 import System.Posix.Signals (signalProcess, sigKILL)
 import System.Posix.Types (Fd)
@@ -151,9 +151,9 @@ connectToRpcServer :: FilePath   -- ^ stdin named pipe
                    -> IO RpcServer
 connectToRpcServer requestW responseR errorsR = do
   -- TODO: here and in forkRpcServer, deal with exceptions
-  responseR' <- openFile         responseR ReadMode
-  errorsR'   <- openFile         errorsR   ReadMode
   requestW'  <- openFileBlocking requestW  WriteMode
+  responseR' <- openFileBlocking responseR ReadMode
+  errorsR'   <- openFileBlocking errorsR   ReadMode
   st         <- newMVar RpcRunning
   input      <- newStream responseR'
   return RpcServer {
