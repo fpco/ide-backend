@@ -85,7 +85,7 @@ traceOnException str io = Ex.catch io $ \e -> do
   hPutStrLn stderr (str ++ ": " ++ show e)
   Ex.throwIO (e :: Ex.SomeException)
 
-#define DEBUGGING 1
+#define DEBUGGING 0
 
 #if DEBUGGING == 1
 
@@ -195,6 +195,9 @@ modifyMVar_ = [| C.modifyMVar_ |]
 withMVar :: ExpQ
 withMVar = [| C.withMVar |]
 
+swapMVar :: ExpQ
+swapMVar = [| C.swapMVar |]
+
 {-------------------------------------------------------------------------------
   StrictMVar
 -------------------------------------------------------------------------------}
@@ -216,6 +219,9 @@ modifyStrictMVar_ = [| StrictMVar.modifyMVar_ |]
 
 withStrictMVar :: ExpQ
 withStrictMVar = [| StrictMVar.withMVar |]
+
+swapStrictMVar :: ExpQ
+swapStrictMVar = [| StrictMVar.swapMVar |]
 
 {-------------------------------------------------------------------------------
   Chan
