@@ -1104,8 +1104,12 @@ runCmd session mkCmd = modifyIdleState session $ \idleState ->
       runActions <- rpcRun (idleState ^. ideGhcServer)
                            cmd
                            (translateRunResult isBreak)
-      registerTerminationCallback runActions (restoreToIdle cache isBreak)
-      return (IdeSessionRunning runActions idleState, runActions)
+      --registerTerminationCallback runActions (restoreToIdle cache isBreak)
+      --return (IdeSessionRunning runActions idleState, runActions)
+
+      -- TODO: We should register the runActions somewhere so we can do a
+      -- clean session shutdown
+      return (IdeSessionIdle idleState, runActions)
     _ ->
       -- This 'fail' invocation is, in part, a workaround for
       -- http://hackage.haskell.org/trac/ghc/ticket/7539
