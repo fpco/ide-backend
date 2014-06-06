@@ -16,10 +16,12 @@ import Data.Function (on)
 import System.Environment (withArgs)
 import System.FilePath ((</>))
 import System.IO (Handle, hFlush)
-import System.IO.Temp (withTempDirectory)
+import System.IO.Temp (createTempDirectory)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import System.Posix.Files (createNamedPipe)
+import System.Posix.Process (forkProcess, getProcessID)
+import System.Posix.Types (ProcessID)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString as BSS (hGetSome, hPut, null)
 import qualified Data.List as List
@@ -174,26 +176,35 @@ ghcServerEngine conv@RpcConversation{..} = do
 
 startConcurrentConversation :: FilePath -> (RpcConversation -> Ghc ()) -> Ghc (FilePath, FilePath, FilePath)
 startConcurrentConversation sessionDir server = do
-  pipes <- liftIO newEmptyMVar
+  -- Ideally, we'd have the child process create the temp directory and
+  -- communicate the name back to us, so that the child process can remove the
+  -- directories again when it's done with it. However, this means we need some
+  -- interprocess communication, which is awkward. So we create the temp
+  -- directory here; I suppose we could still delegate the responsibility of
+  -- deleting the directory to the child, but instead we'll just remove the
+  -- directory along with the rest of the session temp dirs on session exit.
+  (stdin, stdout, stderr) <- liftIO $ do
+    tempDir <- createTempDirectory sessionDir "rpc."
+    let stdin  = tempDir </> "stdin"
+        stdout = tempDir </> "stdout"
+        stderr = tempDir </> "stderr"
 
-  -- TODO: Should we do anything with this thread ID?
-  _threadId <- forkGhc $ do
-    ghcWithTempDirectory sessionDir "rpc." $ \tempDir -> do
-      let stdin  = tempDir </> "stdin"
-          stdout = tempDir </> "stdout"
-          stderr = tempDir </> "stderr"
+    createNamedPipe stdin  0o600
+    createNamedPipe stdout 0o600
+    createNamedPipe stderr 0o600
 
-      liftIO $ do
-        createNamedPipe stdin  0o600
-        createNamedPipe stdout 0o600
-        createNamedPipe stderr 0o600
+    return (stdin, stdout, stderr)
 
-        -- Once we have created the pipes we can tell the client
-        $putMVar pipes (stdin, stdout, stderr)
+  -- Start the concurrent conversion. We use forkGhcProcess rather than forkGhc
+  -- because we need to change global state in the child process; in particular,
+  -- we need to redirect stdin, stdout, and stderr (as well as some other global
+  -- state, including withArgs).
+  --
+  -- TODO: It might be a good idea to do a major GC before forking.
+  _processId <- forkGhcProcess $ ghcConcurrentConversation stdin stdout stderr server
 
-      ghcConcurrentConversation stdin stdout stderr server
-
-  liftIO $ $readMVar pipes
+  -- TODO: Should we do something with _processId?
+  return (stdin, stdout, stderr)
 
 -- | We cache our own "module summaries" in between compile requests
 data ModSummary = ModSummary {
@@ -610,13 +621,13 @@ unsafeLiftIO' f g = Ghc $ \session ->
 ghcWithArgs :: [String] -> Ghc a -> Ghc a
 ghcWithArgs = unsafeLiftIO . withArgs
 
--- | Work within the `Ghc` monad. Use with extreme caution!
+-- | Fork within the `Ghc` monad. Use with caution.
 forkGhc :: Ghc () -> Ghc ThreadId
 forkGhc = unsafeLiftIO forkIO
 
--- | Lifted version of withTempDirectory
-ghcWithTempDirectory :: FilePath -> String -> (FilePath -> Ghc a) -> Ghc a
-ghcWithTempDirectory fp str = unsafeLiftIO' (withTempDirectory fp str)
+-- | forkProcess within the `Ghc` monad. Use with extreme caution.
+forkGhcProcess :: Ghc () -> Ghc ProcessID
+forkGhcProcess = unsafeLiftIO forkProcess
 
 -- | Lifted version of concurrentConversation
 ghcConcurrentConversation :: FilePath
