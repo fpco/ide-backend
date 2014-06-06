@@ -1,11 +1,12 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell, TypeSynonymInstances, FlexibleInstances, RecordWildCards, OverlappingInstances, OverloadedStrings #-}
 module Main (main) where
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.MVar
 import qualified Control.Exception as Ex
 import Control.Monad
 import Control.DeepSeq (rnf)
+import qualified Data.ByteString            as BSS
 import qualified Data.ByteString.Char8      as BSSC
 import qualified Data.ByteString.Lazy       as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSLC
@@ -7247,7 +7248,85 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" True (null buildStderr)
     )
+  , ( "Concurrent snippets 1: Run same snippet multiple times"
+    , withSession defaultSession $ \session -> do
+        let upd = (updateCodeGeneration True)
+               <> (updateStdoutBufferMode $ RunLineBuffering Nothing)
+               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                    [ "module M where"
+                    , "import Control.Monad"
+                    , "echo :: IO ()"
+                    , "echo = do str <- getLine"
+                    , "          replicateM_ 100 $ putStrLn str"
+                    ])
+        updateSessionD session upd 1
+        assertNoErrors session
+
+        -- Execute all snippets, but leave them waiting for input
+        snippets <- forM ["foo", "bar", "baz", "Foo", "Bar", "Baz", "FOO", "BAR", "BAZ"] $ \str -> do
+          let expectedResult = BSLC.concat (replicate 100 (BSLC.pack (str ++ "\n")))
+          runActions <- runStmt session "M" "echo"
+          return (runActions, str, expectedResult)
+
+        -- Start all snippets and collect all their output concurrently
+        testResults <- forM snippets $ \(runActions, str, _expectedResult) -> do
+          testResult <- newEmptyMVar
+          _ <- forkIO $ do
+            supplyStdin runActions (BSSC.pack (str ++ "\n"))
+            putMVar testResult =<< runWaitAll' runActions
+          return testResult
+
+        -- Wait for all test results, and compare against expected results
+        forM_ (zip snippets testResults) $ \((_runActions, _str, expectedResult), testResult) -> do
+          (output, result) <- takeMVar testResult
+          assertEqual "" RunOk result
+          assertEqual "" expectedResult output
+    )
+  , ( "Concurrent snippets 2: Execute different snippets concurrently"
+    , withSession defaultSession $ \session -> do
+        -- Execute all snippets, but leave them waiting for input
+        snippets <- forM ["foo", "bar", "baz", "Foo", "Bar", "Baz", "FOO", "BAR", "BAZ"] $ \str -> do
+          let upd = (updateCodeGeneration True)
+                 <> (updateStdoutBufferMode $ RunLineBuffering Nothing)
+                 <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
+                      [ "module M where"
+                      , "import Control.Monad"
+                      , "echo :: IO ()"
+                      , "echo = do _waiting <- getLine"
+                      , "          replicateM_ 100 $ putStrLn " ++ show str
+                      ])
+          updateSessionD session upd 1
+          assertNoErrors session
+
+          let expectedResult = BSLC.concat (replicate 100 (BSLC.pack (str ++ "\n")))
+          runActions <- runStmt session "M" "echo"
+          return (runActions, expectedResult)
+
+        -- Start all snippets and collect all their output concurrently
+        testResults <- forM snippets $ \(runActions, _expectedResult) -> do
+          testResult <- newEmptyMVar
+          _ <- forkIO $ do
+            supplyStdin runActions (BSSC.pack "\n")
+            putMVar testResult =<< runWaitAll' runActions
+          return testResult
+
+        -- Wait for all test results, and compare against expected results
+        forM_ (zip snippets testResults) $ \((_runActions, expectedResult), testResult) -> do
+          (output, result) <- takeMVar testResult
+          assertEqual "" RunOk result
+          assertEqual "" expectedResult output
+    )
   ]
+
+runWaitAll' :: forall a. RunActions a -> IO (BSL.ByteString, a)
+runWaitAll' RunActions{runWait} = go []
+  where
+    go :: [BSS.ByteString] -> IO (BSL.ByteString, a)
+    go acc = do
+      resp <- runWait
+      case resp of
+        Left  bs        -> go (bs : acc)
+        Right runResult -> return (BSL.fromChunks (reverse acc), runResult)
 
 buildExeTargetHsSucceeds :: IdeSession -> String -> IO ()
 buildExeTargetHsSucceeds session m = do
