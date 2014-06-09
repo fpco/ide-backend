@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor, DeriveGeneric #-}
+{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor, DeriveGeneric, StandaloneDeriving, GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module IdeSession.Util (
     -- * Misc util
@@ -52,6 +52,7 @@ import System.Environment (getEnvironment)
 import System.FilePath (splitSearchPath, searchPathSeparator)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
+import System.Posix.Types (CPid(..))
 import qualified System.Posix.Files as Files
 import qualified Data.ByteString.Char8 as BSSC (pack)
 import System.Posix.Env (setEnv, unsetEnv)
@@ -152,16 +153,6 @@ makeBlocks n = go . BSL.toChunks
           case bss of
             []         -> [bs]
             (bs':bss') -> go (BSS.append bs bs' : bss')
-
-instance Binary Text where
-  get   = do units <- Bin.get
-             Bin.readNWith (units * 2) $ \ptr ->
-               Text.fromPtr (castPtr ptr) (fromIntegral units)
-
-  put t = do put (Text.lengthWord16 t)
-             Bin.putBuilder $
-               Bin.writeN (Text.lengthWord16 t * 2)
-                          (\p -> Text.unsafeCopyToPtr t (castPtr p))
 
 setupEnv :: [(String, Maybe String)] -> IO ()
 setupEnv env = forM_ env $ \(var, mVal) ->
@@ -281,3 +272,19 @@ restoreHandle h fd fdBackup = do
   closeFd fd
   _ <- dup fdBackup
   closeFd fdBackup
+
+{-------------------------------------------------------------------------------
+  Orphans
+-------------------------------------------------------------------------------}
+
+instance Binary Text where
+  get   = do units <- Bin.get
+             Bin.readNWith (units * 2) $ \ptr ->
+               Text.fromPtr (castPtr ptr) (fromIntegral units)
+
+  put t = do put (Text.lengthWord16 t)
+             Bin.putBuilder $
+               Bin.writeN (Text.lengthWord16 t * 2)
+                          (\p -> Text.unsafeCopyToPtr t (castPtr p))
+
+deriving instance Binary CPid

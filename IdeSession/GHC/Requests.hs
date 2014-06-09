@@ -88,7 +88,6 @@ instance PrettyVal RunCmd
 data GhcRunRequest =
     GhcRunInput ByteString
   | GhcRunInterrupt
-  | GhcRunAckDone
   deriving Typeable
 
 instance Binary GhcInitRequest where
@@ -179,12 +178,10 @@ instance Binary RunCmd where
 instance Binary GhcRunRequest where
   put (GhcRunInput bs) = putWord8 0 >> put bs
   put GhcRunInterrupt  = putWord8 1
-  put GhcRunAckDone    = putWord8 2
 
   get = do
     header <- getWord8
     case header of
       0 -> GhcRunInput <$> get
       1 -> return GhcRunInterrupt
-      2 -> return GhcRunAckDone
       _ -> fail "GhcRunRequest.get: invalid header"
