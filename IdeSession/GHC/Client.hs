@@ -29,13 +29,16 @@ import Control.Concurrent (killThread)
 import Control.Concurrent.Async (async, cancel, withAsync)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Concurrent.MVar (newMVar)
-import Control.Monad (when)
+import Control.Monad (when, forever)
 import Data.Typeable (Typeable)
 import Data.Binary (Binary)
 import System.Exit (ExitCode)
+import System.Posix.Signals (sigKILL, signalProcess)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Char8      as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
+
+import Data.Maybe
 
 import IdeSession.Config
 import IdeSession.GHC.API
@@ -218,12 +221,28 @@ rpcRun server cmd translateResult = do
   runWaitChan <- newChan :: IO (Chan (SnippetAction a))
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
-  conv <- async . Ex.handle (handleExternalException runWaitChan) $ do
-    (stdin, stdout, stderr) <- ghcRpc server (ReqRun cmd)
+  -- Communicate with the snippet using an independent, concurrent, conversation
+  (pid, server') <- do
+    (pid, stdin, stdout, stderr) <- ghcRpc server (ReqRun cmd)
     server' <- OutProcess <$> connectToRpcServer stdin stdout stderr
+    return (pid, server')
 
+  respThread <- async . Ex.handle (handleExternalException runWaitChan) $ do
     ghcConversation server' $ \RpcConversation{..} -> do
-      withAsync (sendRequests put reqChan) $ \sentAck -> do
+      -- This "respThread" is responsible for reading responses from the RPC
+      -- conversation, and writing them to the runWaitChan channel. This thread
+      -- terminates when the server replies with GhcRunDone.
+      --
+      -- In addition, we spawns a second "reqThread" which is responsible for
+      -- reading requests from the reqChan and sending them to to server. We
+      -- use withAsync so that when then we (the respThread) terminate the
+      -- reqThread automatically gets cancelled.
+      --
+      -- If an exception happens in the respThread it will be written to the
+      -- runWaitChan and the snippet will be considered terminated.
+      --
+      -- (TODO: What happens when an exception happens in the reqThread?)
+      withAsync (sendRequests put reqChan) $ \_reqThread -> do
         let go = do resp <- get
                     case resp of
                       GhcRunDone result -> do
@@ -233,7 +252,6 @@ rpcRun server cmd translateResult = do
                         writeChan runWaitChan (SnippetOutput bs)
                         go
         go
-        $wait sentAck
 
   -- The runActionState initially is the termination callback to be called
   -- when the snippet terminates. After termination it becomes (Right outcome).
@@ -241,24 +259,28 @@ rpcRun server cmd translateResult = do
   -- the user can safely call runWait after termination and get the same
   -- result.
   let onTermination :: a -> IO ()
-      onTermination _ = do writeChan reqChan GhcRunAckDone
-                           $wait conv
+      onTermination _ = return ()
   runActionsState <- newMVar (Left onTermination)
 
   return RunActions {
-      runWait = $modifyMVar runActionsState $ \st -> case st of
-        Right outcome ->
-          return (Right outcome, Right outcome)
-        Left terminationCallback -> do
-          outcome <- $readChan runWaitChan
-          case outcome of
-            SnippetOutput bs ->
-              return (Left terminationCallback, Left bs)
-            SnippetForceTerminated res ->
-              return (Right res, Right res)
-            SnippetTerminated res -> do
-              terminationCallback res
-              return (Right res, Right res)
+      runWait = do
+        (outcome, mRestoreToIdle) <- $modifyMVar runActionsState $ \st ->
+          case st of
+            Right outcome ->
+              return (Right outcome, (Right outcome, Nothing))
+            Left terminationCallback -> do
+              outcome <- $readChan runWaitChan
+              case outcome of
+                SnippetOutput bs ->
+                  return (Left terminationCallback, (Left bs, Nothing))
+                SnippetForceTerminated res -> do
+                  return (Right res, (Right res, Just (terminationCallback res)))
+                SnippetTerminated res -> do
+                  return (Right res, (Right res, Just (terminationCallback res)))
+        case mRestoreToIdle of
+          Nothing            -> return ()
+          Just restoreToIdle -> restoreToIdle
+        return outcome
     , interrupt   = writeChan reqChan GhcRunInterrupt
     , supplyStdin = writeChan reqChan . GhcRunInput
     , registerTerminationCallback = \callback' ->
@@ -268,19 +290,14 @@ rpcRun server cmd translateResult = do
           Left callback ->
             return (Left (\res -> callback res >> callback' res))
     , forceCancel = do
+        signalProcess sigKILL pid
         result <- translateResult Nothing
         writeChan runWaitChan (SnippetForceTerminated result)
-        cancel conv
+        cancel respThread
     }
   where
     sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> IO ()
-    sendRequests put reqChan =
-      let go = do req <- $readChan reqChan
-                  put req
-                  case req of
-                    GhcRunAckDone -> return ()
-                    _             -> go
-      in go
+    sendRequests put reqChan = forever $ put =<< $readChan reqChan
 
     -- TODO: should we restart the session when ghc crashes?
     -- Maybe recommend that the session is started on GhcExceptions?

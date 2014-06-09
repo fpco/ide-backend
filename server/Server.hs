@@ -17,10 +17,11 @@ import System.Environment (withArgs)
 import System.FilePath ((</>))
 import System.IO (Handle, hFlush)
 import System.IO.Temp (createTempDirectory)
+import System.Mem (performGC)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import System.Posix.Files (createNamedPipe)
-import System.Posix.Process (forkProcess, getProcessID)
+import System.Posix.Process (forkProcess)
 import System.Posix.Types (ProcessID)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString as BSS (hGetSome, hPut, null)
@@ -129,9 +130,9 @@ ghcServerEngine conv@RpcConversation{..} = do
                 genCode targets configGenerateModInfo
               return args
             ReqRun runCmd -> do
-              (stdin, stdout, stderr) <- startConcurrentConversation sessionDir $ \conv' -> do
+              (pid, stdin, stdout, stderr) <- startConcurrentConversation sessionDir $ \conv' -> do
                  ghcWithArgs args $ ghcHandleRun conv' runCmd
-              liftIO $ put (stdin, stdout, stderr)
+              liftIO $ put (pid, stdin, stdout, stderr)
               return args
             ReqSetEnv env -> do
               ghcHandleSetEnv conv env
@@ -174,7 +175,7 @@ ghcServerEngine conv@RpcConversation{..} = do
           -- Ignore messages we cannot parse
           return ()
 
-startConcurrentConversation :: FilePath -> (RpcConversation -> Ghc ()) -> Ghc (FilePath, FilePath, FilePath)
+startConcurrentConversation :: FilePath -> (RpcConversation -> Ghc ()) -> Ghc (ProcessID, FilePath, FilePath, FilePath)
 startConcurrentConversation sessionDir server = do
   -- Ideally, we'd have the child process create the temp directory and
   -- communicate the name back to us, so that the child process can remove the
@@ -199,12 +200,10 @@ startConcurrentConversation sessionDir server = do
   -- because we need to change global state in the child process; in particular,
   -- we need to redirect stdin, stdout, and stderr (as well as some other global
   -- state, including withArgs).
-  --
-  -- TODO: It might be a good idea to do a major GC before forking.
-  _processId <- forkGhcProcess $ ghcConcurrentConversation stdin stdout stderr server
+  liftIO $ performGC
+  processId <- forkGhcProcess $ ghcConcurrentConversation stdin stdout stderr server
 
-  -- TODO: Should we do something with _processId?
-  return (stdin, stdout, stderr)
+  return (processId, stdin, stdout, stderr)
 
 -- | We cache our own "module summaries" in between compile requests
 data ModSummary = ModSummary {
@@ -491,10 +490,6 @@ ghcHandleRun RpcConversation{..} runCmd = do
       liftIO $ debug dVerbosity $ "returned from ghcHandleRun with "
                                   ++ show runOutcome
       put $ GhcRunDone runOutcome
-
-      -- Wait for the client to acknowledge the done
-      -- (this avoids race conditions)
-      $wait reqThread
   where
     -- Wait for and execute run requests from the client
     readRunRequests :: MVar (Maybe ThreadId) -> Handle -> IO ()
@@ -511,8 +506,6 @@ ghcHandleRun RpcConversation{..} runCmd = do
                       BSS.hPut stdInputWr bs
                       hFlush stdInputWr
                       go
-                    GhcRunAckDone ->
-                      return ()
       in go
 
     -- Wait for the process to output something or terminate
