@@ -73,7 +73,8 @@ import System.FilePath (
   , replaceExtension
   , dropFileName
   )
-import System.Posix.Files (setFileTimes)
+import System.FilePath.Find (find, always, extension, (&&?), (||?), fileType, (==?), FileType (RegularFile))
+import System.Posix.Files (setFileTimes, getFileStatus, modificationTime)
 import qualified System.IO as IO
 import System.IO.Temp (createTempDirectory)
 import System.IO.Error (isDoesNotExistError)
@@ -1264,6 +1265,21 @@ buildExe extraOpts ms = do
                                   , beStderrLog
                                   }
                 invokeExeCabal ideStaticInfo (ReqExeBuild beArgs ms) callback)
+    -- Solution 2. to #119: update timestamps of .o (and all other) files
+    -- according to the session's artificial timestamp.
+    newTS <- nextLogicalTimestamp
+    liftIO $ do
+      objectPaths <- find always
+                          (fileType ==? RegularFile
+                           &&? (extension ==? ".o"
+                                ||? extension ==? ".hi"
+                                ||? extension ==? ".a"))
+                          (ideDistDir </> "build")
+      forM_ objectPaths $ \path -> do
+        fileStatus <- getFileStatus path
+        -- We only reset the timestamp, if ghc modified the file.
+        when (modificationTime fileStatus > newTS) $
+          setFileTimes path newTS newTS
     set ideBuildExeStatus (Just exitCode)
 
 -- | Build haddock documentation from sources added previously via

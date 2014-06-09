@@ -262,7 +262,7 @@ configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
                               , beLibDeps = libDeps
                               , beLoadedMs = loadedMs
                               , .. } ms = do
-  let mainDep = Package.Dependency pkgNameMain (thisVersion pkgVersionMain)
+  let mainDep = Package.Dependency pkgNameMain anyVersion
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         relativeIncludes
