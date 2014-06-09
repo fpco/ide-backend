@@ -1228,11 +1228,7 @@ buildExe extraOpts ms = do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    -- Delete the build directory completely so that we trigger a full
-    -- recompilation. This is a workaround for #119.
-    liftIO $ do
-      ignoreDoesNotExist $ Dir.removeDirectoryRecursive $ ideDistDir </> "build"
-      Dir.createDirectoryIfMissing False $ ideDistDir </> "build"
+    liftIO $ Dir.createDirectoryIfMissing False $ ideDistDir </> "build"
     let beStdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
         beStderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
         errors = case toLazyMaybe mcomputed of
