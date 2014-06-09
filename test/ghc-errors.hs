@@ -396,6 +396,12 @@ syntheticTests = [
         assertNoErrors session
         status1 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status1
+        let m2 = "Exception"
+            upd2 = buildExe [] [(Text.pack m2, m2 <.> "hs")]
+        updateSessionD session upd2 4
+        let m3 = "Main"
+            upd3 = buildExe [] [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
+        updateSessionD session upd3 4
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "Maybes exe output"
                     "False\n"
@@ -407,9 +413,6 @@ syntheticTests = [
                     outExe1
         assertEqual "after runExe 1" ExitSuccess statusExe1
 
-        let m2 = "Exception"
-            upd2 = buildExe [] [(Text.pack m2, m2 <.> "hs")]
-        updateSessionD session upd2 4
         out2 <- readProcess (distDir </> "build" </> m2 </> m2) [] []
         assertEqual "Exception exe output"
                     ""
@@ -430,9 +433,6 @@ syntheticTests = [
                     outExe2
         assertEqual "after runExe 2" ExitSuccess statusExe2
 
-        let m3 = "Main"
-            upd3 = buildExe [] [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
-        updateSessionD session upd3 4
         out3 <- readProcess (distDir </> "build" </> m3 </> m3) [] []
         assertEqual "Main exe output"
                     ""
@@ -444,8 +444,6 @@ syntheticTests = [
                     outExe3
         assertEqual "after runExe 3" ExitSuccess statusExe3
 
-        let upd4 = buildExe [] [(Text.pack m, m <.> "lhs")]
-        updateSessionD session upd4 4
         status4 <- getBuildExeStatus session
         assertEqual "after all exe builds" (Just ExitSuccess) status4
 
@@ -2870,8 +2868,8 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                               , (Text.pack "Main", "ParFib.hs") ]
         updateSessionD session upd 4
         assertNoErrors session
-        --let upd2 = buildExe [] [(Text.pack "Main", "ParFib.hs")]
-        --updateSessionD session upd2 1
+        let upd2 = buildExe [] [(Text.pack "Main", "ParFib.hs")]
+        updateSessionD session upd2 4
         distDir <- getDistDir session
         fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "ParFib exe output"
