@@ -264,12 +264,8 @@ shutdownSession' forceTerminate session@IdeSession{ideState, ideStaticInfo} = do
   -- Try to terminate the server, unless we currently have a snippet running
   mStillRunning <- $modifyStrictMVar ideState $ \state ->
     case state of
-      IdeSessionRunning runActions idleState -> do
-        if forceTerminate
-          then do forceShutdownGhcServer $ _ideGhcServer idleState
-                  cleanupDirs
-                  return (IdeSessionShutdown, Nothing)
-          else return (state, Just runActions)
+      IdeSessionRunning runActions _idleState -> do
+         return (state, Just runActions)
       IdeSessionIdle idleState -> do
         if forceTerminate
           then forceShutdownGhcServer $ _ideGhcServer idleState
@@ -295,7 +291,8 @@ shutdownSession' forceTerminate session@IdeSession{ideState, ideStaticInfo} = do
       -- We cannot do this while we hold the session lock, because the
       -- runactions will change the state of the session to Idle when the
       -- snippet terminates
-      interrupt runActions
+      if forceTerminate then forceCancel runActions
+                        else interrupt runActions
       void $ runWaitAll runActions
       shutdownSession' forceTerminate session
     Nothing ->
@@ -1162,8 +1159,9 @@ runCmd session mkCmd = modifyIdleState session $ \idleState ->
     translateRunResult isBreak (Just (Private.RunBreak breakInfo)) = do
       $putStrictMVar isBreak (Maybe.just breakInfo)
       return $ Public.RunBreak
-    translateRunResult _isBreak Nothing =
-      -- Termination handler not called in this case, no need to update _isBreak
+    translateRunResult isBreak Nothing = do
+      -- On a force cancellation we definitely didn't hit a breakpoint
+      $putStrictMVar isBreak Maybe.nothing
       return $ Public.RunForceCancelled
 
 -- | Breakpoint
