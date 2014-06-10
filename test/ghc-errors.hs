@@ -396,6 +396,12 @@ syntheticTests = [
         assertNoErrors session
         status1 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status1
+        let m2 = "Exception"
+            upd2 = buildExe [] [(Text.pack m2, m2 <.> "hs")]
+        updateSessionD session upd2 3
+        let m3 = "Main"
+            upd3 = buildExe [] [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
+        updateSessionD session upd3 1
         out <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "Maybes exe output"
                     "False\n"
@@ -407,9 +413,6 @@ syntheticTests = [
                     outExe1
         assertEqual "after runExe 1" ExitSuccess statusExe1
 
-        let m2 = "Exception"
-            upd2 = buildExe [] [(Text.pack m2, m2 <.> "hs")]
-        updateSessionD session upd2 4
         out2 <- readProcess (distDir </> "build" </> m2 </> m2) [] []
         assertEqual "Exception exe output"
                     ""
@@ -430,9 +433,6 @@ syntheticTests = [
                     outExe2
         assertEqual "after runExe 2" ExitSuccess statusExe2
 
-        let m3 = "Main"
-            upd3 = buildExe [] [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
-        updateSessionD session upd3 4
         out3 <- readProcess (distDir </> "build" </> m3 </> m3) [] []
         assertEqual "Main exe output"
                     ""
@@ -444,8 +444,6 @@ syntheticTests = [
                     outExe3
         assertEqual "after runExe 3" ExitSuccess statusExe3
 
-        let upd4 = buildExe [] [(Text.pack m, m <.> "lhs")]
-        updateSessionD session upd4 4
         status4 <- getBuildExeStatus session
         assertEqual "after all exe builds" (Just ExitSuccess) status4
 
@@ -464,7 +462,7 @@ syntheticTests = [
         assertNoErrors session
         let m = "Maybes"
             upd0 = buildExe [] [(Text.pack m, m <.> "lhs")]
-        updateSessionD session upd0 4
+        updateSessionD session upd0 0
         assertNoErrors session
         status0 <- getBuildExeStatus session
         -- Expected failure! The updateRelativeIncludes below is really needed.
@@ -475,8 +473,7 @@ syntheticTests = [
         assertNoErrors session
         distDir <- getDistDir session
 
-        let upd = buildExe [] [(Text.pack m, m <.> "lhs")]
-        updateSessionD session upd 4
+        updateSessionD session upd0 4
         status1 <- getBuildExeStatus session
         assertEqual "after exe build 2" (Just ExitSuccess) status1
         out <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -492,7 +489,7 @@ syntheticTests = [
 
         let m2 = "Exception"
             upd2 = buildExe [] [(Text.pack m2, m2 <.> "hs")]
-        updateSessionD session upd2 4
+        updateSessionD session upd2 1
         out2 <- readProcess (distDir </> "build" </> m2 </> m2) [] []
         assertEqual "Exception exe output"
                     ""
@@ -506,7 +503,7 @@ syntheticTests = [
 
         let m3 = "Main"
             upd3 = buildExe [] [(Text.pack m3, "Subdir" </> m3 <.> "lhs")]
-        updateSessionD session upd3 4
+        updateSessionD session upd3 1
         out3 <- readProcess (distDir </> "build" </> m3 </> m3) [] []
         assertEqual "Main exe output"
                     ""
@@ -519,7 +516,7 @@ syntheticTests = [
         assertEqual "after runExe 3" ExitSuccess statusExe3
 
         let upd4 = buildExe [] [(Text.pack m, m <.> "lhs")]
-        updateSessionD session upd4 4
+        updateSessionD session upd4 2
         status4 <- getBuildExeStatus session
         assertEqual "after all exe builds" (Just ExitSuccess) status4
 
@@ -2870,8 +2867,8 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                               , (Text.pack "Main", "ParFib.hs") ]
         updateSessionD session upd 4
         assertNoErrors session
-        --let upd2 = buildExe [] [(Text.pack "Main", "ParFib.hs")]
-        --updateSessionD session upd2 1
+        let upd2 = buildExe [] [(Text.pack "Main", "ParFib.hs")]
+        updateSessionD session upd2 0
         distDir <- getDistDir session
         fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
         assertEqual "ParFib exe output"
@@ -5761,7 +5758,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
            assertEqual "" (BSLC.pack "54322\n") output
         let m = "M"
             updExe = buildExe [] [(Text.pack m, "M.hs")]
-        updateSessionD session updExe 2
+        updateSessionD session updExe 3
         runActionsExe <- runExe session m
         (outExe, statusExe) <- runWaitAll runActionsExe
         assertEqual "Output from runExe"
@@ -6320,7 +6317,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "after exe build" (Just ExitSuccess) status
 
         let updE2 = buildExe [] [(Text.pack "Main", "A.hs")]
-        updateSessionD session updE2 3
+        updateSessionD session updE2 0
         status2 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status2
     )
@@ -6338,13 +6335,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertNoErrors session
 
         let updE = buildExe [] [(Text.pack "Main", "test/ABnoError/A.hs")]
-        updateSessionD session updE 3
+        updateSessionD session updE 1
         status <- getBuildExeStatus session
         -- Path "" no longer in include paths here!
         assertEqual "after exe build" (Just $ ExitFailure 1) status
 
         let updE2 = buildExe [] [(Text.pack "Main", "A.hs")]
-        updateSessionD session updE2 3
+        updateSessionD session updE2 2
         status2 <- getBuildExeStatus session
         assertEqual "after exe build" (Just ExitSuccess) status2
     )
@@ -6391,7 +6388,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "after runExe" (ExitFailure 1) statusExe
 
         let updE2 = buildExe [] [(Text.pack m, "A.hs")]
-        updateSessionD session updE2 3
+        updateSessionD session updE2 0
         status2 <- getBuildExeStatus session
         assertEqual "after exe build2" (Just ExitSuccess) status2
         (stExc2, out2, _) <-
@@ -6428,13 +6425,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         -- And this one works OK even without updateSourceFileDelete
         -- and even without session restart.
         let updE3 = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
-        updateSessionD session updE3 3
+        updateSessionD session updE3 1
         status3 <- getBuildExeStatus session
         -- Path "" no longer in include paths here!
         assertEqual "after exe build3" (Just $ ExitFailure 1) status3
 
         let updE4 = buildExe [] [(Text.pack m, "A.hs")]
-        updateSessionD session updE4 3
+        updateSessionD session updE4 2
         status4 <- getBuildExeStatus session
         assertEqual "after exe build4" (Just ExitSuccess) status4
         (stExc4, out4, _) <-
@@ -6490,7 +6487,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
 
 
         let updE2 = buildExe [] [(Text.pack m, "A.hs")]
-        updateSessionD session updE2 3
+        updateSessionD session updE2 0
         status2 <- getBuildExeStatus session
         assertEqual "after exe build2" (Just ExitSuccess) status2
         (stExc2, out2, _) <-
@@ -6534,13 +6531,13 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "output3" (BSLC.pack "\"running A with another B\"\n") output3
 
         let updE3 = buildExe [] [(Text.pack m, "test/AnotherA/A.hs")]
-        updateSessionD session updE3 3
+        updateSessionD session updE3 1
         status3 <- getBuildExeStatus session
         -- Path "" no longer in include paths here!
         assertEqual "after exe build3" (Just $ ExitFailure 1) status3
 
         let updE4 = buildExe [] [(Text.pack m, "A.hs")]
-        updateSessionD session updE4 3
+        updateSessionD session updE4 2
         status4 <- getBuildExeStatus session
         assertEqual "after exe build4" (Just ExitSuccess) status4
         (stExc4, out4, _) <-
@@ -6600,7 +6597,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         let m = "Main"
 
         let updE4 = buildExe [] [(Text.pack m, "A.hs")]
-        updateSessionD session updE4 3
+        updateSessionD session updE4 1
         status4 <- getBuildExeStatus session
         assertEqual "after exe build4" (Just $ ExitFailure 1) status4
           -- Failure due to no A in path.
@@ -6612,7 +6609,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
 
         -- buildExe with full paths works though, if the includes have ""
         let updE41 = buildExe [] [(Text.pack m, "test/ABnoError/A.hs")]
-        updateSessionD session updE41 3
+        updateSessionD session updE41 2
         status41 <- getBuildExeStatus session
         assertEqual "after exe build41" (Just ExitSuccess) status41
         (stExc41, out41, _) <-
@@ -6638,7 +6635,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         assertEqual "output4" (BSLC.pack "\"running A with another B\"\n") output4
 
         -- A again in path, so this time this works
-        updateSessionD session updE4 4
+        updateSessionD session updE4 2
         status45 <- getBuildExeStatus session
         assertEqual "after exe build45" (Just ExitSuccess) status45
         (stExc45, out45, _) <-
@@ -6656,7 +6653,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
 
         updateSessionD session
                        (updateRelativeIncludes ["test/ABnoError"])
-                       2
+                       0
         assertOneError session  -- correct
     )
   , ( "Dynamically setting/unsetting -Werror (#115)"
