@@ -1133,9 +1133,11 @@ runCmd session mkCmd = modifyIdleState session $ \idleState ->
       mBreakInfo <- $readStrictMVar isBreak
       $modifyStrictMVar_ (ideState session) $ \state -> case state of
         IdeSessionIdle _ ->
-          Ex.throwIO (userError "The impossible happened!")
+          -- This can happen when a session restart happened in the middle
+          return state
         IdeSessionPendingChanges _ _ ->
-          Ex.throwIO (userError "The impossible happened!")
+          -- This can happen when a session restart happened in the middle
+          return state
         IdeSessionRunning _ idleState -> do
           let upd = ideBreakInfo ^= fmap (removeExplicitSharing cache) mBreakInfo
           return $ IdeSessionIdle (upd idleState)
