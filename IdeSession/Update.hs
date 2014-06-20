@@ -99,7 +99,6 @@ import IdeSession.Strict.MVar (newMVar, newEmptyMVar, StrictMVar)
 import IdeSession.Types.Private hiding (RunResult(..))
 import IdeSession.Types.Progress
 import IdeSession.Types.Public (RunBufferMode(..))
-import IdeSession.Types.Translation (removeExplicitSharing)
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
 import qualified IdeSession.Query as Query
@@ -264,8 +263,6 @@ shutdownSession' forceTerminate session@IdeSession{ideState, ideStaticInfo} = do
   -- Try to terminate the server, unless we currently have a snippet running
   mStillRunning <- $modifyStrictMVar ideState $ \state ->
     case state of
-      IdeSessionRunning runActions _idleState -> do
-         return (state, Just runActions)
       IdeSessionIdle idleState -> do
         if forceTerminate
           then forceShutdownGhcServer $ _ideGhcServer idleState
@@ -329,9 +326,6 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
     $modifyStrictMVar_ ideState $ \state ->
       case state of
         IdeSessionIdle idleState ->
-          restart noPendingRemoteChanges idleState
-        IdeSessionRunning runActions idleState -> do
-          forceCancel runActions
           restart noPendingRemoteChanges idleState
         IdeSessionPendingChanges pendingChanges idleState ->
           restart pendingChanges idleState
@@ -530,8 +524,6 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
             if not justRestarted
               then return (state, Just update)
               else return (state, Nothing)
-          IdeSessionRunning _ _ ->
-            Ex.throwIO (userError "Cannot update session in running mode")
           IdeSessionShutdown ->
             Ex.throwIO (userError "Session already shut down.")
 
@@ -1047,39 +1039,30 @@ runExe session m = do
                                       }
       (Just stdin_hdl, Nothing, Nothing, ph) <- createProcess cproc
 
-      -- The runActionState initially is the termination callback to be called
-      -- when the snippet terminates. After termination
-      -- it becomes (Right outcome).
-      -- This means that we will only execute the termination callback once,
-      -- avoid the race condition between mutliople @waitForProcess@
-      -- and the user can safely call runWait after termination and get the same
-      -- result.
-      runActionsState <- newMVar (Left $ \_ -> return ())
+      -- The runActionState holds 'Just' the result of the snippet, or 'Nothing' if
+      -- it has not yet terminated.  initially is the termination callback to be
+      -- called
+      runActionsState <- newMVar Nothing
 
       forceTermination <- newMVar False
 
       return $ RunActions
         { runWait = $modifyStrictMVar runActionsState $ \st -> case st of
-            Right outcome ->
-              return (Right outcome, Right outcome)
-            Left terminationCallback -> do
+            Just outcome ->
+              return (Just outcome, Right outcome)
+            Nothing -> do
               bs <- BSS.hGetSome std_rd_hdl blockSize
               if BSS.null bs
                 then do
                   res <- waitForProcess ph
                   forceTerm <- $takeStrictMVar forceTermination
-                  unless forceTerm $ terminationCallback res
-                  return (Right res, Right res)
+                  -- TODO: Should we do something with forceTerm?
+                  -- runCmd will return RunForceTerminated on forceCancel
+                  return (Just res, Right res)
                 else
-                  return (Left terminationCallback, Left bs)
+                  return (Nothing, Left bs)
         , interrupt = interruptProcessGroupOf ph
         , supplyStdin = \bs -> BSS.hPut stdin_hdl bs >> IO.hFlush stdin_hdl
-        , registerTerminationCallback = \callback' ->
-            $modifyStrictMVar_ runActionsState $ \st -> case st of
-              Right outcome ->
-                return (Right outcome)
-              Left callback ->
-                return (Left (\res -> callback res >> callback' res))
         , forceCancel = do
             $swapStrictMVar forceTermination True
             terminateProcess ph
@@ -1099,19 +1082,16 @@ runCmd :: IdeSession -> (IdeIdleState -> RunCmd) -> IO (RunActions Public.RunRes
 runCmd session mkCmd = modifyIdleState session $ \idleState ->
   case (toLazyMaybe (idleState ^. ideComputed), idleState ^. ideGenerateCode) of
     (Just comp, True) -> do
-      let cmd   = mkCmd idleState
-          cache = computedCache comp
+      let cmd = mkCmd idleState
 
       checkStateOk comp cmd
       isBreak    <- newEmptyMVar
       runActions <- rpcRun (idleState ^. ideGhcServer)
                            cmd
                            (translateRunResult isBreak)
-      --registerTerminationCallback runActions (restoreToIdle cache isBreak)
-      --return (IdeSessionRunning runActions idleState, runActions)
 
       -- TODO: We should register the runActions somewhere so we can do a
-      -- clean session shutdown
+      -- clean session shutdown?
       return (IdeSessionIdle idleState, runActions)
     _ ->
       -- This 'fail' invocation is, in part, a workaround for
@@ -1131,24 +1111,6 @@ runCmd session mkCmd = modifyIdleState session $ \idleState ->
     checkStateOk _comp Resume =
       -- TODO: should we check that there is anything to resume here?
       return ()
-
-    restoreToIdle :: ExplicitSharingCache -> StrictMVar (Strict Maybe BreakInfo) -> Public.RunResult -> IO ()
-    restoreToIdle cache isBreak _ = do
-      mBreakInfo <- $readStrictMVar isBreak
-      $modifyStrictMVar_ (ideState session) $ \state -> case state of
-        IdeSessionIdle _ ->
-          -- This can happen when a session restart happened in the middle
-          return state
-        IdeSessionPendingChanges _ _ ->
-          -- This can happen when a session restart happened in the middle
-          return state
-        IdeSessionRunning _ idleState -> do
-          let upd = ideBreakInfo ^= fmap (removeExplicitSharing cache) mBreakInfo
-          return $ IdeSessionIdle (upd idleState)
-        IdeSessionShutdown ->
-          return state
-        IdeSessionServerDied _ _ ->
-          return state
 
     translateRunResult :: StrictMVar (Strict Maybe BreakInfo)
                        -> Maybe Private.RunResult

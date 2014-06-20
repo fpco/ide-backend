@@ -419,16 +419,7 @@ syntheticTests = [
                     ""
                     out2
         runActions2 <- runExe session m2
-        varBool <- newMVar False
-        let f ExitSuccess = void $ swapMVar varBool True
-            f _ = return ()
-            g _= return ()
-        registerTerminationCallback runActions2 g
-        registerTerminationCallback runActions2 f
-        registerTerminationCallback runActions2 g
         (outExe2, statusExe2) <- runWaitAll runActions2
-        b <- takeMVar varBool
-        assertEqual "registerTerminationCallback" b True
         assertEqual "Maybes exe output from runExe 2"
                     ""
                     outExe2
@@ -1825,7 +1816,14 @@ syntheticTests = [
            assertEqual "after runExe" ExitSuccess statusExe
 
     )
-  , ( "Restart session (snippet doesn't swallow exceptions; after .1 sec)"
+  , ( "Restart session (well-behaved snippet; after .1 sec)"
+    , restartRun [ "module M where"
+                 , "import Control.Concurrent (threadDelay)"
+                 , "loop :: IO ()"
+                 , "loop = threadDelay 10000 >> loop"
+                 ] ExitSuccess
+    )
+  , ( "Restart session (blackhole, snippet doesn't swallow exceptions; after .1 sec)"
     , restartRun [ "module M where"
                  , "loop :: IO ()"
                  , "loop = loop"
@@ -2037,6 +2035,7 @@ syntheticTests = [
         runActions <- runStmt session "M" "loop"
         threadDelay 1000000
         restartSession session Nothing
+        forceCancel runActions
         resOrEx2 <- runWait runActions
         case resOrEx2 of
           Right RunForceCancelled -> return ()
@@ -7923,7 +7922,8 @@ restartRun code exitCode =
         exitCodeAfter <- getGhcExitCode serverAfter
         assertEqual "exitCodeAfter" Nothing exitCodeAfter
 
-        -- Just one more extra perverse test, since we have the setup ready.
+        -- Force cancel the old snippet
+        forceCancel runActionsBefore
         resOrEx <- runWait runActionsBefore
         case resOrEx of
           Right RunForceCancelled -> return ()
