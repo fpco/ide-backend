@@ -38,8 +38,6 @@ import qualified Control.Exception as Ex
 import qualified Data.ByteString.Char8      as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 
-import Data.Maybe
-
 import IdeSession.Config
 import IdeSession.GHC.API
 import IdeSession.RPC.Client
@@ -253,42 +251,28 @@ rpcRun server cmd translateResult = do
                         go
         go
 
-  -- The runActionState initially is the termination callback to be called
-  -- when the snippet terminates. After termination it becomes (Right outcome).
-  -- This means that we will only execute the termination callback once, and
-  -- the user can safely call runWait after termination and get the same
-  -- result.
-  let onTermination :: a -> IO ()
-      onTermination _ = return ()
-  runActionsState <- newMVar (Left onTermination)
+  -- The runActionState holds 'Just' the result of the snippet, or 'Nothing' if
+  -- it has not yet terminated.  initially is the termination callback to be
+  -- called
+  runActionsState <- newMVar Nothing
 
   return RunActions {
-      runWait = do
-        (outcome, mRestoreToIdle) <- $modifyMVar runActionsState $ \st ->
+      runWait =
+        $modifyMVar runActionsState $ \st ->
           case st of
-            Right outcome ->
-              return (Right outcome, (Right outcome, Nothing))
-            Left terminationCallback -> do
+            Just outcome ->
+              return (Just outcome, Right outcome)
+            Nothing -> do
               outcome <- $readChan runWaitChan
               case outcome of
                 SnippetOutput bs ->
-                  return (Left terminationCallback, (Left bs, Nothing))
+                  return (Nothing, Left bs)
                 SnippetForceTerminated res -> do
-                  return (Right res, (Right res, Just (terminationCallback res)))
+                  return (Just res, Right res)
                 SnippetTerminated res -> do
-                  return (Right res, (Right res, Just (terminationCallback res)))
-        case mRestoreToIdle of
-          Nothing            -> return ()
-          Just restoreToIdle -> restoreToIdle
-        return outcome
+                  return (Just res, Right res)
     , interrupt   = writeChan reqChan GhcRunInterrupt
     , supplyStdin = writeChan reqChan . GhcRunInput
-    , registerTerminationCallback = \callback' ->
-        $modifyMVar_ runActionsState $ \st -> case st of
-          Right outcome ->
-            return (Right outcome)
-          Left callback ->
-            return (Left (\res -> callback res >> callback' res))
     , forceCancel = do
         signalProcess sigKILL pid
         result <- translateResult Nothing

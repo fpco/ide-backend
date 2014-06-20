@@ -142,7 +142,6 @@ noPendingRemoteChanges = PendingRemoteChanges {
 
 data IdeSessionState =
     IdeSessionIdle IdeIdleState
-  | IdeSessionRunning (RunActions Public.RunResult) IdeIdleState
   | IdeSessionPendingChanges PendingRemoteChanges IdeIdleState
   | IdeSessionShutdown
   | IdeSessionServerDied ExternalException IdeIdleState
@@ -233,13 +232,6 @@ data RunActions a = RunActions {
     --
     -- A call to 'supplyStdin' after the snippet has terminated has no effect.
   , supplyStdin :: BSS.ByteString -> IO ()
-    -- | Register a callback to be invoked when the program terminates
-    -- The callback will only be invoked once.
-    --
-    -- A call to 'registerTerminationCallback' after the snippet has terminated
-    -- has no effect. The termination handler is NOT called when the
-    -- 'RunActions' is 'forceCancel'ed.
-  , registerTerminationCallback :: (a -> IO ()) -> IO ()
     -- | Force terminate the runaction
     -- (The server will be useless after this -- for internal use only).
     --
