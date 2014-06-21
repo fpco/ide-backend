@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, CPP #-}
+{-# LANGUAGE CPP, TemplateHaskell #-}
 module IdeSession.RPC.Client (
     RpcServer
   , RpcConversation(..)
@@ -16,33 +16,27 @@ module IdeSession.RPC.Client (
 
 import Control.Applicative ((<$>))
 import Control.Concurrent.MVar (MVar, newMVar, tryTakeMVar)
-import Control.Monad (void, unless)
-import Data.Binary (Binary, encode, decode)
-import Data.IORef (writeIORef, readIORef, newIORef)
-import Data.Typeable (Typeable)
-import Prelude hiding (take)
-import System.Directory (canonicalizePath, getPermissions, executable)
-import System.Exit (ExitCode)
-import System.IO (Handle, IOMode(..))
-import System.Posix.IO (createPipe, closeFd, fdToHandle)
-import System.Posix.Signals (signalProcess, sigKILL)
-import System.Posix.Types (Fd)
-import System.Process
-  ( createProcess
-  , proc
-  , ProcessHandle
-  , waitForProcess
-  , CreateProcess(cwd, env)
-  , getProcessExitCode
-  )
-import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
 import qualified Control.Exception as Ex
+import Control.Monad (unless, void, when)
+import Data.Binary (Binary, decode, encode)
 import qualified Data.ByteString.Lazy.Char8 as BSL
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Typeable (Typeable)
 import GHC.IO.Handle.FD (openFileBlocking)
+import Prelude hiding (take)
+import System.Directory (canonicalizePath, executable, getPermissions)
+import System.Exit (ExitCode)
+import System.IO (Handle, IOMode (..), writeFile)
+import System.Posix.IO (closeFd, createPipe, fdToHandle)
+import System.Posix.Signals (sigKILL, signalProcess)
+import System.Posix.Types (Fd)
+import System.Process (CreateProcess (cwd, env), ProcessHandle, createProcess,
+                       getProcessExitCode, proc, waitForProcess)
+import System.Process.Internals (ProcessHandle__ (..), withProcessHandle)
 
-import IdeSession.Util.BlockingOps
 import IdeSession.RPC.API
 import IdeSession.RPC.Stream
+import IdeSession.Util.BlockingOps
 
 --------------------------------------------------------------------------------
 -- Client-side API                                                            --
@@ -59,11 +53,11 @@ data RpcServer = RpcServer {
     -- This is Nothing if we connected to an existing RPC server
     -- ('connectToRpcServer') rather than started a new server
     -- ('forkRpcServer')
-  , rpcProc :: Maybe ProcessHandle
+  , rpcProc      :: Maybe ProcessHandle
     -- | IORef containing the server response stream
   , rpcResponseR :: Stream Response
     -- | Server state
-  , rpcState :: MVar RpcClientSideState
+  , rpcState     :: MVar RpcClientSideState
   }
 
 -- | RPC server state
@@ -174,7 +168,7 @@ rpc server req = rpcConversation server $ \RpcConversation{..} -> put req >> get
 rpcConversation :: RpcServer
                 -> (RpcConversation -> IO a)
                 -> IO a
-rpcConversation server handler = withRpcServer server $ \st ->
+rpcConversation server handler = withRpcServer server False $ \st ->
   case st of
     RpcRunning -> do
       -- We want to be able to detect when a conversation is used out of scope
@@ -214,7 +208,7 @@ illscopedConversationException =
 -- process cleanly you must implement your own termination protocol before
 -- calling 'shutdown'.
 shutdown :: RpcServer -> IO ()
-shutdown server = withRpcServer server $ \_ -> do
+shutdown server = withRpcServer server False $ \_ -> do
   terminate server
   let ex = Ex.toException (userError "Manual shutdown")
   return (RpcStopped ex, ())
@@ -230,7 +224,9 @@ forceShutdown :: RpcServer -> IO ()
 forceShutdown server = Ex.mask_ $ do
   mst <- tryTakeMVar (rpcState server)
 
+  writeFile "/tmp/modify4" "asdf"
   ignoreAllExceptions $ forceTerminate server
+  writeFile "/tmp/modify5" "asdf"
   let ex = Ex.toException (userError "Forced manual shutdown")
 
   case mst of
@@ -267,10 +263,15 @@ forceTerminate server =
         withProcessHandle ph $ \p_ ->
           case p_ of
             ClosedHandle _ ->
+              writeFile "/tmp/modify6" "asdf"
               leaveHandleAsIs p_
+              writeFile "/tmp/modify7" "asdf"
             OpenHandle pID -> do
+              writeFile "/tmp/modify8" "asdf"
               signalProcess sigKILL pID
+              writeFile "/tmp/modify9" "asdf"
               leaveHandleAsIs p_
+              writeFile "/tmp/modify10" "asdf"
       Nothing ->
         Ex.throwIO $ userError "forceTerminate: parallel connection"
   where
@@ -282,22 +283,29 @@ forceTerminate server =
 #endif
 
 -- | Like modifyMVar, but terminate the server on exceptions
-withRpcServer :: RpcServer
+withRpcServer :: RpcServer -> Bool
               -> (RpcClientSideState -> IO (RpcClientSideState, a))
               -> IO a
-withRpcServer server io =
+withRpcServer server debugg io =
   Ex.mask $ \restore -> do
+    when debugg $ writeFile "/tmp/modify21" "asdf"
     st <- $takeMVar (rpcState server)
+    when debugg $ writeFile "/tmp/modify22" "asdf"
 
     mResult <- Ex.try $ restore (io st)
+    when debugg $ writeFile "/tmp/modify23" "asdf"
 
     case mResult of
       Right (st', a) -> do
+        when debugg $ writeFile "/tmp/modify24" "asdf"
         $putMVar (rpcState server) st'
+        when debugg $ writeFile "/tmp/modify25" "asdf"
         return a
       Left ex -> do
    --     terminate server
+        when debugg $ writeFile "/tmp/modify26" "asdf"
         $putMVar (rpcState server) (RpcStopped ex)
+        when debugg $ writeFile "/tmp/modify27" "asdf"
         Ex.throwIO ex
 
 -- | Get the exit code of the RPC server, unless still running.
@@ -322,4 +330,3 @@ mapIOToExternal server p = Ex.catch p $ \ex -> do
   if null merr
     then Ex.throwIO (serverKilledException (Just ex))
     else Ex.throwIO (ExternalException merr (Just ex))
-
