@@ -262,16 +262,18 @@ forceTerminate server =
       Just ph ->
         withProcessHandle ph $ \p_ ->
           case p_ of
-            ClosedHandle _ ->
+            ClosedHandle _ -> do
               writeFile "/tmp/modify6" "asdf"
-              leaveHandleAsIs p_
+              res <- leaveHandleAsIs p_
               writeFile "/tmp/modify7" "asdf"
+              return res
             OpenHandle pID -> do
               writeFile "/tmp/modify8" "asdf"
               signalProcess sigKILL pID
               writeFile "/tmp/modify9" "asdf"
-              leaveHandleAsIs p_
+              res <- leaveHandleAsIs p_
               writeFile "/tmp/modify10" "asdf"
+              return res
       Nothing ->
         Ex.throwIO $ userError "forceTerminate: parallel connection"
   where
