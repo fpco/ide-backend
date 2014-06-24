@@ -1130,7 +1130,7 @@ syntheticTests = [
           runActions <- runStmt session "Main" "main"
           interrupt runActions
           (_output, result) <- runWaitAll runActions
-          assertBool "" (isAsyncException result)
+          assertBool ("Expected asynchronous exception; got " ++ show result) (isAsyncException result)
 
         runActions <- runStmt session "Main" "main"
         result <- runWait runActions
