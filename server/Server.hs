@@ -21,7 +21,7 @@ import System.Mem (performGC)
 import System.Posix (Fd)
 import System.Posix.IO.ByteString
 import System.Posix.Files (createNamedPipe)
-import System.Posix.Process (forkProcess)
+import System.Posix.Process (forkProcess, getProcessStatus)
 import System.Posix.Types (ProcessID)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString as BSS (hGetSome, hPut, null)
@@ -202,6 +202,11 @@ startConcurrentConversation sessionDir server = do
   -- state, including withArgs).
   liftIO $ performGC
   processId <- forkGhcProcess $ ghcConcurrentConversation stdin stdout stderr server
+
+  -- We wait for the process to finish in a separate thread so that we do not
+  -- accumulate zombies
+  liftIO $ void $ forkIO $
+    void $ getProcessStatus True False processId
 
   return (processId, stdin, stdout, stderr)
 

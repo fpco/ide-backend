@@ -1121,7 +1121,7 @@ syntheticTests = [
     , withSession defaultSession $ \session -> do
         let upd = (updateCodeGeneration True)
                <> (updateSourceFile "Main.hs" . BSLC.pack $
-                    "main = putStrLn \"Hi!\" >> getLine")
+                    "main = putStrLn \"Hi!\" >> getLine >> return ()")
                <> (updateStdoutBufferMode (RunLineBuffering Nothing))
         updateSessionD session upd 1
         assertNoErrors session
@@ -1133,8 +1133,10 @@ syntheticTests = [
           assertBool ("Expected asynchronous exception; got " ++ show result) (isAsyncException result)
 
         runActions <- runStmt session "Main" "main"
-        result <- runWait runActions
-        assertEqual "" (Left (BSSC.pack "Hi!\n")) result
+        supplyStdin runActions "\n"
+        (output, result) <- runWaitAll runActions
+        assertEqual "" RunOk result
+        assertEqual "" (BSLC.pack "Hi!\n") output
     )
   , ( "Interrupt runExe (after 1 sec)"
     , withSession defaultSession $ \session -> do
