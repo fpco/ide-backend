@@ -54,6 +54,7 @@ module IdeSession.Util.BlockingOps (
     -- * Blocking Async ops
   , wait
   , waitCatch
+  , waitAny
   , waitAnyCatchCancel
   ) where
 
@@ -168,6 +169,9 @@ wait = rethrowWithLineNumber1 [| Async.wait |]
 waitCatch :: ExpQ
 waitCatch = rethrowWithLineNumber1 [| Async.waitCatch |]
 
+waitAny :: ExpQ
+waitAny = rethrowWithLineNumber1 [| Async.waitAny |]
+
 waitAnyCatchCancel :: ExpQ
 waitAnyCatchCancel = rethrowWithLineNumber1 [| Async.waitAnyCatchCancel |]
 
@@ -239,6 +243,9 @@ wait = [| Async.wait |]
 
 waitCatch :: ExpQ
 waitCatch = [| Async.waitCatch |]
+
+waitAny :: ExpQ
+waitAny = [| Async.waitAny |]
 
 waitAnyCatchCancel :: ExpQ
 waitAnyCatchCancel = [| Async.waitAnyCatchCancel |]
