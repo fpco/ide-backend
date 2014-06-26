@@ -37,7 +37,7 @@ import System.FilePath
 import System.FilePath.Find (always, extension, find)
 import System.IO as IO
 import System.IO.Unsafe (unsafePerformIO)
-import System.Process (readProcess, readProcessWithExitCode)
+import System.Process (readProcess, readProcessWithExitCode, system)
 import qualified System.Process as Process
 import System.Random (randomRIO)
 import System.Timeout (timeout)
@@ -1126,17 +1126,24 @@ syntheticTests = [
         updateSessionD session upd 1
         assertNoErrors session
 
+        IO.writeFile "/tmp/modifyer1" "asdf"
         replicateM_ 100 $ do
           runActions <- runStmt session "Main" "main"
           interrupt runActions
           (_output, result) <- runWaitAll runActions
           assertBool ("Expected asynchronous exception; got " ++ show result) (isAsyncException result)
+          system "ps"
+        IO.writeFile "/tmp/modifyer2" "asdf"
 
         runActions <- runStmt session "Main" "main"
+        IO.writeFile "/tmp/modifyer3" "asdf"
         supplyStdin runActions "\n"
+        IO.writeFile "/tmp/modifyer4" "asdf"
         (output, result) <- runWaitAll runActions
+        IO.writeFile "/tmp/modifyer5" "asdf"
         assertEqual "" RunOk result
         assertEqual "" (BSLC.pack "Hi!\n") output
+        IO.writeFile "/tmp/modifyer6" "asdf"
     )
   , ( "Interrupt runExe (after 1 sec)"
     , withSession defaultSession $ \session -> do
@@ -7541,7 +7548,10 @@ traceTests :: [(String, Assertion)] -> [(String, Assertion)]
 traceTests = map $ \(label, test) -> (label, do traceEventIO ("TEST " ++ label) ; test)
 
 main :: IO ()
-main = defaultMain tests
+main = do
+  IO.writeFile "/tmp/modifymain1" "asdf"
+  defaultMain tests
+  IO.writeFile "/tmp/modifymain2" "asdf"
 
 updateSessionP :: IdeSession -> IdeSessionUpdate () -> [(Int, Int, String)] -> IO ()
 updateSessionP session update expectedProgressUpdates = do

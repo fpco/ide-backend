@@ -209,7 +209,9 @@ illscopedConversationException =
 -- calling 'shutdown'.
 shutdown :: RpcServer -> IO ()
 shutdown server = withRpcServer server False $ \_ -> do
+  writeFile "/tmp/modify31" "asdf"
   terminate server
+  writeFile "/tmp/modify32" "asdf"
   let ex = Ex.toException (userError "Manual shutdown")
   return (RpcStopped ex, ())
 
@@ -222,6 +224,7 @@ shutdown server = withRpcServer server False $ \_ -> do
 -- be using it anymore after calling forceShutdown!
 forceShutdown :: RpcServer -> IO ()
 forceShutdown server = Ex.mask_ $ do
+  writeFile "/tmp/modify4pre1" "asdf"
   mst <- tryTakeMVar (rpcState server)
 
   writeFile "/tmp/modify4" "asdf"
@@ -234,6 +237,7 @@ forceShutdown server = Ex.mask_ $ do
       return ()
     Just _ ->
       $putMVar (rpcState server) (RpcStopped ex)
+  writeFile "/tmp/modify5pos1" "asdf"
 
 -- | Silently ignore all exceptions
 ignoreAllExceptions :: IO () -> IO ()
@@ -248,10 +252,13 @@ ignoreAllExceptions = Ex.handle ignore
 -- we wait for the remote process to terminate.
 terminate :: RpcServer -> IO ()
 terminate server = do
+    writeFile "/tmp/modify41" "asdf"
     ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode RequestShutdown)
+    writeFile "/tmp/modify42" "asdf"
     case rpcProc server of
       Just ph -> void $ waitForProcess ph
       Nothing -> return ()
+    writeFile "/tmp/modify43" "asdf"
 
 -- | Force-terminate the external process
 --

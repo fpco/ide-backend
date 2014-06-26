@@ -147,11 +147,18 @@ getGhcExitCode (InProcess _ _) =
 -- | Repeatedly call 'runWait' until we receive a 'Right' result, while
 -- collecting all 'Left' results
 runWaitAll :: forall a. RunActions a -> IO (BSL.ByteString, a)
-runWaitAll RunActions{runWait} = go []
+runWaitAll RunActions{runWait} = do
+ writeFile "/tmp/modifyall3" "asdf"
+ res <- go []
+ writeFile "/tmp/modifyall4" "asdf"
+ return res
+
   where
     go :: [BSS.ByteString] -> IO (BSL.ByteString, a)
     go acc = do
+      writeFile "/tmp/modifyall1" "asdf"
       resp <- runWait
+      writeFile "/tmp/modifyall2" "asdf"
       case resp of
         Left  bs        -> go (bs : acc)
         Right runResult -> return (BSL.fromChunks (reverse acc), runResult)
@@ -257,8 +264,10 @@ rpcRun server cmd translateResult = do
   runActionsState <- newMVar Nothing
 
   return RunActions {
-      runWait =
-        $modifyMVar runActionsState $ \st ->
+      runWait = do
+        writeFile "/tmp/modifyw1" "asdf"
+        res <- $modifyMVar runActionsState $ \st -> do
+          writeFile "/tmp/modifyw2" "asdf"
           case st of
             Just outcome ->
               return (Just outcome, Right outcome)
@@ -271,6 +280,9 @@ rpcRun server cmd translateResult = do
                   return (Just res, Right res)
                 SnippetTerminated res -> do
                   return (Just res, Right res)
+        writeFile "/tmp/modifyw3" "asdf"
+        return res
+
     , interrupt   = writeChan reqChan GhcRunInterrupt
     , supplyStdin = writeChan reqChan . GhcRunInput
     , forceCancel = do
