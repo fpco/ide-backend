@@ -128,52 +128,52 @@ ghcServerEngine conv@RpcConversation{..} = do
     storeDynFlags
 
     -- Start handling RPC calls
-    liftIO $ appendFile "/tmp/modifys" "e3"
+--    liftIO $ appendFile "/tmp/modifys" "e3"
     let go args = do
-          liftIO $ appendFile "/tmp/modifys" "e4"
+--          liftIO $ appendFile "/tmp/modifys" "e4"
           req <- liftIO get
-          liftIO $ appendFile "/tmp/modifys" "e5"
+--          liftIO $ appendFile "/tmp/modifys" "e5"
           args' <- case req of
             ReqCompile genCode targets -> do
-              liftIO $ appendFile "/tmp/modifys" "f1"
+--              liftIO $ appendFile "/tmp/modifys" "f1"
               ghcHandleCompile
                 conv pluginRef importsRef errsRef sourceDir
                 genCode targets configGenerateModInfo
               return args
             ReqRun runCmd -> do
-              liftIO $ appendFile "/tmp/modifys" "f2"
+--              liftIO $ appendFile "/tmp/modifys" "f2"
               (pid, stdin, stdout, stderr) <- startConcurrentConversation sessionDir $ \conv' -> do
                  ghcWithArgs args $ ghcHandleRun conv' runCmd
-              liftIO $ appendFile "/tmp/modifys" "e7"
+--              liftIO $ appendFile "/tmp/modifys" "e7"
               liftIO $ put (pid, stdin, stdout, stderr)
-              liftIO $ appendFile "/tmp/modifys" "e8"
+--              liftIO $ appendFile "/tmp/modifys" "e8"
               return args
             ReqSetEnv env -> do
-              liftIO $ appendFile "/tmp/modifys" "f3"
+--              liftIO $ appendFile "/tmp/modifys" "f3"
               ghcHandleSetEnv conv env
               return args
             ReqSetArgs args' -> do
-              liftIO $ appendFile "/tmp/modifys" "f4"
+--              liftIO $ appendFile "/tmp/modifys" "f4"
               liftIO $ put ()
               return args'
             ReqBreakpoint mod span value -> do
-              liftIO $ appendFile "/tmp/modifys" "f5"
+--              liftIO $ appendFile "/tmp/modifys" "f5"
               ghcHandleBreak conv mod span value
               return args
             ReqPrint vars bind forceEval -> do
-              liftIO $ appendFile "/tmp/modifys" "f6"
+--              liftIO $ appendFile "/tmp/modifys" "f6"
               ghcHandlePrint conv vars bind forceEval
               return args
             ReqLoad path unload -> do
-              liftIO $ appendFile "/tmp/modifys" "f7"
+--              liftIO $ appendFile "/tmp/modifys" "f7"
               ghcHandleLoad conv path unload
               return args
             ReqSetGhcOpts opts -> do
-              liftIO $ appendFile "/tmp/modifys" "f8"
+--              liftIO $ appendFile "/tmp/modifys" "f8"
               ghcHandleSetOpts conv opts
               return args
             ReqCrash delay -> do
-              liftIO $ appendFile "/tmp/modifys" "f9"
+--              liftIO $ appendFile "/tmp/modifys" "f9"
               ghcHandleCrash delay
               return args
           go args'
@@ -198,7 +198,7 @@ ghcServerEngine conv@RpcConversation{..} = do
 
 startConcurrentConversation :: FilePath -> (RpcConversation -> Ghc ()) -> Ghc (ProcessID, FilePath, FilePath, FilePath)
 startConcurrentConversation sessionDir server = do
-  liftIO $ appendFile "/tmp/modifys" "n1"
+--  liftIO $ appendFile "/tmp/modifys" "n1"
   -- Ideally, we'd have the child process create the temp directory and
   -- communicate the name back to us, so that the child process can remove the
   -- directories again when it's done with it. However, this means we need some
@@ -225,14 +225,14 @@ startConcurrentConversation sessionDir server = do
   -- because we need to change global state in the child process; in particular,
   -- we need to redirect stdin, stdout, and stderr (as well as some other global
   -- state, including withArgs).
-  liftIO $ appendFile "/tmp/modifys" "n2"
+--  liftIO $ appendFile "/tmp/modifys" "n2"
   liftIO $ performGC
-  liftIO $ appendFile "/tmp/modifys" "n3"
+--  liftIO $ appendFile "/tmp/modifys" "n3"
   processId <- forkGhcProcess $ do
-                 liftIO $ logPid "s1"
+--                 liftIO $ logPid "s1"
                  ghcConcurrentConversation stdin stdout stderr server
-                 liftIO $ logPid "s2"
-  liftIO $ appendFile "/tmp/modifys" "n4"
+--                 liftIO $ logPid "s2"
+--  liftIO $ appendFile "/tmp/modifys" "n4"
 
   -- We wait for the process to finish in a separate thread so that we do not
   -- accumulate zombies
@@ -679,6 +679,6 @@ ghcConcurrentConversation :: FilePath
                           -> (RpcConversation -> Ghc ())
                           -> Ghc ()
 ghcConcurrentConversation requestR responseW errorsW g = do
-  liftIO $ appendFile "/tmp/modifyz" "u1"
+--  liftIO $ appendFile "/tmp/modifyz" "u1"
   unsafeLiftIO' (concurrentConversation requestR responseW errorsW) g
-  liftIO $ appendFile "/tmp/modifyz" "u2"
+--  liftIO $ appendFile "/tmp/modifyz" "u2"
