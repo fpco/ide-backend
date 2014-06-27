@@ -148,17 +148,17 @@ getGhcExitCode (InProcess _ _) =
 -- collecting all 'Left' results
 runWaitAll :: forall a. RunActions a -> IO (BSL.ByteString, a)
 runWaitAll RunActions{runWait} = do
- writeFile "/tmp/modifyall3" "asdf"
+ appendFile "/tmp/modify" "all3"
  res <- go []
- writeFile "/tmp/modifyall4" "asdf"
+ appendFile "/tmp/modify" "all4"
  return res
 
   where
     go :: [BSS.ByteString] -> IO (BSL.ByteString, a)
     go acc = do
-      writeFile "/tmp/modifyall1" "asdf"
+      appendFile "/tmp/modify" "all1"
       resp <- runWait
-      writeFile "/tmp/modifyall2" "asdf"
+      appendFile "/tmp/modify" "all2"
       case resp of
         Left  bs        -> go (bs : acc)
         Right runResult -> return (BSL.fromChunks (reverse acc), runResult)
@@ -223,15 +223,22 @@ rpcRun :: forall a.
                                     -- @Nothing@ indicates force cancellation
        -> IO (RunActions a)
 rpcRun server cmd translateResult = do
+  appendFile "/tmp/modify" "p1"
   runWaitChan <- newChan :: IO (Chan (SnippetAction a))
+  appendFile "/tmp/modify" "p2"
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
+  appendFile "/tmp/modify" "p3"
 
   -- Communicate with the snippet using an independent, concurrent, conversation
   (pid, server') <- do
+    appendFile "/tmp/modify" "q1"
     (pid, stdin, stdout, stderr) <- ghcRpc server (ReqRun cmd)
+    appendFile "/tmp/modify" "q2"
     server' <- OutProcess <$> connectToRpcServer stdin stdout stderr
+    appendFile "/tmp/modify" "q3"
     return (pid, server')
 
+  appendFile "/tmp/modify" "p4"
   respThread <- async . Ex.handle (handleExternalException runWaitChan) $ do
     ghcConversation server' $ \RpcConversation{..} -> do
       -- This "respThread" is responsible for reading responses from the RPC
@@ -261,13 +268,15 @@ rpcRun server cmd translateResult = do
   -- The runActionState holds 'Just' the result of the snippet, or 'Nothing' if
   -- it has not yet terminated.  initially is the termination callback to be
   -- called
+  appendFile "/tmp/modify" "p5"
   runActionsState <- newMVar Nothing
 
+  appendFile "/tmp/modify" "p6"
   return RunActions {
       runWait = do
-        writeFile "/tmp/modifyw1" "asdf"
+        appendFile "/tmp/modify" "w1"
         res <- $modifyMVar runActionsState $ \st -> do
-          writeFile "/tmp/modifyw2" "asdf"
+          appendFile "/tmp/modify" "w2"
           case st of
             Just outcome ->
               return (Just outcome, Right outcome)
@@ -280,7 +289,7 @@ rpcRun server cmd translateResult = do
                   return (Just res, Right res)
                 SnippetTerminated res -> do
                   return (Just res, Right res)
-        writeFile "/tmp/modifyw3" "asdf"
+        appendFile "/tmp/modify" "w3"
         return res
 
     , interrupt   = writeChan reqChan GhcRunInterrupt

@@ -1,4 +1,5 @@
-{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DeriveDataTypeable, RankNTypes, GADTs #-}
+{-# LANGUAGE DeriveDataTypeable, GADTs, RankNTypes, ScopedTypeVariables,
+             TemplateHaskell #-}
 {-# OPTIONS_GHC -Wall #-}
 module IdeSession.RPC.Server
   ( rpcServer
@@ -6,28 +7,26 @@ module IdeSession.RPC.Server
   , RpcConversation(..)
   ) where
 
-import Prelude hiding (take)
-import System.IO
-  ( Handle
-  , hSetBinaryMode
-  , hSetBuffering
-  , BufferMode(BlockBuffering)
-  , IOMode(..)
-  )
-import System.Posix.Types (Fd)
-import System.Posix.IO (closeFd, fdToHandle)
-import Control.Monad (void)
-import qualified Control.Exception as Ex
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Chan (Chan, newChan, writeChan)
-import qualified Data.ByteString.Lazy.Char8 as BSL
 import Control.Concurrent.Async (Async, async)
-import Data.Binary (encode, decode)
+import Control.Concurrent.Chan (Chan, newChan, writeChan)
+import qualified Control.Exception as Ex
+import Control.Monad (void)
+import Data.Binary (decode, encode)
+import qualified Data.ByteString.Lazy.Char8 as BSL
 import GHC.IO.Handle.FD (openFileBlocking)
+import Prelude hiding (take)
+import System.IO (BufferMode (BlockBuffering), Handle, IOMode (..),
+                  hSetBinaryMode, hSetBuffering)
+import System.IO (appendFile)
+import System.Posix.IO (closeFd, fdToHandle)
+import System.Posix.Types (Fd)
 
-import IdeSession.Util.BlockingOps (readChan, wait, waitAny)
+import System.Posix.Process (getProcessID)
+
 import IdeSession.RPC.API
 import IdeSession.RPC.Stream
+import IdeSession.Util.BlockingOps (readChan, wait, waitAny)
 
 --------------------------------------------------------------------------------
 -- Server-side API                                                            --
@@ -43,15 +42,22 @@ rpcServer handler fds = do
   let readFd :: String -> Fd
       readFd fd = fromIntegral (read fd :: Int)
 
+  appendFile "/tmp/modifyg" "m1"
   let [requestR, requestW, responseR, responseW, errorsR, errorsW] = map readFd fds
+  pid <- getProcessID
+  appendFile "/tmp/modifyg" ("m2(" ++ show pid ++ ", " ++ show (head fds) ++ ")\n")
 
   closeFd requestW
+  appendFile "/tmp/modifyg" "m3"
   closeFd responseR
   closeFd errorsR
+  appendFile "/tmp/modifyg" "m4"
   requestR'  <- fdToHandle requestR
+  appendFile "/tmp/modifyg" "m5"
   responseW' <- fdToHandle responseW
   errorsW'   <- fdToHandle errorsW
 
+  appendFile "/tmp/modifyg" "m6"
   rpcServer' requestR' responseW' errorsW' handler
 
 -- | Start a concurrent conversation.
@@ -61,10 +67,16 @@ concurrentConversation :: FilePath -- ^ stdin named pipe
                        -> (RpcConversation -> IO ())
                        -> IO ()
 concurrentConversation requestR responseW errorsW server = do
+  appendFile "/tmp/modifyg" "b1"
   hin  <- openFileBlocking requestR  ReadMode
+  pid <- getProcessID
+  appendFile "/tmp/modifyg" ("b2(" ++ show pid ++ ", " ++ show requestR ++ ")\n")
   hout <- openFileBlocking responseW WriteMode
+  appendFile "/tmp/modifyg" "b3"
   herr <- openFileBlocking errorsW   WriteMode
+  appendFile "/tmp/modifyg" "b4"
   rpcServer' hin hout herr server
+  appendFile "/tmp/modifyg" "b5"
 
 -- | Start the RPC server
 rpcServer' :: Handle                     -- ^ Input
@@ -88,6 +100,9 @@ rpcServer' hin hout herr server = do
       return (reader, writer, handler)
 
     (_thread, ev) <- $waitAny [reader, writer, handler]
+    pid <- getProcessID
+    putStrLn $ show (pid, ev)
+
     case ev of
       -- If we lose connection with the client, just terminate.
       -- See #194 (in particular, https://github.com/fpco/ide-backend/issues/194#issuecomment-44210412)
@@ -118,6 +133,7 @@ rpcServer' hin hout herr server = do
         void $ flushResponses responses writer
 
     threadDelay 100000
+    putStrLn $ show pid ++ " terminating"
   where
     tryShowException :: Maybe Ex.SomeException -> IO ()
     tryShowException (Just ex) =
@@ -150,6 +166,7 @@ data ServerEvent =
     -- | The reader thread and writer threads terminate with 'LostConnection'
     -- if an exception occurs
   | LostConnection Ex.SomeException
+  deriving Show
 
 -- | Decode messages from a handle and forward them to a channel.
 -- The boolean result indicates whether the shutdown is forced.

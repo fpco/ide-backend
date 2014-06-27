@@ -145,18 +145,26 @@ connectToRpcServer :: FilePath   -- ^ stdin named pipe
                    -> IO RpcServer
 connectToRpcServer requestW responseR errorsR = do
   -- TODO: here and in forkRpcServer, deal with exceptions
+  appendFile "/tmp/modify" ("o1(" ++ requestW ++ ")\n")
   requestW'  <- openFileBlocking requestW  WriteMode
+  appendFile "/tmp/modify" "o2"
   responseR' <- openFileBlocking responseR ReadMode
+  appendFile "/tmp/modify" "o3"
   errorsR'   <- openFileBlocking errorsR   ReadMode
+  appendFile "/tmp/modify" "o4"
   st         <- newMVar RpcRunning
+  appendFile "/tmp/modify" "o5"
   input      <- newStream responseR'
-  return RpcServer {
+  appendFile "/tmp/modify" "o6"
+  let !x = RpcServer {
       rpcRequestW  = requestW'
     , rpcErrorsR   = errorsR'
     , rpcProc      = Nothing
     , rpcState     = st
     , rpcResponseR = input
     }
+  appendFile "/tmp/modify" "o7"
+  return x
 
 -- | Specialized form of 'rpcConversation' to do single request and wait for
 -- a single response.
@@ -209,9 +217,9 @@ illscopedConversationException =
 -- calling 'shutdown'.
 shutdown :: RpcServer -> IO ()
 shutdown server = withRpcServer server False $ \_ -> do
-  writeFile "/tmp/modify31" "asdf"
+  appendFile "/tmp/modify" "31"
   terminate server
-  writeFile "/tmp/modify32" "asdf"
+  appendFile "/tmp/modify" "32"
   let ex = Ex.toException (userError "Manual shutdown")
   return (RpcStopped ex, ())
 
@@ -224,12 +232,12 @@ shutdown server = withRpcServer server False $ \_ -> do
 -- be using it anymore after calling forceShutdown!
 forceShutdown :: RpcServer -> IO ()
 forceShutdown server = Ex.mask_ $ do
-  writeFile "/tmp/modify4pre1" "asdf"
+  appendFile "/tmp/modify" "4pre1"
   mst <- tryTakeMVar (rpcState server)
 
-  writeFile "/tmp/modify4" "asdf"
+  appendFile "/tmp/modify" "4"
   ignoreAllExceptions $ forceTerminate server
-  writeFile "/tmp/modify5" "asdf"
+  appendFile "/tmp/modify" "5"
   let ex = Ex.toException (userError "Forced manual shutdown")
 
   case mst of
@@ -237,7 +245,7 @@ forceShutdown server = Ex.mask_ $ do
       return ()
     Just _ ->
       $putMVar (rpcState server) (RpcStopped ex)
-  writeFile "/tmp/modify5pos1" "asdf"
+  appendFile "/tmp/modify" "5pos1"
 
 -- | Silently ignore all exceptions
 ignoreAllExceptions :: IO () -> IO ()
@@ -252,13 +260,13 @@ ignoreAllExceptions = Ex.handle ignore
 -- we wait for the remote process to terminate.
 terminate :: RpcServer -> IO ()
 terminate server = do
-    writeFile "/tmp/modify41" "asdf"
+    appendFile "/tmp/modify" "41"
     ignoreIOExceptions $ hPutFlush (rpcRequestW server) (encode RequestShutdown)
-    writeFile "/tmp/modify42" "asdf"
+    appendFile "/tmp/modify" "42"
     case rpcProc server of
       Just ph -> void $ waitForProcess ph
       Nothing -> return ()
-    writeFile "/tmp/modify43" "asdf"
+    appendFile "/tmp/modify" "43"
 
 -- | Force-terminate the external process
 --
@@ -270,16 +278,16 @@ forceTerminate server =
         withProcessHandle ph $ \p_ ->
           case p_ of
             ClosedHandle _ -> do
-              writeFile "/tmp/modify6" "asdf"
+              appendFile "/tmp/modify" "6"
               res <- leaveHandleAsIs p_
-              writeFile "/tmp/modify7" "asdf"
+              appendFile "/tmp/modify" "7"
               return res
             OpenHandle pID -> do
-              writeFile "/tmp/modify8" "asdf"
+              appendFile "/tmp/modify" "8"
               signalProcess sigKILL pID
-              writeFile "/tmp/modify9" "asdf"
+              appendFile "/tmp/modify" "9"
               res <- leaveHandleAsIs p_
-              writeFile "/tmp/modify10" "asdf"
+              appendFile "/tmp/modify" "10"
               return res
       Nothing ->
         Ex.throwIO $ userError "forceTerminate: parallel connection"
@@ -297,24 +305,24 @@ withRpcServer :: RpcServer -> Bool
               -> IO a
 withRpcServer server debugg io =
   Ex.mask $ \restore -> do
-    when debugg $ writeFile "/tmp/modify21" "asdf"
+    when debugg $ appendFile "/tmp/modify" "21"
     st <- $takeMVar (rpcState server)
-    when debugg $ writeFile "/tmp/modify22" "asdf"
+    when debugg $ appendFile "/tmp/modify" "22"
 
     mResult <- Ex.try $ restore (io st)
-    when debugg $ writeFile "/tmp/modify23" "asdf"
+    when debugg $ appendFile "/tmp/modify" "23"
 
     case mResult of
       Right (st', a) -> do
-        when debugg $ writeFile "/tmp/modify24" "asdf"
+        when debugg $ appendFile "/tmp/modify" "24"
         $putMVar (rpcState server) st'
-        when debugg $ writeFile "/tmp/modify25" "asdf"
+        when debugg $ appendFile "/tmp/modify" "25"
         return a
       Left ex -> do
    --     terminate server
-        when debugg $ writeFile "/tmp/modify26" "asdf"
+        when debugg $ appendFile "/tmp/modify" "26"
         $putMVar (rpcState server) (RpcStopped ex)
-        when debugg $ writeFile "/tmp/modify27" "asdf"
+        when debugg $ appendFile "/tmp/modify" "27"
         Ex.throwIO ex
 
 -- | Get the exit code of the RPC server, unless still running.

@@ -132,7 +132,7 @@ getGhcLibdir = do
   let ghcbinary = "ghc-" ++ GHC.cProjectVersion
   out <- readProcess ghcbinary ["--print-libdir"] ""
   case lines out of
-    [libdir] -> return libdir
+    libdir : _ -> return libdir
     _        -> fail "cannot parse output of ghc --print-libdir"
 
 runFromGhc :: Ghc a -> IO a

@@ -1126,24 +1126,24 @@ syntheticTests = [
         updateSessionD session upd 1
         assertNoErrors session
 
-        IO.writeFile "/tmp/modifyer1" "asdf"
+        IO.appendFile "/tmp/modify" "er1"
         replicateM_ 100 $ do
           runActions <- runStmt session "Main" "main"
           interrupt runActions
           (_output, result) <- runWaitAll runActions
           assertBool ("Expected asynchronous exception; got " ++ show result) (isAsyncException result)
           system "ps"
-        IO.writeFile "/tmp/modifyer2" "asdf"
+        IO.appendFile "/tmp/modify" "er2"
 
         runActions <- runStmt session "Main" "main"
-        IO.writeFile "/tmp/modifyer3" "asdf"
+        IO.appendFile "/tmp/modify" "er3"
         supplyStdin runActions "\n"
-        IO.writeFile "/tmp/modifyer4" "asdf"
+        IO.appendFile "/tmp/modify" "er4"
         (output, result) <- runWaitAll runActions
-        IO.writeFile "/tmp/modifyer5" "asdf"
+        IO.appendFile "/tmp/modify" "er5"
         assertEqual "" RunOk result
         assertEqual "" (BSLC.pack "Hi!\n") output
-        IO.writeFile "/tmp/modifyer6" "asdf"
+        IO.appendFile "/tmp/modify" "er6"
     )
   , ( "Interrupt runExe (after 1 sec)"
     , withSession defaultSession $ \session -> do
@@ -7549,9 +7549,9 @@ traceTests = map $ \(label, test) -> (label, do traceEventIO ("TEST " ++ label) 
 
 main :: IO ()
 main = do
-  IO.writeFile "/tmp/modifymain1" "asdf"
+  IO.appendFile "/tmp/modify" "main1"
   defaultMain tests
-  IO.writeFile "/tmp/modifymain2" "asdf"
+  IO.appendFile "/tmp/modify" "main2"
 
 updateSessionP :: IdeSession -> IdeSessionUpdate () -> [(Int, Int, String)] -> IO ()
 updateSessionP session update expectedProgressUpdates = do

@@ -40,6 +40,8 @@ import qualified IdeSession.Strict.List as StrictList
 import qualified IdeSession.Strict.Map  as StrictMap
 import qualified IdeSession.Types.Public as Public
 
+import System.Posix.Process (getProcessID)
+
 import qualified GHC
 import GhcMonad(Ghc(..))
 import qualified ObjLink as Linker
@@ -56,7 +58,10 @@ import GhcShim
 
 -- | Start the RPC server. Used from within the server executable.
 ghcServer :: [String] -> IO ()
-ghcServer = rpcServer ghcServerEngine
+ghcServer s = do
+  liftIO $ appendFile "/tmp/modifys" "eA"
+  rpcServer ghcServerEngine s
+  liftIO $ appendFile "/tmp/modifys" "eB"
 
 -- | The GHC server engine proper.
 --
@@ -64,6 +69,7 @@ ghcServer = rpcServer ghcServerEngine
 -- incremental compilation possible.
 ghcServerEngine :: RpcConversation -> IO ()
 ghcServerEngine conv@RpcConversation{..} = do
+  liftIO $ appendFile "/tmp/modifys" "e1"
   -- The initial handshake with the client
   (configGenerateModInfo, initOpts, sessionDir) <- handleInit conv
   let distDir   = ideSessionDistDir   sessionDir
@@ -78,6 +84,7 @@ ghcServerEngine conv@RpcConversation{..} = do
   stRef      <- newIORef initExtractIdsSuspendedState
 
   -- Start handling requests. From this point on we don't leave the GHC monad.
+  liftIO $ appendFile "/tmp/modifys" "e2"
   runFromGhc $ do
     -- Register startup options and perhaps our plugin in dynamic flags.
     -- This is the only place where the @packageDbArgs@ options are used
@@ -121,38 +128,52 @@ ghcServerEngine conv@RpcConversation{..} = do
     storeDynFlags
 
     -- Start handling RPC calls
+    liftIO $ appendFile "/tmp/modifys" "e3"
     let go args = do
+          liftIO $ appendFile "/tmp/modifys" "e4"
           req <- liftIO get
+          liftIO $ appendFile "/tmp/modifys" "e5"
           args' <- case req of
             ReqCompile genCode targets -> do
+              liftIO $ appendFile "/tmp/modifys" "f1"
               ghcHandleCompile
                 conv pluginRef importsRef errsRef sourceDir
                 genCode targets configGenerateModInfo
               return args
             ReqRun runCmd -> do
+              liftIO $ appendFile "/tmp/modifys" "f2"
               (pid, stdin, stdout, stderr) <- startConcurrentConversation sessionDir $ \conv' -> do
                  ghcWithArgs args $ ghcHandleRun conv' runCmd
+              liftIO $ appendFile "/tmp/modifys" "e7"
               liftIO $ put (pid, stdin, stdout, stderr)
+              liftIO $ appendFile "/tmp/modifys" "e8"
               return args
             ReqSetEnv env -> do
+              liftIO $ appendFile "/tmp/modifys" "f3"
               ghcHandleSetEnv conv env
               return args
             ReqSetArgs args' -> do
+              liftIO $ appendFile "/tmp/modifys" "f4"
               liftIO $ put ()
               return args'
             ReqBreakpoint mod span value -> do
+              liftIO $ appendFile "/tmp/modifys" "f5"
               ghcHandleBreak conv mod span value
               return args
             ReqPrint vars bind forceEval -> do
+              liftIO $ appendFile "/tmp/modifys" "f6"
               ghcHandlePrint conv vars bind forceEval
               return args
             ReqLoad path unload -> do
+              liftIO $ appendFile "/tmp/modifys" "f7"
               ghcHandleLoad conv path unload
               return args
             ReqSetGhcOpts opts -> do
+              liftIO $ appendFile "/tmp/modifys" "f8"
               ghcHandleSetOpts conv opts
               return args
             ReqCrash delay -> do
+              liftIO $ appendFile "/tmp/modifys" "f9"
               ghcHandleCrash delay
               return args
           go args'
@@ -177,6 +198,7 @@ ghcServerEngine conv@RpcConversation{..} = do
 
 startConcurrentConversation :: FilePath -> (RpcConversation -> Ghc ()) -> Ghc (ProcessID, FilePath, FilePath, FilePath)
 startConcurrentConversation sessionDir server = do
+  liftIO $ appendFile "/tmp/modifys" "n1"
   -- Ideally, we'd have the child process create the temp directory and
   -- communicate the name back to us, so that the child process can remove the
   -- directories again when it's done with it. However, this means we need some
@@ -196,12 +218,21 @@ startConcurrentConversation sessionDir server = do
 
     return (stdin, stdout, stderr)
 
+  let  logPid :: String -> IO ()
+       logPid str = do pid <- getProcessID ; appendFile ("/tmp/piid" ++ show pid ++ ".log") (str ++ "\n")
+
   -- Start the concurrent conversion. We use forkGhcProcess rather than forkGhc
   -- because we need to change global state in the child process; in particular,
   -- we need to redirect stdin, stdout, and stderr (as well as some other global
   -- state, including withArgs).
+  liftIO $ appendFile "/tmp/modifys" "n2"
   liftIO $ performGC
-  processId <- forkGhcProcess $ ghcConcurrentConversation stdin stdout stderr server
+  liftIO $ appendFile "/tmp/modifys" "n3"
+  processId <- forkGhcProcess $ do
+                 liftIO $ logPid "s1"
+                 ghcConcurrentConversation stdin stdout stderr server
+                 liftIO $ logPid "s2"
+  liftIO $ appendFile "/tmp/modifys" "n4"
 
   -- We wait for the process to finish in a separate thread so that we do not
   -- accumulate zombies
@@ -450,12 +481,18 @@ ghcHandleLoad RpcConversation{..} path unload = do
 -- | Handle a run request
 ghcHandleRun :: RpcConversation -> RunCmd -> Ghc ()
 ghcHandleRun RpcConversation{..} runCmd = do
+    liftIO $ appendFile "/tmp/modifys" "i1"
     (stdOutputRd, stdOutputBackup, stdErrorBackup) <- redirectStdout
+    liftIO $ appendFile "/tmp/modifys" "i2"
     (stdInputWr,  stdInputBackup)                  <- redirectStdin
+    liftIO $ appendFile "/tmp/modifys" "i3"
 
     ghcThread    <- liftIO newEmptyMVar :: Ghc (MVar (Maybe ThreadId))
+    liftIO $ appendFile "/tmp/modifys" "i4"
     reqThread    <- liftIO . async $ readRunRequests ghcThread stdInputWr
+    liftIO $ appendFile "/tmp/modifys" "i5"
     stdoutThread <- liftIO . async $ readStdout stdOutputRd
+    liftIO $ appendFile "/tmp/modifys" "i6"
 
     -- This is a little tricky. We only want to deliver the UserInterrupt
     -- exceptions when we are running 'runInGhc'. If the UserInterrupt arrives
@@ -480,21 +517,29 @@ ghcHandleRun RpcConversation{..} runCmd = do
         (\() -> liftIO $ $modifyMVar_ ghcThread (\_ -> return Nothing))
         (\() -> runInGhc runCmd)
 
+    liftIO $ appendFile "/tmp/modifys" "i7"
     liftIO $ do
       -- Restore stdin and stdout
+      liftIO $ appendFile "/tmp/modifys" "i8"
       dupTo stdOutputBackup stdOutput >> closeFd stdOutputBackup
+      liftIO $ appendFile "/tmp/modifys" "i9"
       dupTo stdErrorBackup  stdError  >> closeFd stdErrorBackup
+      liftIO $ appendFile "/tmp/modifys" "iA"
       dupTo stdInputBackup  stdInput  >> closeFd stdInputBackup
+      liftIO $ appendFile "/tmp/modifys" "iB"
 
       -- Closing the write end of the stdout pipe will cause the stdout
       -- thread to terminate after it processed all remaining output;
       -- wait for this to happen
       $wait stdoutThread
+      liftIO $ appendFile "/tmp/modifys" "iC"
 
       -- Report the final result
       liftIO $ debug dVerbosity $ "returned from ghcHandleRun with "
                                   ++ show runOutcome
+      liftIO $ appendFile "/tmp/modifys" "iD"
       put $ GhcRunDone runOutcome
+      liftIO $ appendFile "/tmp/modifys" "iE"
   where
     -- Wait for and execute run requests from the client
     readRunRequests :: MVar (Maybe ThreadId) -> Handle -> IO ()
@@ -633,5 +678,7 @@ ghcConcurrentConversation :: FilePath
                           -> FilePath
                           -> (RpcConversation -> Ghc ())
                           -> Ghc ()
-ghcConcurrentConversation requestR responseW errorsW =
-  unsafeLiftIO' (concurrentConversation requestR responseW errorsW)
+ghcConcurrentConversation requestR responseW errorsW g = do
+  liftIO $ appendFile "/tmp/modifyz" "u1"
+  unsafeLiftIO' (concurrentConversation requestR responseW errorsW) g
+  liftIO $ appendFile "/tmp/modifyz" "u2"

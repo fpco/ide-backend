@@ -253,16 +253,16 @@ writeMacros IdeStaticInfo{ideConfig = SessionConfig {..}, ..}
 -- If code is still running, it will be interrupted.
 shutdownSession :: IdeSession -> IO ()
 shutdownSession s = do
-  writeFile "/tmp/modifys1" "asdf"
+  appendFile "/tmp/modify" "s1"
   shutdownSession' False s
-  writeFile "/tmp/modifys2" "asdf"
+  appendFile "/tmp/modify" "s2"
 
 -- | Like shutdownSession, but don't be nice about it (SIGKILL)
 forceShutdownSession :: IdeSession -> IO ()
 forceShutdownSession s = do
-  writeFile "/tmp/modifys3" "asdf"
+  appendFile "/tmp/modify" "s3"
   shutdownSession' True s
-  writeFile "/tmp/modifys4" "asdf"
+  appendFile "/tmp/modify" "s4"
 
 -- | Internal generalization of 'shutdownSession' and 'forceShutdownSession'
 shutdownSession' :: Bool -> IdeSession -> IO ()
@@ -271,19 +271,19 @@ shutdownSession' forceTerminate session@IdeSession{ideState, ideStaticInfo} = do
   mStillRunning <- $modifyStrictMVar ideState $ \state ->
     case state of
       IdeSessionIdle idleState -> do
-        writeFile "/tmp/modifyu1" "asdf"
+        appendFile "/tmp/modify" "u1"
         if forceTerminate
           then forceShutdownGhcServer $ _ideGhcServer idleState
           else shutdownGhcServer      $ _ideGhcServer idleState
-        writeFile "/tmp/modifyu2" "asdf"
+        appendFile "/tmp/modify" "u2"
         cleanupDirs
         return (IdeSessionShutdown, Nothing)
       IdeSessionPendingChanges _pendingChanges idleState -> do
-        writeFile "/tmp/modifyu3" "asdf"
+        appendFile "/tmp/modify" "u3"
         if forceTerminate
           then forceShutdownGhcServer $ _ideGhcServer idleState
           else shutdownGhcServer      $ _ideGhcServer idleState
-        writeFile "/tmp/modifyu4" "asdf"
+        appendFile "/tmp/modify" "u4"
         cleanupDirs
         return (IdeSessionShutdown, Nothing)
       IdeSessionShutdown ->
@@ -302,9 +302,9 @@ shutdownSession' forceTerminate session@IdeSession{ideState, ideStaticInfo} = do
       if forceTerminate then forceCancel runActions
                         else interrupt runActions
       void $ runWaitAll runActions
-      writeFile "/tmp/modifys5" "asdf"
+      appendFile "/tmp/modify" "s5"
       shutdownSession' forceTerminate session
-      writeFile "/tmp/modifys6" "asdf"
+      appendFile "/tmp/modify" "s6"
     Nothing ->
       -- We're done
       return ()
@@ -527,7 +527,7 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
   where
     go :: Bool -> IdeSessionUpdate (Int, [SourceError]) -> IO ()
     go justRestarted update = do
-      writeFile "/tmp/modifyg1" "asdf"
+      appendFile "/tmp/modify" "g1"
       shouldRestart <- $modifyStrictMVar ideState $ \state ->
         case state of
           IdeSessionIdle idleState ->
@@ -547,7 +547,7 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
           go True update'
         Nothing ->
           return ()
-      writeFile "/tmp/modifyg2" "asdf"
+      appendFile "/tmp/modify" "g2"
 
     -- The real work happens here. We will have the lock on the session while
     -- this executes. Returns Just an update if we need to restart the session
@@ -1094,20 +1094,20 @@ runCmd :: IdeSession -> (IdeIdleState -> RunCmd) -> IO (RunActions Public.RunRes
 runCmd session mkCmd = modifyIdleState session $ \idleState ->
   case (toLazyMaybe (idleState ^. ideComputed), idleState ^. ideGenerateCode) of
     (Just comp, True) -> do
-      writeFile "/tmp/modifyr1" "asdf"
+      appendFile "/tmp/modify" "r1"
       let cmd = mkCmd idleState
 
       checkStateOk comp cmd
-      writeFile "/tmp/modifyr3" "asdf"
+      appendFile "/tmp/modify" "r3"
       isBreak    <- newEmptyMVar
-      writeFile "/tmp/modifyr4" "asdf"
+      appendFile "/tmp/modify" "r4"
       runActions <- rpcRun (idleState ^. ideGhcServer)
                            cmd
                            (translateRunResult isBreak)
 
       -- TODO: We should register the runActions somewhere so we can do a
       -- clean session shutdown?
-      writeFile "/tmp/modifyr2" "asdf"
+      appendFile "/tmp/modify" "r2"
       return (IdeSessionIdle idleState, runActions)
     _ ->
       -- This 'fail' invocation is, in part, a workaround for
