@@ -2226,7 +2226,7 @@ syntheticTests = [
         updateSession session updates2 $ const $ return ()
         ra2 <- runStmt session "Main" "main"
         out2b <- runWait ra2
-        assertEqual "" out2b (Right RunOk)
+        assertEqual "ra2" out2b (Right RunOk)
 
         let updates3 =
               updateSourceFile "Main.hs" (BSLC.pack "main = getLine >>= putStrLn")
@@ -2234,7 +2234,7 @@ syntheticTests = [
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-        assertEqual "" out3b RunOk
+        assertEqual "ra3" out3b RunOk
         assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "First snippet closes stderr; next snippet unaffected"
@@ -2246,7 +2246,7 @@ syntheticTests = [
         updateSession session updates2 $ const $ return ()
         ra2 <- runStmt session "Main" "main"
         out2b <- runWait ra2
-        assertEqual "" out2b (Right RunOk)
+        assertEqual "ra2" out2b (Right RunOk)
 
         let updates3 =
               updateSourceFile "Main.hs" (BSLC.pack "import System.IO\nmain = getLine >>= hPutStrLn stderr")
@@ -2254,7 +2254,7 @@ syntheticTests = [
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-        assertEqual "" out3b RunOk
+        assertEqual "ra3" out3b RunOk
         assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "Snippet closes stderr, using timeout buffering"
