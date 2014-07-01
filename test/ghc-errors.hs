@@ -5845,6 +5845,37 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
             assertEqual "" (TextSpan (Text.pack "<from GhcException>")) (errorSpan e2)
           _ -> assertFailure $ "Unexpected errors: " ++ show errors
     )
+  , ( "Using C files 4: Errors in C file, then update C file (#201)"
+    , withSession defaultSession $ \session -> do
+        let mainLBS = BSLC.pack . unlines $ [
+                "import Foreign"
+              , "import Foreign.C"
+              , "import Foreign.C.Types"
+              , "foreign import ccall safe \"test_c_func\" test_c_func :: CInt"
+              , "main = print test_c_func"
+              ]
+        let cLBS = BSLC.pack . unlines $ [
+                "int test_c_func() { return 42; }"
+              ]
+
+        let upd = updateCodeGeneration True
+               <> updateSourceFile "Main.hs" mainLBS
+               <> updateSourceFile "test.c" cLBS
+
+        updateSessionD session upd 3
+        assertNoErrors session
+
+        runActions <- runStmt session "Main" "main"
+        (output, result) <- runWaitAll runActions
+        assertEqual "" result RunOk
+        assertEqual "" output (BSLC.pack "42\n")
+
+        updateSessionD session (updateSourceFile "test.c" "invalid") 3
+        assertOneError session
+
+        updateSessionD session (updateSourceFile "test.c" cLBS) 3
+        assertNoErrors session
+    )
   , ( "ghc qAddDependentFile patch (#118)"
     , withSession defaultSession $ \session -> do
         let cb     = \_ -> return ()
