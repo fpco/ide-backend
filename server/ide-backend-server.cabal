@@ -57,10 +57,12 @@ executable ide-backend-server
     build-depends: time    >= 1.4  && < 1.5,
                    haddock >= 2.14 && < 2.15
     cpp-options: -DGHC_78
+    ghc-options: -dynamic
   if impl(ghc == 7.8.*)
     build-depends: time    >= 1.4  && < 1.5,
                    haddock >= 2.14 && < 2.15
     cpp-options: -DGHC_78
+    ghc-options: -dynamic
 
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,
