@@ -769,9 +769,12 @@ recompileObjectFiles = do
               liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
               errs <- lift $ do
                 errs <- runGcc absC absObj objDir
-                when (null errs) $ do
-                  ts' <- updateFileTimes absObj
-                  set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
+                if (null errs)
+                  then do
+                    ts' <- updateFileTimes absObj
+                    set (ideObjectFiles .> lookup' fp) (Just (absObj, ts'))
+                  else
+                    set (ideObjectFiles .> lookup' fp) Nothing
                 return errs
               if null errs then tellSt ([fp], [])
                            else tellSt ([], errs)
