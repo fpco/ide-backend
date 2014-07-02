@@ -2256,11 +2256,7 @@ syntheticTests = [
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-<<<<<<< HEAD
-        assertEqual "" RunOk out3b
-=======
         assertEqual "ra3" out3b RunOk
->>>>>>> origin/experimental
         assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "Snippet closes stderr, using timeout buffering"
