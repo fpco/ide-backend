@@ -19,7 +19,6 @@ module IdeSession.Util (
   , suppressStdError
   , redirectStdError
   , restoreStdError
-  , ignoreIOExceptions
   ) where
 
 import Control.Monad (void, forM_, mplus)
@@ -253,7 +252,7 @@ restoreStdError = restoreHandle stderr stdError
 
 suppressHandle :: Handle -> Fd -> IO FdBackup
 suppressHandle h fd = do
-  ignoreIOExceptions $ hFlush h
+  hFlush h
   fdBackup <- dup fd
   closeFd fd
   -- Will use next available file descriptor: that of h, e.g., stdout.
@@ -269,7 +268,7 @@ redirectHandle h fd file = do
   -- The file can't be created down there in openFd, because then
   -- a wrong fd gets captured.
   void $ createFile fileBS mode
-  ignoreIOExceptions $ hFlush h
+  hFlush h
   fdBackup <- dup fd
   closeFd fd
   -- Will use next available file descriptor: that of h, e.g., stdout.
@@ -278,15 +277,7 @@ redirectHandle h fd file = do
 
 restoreHandle :: Handle -> Fd -> FdBackup -> IO ()
 restoreHandle h fd fdBackup = do
-  ignoreIOExceptions $ hFlush h
+  hFlush h
   closeFd fd
   _ <- dup fdBackup
   closeFd fdBackup
-
--- TODO: merge with RPC.API
--- | Ignore IO exceptions
-ignoreIOExceptions :: IO () -> IO ()
-ignoreIOExceptions = Ex.handle ignore
-  where
-    ignore :: Ex.IOException -> IO ()
-    ignore _ = return ()
