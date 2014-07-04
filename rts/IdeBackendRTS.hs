@@ -27,12 +27,12 @@ import qualified GHC.IO.FD as FD
 
 run :: RunBufferMode -> RunBufferMode -> IO a -> IO a
 run outBMode errBMode io = do
-  res <- 
-    withBuffering IO.stdout outBMode $ withBuffering IO.stderr errBMode $ io
-  resetStdin  IO.utf8
-  resetStdout IO.utf8
-  resetStderr IO.utf8
-  return res
+  let resetHandles = do
+        resetStdin  IO.utf8
+        resetStdout IO.utf8
+        resetStderr IO.utf8
+  withBuffering IO.stdout outBMode (withBuffering IO.stderr errBMode io)
+    `Ex.finally` resetHandles
 
 {-------------------------------------------------------------------------------
   Buffer modes
