@@ -353,6 +353,12 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 * Get the corresponding version of the core libraries:
 
       ./sync-all --extra --no-dph --nofib -r git://git.haskell.org get -b ghc-7.8
+      ./sync-all checkout -b ghc-7.8.2 ghc-7.8.2-release
+
+  (The second line checks out the 7.8.2 release of the libraries _where
+  available_; unfortunately, not all libraries have this tag. This will be
+  resolved once we move to 7.8.3, which uses proper git submodules
+  consistently.)
 
 * Create build.mk
 
