@@ -102,7 +102,7 @@ envWithPathOverride extraPathDirs = do
     env <- getEnvironment
     let path  = fromMaybe "" (lookup "PATH" env)
         path' = intercalate [searchPathSeparator]
-                  (splitSearchPath path ++ extraPathDirs)
+                  (extraPathDirs ++ splitSearchPath path)
         env'  = ("PATH", path') : filter (\(var, _) -> var /= "PATH") env
     return (Just env')
 

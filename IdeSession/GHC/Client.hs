@@ -93,8 +93,8 @@ forkGhcServer IdeStaticInfo{ideConfig, ideSessionDir} = do
            ++ relInclToOpts (ideSessionSourceDir ideSessionDir) configRelativeIncludes
 
     searchPath :: ProgramSearchPath
-    searchPath = ProgramSearchPathDefault
-               : map ProgramSearchPathDir configExtraPathDirs
+    searchPath = map ProgramSearchPathDir configExtraPathDirs
+              ++ [ProgramSearchPathDefault]
 
     SessionConfig{..} = ideConfig
 
