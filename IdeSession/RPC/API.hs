@@ -12,18 +12,21 @@ module IdeSession.RPC.API (
     -- * IO utils
   , hPutFlush
   , ignoreIOExceptions
+  , openPipeForWriting
+  , openPipeForReading
   ) where
 
 import Prelude hiding (take)
-import System.IO (Handle, hFlush)
-import Data.Typeable (Typeable)
 import Control.Applicative ((<$>))
+import Control.Concurrent (threadDelay)
+import Data.Binary (Binary)
+import Data.Typeable (Typeable)
+import System.IO (Handle, hFlush, openFile, IOMode(..), hPutChar, hGetChar)
 import qualified Control.Exception as Ex
+import qualified Data.Binary as Binary
+import qualified Data.ByteString as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.ByteString.Lazy.Internal as BSL
-import qualified Data.ByteString as BSS
-import Data.Binary (Binary)
-import qualified Data.Binary as Binary
 
 --------------------------------------------------------------------------------
 -- Exceptions thrown by the RPC server are retrown locally as                 --
@@ -125,3 +128,55 @@ ignoreIOExceptions = Ex.handle ignore
     ignore :: Ex.IOException -> IO ()
     ignore _ = return ()
 
+-- | Open a pipe for writing
+--
+-- This is meant to be used together with 'openPipeForReading'
+openPipeForWriting :: FilePath -> Int -> IO Handle
+openPipeForWriting fp = go
+  where
+    go :: Int -> IO Handle
+    go timeout = do
+      -- We cannot open a pipe for writing without a corresponding reader
+      mh <- Ex.try $ openFile fp WriteMode
+      case mh of
+        Left ex ->
+          if timeout > delay
+            then do threadDelay delay
+                    go (timeout - delay)
+            else Ex.throwIO (ex :: Ex.IOException)
+        Right h -> do
+          hPutChar h '!'
+          hFlush h
+          return h
+
+    delay :: Int
+    delay = 10000 -- 10 ms
+
+-- | Open a pipe for reading
+--
+-- This is meant to be used together with 'openPipeForWriting'
+openPipeForReading :: FilePath -> Int -> IO Handle
+openPipeForReading fp = \timeout -> do
+    -- We _can_ open a pipe for reading without a corresponding writer
+    h <- openFile fp ReadMode
+    -- But if there is no corresponding writer, then trying to read from the
+    -- pipe will report EOF. So we wait.
+    go h timeout
+    return h
+  where
+    go :: Handle -> Int -> IO ()
+    go h timeout = do
+      mc <- Ex.try $ hGetChar h
+      case mc of
+        Left ex ->
+          if timeout > delay
+            then do threadDelay delay
+                    go h (timeout - delay)
+            else Ex.throwIO (ex :: Ex.IOException)
+        Right '!' ->
+          return ()
+        Right c ->
+          Ex.throwIO (userError $ "openPipeForReading: Unexpected " ++ show c)
+
+    delay :: Int
+    delay = 10000 -- 10 ms
