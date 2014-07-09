@@ -183,7 +183,7 @@ connectToRpcServer requestW responseR errorsR = do
     tryToConnect numAttempts fp mode = do
       mh <- Ex.try $ openFile fp mode
       case mh of
-        Left (ex :: Ex.SomeException) ->
+        Left (ex :: Ex.IOException) ->
           if numAttempts == 0
             then Ex.throwIO ex
             else do threadDelay delay
