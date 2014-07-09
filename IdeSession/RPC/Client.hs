@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, CPP #-}
+{-# LANGUAGE TemplateHaskell, CPP, ScopedTypeVariables #-}
 module IdeSession.RPC.Client (
     RpcServer
   , RpcConversation(..)
@@ -15,6 +15,7 @@ module IdeSession.RPC.Client (
   ) where
 
 import Control.Applicative ((<$>))
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (MVar, newMVar, tryTakeMVar)
 import Control.Monad (void, unless)
 import Data.Binary (Binary, encode, decode)
@@ -23,7 +24,7 @@ import Data.Typeable (Typeable)
 import Prelude hiding (take)
 import System.Directory (canonicalizePath, getPermissions, executable)
 import System.Exit (ExitCode)
-import System.IO (Handle, IOMode(..))
+import System.IO (Handle, IOMode(..), openFile)
 import System.Posix.IO (createPipe, closeFd, fdToHandle)
 import System.Posix.Signals (signalProcess, sigKILL)
 import System.Posix.Types (Fd)
@@ -151,7 +152,19 @@ connectToRpcServer :: FilePath   -- ^ stdin named pipe
                    -> IO RpcServer
 connectToRpcServer requestW responseR errorsR = do
   -- TODO: here and in forkRpcServer, deal with exceptions
-  requestW'  <- openFileBlocking requestW  WriteMode
+
+  -- In the case that the child process deadlocks before it gets started
+  -- (forkProcess bug), we will never be able to connect to it. Doing a
+  -- blocking FFI call means that the client process will be completely
+  -- deadlocked in that case too. Hence, we poll instead.
+  --
+  -- We _do_ use a blocking open for reading; at this point we managed to
+  -- connect to the server so that is no longer an issue. A non-blocking open
+  -- will succeed even without a corresponding writer, but then we get into
+  -- trouble later when we try to read from it (the bytestring library may
+  -- return EOF if we happen to manage to read from the handle before the
+  -- server managed to connect).
+  requestW'  <- tryToConnect maxNumAttempts requestW  WriteMode
   responseR' <- openFileBlocking responseR ReadMode
   errorsR'   <- openFileBlocking errorsR   ReadMode
   st         <- newMVar RpcRunning
@@ -163,6 +176,28 @@ connectToRpcServer requestW responseR errorsR = do
     , rpcState     = st
     , rpcResponseR = input
     }
+  where
+    -- The exact exception depends on the OS, so we just ignore any exception
+    -- at all as long as we still have attempts left.
+    tryToConnect :: Int -> FilePath -> IOMode -> IO Handle
+    tryToConnect numAttempts fp mode = do
+      mh <- Ex.try $ openFile fp mode
+      case mh of
+        Left (ex :: Ex.IOException) ->
+          if numAttempts == 0
+            then Ex.throwIO ex
+            else do threadDelay delay
+                    tryToConnect (numAttempts - 1) fp mode
+        Right h ->
+          return h
+
+    delay :: Int
+    delay = 10000 -- 10 ms
+
+    maxNumAttempts :: Int
+    maxNumAttempts = 10
+
+
 
 -- | Specialized form of 'rpcConversation' to do single request and wait for
 -- a single response.

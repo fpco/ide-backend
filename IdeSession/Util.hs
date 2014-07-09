@@ -60,6 +60,7 @@ import System.Posix.Env (setEnv, unsetEnv)
 import GHC.Generics (Generic)
 import Text.Show.Pretty
 
+import IdeSession.RPC.API (ignoreIOExceptions)
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map as StrictMap
 
@@ -273,14 +274,6 @@ restoreHandle h fd fdBackup = do
   closeFd fd
   _ <- dup fdBackup
   closeFd fdBackup
-
--- TODO: merge with RPC.API
--- | Ignore IO exceptions
-ignoreIOExceptions :: IO () -> IO ()
-ignoreIOExceptions = Ex.handle ignore
-  where
-    ignore :: Ex.IOException -> IO ()
-    ignore _ = return ()
 
 {-------------------------------------------------------------------------------
   Orphans
