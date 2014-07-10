@@ -12,7 +12,6 @@ import System.IO
   , hSetBinaryMode
   , hSetBuffering
   , BufferMode(BlockBuffering)
-  , IOMode(..)
   )
 import System.Posix.Types (Fd)
 import System.Posix.IO (closeFd, fdToHandle)
@@ -23,7 +22,6 @@ import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Control.Concurrent.Async (Async, async)
 import Data.Binary (encode, decode)
-import GHC.IO.Handle.FD (openFileBlocking)
 
 import IdeSession.Util.BlockingOps (readChan, wait, waitAny)
 import IdeSession.RPC.API
@@ -61,10 +59,13 @@ concurrentConversation :: FilePath -- ^ stdin named pipe
                        -> (RpcConversation -> IO ())
                        -> IO ()
 concurrentConversation requestR responseW errorsW server = do
-  hin  <- openFileBlocking requestR  ReadMode
-  hout <- openFileBlocking responseW WriteMode
-  herr <- openFileBlocking errorsW   WriteMode
-  rpcServer' hin hout herr server
+    hin  <- openPipeForReading requestR  timeout
+    hout <- openPipeForWriting responseW timeout
+    herr <- openPipeForWriting errorsW   timeout
+    rpcServer' hin hout herr server
+  where
+    timeout :: Int
+    timeout = maxBound
 
 -- | Start the RPC server
 rpcServer' :: Handle                     -- ^ Input
