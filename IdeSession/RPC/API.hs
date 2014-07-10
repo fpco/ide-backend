@@ -143,7 +143,7 @@ openPipeForWriting fp = go
           if timeout > delay
             then do threadDelay delay
                     go (timeout - delay)
-            else Ex.throwIO (ex :: Ex.IOException)
+            else Ex.throwIO (RPCPipeNotCreated ex)
         Right h -> do
           hPutChar h '!'
           hFlush h
@@ -151,6 +151,12 @@ openPipeForWriting fp = go
 
     delay :: Int
     delay = 10000 -- 10 ms
+
+data RPCPipeNotCreated = RPCPipeNotCreated Ex.IOException
+    deriving Typeable
+instance Ex.Exception RPCPipeNotCreated
+instance Show RPCPipeNotCreated where
+    show (RPCPipeNotCreated e) = "The bidirectional RPC pipe could not be opened. Exception was: " ++ show e
 
 -- | Open a pipe for reading
 --
@@ -172,7 +178,7 @@ openPipeForReading fp = \timeout -> do
           if timeout > delay
             then do threadDelay delay
                     go h (timeout - delay)
-            else Ex.throwIO (ex :: Ex.IOException)
+            else Ex.throwIO (RPCPipeNotCreated ex)
         Right '!' ->
           return ()
         Right c ->
