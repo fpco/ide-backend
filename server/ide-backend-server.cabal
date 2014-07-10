@@ -75,3 +75,6 @@ executable ide-backend-server
                       -with-rtsopts=-c
                       -- disable idle GC
                       -with-rtsopts=-I0
+
+-- MSS 2014-07-10: I modified the cabal file with this comment simply to force
+-- fpbuild to rebuild.
