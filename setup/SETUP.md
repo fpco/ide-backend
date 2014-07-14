@@ -239,8 +239,8 @@ only a few minor differences, explained when they come up.
     use a separate snippet DB for the test suite:)
 
     * parallel-3.2.0.4 (not necessary for 7.8, is now in the ghc DB itself)
-    * mtl (tested with 2.1.3.1)
-    * monads-tf-0.1.0.1
+    * mtl (tested with 2.1.3.1, 2.2.1)
+    * monads-tf (testd with 0.1.0.1, 0.1.0.2)
     * yesod-1.2.4 (optional; only required for one test; install with
       cabal --max-backjumps=-1; do not attempt for 7.8 for now))
     * parsec-3.1.3 (optional; only required for one test)

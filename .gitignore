@@ -3,3 +3,4 @@ cabal-dev
 test/OldLogs
 tags
 dist/
+unversioned/

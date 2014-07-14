@@ -525,9 +525,7 @@ syntheticTests = [
     , withSession defaultSession $ \session -> do
         status0 <- getBuildDocStatus session
         assertEqual "before module loading" Nothing status0
-        setCurrentDirectory "test/compiler/utils"
-        loadModulesFrom session "."
-        setCurrentDirectory "../../../"
+        withCurrentDirectory "test/compiler/utils" $ loadModulesFrom session "."
         assertNoErrors session
         let upd = buildDoc
         updateSessionD session upd 1
@@ -541,9 +539,7 @@ syntheticTests = [
     )
   , ( "Build haddocks and fail"
     , withSession defaultSession $ \session -> do
-        setCurrentDirectory "test/ABerror"
-        loadModulesFrom session "."
-        setCurrentDirectory "../.."
+        withCurrentDirectory "test/ABerror" $ loadModulesFrom session "."
         assertOneError session
         let upd = buildDoc
         -- Note that the stderr log file here is empty, but exit code is 1:
@@ -745,14 +741,13 @@ syntheticTests = [
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , withSession (withOpts ["-hide-package monads-tf"]) $ \session -> do
-        setCurrentDirectory "test/Puns"
-        loadModulesFrom session "."
-        assertMoreErrors session
-        let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
-            update2 = updateDynamicOpts punOpts
-        (_, lm) <- getModules session
-        updateSessionD session update2 (length lm)
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/Puns" $ do
+          loadModulesFrom session "."
+          assertMoreErrors session
+          let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
+              update2 = updateDynamicOpts punOpts
+          (_, lm) <- getModules session
+          updateSessionD session update2 (length lm)
         assertNoErrors session
         let m = "GHC.RTS.Events"
             upd2 = buildExe [] [(Text.pack m, "GHC/RTS/Events.hs")]
@@ -962,11 +957,10 @@ syntheticTests = [
     )
   , ( "Test TH; code generation on"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
-        setCurrentDirectory "test"
-        (originalUpdate, lm) <- getModulesFrom session "TH"
-        let update = originalUpdate <> updateCodeGeneration True
-        updateSessionD session update (length lm)
-        setCurrentDirectory "../"
+        withCurrentDirectory "test" $ do
+          (originalUpdate, lm) <- getModulesFrom session "TH"
+          let update = originalUpdate <> updateCodeGeneration True
+          updateSessionD session update (length lm)
         assertNoErrors session
         runActions <- runStmt session "TH.TH" "main"
         (output, result) <- runWaitAll runActions
@@ -975,11 +969,10 @@ syntheticTests = [
     )
   , ( "Build executable from TH"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
-        setCurrentDirectory "test"
-        (originalUpdate, lm) <- getModulesFrom session "TH"
-        let update = originalUpdate <> updateCodeGeneration True
-        updateSessionD session update (length lm)
-        setCurrentDirectory "../"
+        withCurrentDirectory "test" $ do
+          (originalUpdate, lm) <- getModulesFrom session "TH"
+          let update = originalUpdate <> updateCodeGeneration True
+          updateSessionD session update (length lm)
         assertNoErrors session
         let m = "TH.TH"
             upd = buildExe ["-rtsopts=all", "-O0"] [(Text.pack m, "TH/TH.hs")]
@@ -1008,11 +1001,10 @@ syntheticTests = [
     )
   , ( "Build haddocks from TH"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
-        setCurrentDirectory "test"
-        (originalUpdate, lm) <- getModulesFrom session "TH"
-        let update = originalUpdate <> updateCodeGeneration True
-        updateSessionD session update (length lm)
-        setCurrentDirectory "../"
+        withCurrentDirectory "test" $ do
+          (originalUpdate, lm) <- getModulesFrom session "TH"
+          let update = originalUpdate <> updateCodeGeneration True
+          updateSessionD session update (length lm)
         assertNoErrors session
         let upd = buildDoc
         updateSessionD session upd 1
@@ -2476,9 +2468,7 @@ syntheticTests = [
               , updateSourceFileFromFile "ffiles/life.h"
               , updateSourceFileFromFile "ffiles/local.h"
               ]
-        setCurrentDirectory "test/FFI"
-        updateSessionD session upd 4
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/FFI" $ updateSessionD session upd 4
         assertNoErrors session
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
@@ -2797,10 +2787,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build executable from Main"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "ParFib.hs")]
         updateSessionD session upd 3
@@ -2832,10 +2821,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                         , "-package old-time"
                         ]
       in withSession (withOpts packageOpts) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "ParFib.hs")]
         updateSessionD session upd 3
@@ -2862,10 +2850,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build executable from ParFib.Main"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let m = "ParFib.Main"
             upd = buildExe [] [ (Text.pack m, "ParFib.Main.hs")
                               , (Text.pack "Main", "ParFib.hs") ]
@@ -2896,10 +2883,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build executable with a wrong filename and fail"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "foooooooooooooooo.hs")]
         status0 <- getBuildExeStatus session
@@ -2911,11 +2897,10 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build .cabal from TH with a wrong libname and don't fail"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
-        setCurrentDirectory "test"
-        (originalUpdate, lm) <- getModulesFrom session "TH"
-        let update = originalUpdate <> updateCodeGeneration True
-        updateSessionD session update (length lm)
-        setCurrentDirectory "../"
+        withCurrentDirectory "test" $ do
+          (originalUpdate, lm) <- getModulesFrom session "TH"
+          let update = originalUpdate <> updateCodeGeneration True
+          updateSessionD session update (length lm)
         assertNoErrors session
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "--///fo/name" $ Version [-1, -9] []
@@ -2923,11 +2908,10 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build licenses from TH with a wrong cabals dir and don't fail"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
-        setCurrentDirectory "test"
-        (originalUpdate, lm) <- getModulesFrom session "TH"
-        let update = originalUpdate <> updateCodeGeneration True
-        updateSessionD session update (length lm)
-        setCurrentDirectory "../"
+        withCurrentDirectory "test" $ do
+          (originalUpdate, lm) <- getModulesFrom session "TH"
+          let update = originalUpdate <> updateCodeGeneration True
+          updateSessionD session update (length lm)
         assertNoErrors session
         let upd = buildLicenses "--/fooo /fooo/foo"
         updateSessionD session upd 99
@@ -2939,10 +2923,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build haddocks from ParFib"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let upd = buildDoc
         updateSessionD session upd 1
         distDir <- getDistDir session
@@ -2958,10 +2941,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build licenses from ParFib"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let upd = buildLicenses "test/MainModule/cabals"
         updateSessionD session upd 6
         distDir <- getDistDir session
@@ -2976,10 +2958,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build licenses from Cabal"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/Cabal"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/Cabal" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let upd = buildLicenses "test/Puns/cabals"  -- 7 packages missing
         updateSessionD session upd 99
         distDir <- getDistDir session
@@ -8117,6 +8098,17 @@ concatFailures = go []
   where
     go acc []                    = HUnitFailure (unlines . reverse $ acc)
     go acc (HUnitFailure e : es) = go (e : acc) es
+
+-- | Temporarily switch directory
+--
+-- (and make sure to switch back even in the presence of exceptions)
+withCurrentDirectory :: FilePath -> IO a -> IO a
+withCurrentDirectory fp act =
+  Ex.bracket (do cwd <- getCurrentDirectory
+                 setCurrentDirectory fp
+                 return cwd)
+             (setCurrentDirectory)
+             (\_ -> act)
 
 {------------------------------------------------------------------------------
   Replace (type variables) with numbered type variables
