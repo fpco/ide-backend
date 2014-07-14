@@ -34,7 +34,7 @@ executable ide-backend-server
                       process              >= 1.1     && < 1.3,
                       transformers         >= 0.3     && < 0.5,
                       -- mtl 2.2 is broken
-                      mtl                  >= 2.2.1   && < 2.3,
+                      mtl                  == 2.1.* || >= 2.2.1,
                       unordered-containers >= 0.2.3   && < 0.3,
                       filemanip            >= 0.3.6.2 && < 0.4,
                       attoparsec           >= 0.10    && < 0.13,
