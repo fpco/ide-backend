@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                ide-backend-rts
-version:             0.1.1
+version:             0.1.2
 synopsis:            RTS for the IDE backend
 -- description:         
 license:              AllRightsReserved
