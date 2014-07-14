@@ -450,7 +450,7 @@ instance FoldId id => Fold (LHsContext id) where
     fold alg typs
 
 instance FoldId id => Fold (LHsBinds id) where
-  fold alg = fold alg . map snd . bagToList
+  fold alg = fold alg . bagToList
 
 instance FoldId id => Fold (LHsBind id) where
   fold alg (L span bind@(FunBind {})) = astMark alg (Just span) "FunBind" $ do
@@ -479,7 +479,9 @@ typecheckOnly = mkGeneralSrcSpan (fsLit "<typecheck only>")
 
 instance (FoldId id, Fold body) => Fold (MatchGroup id body) where
   -- We ignore the postTcType, as it doesn't have location information
-  fold alg (MG mg_alts _mg_arg_tys _mg_res_ty) = astMark alg Nothing "MG" $
+  -- TODO: _mg_origin distinguishes between FromSource and Generated.
+  -- May be useful to take that into account? (Here and elsewhere)
+  fold alg (MG mg_alts _mg_arg_tys _mg_res_ty _mg_origin) = astMark alg Nothing "MG" $
     fold alg mg_alts
 
 instance (FoldId id, Fold body) => Fold (LMatch id body) where
@@ -550,7 +552,7 @@ instance FoldId id => Fold (LHsExpr id) where
     -- the original "assert". This means that the <span> (represented as an
     -- HsLit) might override "assertError" in the IdMap.
     astExpType alg span (ifPostTc (undefined :: id) (hsLitType lit))
-  fold alg (L span (HsLam matches@(MG _ mg_arg_tys mg_res_ty))) = astMark alg (Just span) "HsLam" $ do
+  fold alg (L span (HsLam matches@(MG _ mg_arg_tys mg_res_ty _ms_origin))) = astMark alg (Just span) "HsLam" $ do
     fold alg matches
     let lamTy = do arg_tys <- sequence $ map (ifPostTc (undefined :: id)) mg_arg_tys
                    res_ty  <- ifPostTc (undefined :: id) mg_res_ty
@@ -573,7 +575,7 @@ instance FoldId id => Fold (LHsExpr id) where
       Just postTcExpr -> do
         conTy <- fold alg (L (getLoc con) postTcExpr)
         astExpType alg span (funResN <$> conTy)
-  fold alg (L span (HsCase expr matches@(MG _ _mg_arg_tys mg_res_ty))) = astMark alg (Just span) "HsCase" $ do
+  fold alg (L span (HsCase expr matches@(MG _ _mg_arg_tys mg_res_ty _mg_origin))) = astMark alg (Just span) "HsCase" $ do
     fold alg expr
     fold alg matches
     astExpType alg span (ifPostTc (undefined :: id) mg_res_ty)
@@ -869,7 +871,7 @@ instance FoldId id => Fold (LInstDecl id) where
     fold alg tfid_inst
 
 instance FoldId id => Fold (LDerivDecl id) where
-  fold alg (L span (DerivDecl deriv_type)) = astMark alg (Just span) "LDerivDecl" $ do
+  fold alg (L span (DerivDecl deriv_type _deriv_overlap_mode)) = astMark alg (Just span) "LDerivDecl" $ do
     fold alg deriv_type
 
 instance FoldId id => Fold (LFixitySig id) where
@@ -991,7 +993,8 @@ instance FoldId id => Fold (ClsInstDecl id) where
                         cid_binds
                         cid_sigs
                         cid_tyfam_insts
-                        cid_datafam_insts) = astMark alg Nothing "ClsInstDecl" $ do
+                        cid_datafam_insts
+                       _cid_overlap_mode) = astMark alg Nothing "ClsInstDecl" $ do
     fold alg cid_poly_ty
     fold alg cid_binds
     fold alg cid_sigs

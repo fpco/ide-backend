@@ -310,6 +310,9 @@ ghc 7.4
 
   in the section for the "quick" build flavour (make sure there are no trailing
   spaces in your build.mk).
+  
+  NOTE: This assumes wanting to do ghc dev. For performance builds you should
+  pick a different build flavour.
 
 * Build as usual
 
@@ -352,13 +355,10 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
 * Get the corresponding version of the core libraries:
 
-      ./sync-all --extra --no-dph --nofib -r git://git.haskell.org get -b ghc-7.8
-      ./sync-all checkout -b ghc-7.8.2 ghc-7.8.2-release
+      ./sync-all --no-dph get
 
-  (The second line checks out the 7.8.2 release of the libraries _where
-  available_; unfortunately, not all libraries have this tag. This will be
-  resolved once we move to 7.8.3, which uses proper git submodules
-  consistently.)
+  (This is much easier and more reliable now since the version of ghc that we
+  work with, 7.8.3+, now uses git submodules.)
 
 * Create build.mk
 
@@ -374,6 +374,9 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
   in the section for the "quick" build flavour (make sure there are no trailing
   spaces in your build.mk).
+
+  NOTE: This assumes wanting to do ghc dev. For performance builds you should
+  pick a different build flavour.
 
 * Build as usual
 
