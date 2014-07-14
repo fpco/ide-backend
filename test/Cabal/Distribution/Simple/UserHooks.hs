@@ -64,7 +64,7 @@ import Distribution.Simple.Program    (Program)
 import Distribution.Simple.Command    (noExtraFlags)
 import Distribution.Simple.PreProcess (PPSuffixHandler)
 import Distribution.Simple.Setup
-         (ConfigFlags, BuildFlags, CleanFlags, CopyFlags,
+         (ConfigFlags, BuildFlags, ReplFlags, CleanFlags, CopyFlags,
           InstallFlags, SDistFlags, RegisterFlags, HscolourFlags,
           HaddockFlags, TestFlags, BenchmarkFlags)
 import Distribution.Simple.LocalBuildInfo (LocalBuildInfo)
@@ -105,6 +105,13 @@ data UserHooks = UserHooks {
     -- |Hook to run after build command.  Second arg indicates verbosity level.
     postBuild :: Args -> BuildFlags -> PackageDescription -> LocalBuildInfo -> IO (),
 
+    -- |Hook to run before repl command.  Second arg indicates verbosity level.
+    preRepl  :: Args -> ReplFlags -> IO HookedBuildInfo,
+    -- |Over-ride this hook to get different behavior during interpretation.
+    replHook :: PackageDescription -> LocalBuildInfo -> UserHooks -> ReplFlags -> [String] -> IO (),
+    -- |Hook to run after repl command.  Second arg indicates verbosity level.
+    postRepl :: Args -> ReplFlags -> PackageDescription -> LocalBuildInfo -> IO (),
+
     -- |Hook to run before clean command.  Second arg indicates verbosity level.
     preClean  :: Args -> CleanFlags -> IO HookedBuildInfo,
     -- |Over-ride this hook to get different behavior during clean.
@@ -144,7 +151,7 @@ data UserHooks = UserHooks {
 
     -- |Hook to run before unregister command
     preUnreg  :: Args -> RegisterFlags -> IO HookedBuildInfo,
-    -- |Over-ride this hook to get different behavior during registration.
+    -- |Over-ride this hook to get different behavior during unregistration.
     unregHook :: PackageDescription -> LocalBuildInfo -> UserHooks -> RegisterFlags -> IO (),
     -- |Hook to run after unregister command
     postUnreg :: Args -> RegisterFlags -> PackageDescription -> LocalBuildInfo -> IO (),
@@ -191,9 +198,12 @@ emptyUserHooks
       preConf   = rn,
       confHook  = (\_ _ -> return (error "No local build info generated during configure. Over-ride empty configure hook.")),
       postConf  = ru,
-      preBuild  = rn,
+      preBuild  = rn',
       buildHook = ru,
       postBuild = ru,
+      preRepl   = \_ _ -> return emptyHookedBuildInfo,
+      replHook  = \_ _ _ _ _ -> return (),
+      postRepl  = ru,
       preClean  = rn,
       cleanHook = ru,
       postClean = ru,
@@ -218,14 +228,13 @@ emptyUserHooks
       preHaddock   = rn,
       haddockHook  = ru,
       postHaddock  = ru,
-      preTest = \_ _ -> return emptyHookedBuildInfo, -- same as rn, but without
-                                                     -- noExtraFlags
+      preTest  = rn',
       testHook = ru,
       postTest = ru,
-      preBench = \_ _ -> return emptyHookedBuildInfo, -- same as rn, but without
-                                                      -- noExtraFlags
+      preBench = rn',
       benchHook = \_ -> ru,
       postBench = ru
     }
-    where rn args  _ = noExtraFlags args >> return emptyHookedBuildInfo
+    where rn  args _ = noExtraFlags args >> return emptyHookedBuildInfo
+          rn' _    _ = return emptyHookedBuildInfo
           ru _ _ _ _ = return ()

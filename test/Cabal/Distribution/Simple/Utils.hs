@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP, ForeignFunctionInterface #-}
-{-# OPTIONS_NHC98 -cpp #-}
-{-# OPTIONS_JHC -fcpp -fffi #-}
+{-# OPTIONS_GHC -fno-warn-deprecations #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Distribution.Simple.Utils
@@ -52,9 +51,9 @@ module Distribution.Simple.Utils (
         -- * logging and errors
         die,
         dieWithLocation,
-        topHandler,
+        topHandler, topHandlerWith,
         warn, notice, setupMessage, info, debug,
-        chattyTry,
+        debugNoWrap, chattyTry,
 
         -- * running programs
         rawSystemExit,
@@ -62,6 +61,7 @@ module Distribution.Simple.Utils (
         rawSystemExitWithEnv,
         rawSystemStdout,
         rawSystemStdInOut,
+        rawSystemIOWithEnv,
         maybeExit,
         xargs,
         findProgramLocation,
@@ -73,11 +73,15 @@ module Distribution.Simple.Utils (
         copyFileVerbose,
         copyDirectoryRecursiveVerbose,
         copyFiles,
+        copyFileTo,
 
         -- * installing files
         installOrdinaryFile,
         installExecutableFile,
+        installMaybeExecutableFile,
         installOrdinaryFiles,
+        installExecutableFiles,
+        installMaybeExecutableFiles,
         installDirectoryContents,
 
         -- * File permissions
@@ -96,15 +100,22 @@ module Distribution.Simple.Utils (
         findModuleFiles,
         getDirectoryContentsRecursive,
 
+        -- * environment variables
+        isInSearchPath,
+
         -- * simple file globbing
         matchFileGlob,
         matchDirFileGlob,
         parseFileGlob,
         FileGlob(..),
 
+        -- * modification time
+        moreRecentFile,
+
         -- * temp files and dirs
-        withTempFile,
-        withTempDirectory,
+        TempFileOptions(..), defaultTempFileOptions,
+        withTempFile, withTempFileEx,
+        withTempDirectory, withTempDirectoryEx,
 
         -- * .cabal and .buildinfo files
         defaultPackageDesc,
@@ -137,41 +148,40 @@ module Distribution.Simple.Utils (
 
 import Control.Monad
     ( when, unless, filterM )
-#ifdef __GLASGOW_HASKELL__
 import Control.Concurrent.MVar
     ( newEmptyMVar, putMVar, takeMVar )
-#endif
 import Data.List
-    ( nub, unfoldr, isPrefixOf, tails, intersperse )
+  ( nub, unfoldr, isPrefixOf, tails, intercalate )
 import Data.Char as Char
     ( toLower, chr, ord )
 import Data.Bits
     ( Bits((.|.), (.&.), shiftL, shiftR) )
+import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString.Lazy.Char8 as BS.Char8
 
 import System.Directory
-    ( getDirectoryContents, doesDirectoryExist, doesFileExist, removeFile
-    , findExecutable )
+    ( Permissions(executable), getDirectoryContents, getPermissions
+    , doesDirectoryExist, doesFileExist, removeFile, findExecutable
+    , getModificationTime )
 import System.Environment
     ( getProgName )
-import System.Process
-    ( rawSystem )
 import System.Exit
     ( exitWith, ExitCode(..) )
 import System.FilePath
-    ( normalise, (</>), (<.>), takeDirectory, splitFileName
+    ( normalise, (</>), (<.>)
+    , getSearchPath, takeDirectory, splitFileName
     , splitExtension, splitExtensions, splitDirectories )
 import System.Directory
     ( createDirectory, renameFile, removeDirectoryRecursive )
 import System.IO
-    ( Handle, openFile, openBinaryFile, IOMode(ReadMode), hSetBinaryMode
-    , hGetContents, stderr, stdout, hPutStr, hFlush, hClose )
+    ( Handle, openFile, openBinaryFile, openBinaryTempFile
+    , IOMode(ReadMode), hSetBinaryMode
+    , hGetContents, stdin, stderr, stdout, hPutStr, hFlush, hClose )
 import System.IO.Error as IO.Error
     ( isDoesNotExistError, isAlreadyExistsError
     , ioeSetFileName, ioeGetFileName, ioeGetErrorString )
-#if !(defined(__HUGS__) || (defined(__GLASGOW_HASKELL__) && __GLASGOW_HASKELL__ < 608))
 import System.IO.Error
     ( ioeSetLocation, ioeGetLocation )
-#endif
 import System.IO.Unsafe
     ( unsafeInterleaveIO )
 import qualified Control.Exception as Exception
@@ -185,24 +195,31 @@ import qualified Distribution.ModuleName as ModuleName
 import Distribution.Version
     (Version(..))
 
-import Control.Exception (evaluate)
-import System.Process (runProcess)
+import Control.Exception (IOException, evaluate, throwIO)
+import System.Process (rawSystem)
+import qualified System.Process as Process (CreateProcess(..))
 
-#ifdef __GLASGOW_HASKELL__
 import Control.Concurrent (forkIO)
-import System.Process (runInteractiveProcess, waitForProcess)
+import System.Process (runInteractiveProcess, waitForProcess, proc,
+                       StdStream(..))
+#if __GLASGOW_HASKELL__ >= 702
+import System.Process (showCommandForUser)
+#endif
+
+#ifndef mingw32_HOST_OS
+import System.Posix.Signals (installHandler, sigINT, sigQUIT, Handler(..))
+import System.Process.Internals (defaultSignal, runGenProcess_)
 #else
-import System.Process (system)
-import System.Directory (getTemporaryDirectory)
+import System.Process (createProcess)
 #endif
 
 import Distribution.Compat.CopyFile
          ( copyFile, copyOrdinaryFile, copyExecutableFile
          , setFileOrdinary, setFileExecutable, setDirOrdinary )
 import Distribution.Compat.TempFile
-         ( openTempFile, openNewBinaryFile, createTempDirectory )
+         ( openTempFile, createTempDirectory )
 import Distribution.Compat.Exception
-         ( IOException, throwIOIO, tryIO, catchIO, catchExit, onException )
+         ( tryIO, catchIO, catchExit )
 import Distribution.Verbosity
 
 #ifdef VERSION_base
@@ -228,37 +245,32 @@ dieWithLocation filename lineno msg =
           . flip ioeSetFileName (normalise filename)
           $ userError msg
   where
-#if defined(__HUGS__) || (defined(__GLASGOW_HASKELL__) && __GLASGOW_HASKELL__ < 608)
-    setLocation _        err = err
-#else
     setLocation Nothing  err = err
     setLocation (Just n) err = ioeSetLocation err (show n)
-#endif
 
 die :: String -> IO a
 die msg = ioError (userError msg)
 
-topHandler :: IO a -> IO a
-topHandler prog = catchIO prog handle
+topHandlerWith :: (Exception.IOException -> IO a) -> IO a -> IO a
+topHandlerWith cont prog = catchIO prog handle
   where
     handle ioe = do
       hFlush stdout
       pname <- getProgName
       hPutStr stderr (mesage pname)
-      exitWith (ExitFailure 1)
+      cont ioe
       where
         mesage pname = wrapText (pname ++ ": " ++ file ++ detail)
         file         = case ioeGetFileName ioe of
                          Nothing   -> ""
                          Just path -> path ++ location ++ ": "
-#if defined(__HUGS__) || (defined(__GLASGOW_HASKELL__) && __GLASGOW_HASKELL__ < 608)
-        location     = ""
-#else
         location     = case ioeGetLocation ioe of
                          l@(n:_) | n >= '0' && n <= '9' -> ':' : l
                          _                              -> ""
-#endif
         detail       = ioeGetErrorString ioe
+
+topHandler :: IO a -> IO a
+topHandler prog = topHandlerWith (const $ exitWith (ExitFailure 1)) prog
 
 -- | Non fatal conditions that may be indicative of an error or problem.
 --
@@ -305,6 +317,14 @@ debug verbosity msg =
     putStr (wrapText msg)
     hFlush stdout
 
+-- | A variant of 'debug' that doesn't perform the automatic line
+-- wrapping. Produces better output in some cases.
+debugNoWrap :: Verbosity -> String -> IO ()
+debugNoWrap verbosity msg =
+  when (verbosity >= deafening) $ do
+    putStrLn msg
+    hFlush stdout
+
 -- | Perform an IO action, catching any IO exceptions and printing an error
 --   if one occurs.
 chattyTry :: String  -- ^ a description of the action we were attempting
@@ -320,9 +340,10 @@ chattyTry desc action =
 -- | Wraps text to the default line width. Existing newlines are preserved.
 wrapText :: String -> String
 wrapText = unlines
-         . concatMap (map unwords
-                    . wrapLine 79
-                    . words)
+         . map (intercalate "\n"
+              . map unwords
+              . wrapLine 79
+              . words)
          . lines
 
 -- | Wraps a list of words to a list of lines of words of a particular width.
@@ -351,7 +372,12 @@ maybeExit cmd = do
 printRawCommandAndArgs :: Verbosity -> FilePath -> [String] -> IO ()
 printRawCommandAndArgs verbosity path args
  | verbosity >= deafening = print (path, args)
- | verbosity >= verbose   = putStrLn $ unwords (path : args)
+ | verbosity >= verbose   =
+#if __GLASGOW_HASKELL__ >= 702
+                            putStrLn $ showCommandForUser path args
+#else
+                            putStrLn $ unwords (path : args)
+#endif
  | otherwise              = return ()
 
 printRawCommandAndArgsAndEnv :: Verbosity
@@ -364,6 +390,40 @@ printRawCommandAndArgsAndEnv verbosity path args env
                                print (path, args)
  | verbosity >= verbose   = putStrLn $ unwords (path : args)
  | otherwise              = return ()
+
+
+-- This is taken directly from the process package.
+-- The reason we need it is that runProcess doesn't handle ^C in the same
+-- way that rawSystem handles it, but rawSystem doesn't allow us to pass
+-- an environment.
+syncProcess :: String -> Process.CreateProcess -> IO ExitCode
+#if mingw32_HOST_OS
+syncProcess _fun c = do
+  (_,_,_,p) <- createProcess c
+  waitForProcess p
+#else
+syncProcess fun c = do
+  -- The POSIX version of system needs to do some manipulation of signal
+  -- handlers.  Since we're going to be synchronously waiting for the child,
+  -- we want to ignore ^C in the parent, but handle it the default way
+  -- in the child (using SIG_DFL isn't really correct, it should be the
+  -- original signal handler, but the GHC RTS will have already set up
+  -- its own handler and we don't want to use that).
+  r <- Exception.bracket (installHandlers) (restoreHandlers) $
+       (\_ -> do (_,_,_,p) <- runGenProcess_ fun c
+                              (Just defaultSignal) (Just defaultSignal)
+                 waitForProcess p)
+  return r
+    where
+      installHandlers = do
+        old_int  <- installHandler sigINT  Ignore Nothing
+        old_quit <- installHandler sigQUIT Ignore Nothing
+        return (old_int, old_quit)
+      restoreHandlers (old_int, old_quit) = do
+        _ <- installHandler sigINT  old_int Nothing
+        _ <- installHandler sigQUIT old_quit Nothing
+        return ()
+#endif  /* mingw32_HOST_OS */
 
 -- Exit with the same exitcode if the subcommand fails
 rawSystemExit :: Verbosity -> FilePath -> [String] -> IO ()
@@ -392,11 +452,46 @@ rawSystemExitWithEnv :: Verbosity
 rawSystemExitWithEnv verbosity path args env = do
     printRawCommandAndArgsAndEnv verbosity path args env
     hFlush stdout
-    ph <- runProcess path args Nothing (Just env) Nothing Nothing Nothing
-    exitcode <- waitForProcess ph
+    exitcode <- syncProcess "rawSystemExitWithEnv" (proc path args)
+                { Process.env = Just env }
     unless (exitcode == ExitSuccess) $ do
         debug verbosity $ path ++ " returned " ++ show exitcode
         exitWith exitcode
+
+-- Closes the passed in handles before returning.
+rawSystemIOWithEnv :: Verbosity
+                   -> FilePath
+                   -> [String]
+                   -> Maybe FilePath           -- ^ New working dir or inherit
+                   -> Maybe [(String, String)] -- ^ New environment or inherit
+                   -> Maybe Handle  -- ^ stdin
+                   -> Maybe Handle  -- ^ stdout
+                   -> Maybe Handle  -- ^ stderr
+                   -> IO ExitCode
+rawSystemIOWithEnv verbosity path args mcwd menv inp out err = do
+    maybe (printRawCommandAndArgs       verbosity path args)
+          (printRawCommandAndArgsAndEnv verbosity path args) menv
+    hFlush stdout
+    exitcode <- syncProcess "rawSystemIOWithEnv" (proc path args)
+                { Process.cwd     = mcwd
+                , Process.env     = menv
+                , Process.std_in  = mbToStd inp
+                , Process.std_out = mbToStd out
+                , Process.std_err = mbToStd err }
+                `Exception.finally` (mapM_ maybeClose [inp, out, err])
+    unless (exitcode == ExitSuccess) $ do
+      debug verbosity $ path ++ " returned " ++ show exitcode
+    return exitcode
+  where
+  -- Also taken from System.Process
+  maybeClose :: Maybe Handle -> IO ()
+  maybeClose (Just  hdl)
+    | hdl /= stdin && hdl /= stdout && hdl /= stderr = hClose hdl
+  maybeClose _ = return ()
+
+  mbToStd :: Maybe Handle -> StdStream
+  mbToStd Nothing    = Inherit
+  mbToStd (Just hdl) = UseHandle hdl
 
 -- | Run a command and return its output.
 --
@@ -405,6 +500,7 @@ rawSystemExitWithEnv verbosity path args env = do
 rawSystemStdout :: Verbosity -> FilePath -> [String] -> IO String
 rawSystemStdout verbosity path args = do
   (output, errors, exitCode) <- rawSystemStdInOut verbosity path args
+                                                  Nothing Nothing
                                                   Nothing False
   when (exitCode /= ExitSuccess) $
     die errors
@@ -415,16 +511,18 @@ rawSystemStdout verbosity path args = do
 -- mode of the input and output.
 --
 rawSystemStdInOut :: Verbosity
-                  -> FilePath -> [String]
-                  -> Maybe (String, Bool) -- ^ input text and binary mode
-                  -> Bool                 -- ^ output in binary mode
+                  -> FilePath                 -- ^ Program location
+                  -> [String]                 -- ^ Arguments
+                  -> Maybe FilePath           -- ^ New working dir or inherit
+                  -> Maybe [(String, String)] -- ^ New environment or inherit
+                  -> Maybe (String, Bool)     -- ^ input text and binary mode
+                  -> Bool                     -- ^ output in binary mode
                   -> IO (String, String, ExitCode) -- ^ output, errors, exit
-rawSystemStdInOut verbosity path args input outputBinary = do
+rawSystemStdInOut verbosity path args mcwd menv input outputBinary = do
   printRawCommandAndArgs verbosity path args
 
-#ifdef __GLASGOW_HASKELL__
   Exception.bracket
-     (runInteractiveProcess path args Nothing Nothing)
+     (runInteractiveProcess path args mcwd menv)
      (\(inh,outh,errh,_) -> hClose inh >> hClose outh >> hClose errh)
     $ \(inh,outh,errh,pid) -> do
 
@@ -467,35 +565,12 @@ rawSystemStdInOut verbosity path args input outputBinary = do
         debug verbosity $ path ++ " returned " ++ show exitcode
                        ++ if null err then "" else
                           " with error message:\n" ++ err
+                       ++ case input of
+                            Nothing       -> ""
+                            Just ("",  _) -> ""
+                            Just (inp, _) -> "\nstdin input:\n" ++ inp
 
       return (out, err, exitcode)
-#else
-  tmpDir <- getTemporaryDirectory
-  withTempFile tmpDir ".cmd.stdout" $ \outName outHandle ->
-   withTempFile tmpDir ".cmd.stdin" $ \inName inHandle -> do
-    hClose outHandle
-
-    case input of
-      Nothing -> return ()
-      Just (inputStr, inputBinary) -> do
-        hSetBinaryMode inHandle inputBinary
-        hPutStr inHandle inputStr
-    hClose inHandle
-
-    let quote name = "'" ++ name ++ "'"
-        cmd = unwords (map quote (path:args))
-           ++ " <" ++ quote inName
-           ++ " >" ++ quote outName
-    exitcode <- system cmd
-
-    unless (exitcode == ExitSuccess) $
-      debug verbosity $ path ++ " returned " ++ show exitcode
-
-    Exception.bracket (openFile outName ReadMode) hClose $ \hnd -> do
-      hSetBinaryMode hnd outputBinary
-      output <- hGetContents hnd
-      length output `seq` return (output, "", exitcode)
-#endif
 
 
 -- | Look for a program on the path.
@@ -670,6 +745,13 @@ getDirectoryContentsRecursive topdir = recurseDirectories [""]
         ignore ['.', '.'] = True
         ignore _          = False
 
+------------------------
+-- Environment variables
+
+-- | Is this directory in the system search path?
+isInSearchPath :: FilePath -> IO Bool
+isInSearchPath path = fmap (elem path) getSearchPath
+
 ----------------
 -- File globbing
 
@@ -712,6 +794,23 @@ matchDirFileGlob dir filepath = case parseFileGlob filepath of
                     ++ "' does not match any files."
       matches -> return matches
 
+--------------------
+-- Modification time
+
+-- | Compare the modification times of two files to see if the first is newer
+-- than the second. The first file must exist but the second need not.
+-- The expected use case is when the second file is generated using the first.
+-- In this use case, if the result is True then the second file is out of date.
+--
+moreRecentFile :: FilePath -> FilePath -> IO Bool
+moreRecentFile a b = do
+  exists <- doesFileExist b
+  if not exists
+    then return True
+    else do tb <- getModificationTime b
+            ta <- getModificationTime a
+            return (ta > tb)
+
 ----------------------------------------
 -- Copying and installing files and dirs
 
@@ -728,11 +827,11 @@ createDirectoryIfMissingVerbose verbosity create_parents path0
     parents = reverse . scanl1 (</>) . splitDirectories . normalise
 
     createDirs []         = return ()
-    createDirs (dir:[])   = createDir dir throwIOIO
+    createDirs (dir:[])   = createDir dir throwIO
     createDirs (dir:dirs) =
       createDir dir $ \_ -> do
         createDirs dirs
-        createDir dir throwIOIO
+        createDir dir throwIO
 
     createDir :: FilePath -> (IOException -> IO ()) -> IO ()
     createDir dir notExistHandler = do
@@ -751,9 +850,9 @@ createDirectoryIfMissingVerbose verbosity create_parents path0
           | isAlreadyExistsError e -> (do
               isDir <- doesDirectoryExist dir
               if isDir then return ()
-                       else throwIOIO e
+                       else throwIO e
               ) `catchIO` ((\_ -> return ()) :: IOException -> IO ())
-          | otherwise              -> throwIOIO e
+          | otherwise              -> throwIO e
 
 createDirectoryVerbose :: Verbosity -> FilePath -> IO ()
 createDirectoryVerbose verbosity dir = do
@@ -789,6 +888,38 @@ installExecutableFile verbosity src dest = do
   info verbosity ("Installing executable " ++ src ++ " to " ++ dest)
   copyExecutableFile src dest
 
+-- | Install a file that may or not be executable, preserving permissions.
+installMaybeExecutableFile :: Verbosity -> FilePath -> FilePath -> IO ()
+installMaybeExecutableFile verbosity src dest = do
+  perms <- getPermissions src
+  if (executable perms) --only checks user x bit
+    then installExecutableFile verbosity src dest
+    else installOrdinaryFile   verbosity src dest
+
+-- | Given a relative path to a file, copy it to the given directory, preserving
+-- the relative path and creating the parent directories if needed.
+copyFileTo :: Verbosity -> FilePath -> FilePath -> IO ()
+copyFileTo verbosity dir file = do
+  let targetFile = dir </> file
+  createDirectoryIfMissingVerbose verbosity True (takeDirectory targetFile)
+  installOrdinaryFile verbosity file targetFile
+
+-- | Common implementation of 'copyFiles', 'installOrdinaryFiles',
+-- 'installExecutableFiles' and 'installMaybeExecutableFiles'.
+copyFilesWith :: (Verbosity -> FilePath -> FilePath -> IO ())
+              -> Verbosity -> FilePath -> [(FilePath, FilePath)] -> IO ()
+copyFilesWith doCopy verbosity targetDir srcFiles = do
+
+  -- Create parent directories for everything
+  let dirs = map (targetDir </>) . nub . map (takeDirectory . snd) $ srcFiles
+  mapM_ (createDirectoryIfMissingVerbose verbosity True) dirs
+
+  -- Copy all the files
+  sequence_ [ let src  = srcBase   </> srcFile
+                  dest = targetDir </> srcFile
+               in doCopy verbosity src dest
+            | (srcBase, srcFile) <- srcFiles ]
+
 -- | Copies a bunch of files to a target directory, preserving the directory
 -- structure in the target location. The target directories are created if they
 -- do not exist.
@@ -811,32 +942,24 @@ installExecutableFile verbosity src dest = do
 -- anything goes wrong.
 --
 copyFiles :: Verbosity -> FilePath -> [(FilePath, FilePath)] -> IO ()
-copyFiles verbosity targetDir srcFiles = do
-
-  -- Create parent directories for everything
-  let dirs = map (targetDir </>) . nub . map (takeDirectory . snd) $ srcFiles
-  mapM_ (createDirectoryIfMissingVerbose verbosity True) dirs
-
-  -- Copy all the files
-  sequence_ [ let src  = srcBase   </> srcFile
-                  dest = targetDir </> srcFile
-               in copyFileVerbose verbosity src dest
-            | (srcBase, srcFile) <- srcFiles ]
+copyFiles = copyFilesWith copyFileVerbose
 
 -- | This is like 'copyFiles' but uses 'installOrdinaryFile'.
 --
 installOrdinaryFiles :: Verbosity -> FilePath -> [(FilePath, FilePath)] -> IO ()
-installOrdinaryFiles verbosity targetDir srcFiles = do
+installOrdinaryFiles = copyFilesWith installOrdinaryFile
 
-  -- Create parent directories for everything
-  let dirs = map (targetDir </>) . nub . map (takeDirectory . snd) $ srcFiles
-  mapM_ (createDirectoryIfMissingVerbose verbosity True) dirs
+-- | This is like 'copyFiles' but uses 'installExecutableFile'.
+--
+installExecutableFiles :: Verbosity -> FilePath -> [(FilePath, FilePath)]
+                          -> IO ()
+installExecutableFiles = copyFilesWith installExecutableFile
 
-  -- Copy all the files
-  sequence_ [ let src  = srcBase   </> srcFile
-                  dest = targetDir </> srcFile
-               in installOrdinaryFile verbosity src dest
-            | (srcBase, srcFile) <- srcFiles ]
+-- | This is like 'copyFiles' but uses 'installMaybeExecutableFile'.
+--
+installMaybeExecutableFiles :: Verbosity -> FilePath -> [(FilePath, FilePath)]
+                               -> IO ()
+installMaybeExecutableFiles = copyFilesWith installMaybeExecutableFile
 
 -- | This installs all the files in a directory to a target location,
 -- preserving the directory layout. All the files are assumed to be ordinary
@@ -870,15 +993,33 @@ copyDirectoryRecursiveVerbose verbosity srcDir destDir = do
 ---------------------------
 -- Temporary files and dirs
 
+-- | Advanced options for 'withTempFile' and 'withTempDirectory'.
+data TempFileOptions = TempFileOptions {
+  optKeepTempFiles :: Bool  -- ^ Keep temporary files?
+  }
+
+defaultTempFileOptions :: TempFileOptions
+defaultTempFileOptions = TempFileOptions { optKeepTempFiles = False }
+
 -- | Use a temporary filename that doesn't already exist.
 --
-withTempFile :: FilePath -- ^ Temp dir to create the file in
-             -> String   -- ^ File name template. See 'openTempFile'.
-             -> (FilePath -> Handle -> IO a) -> IO a
+withTempFile :: FilePath    -- ^ Temp dir to create the file in
+                -> String   -- ^ File name template. See 'openTempFile'.
+                -> (FilePath -> Handle -> IO a) -> IO a
 withTempFile tmpDir template action =
+  withTempFileEx defaultTempFileOptions tmpDir template action
+
+-- | A version of 'withTempFile' that additionally takes a 'TempFileOptions'
+-- argument.
+withTempFileEx :: TempFileOptions
+                 -> FilePath -- ^ Temp dir to create the file in
+                 -> String   -- ^ File name template. See 'openTempFile'.
+                 -> (FilePath -> Handle -> IO a) -> IO a
+withTempFileEx opts tmpDir template action =
   Exception.bracket
     (openTempFile tmpDir template)
-    (\(name, handle) -> hClose handle >> removeFile name)
+    (\(name, handle) -> do hClose handle
+                           unless (optKeepTempFiles opts) $ removeFile name)
     (uncurry action)
 
 -- | Create and use a temporary directory.
@@ -891,11 +1032,20 @@ withTempFile tmpDir template action =
 -- The @tmpDir@ will be a new subdirectory of the given directory, e.g.
 -- @src/sdist.342@.
 --
-withTempDirectory :: Verbosity -> FilePath -> String -> (FilePath -> IO a) -> IO a
-withTempDirectory _verbosity targetDir template =
+withTempDirectory :: Verbosity
+                     -> FilePath -> String -> (FilePath -> IO a) -> IO a
+withTempDirectory verbosity targetDir template =
+  withTempDirectoryEx verbosity defaultTempFileOptions targetDir template
+
+-- | A version of 'withTempDirectory' that additionally takes a
+-- 'TempFileOptions' argument.
+withTempDirectoryEx :: Verbosity
+                       -> TempFileOptions
+                       -> FilePath -> String -> (FilePath -> IO a) -> IO a
+withTempDirectoryEx _verbosity opts targetDir template =
   Exception.bracket
     (createTempDirectory targetDir template)
-    (removeDirectoryRecursive)
+    (unless (optKeepTempFiles opts) . removeDirectoryRecursive)
 
 -----------------------------------
 -- Safely reading and writing files
@@ -918,21 +1068,16 @@ withFileContents name action =
 -- On windows it is not possible to delete a file that is open by a process.
 -- This case will give an IO exception but the atomic property is not affected.
 --
-writeFileAtomic :: FilePath -> String -> IO ()
-writeFileAtomic targetFile content = do
-  (tmpFile, tmpHandle) <- openNewBinaryFile targetDir template
-  do  hPutStr tmpHandle content
-      hClose tmpHandle
-      renameFile tmpFile targetFile
-   `onException` do hClose tmpHandle
-                    removeFile tmpFile
-  where
-    template = targetName <.> "tmp"
-    targetDir | null targetDir_ = currentDir
-              | otherwise       = targetDir_
-    --TODO: remove this when takeDirectory/splitFileName is fixed
-    --      to always return a valid dir
-    (targetDir_,targetName) = splitFileName targetFile
+writeFileAtomic :: FilePath -> BS.ByteString -> IO ()
+writeFileAtomic targetPath content = do
+  let (targetDir, targetFile) = splitFileName targetPath
+  Exception.bracketOnError
+    (openBinaryTempFile targetDir $ targetFile <.> "tmp")
+    (\(tmpPath, handle) -> hClose handle >> removeFile tmpPath)
+    (\(tmpPath, handle) -> do
+        BS.hPut handle content
+        hClose handle
+        renameFile tmpPath targetPath)
 
 -- | Write a file but only if it would have new content. If we would be writing
 -- the same as the existing content then leave the file as is so that we do not
@@ -944,9 +1089,10 @@ rewriteFile path newContent =
     existingContent <- readFile path
     _ <- evaluate (length existingContent)
     unless (existingContent == newContent) $
-      writeFileAtomic path newContent
+      writeFileAtomic path (BS.Char8.pack newContent)
   where
-    mightNotExist e | isDoesNotExistError e = writeFileAtomic path newContent
+    mightNotExist e | isDoesNotExistError e = writeFileAtomic path
+                                              (BS.Char8.pack newContent)
                     | otherwise             = ioError e
 
 -- | The path name that represents the current directory.
@@ -1112,7 +1258,7 @@ withUTF8FileContents name action =
 -- Uses 'writeFileAtomic', so provides the same guarantees.
 --
 writeUTF8File :: FilePath -> String -> IO ()
-writeUTF8File path = writeFileAtomic path . toUTF8
+writeUTF8File path = writeFileAtomic path . BS.Char8.pack . toUTF8
 
 -- | Fix different systems silly line ending conventions
 normaliseLineEndings :: String -> String
@@ -1133,9 +1279,6 @@ comparing p x y = p x `compare` p y
 
 isInfixOf :: String -> String -> Bool
 isInfixOf needle haystack = any (isPrefixOf needle) (tails haystack)
-
-intercalate :: [a] -> [[a]] -> [a]
-intercalate sep = concat . intersperse sep
 
 lowercase :: String -> String
 lowercase = map Char.toLower

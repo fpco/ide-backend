@@ -101,7 +101,7 @@ import Distribution.Simple.PreProcess (knownSuffixHandlers, PPSuffixHandler)
 import Distribution.Simple.Setup
 import Distribution.Simple.Command
 
-import Distribution.Simple.Build        ( build )
+import Distribution.Simple.Build        ( build, repl )
 import Distribution.Simple.SrcDist      ( sdist )
 import Distribution.Simple.Register
          ( register, unregister )
@@ -131,15 +131,17 @@ import Distribution.Text
          ( display )
 
 -- Base
-import System.Environment(getArgs, getProgName, getEnvironment)
+import System.Environment(getArgs, getProgName)
 import System.Directory(removeFile, doesFileExist,
                         doesDirectoryExist, removeDirectoryRecursive)
-import System.Exit
+import System.Exit hiding (die)
 import System.IO.Error   (isDoesNotExistError)
-import Distribution.Compat.Exception (catchIO, throwIOIO)
+import Control.Exception (throwIO)
+import Distribution.Compat.Environment (getEnvironment)
+import Distribution.Compat.Exception (catchIO)
 
 import Control.Monad   (when)
-import Data.List       (intersperse, unionBy, nub, (\\))
+import Data.List       (intercalate, unionBy, nub, (\\))
 
 -- | A simple implementation of @main@ for a Cabal setup script.
 -- It reads the package description file using IO, and performs the
@@ -187,7 +189,7 @@ defaultMainHelper hooks args = topHandler $
     printHelp help = getProgName >>= putStr . help
     printOptionsList = putStr . unlines
     printErrors errs = do
-      putStr (concat (intersperse "\n" errs))
+      putStr (intercalate "\n" errs)
       exitWith (ExitFailure 1)
     printNumericVersion = putStrLn $ display cabalVersion
     printVersion        = putStrLn $ "Cabal library version "
@@ -198,6 +200,7 @@ defaultMainHelper hooks args = topHandler $
       [configureCommand progs `commandAddAction` \fs as ->
                                                  configureAction    hooks fs as >> return ()
       ,buildCommand     progs `commandAddAction` buildAction        hooks
+      ,replCommand      progs `commandAddAction` replAction         hooks
       ,installCommand         `commandAddAction` installAction      hooks
       ,copyCommand            `commandAddAction` copyAction         hooks
       ,haddockCommand         `commandAddAction` haddockAction      hooks
@@ -272,7 +275,25 @@ buildAction hooks flags args = do
 
   hookedAction preBuild buildHook postBuild
                (return lbi { withPrograms = progs })
-               hooks flags args
+               hooks flags { buildArgs = args } args
+
+replAction :: UserHooks -> ReplFlags -> Args -> IO ()
+replAction hooks flags args = do
+  let distPref  = fromFlag $ replDistPref flags
+      verbosity = fromFlag $ replVerbosity flags
+
+  lbi <- getBuildConfig hooks verbosity distPref
+  progs <- reconfigurePrograms verbosity
+             (replProgramPaths flags)
+             (replProgramArgs flags)
+             (withPrograms lbi)
+
+  pbi <- preRepl hooks args flags
+  let lbi' = lbi { withPrograms = progs }
+      pkg_descr0 = localPkgDescr lbi'
+      pkg_descr = updatePackageDescription pbi pkg_descr0
+  replHook hooks pkg_descr lbi' hooks flags args
+  postRepl hooks args flags pkg_descr lbi'
 
 hscolourAction :: UserHooks -> HscolourFlags -> Args -> IO ()
 hscolourAction hooks flags args
@@ -455,7 +476,7 @@ getBuildConfig hooks verbosity distPref = do
     reconfigure :: FilePath -> LocalBuildInfo -> IO LocalBuildInfo
     reconfigure pkg_descr_file lbi = do
       notice verbosity $ pkg_descr_file ++ " has been changed. "
-                      ++ "Re-configuring with most recently used options. " 
+                      ++ "Re-configuring with most recently used options. "
                       ++ "If this fails, please run configure manually.\n"
       let cFlags = configFlags lbi
       let cFlags' = cFlags {
@@ -502,8 +523,7 @@ clean pkg_descr flags = do
             isDir <- doesDirectoryExist fname
             isFile <- doesFileExist fname
             if isDir then removeDirectoryRecursive fname
-              else if isFile then removeFile fname
-              else return ()
+              else when isFile $ removeFile fname
         verbosity = fromFlag (cleanVerbosity flags)
 
 -- --------------------------------------------------------------------------
@@ -517,6 +537,7 @@ simpleUserHooks =
        confHook  = configure,
        postConf  = finalChecks,
        buildHook = defaultBuildHook,
+       replHook  = defaultReplHook,
        copyHook  = \desc lbi _ f -> install desc lbi f, -- has correct 'copy' behavior with params
        testHook = defaultTestHook,
        benchHook = defaultBenchHook,
@@ -551,14 +572,14 @@ defaultUserHooks :: UserHooks
 defaultUserHooks = autoconfUserHooks {
           confHook = \pkg flags -> do
                        let verbosity = fromFlag (configVerbosity flags)
-                       warn verbosity $
+                       warn verbosity
                          "defaultUserHooks in Setup script is deprecated."
                        confHook autoconfUserHooks pkg flags,
           postConf = oldCompatPostConf
     }
     -- This is the annoying old version that only runs configure if it exists.
     -- It's here for compatibility with existing Setup.hs scripts. See:
-    -- http://hackage.haskell.org/trac/hackage/ticket/165
+    -- https://github.com/haskell/cabal/issues/158
     where oldCompatPostConf args flags pkg_descr lbi
               = do let verbosity = fromFlag (configVerbosity flags)
                    noExtraFlags args
@@ -632,7 +653,7 @@ runConfigureScript verbosity backwardsCompatHack flags lbi = do
     rawSystemExitWithEnv verbosity "sh" args' env'
 
   where
-    args = "configure" : configureArgs backwardsCompatHack flags
+    args = "./configure" : configureArgs backwardsCompatHack flags
 
     appendToEnvironment (key, val) [] = [(key, val)]
     appendToEnvironment (key, val) (kv@(k, v) : rest)
@@ -647,7 +668,7 @@ runConfigureScript verbosity backwardsCompatHack flags lbi = do
       = action
           `catchIO` \ioe -> if isDoesNotExistError ioe
                               then die notFoundMsg
-                              else throwIOIO ioe
+                              else throwIO ioe
 
     notFoundMsg = "The package has a './configure' script. This requires a "
                ++ "Unix compatibility toolchain such as MinGW+MSYS or Cygwin."
@@ -692,6 +713,11 @@ defaultBuildHook :: PackageDescription -> LocalBuildInfo
         -> UserHooks -> BuildFlags -> IO ()
 defaultBuildHook pkg_descr localbuildinfo hooks flags =
   build pkg_descr localbuildinfo flags (allSuffixHandlers hooks)
+
+defaultReplHook :: PackageDescription -> LocalBuildInfo
+        -> UserHooks -> ReplFlags -> [String] -> IO ()
+defaultReplHook pkg_descr localbuildinfo hooks flags args =
+  repl pkg_descr localbuildinfo flags (allSuffixHandlers hooks) args
 
 defaultRegHook :: PackageDescription -> LocalBuildInfo
         -> UserHooks -> RegisterFlags -> IO ()

@@ -1,13 +1,8 @@
-{-# OPTIONS -cpp #-}
--- OPTIONS required for ghc-6.4.x compat, and must appear first
-{-# LANGUAGE CPP #-}
 -- -fno-warn-deprecations for use of Map.foldWithKey
-{-# OPTIONS_GHC -cpp -fno-warn-deprecations #-}
-{-# OPTIONS_NHC98 -cpp #-}
-{-# OPTIONS_JHC -fcpp #-}
+{-# OPTIONS_GHC -fno-warn-deprecations #-}
 -----------------------------------------------------------------------------
 -- |
--- Module      :  Distribution.Configuration
+-- Module      :  Distribution.PackageDescription.Configuration
 -- Copyright   :  Thomas Schilling, 2007
 --
 -- Maintainer  :  cabal-devel@haskell.org
@@ -70,6 +65,8 @@ import Distribution.PackageDescription
          , Flag(..), FlagName(..), FlagAssignment
          , Benchmark(..), CondTree(..), ConfVar(..), Condition(..)
          , TestSuite(..) )
+import Distribution.PackageDescription.Utils
+         ( cabalBug, userBug )
 import Distribution.Version
          ( VersionRange, anyVersion, intersectVersionRanges, withinRange )
 import Distribution.Compiler
@@ -90,11 +87,6 @@ import Data.Maybe ( catMaybes, maybeToList )
 import Data.Map ( Map, fromListWith, toList )
 import qualified Data.Map as Map
 import Data.Monoid
-
-#if defined(__GLASGOW_HASKELL__) && (__GLASGOW_HASKELL__ < 606)
-import qualified Text.Read as R
-import qualified Text.Read.Lex as L
-#endif
 
 ------------------------------------------------------------------------------
 
@@ -220,7 +212,7 @@ instance Monoid d => Monoid (DepTestRslt d) where
 data BT a = BTN a | BTB (BT a) (BT a)  -- very simple binary tree
 
 
--- | Try to find a flag assignment that satisfies the constaints of all trees.
+-- | Try to find a flag assignment that satisfies the constraints of all trees.
 --
 -- Returns either the missing dependencies, or a tuple containing the
 -- resulting data, the associated dependencies, and the chosen flag
@@ -315,34 +307,7 @@ resolveWithFlags dom os arch impl constrs trees checkDeps =
 -- | A map of dependencies.  Newtyped since the default monoid instance is not
 --   appropriate.  The monoid instance uses 'intersectVersionRanges'.
 newtype DependencyMap = DependencyMap { unDependencyMap :: Map PackageName VersionRange }
-#if !defined(__GLASGOW_HASKELL__) || (__GLASGOW_HASKELL__ >= 606)
   deriving (Show, Read)
-#else
--- The Show/Read instance for Data.Map in ghc-6.4 is useless
--- so we have to re-implement it here:
-instance Show DependencyMap where
-  showsPrec d (DependencyMap m) =
-      showParen (d > 10) (showString "DependencyMap" . shows (M.toList m))
-
-instance Read DependencyMap where
-  readPrec = parens $ R.prec 10 $ do
-    R.Ident "DependencyMap" <- R.lexP
-    xs <- R.readPrec
-    return (DependencyMap (M.fromList xs))
-      where parens :: R.ReadPrec a -> R.ReadPrec a
-            parens p = optional
-             where
-               optional  = p R.+++ mandatory
-               mandatory = paren optional
-
-            paren :: R.ReadPrec a -> R.ReadPrec a
-            paren p = do L.Punc "(" <- R.lexP
-                         x          <- R.reset p
-                         L.Punc ")" <- R.lexP
-                         return x
-
-  readListPrec = R.readListPrecDefault
-#endif
 
 instance Monoid DependencyMap where
     mempty = DependencyMap Map.empty
@@ -361,7 +326,7 @@ simplifyCondTree :: (Monoid a, Monoid d) =>
                  -> CondTree v d a
                  -> (d, a)
 simplifyCondTree env (CondNode a d ifs) =
-    foldr mappend (d, a) $ catMaybes $ map simplifyIf ifs
+    mconcat $ (d, a) : catMaybes (map simplifyIf ifs)
   where
     simplifyIf (cnd, t, me) =
         case simplifyCondition cnd env of
@@ -431,7 +396,7 @@ flattenTaggedTargets :: TargetSet PDTagged ->
         , [(String, Benchmark)])
 flattenTaggedTargets (TargetSet targets) = foldr untag (Nothing, [], [], []) targets
   where
-    untag (_, Lib _) (Just _, _, _, _) = bug "Only one library expected"
+    untag (_, Lib _) (Just _, _, _, _) = userBug "Only one library expected"
     untag (deps, Lib l) (Nothing, exes, tests, bms) =
         (Just l', exes, tests, bms)
       where
@@ -439,29 +404,38 @@ flattenTaggedTargets (TargetSet targets) = foldr untag (Nothing, [], [], []) tar
                 libBuildInfo = (libBuildInfo l) { targetBuildDepends = fromDepMap deps }
             }
     untag (deps, Exe n e) (mlib, exes, tests, bms)
-        | any ((== n) . fst) exes = bug "Exe with same name found"
-        | any ((== n) . fst) tests = bug "Test sharing name of exe found"
-        | any ((== n) . fst) bms = bug "Benchmark sharing name of exe found"
-        | otherwise = (mlib, exes ++ [(n, e')], tests, bms)
+        | any ((== n) . fst) exes =
+          userBug $ "There exist several exes with the same name: '" ++ n ++ "'"
+        | any ((== n) . fst) tests =
+          userBug $ "There exists a test with the same name as an exe: '" ++ n ++ "'"
+        | any ((== n) . fst) bms =
+          userBug $ "There exists a benchmark with the same name as an exe: '" ++ n ++ "'"
+        | otherwise = (mlib, (n, e'):exes, tests, bms)
       where
         e' = e {
                 buildInfo = (buildInfo e) { targetBuildDepends = fromDepMap deps }
             }
     untag (deps, Test n t) (mlib, exes, tests, bms)
-        | any ((== n) . fst) tests = bug "Test with same name found"
-        | any ((== n) . fst) exes = bug "Test sharing name of exe found"
-        | any ((== n) . fst) bms = bug "Test sharing name of benchmark found"
-        | otherwise = (mlib, exes, tests ++ [(n, t')], bms)
+        | any ((== n) . fst) tests =
+          userBug $ "There exist several tests with the same name: '" ++ n ++ "'"
+        | any ((== n) . fst) exes =
+          userBug $ "There exists an exe with the same name as the test: '" ++ n ++ "'"
+        | any ((== n) . fst) bms =
+          userBug $ "There exists a benchmark with the same name as the test: '" ++ n ++ "'"
+        | otherwise = (mlib, exes, (n, t'):tests, bms)
       where
         t' = t {
             testBuildInfo = (testBuildInfo t)
                 { targetBuildDepends = fromDepMap deps }
             }
     untag (deps, Bench n b) (mlib, exes, tests, bms)
-        | any ((== n) . fst) bms = bug "Benchmark with same name found"
-        | any ((== n) . fst) exes = bug "Benchmark sharing name of exe found"
-        | any ((== n) . fst) tests = bug "Benchmark sharing name of test found"
-        | otherwise = (mlib, exes, tests, bms ++ [(n, b')])
+        | any ((== n) . fst) bms =
+          userBug $ "There exist several benchmarks with the same name: '" ++ n ++ "'"
+        | any ((== n) . fst) exes =
+          userBug $ "There exists an exe with the same name as the benchmark: '" ++ n ++ "'"
+        | any ((== n) . fst) tests =
+          userBug $ "There exists a test with the same name as the benchmark: '" ++ n ++ "'"
+        | otherwise = (mlib, exes, tests, (n, b'):bms)
       where
         b' = b {
             benchmarkBuildInfo = (benchmarkBuildInfo b)
@@ -489,7 +463,7 @@ instance Monoid PDTagged where
     Exe n e `mappend` Exe n' e' | n == n' = Exe n (e `mappend` e')
     Test n t `mappend` Test n' t' | n == n' = Test n (t `mappend` t')
     Bench n b `mappend` Bench n' b' | n == n' = Bench n (b `mappend` b')
-    _ `mappend` _ = bug "Cannot combine incompatible tags"
+    _ `mappend` _ = cabalBug "Cannot combine incompatible tags"
 
 -- | Create a package description with all configurations resolved.
 --
@@ -647,6 +621,3 @@ biFillInDefaults bi =
     if null (hsSourceDirs bi)
     then bi { hsSourceDirs = [currentDir] }
     else bi
-
-bug :: String -> a
-bug msg = error $ msg ++ ". Consider this a bug."

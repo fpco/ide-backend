@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Distribution.Compiler
@@ -19,7 +20,7 @@
 -- Unfortunately we cannot make this change yet without breaking the
 -- 'UserHooks' api, which would break all custom @Setup.hs@ files, so for the
 -- moment we just have to live with this deficiency. If you're interested, see
--- ticket #50.
+-- ticket #57.
 
 {- All rights reserved.
 
@@ -54,6 +55,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. -}
 module Distribution.Compiler (
   -- * Compiler flavor
   CompilerFlavor(..),
+  buildCompilerId,
   buildCompilerFlavor,
   defaultCompilerFlavor,
   parseCompilerFlavorCompat,
@@ -62,9 +64,12 @@ module Distribution.Compiler (
   CompilerId(..),
   ) where
 
+import Data.Data (Data)
+import Data.Typeable (Typeable)
+import Data.Maybe (fromMaybe)
 import Distribution.Version (Version(..))
 
-import qualified System.Info (compilerName)
+import qualified System.Info (compilerName, compilerVersion)
 import Distribution.Text (Text(..), display)
 import qualified Distribution.Compat.ReadP as Parse
 import qualified Text.PrettyPrint as Disp
@@ -75,7 +80,7 @@ import Control.Monad (when)
 
 data CompilerFlavor = GHC | NHC | YHC | Hugs | HBC | Helium | JHC | LHC | UHC
                     | OtherCompiler String
-  deriving (Show, Read, Eq, Ord)
+  deriving (Show, Read, Eq, Ord, Typeable, Data)
 
 knownCompilerFlavors :: [CompilerFlavor]
 knownCompilerFlavors = [GHC, NHC, YHC, Hugs, HBC, Helium, JHC, LHC, UHC]
@@ -92,9 +97,7 @@ instance Text CompilerFlavor where
 
 classifyCompilerFlavor :: String -> CompilerFlavor
 classifyCompilerFlavor s =
-  case lookup (lowercase s) compilerMap of
-    Just compiler -> compiler
-    Nothing       -> OtherCompiler s
+  fromMaybe (OtherCompiler s) $ lookup (lowercase s) compilerMap
   where
     compilerMap = [ (display compiler, compiler)
                   | compiler <- knownCompilerFlavors ]
@@ -126,6 +129,12 @@ parseCompilerFlavorCompat = do
 
 buildCompilerFlavor :: CompilerFlavor
 buildCompilerFlavor = classifyCompilerFlavor System.Info.compilerName
+
+buildCompilerVersion :: Version
+buildCompilerVersion = System.Info.compilerVersion
+
+buildCompilerId :: CompilerId
+buildCompilerId = CompilerId buildCompilerFlavor buildCompilerVersion
 
 -- | The default compiler flavour to pick when compiling stuff. This defaults
 -- to the compiler used to build the Cabal lib.

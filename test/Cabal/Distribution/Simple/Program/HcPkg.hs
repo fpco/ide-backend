@@ -1,7 +1,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Distribution.Simple.Program.HcPkg
--- Copyright   :  Duncan Coutts 2009
+-- Copyright   :  Duncan Coutts 2009, 2013
 --
 -- Maintainer  :  cabal-devel@haskell.org
 -- Portability :  portable
@@ -10,22 +10,28 @@
 -- Currently only GHC and LHC have hc-pkg programs.
 
 module Distribution.Simple.Program.HcPkg (
+    init,
+    invoke,
     register,
     reregister,
     unregister,
     expose,
     hide,
     dump,
+    list,
 
     -- * Program invocations
+    initInvocation,
     registerInvocation,
     reregisterInvocation,
     unregisterInvocation,
     exposeInvocation,
     hideInvocation,
     dumpInvocation,
+    listInvocation,
   ) where
 
+import Prelude hiding (init)
 import Distribution.Package
          ( PackageId, InstalledPackageId(..) )
 import Distribution.InstalledPackageInfo
@@ -43,7 +49,7 @@ import Distribution.Simple.Program.Run
 import Distribution.Version
          ( Version(..) )
 import Distribution.Text
-         ( display )
+         ( display, simpleParse )
 import Distribution.Simple.Utils
          ( die )
 import Distribution.Verbosity
@@ -61,6 +67,24 @@ import System.FilePath as FilePath
          ( (</>), splitPath, splitDirectories, joinPath, isPathSeparator )
 import qualified System.FilePath.Posix as FilePath.Posix
 
+
+-- | Call @hc-pkg@ to initialise a package database at the location {path}.
+--
+-- > hc-pkg init {path}
+--
+init :: Verbosity -> ConfiguredProgram -> FilePath -> IO ()
+init verbosity hcPkg path =
+  runProgramInvocation verbosity
+    (initInvocation hcPkg verbosity path)
+
+-- | Run @hc-pkg@ using a given package DB stack, directly forwarding the
+-- provided command-line arguments to it.
+invoke :: Verbosity -> ConfiguredProgram -> PackageDBStack -> [String] -> IO ()
+invoke verbosity hcPkg dbStack extraArgs =
+  runProgramInvocation verbosity invocation
+  where
+    args       = packageDbStackOpts hcPkg dbStack ++ extraArgs
+    invocation = programInvocation hcPkg args
 
 -- | Call @hc-pkg@ to register a package.
 --
@@ -118,7 +142,8 @@ hide verbosity hcPkg packagedb pkgid =
     (hideInvocation hcPkg verbosity packagedb pkgid)
 
 
--- | Call @hc-pkg@ to get all the installed packages.
+-- | Call @hc-pkg@ to get all the details of all the packages in the given
+-- package database.
 --
 dump :: Verbosity -> ConfiguredProgram -> PackageDB -> IO [InstalledPackageInfo]
 dump verbosity hcPkg packagedb = do
@@ -224,9 +249,44 @@ setInstalledPackageId pkginfo@InstalledPackageInfo {
 setInstalledPackageId pkginfo = pkginfo
 
 
+-- | Call @hc-pkg@ to get the source package Id of all the packages in the
+-- given package database.
+--
+-- This is much less information than with 'dump', but also rather quicker.
+-- Note in particular that it does not include the 'InstalledPackageId', just
+-- the source 'PackageId' which is not necessarily unique in any package db.
+--
+list :: Verbosity -> ConfiguredProgram -> PackageDB -> IO [PackageId]
+list verbosity hcPkg packagedb = do
+
+  output <- getProgramInvocationOutput verbosity
+              (listInvocation hcPkg verbosity packagedb)
+    `catchExit` \_ -> die $ programId hcPkg ++ " list failed"
+
+  case parsePackageIds output of
+    Just ok -> return ok
+    _       -> die $ "failed to parse output of '"
+                  ++ programId hcPkg ++ " list'"
+
+  where
+    parsePackageIds str =
+      let parsed = map simpleParse (words str)
+       in case [ () | Nothing <- parsed ] of
+            [] -> Just [ pkgid | Just pkgid <- parsed ]
+            _  -> Nothing
+
+
 --------------------------
 -- The program invocations
 --
+
+initInvocation :: ConfiguredProgram
+               -> Verbosity -> FilePath -> ProgramInvocation
+initInvocation hcPkg verbosity path =
+    programInvocation hcPkg args
+  where
+    args = ["init", path]
+        ++ verbosityOpts hcPkg verbosity
 
 registerInvocation, reregisterInvocation
   :: ConfiguredProgram -> Verbosity -> PackageDBStack
@@ -295,6 +355,18 @@ dumpInvocation hcPkg _verbosity packagedb =
     }
   where
     args = ["dump", packageDbOpts hcPkg packagedb]
+        ++ verbosityOpts hcPkg silent
+           -- We use verbosity level 'silent' because it is important that we
+           -- do not contaminate the output with info/debug messages.
+
+listInvocation :: ConfiguredProgram
+               -> Verbosity -> PackageDB -> ProgramInvocation
+listInvocation hcPkg _verbosity packagedb =
+    (programInvocation hcPkg args) {
+      progInvokeOutputEncoding = IOEncodingUTF8
+    }
+  where
+    args = ["list", "--simple-output", packageDbOpts hcPkg packagedb]
         ++ verbosityOpts hcPkg silent
            -- We use verbosity level 'silent' because it is important that we
            -- do not contaminate the output with info/debug messages.

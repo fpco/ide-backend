@@ -51,11 +51,12 @@ import Distribution.PackageDescription (
 import Distribution.Package (Package(..))
 import Distribution.Simple.LocalBuildInfo (
         LocalBuildInfo(..), InstallDirs(..), absoluteInstallDirs,
-        substPathTemplate)
+        substPathTemplate, withLibLBI)
 import Distribution.Simple.BuildPaths (haddockName, haddockPref)
 import Distribution.Simple.Utils
-         ( createDirectoryIfMissingVerbose, installDirectoryContents
-         , installOrdinaryFile, die, info, notice, matchDirFileGlob )
+         ( createDirectoryIfMissingVerbose
+         , installDirectoryContents, installOrdinaryFile, isInSearchPath
+         , die, info, notice, warn, matchDirFileGlob )
 import Distribution.Simple.Compiler
          ( CompilerFlavor(..), compilerFlavor )
 import Distribution.Simple.Setup (CopyFlags(..), CopyDest(..), fromFlag)
@@ -143,19 +144,23 @@ install pkg_descr lbi flags = do
   let buildPref = buildDir lbi
   when (hasLibs pkg_descr) $
     notice verbosity ("Installing library in " ++ libPref)
-  when (hasExes pkg_descr) $
+  when (hasExes pkg_descr) $ do
     notice verbosity ("Installing executable(s) in " ++ binPref)
+    inPath <- isInSearchPath binPref
+    when (not inPath) $
+      warn verbosity ("The directory " ++ binPref
+                      ++ " is not in the system search path.")
 
   -- install include files for all compilers - they may be needed to compile
   -- haskell files (using the CPP extension)
   when (hasLibs pkg_descr) $ installIncludeFiles verbosity pkg_descr incPref
 
   case compilerFlavor (compiler lbi) of
-     GHC  -> do withLib pkg_descr $
+     GHC  -> do withLibLBI pkg_descr lbi $
                   GHC.installLib verbosity lbi libPref dynlibPref buildPref pkg_descr
                 withExe pkg_descr $
                   GHC.installExe verbosity lbi installDirs buildPref (progPrefixPref, progSuffixPref) pkg_descr
-     LHC  -> do withLib pkg_descr $
+     LHC  -> do withLibLBI pkg_descr lbi $
                   LHC.installLib verbosity lbi libPref dynlibPref buildPref pkg_descr
                 withExe pkg_descr $
                   LHC.installExe verbosity lbi installDirs buildPref (progPrefixPref, progSuffixPref) pkg_descr
@@ -167,13 +172,12 @@ install pkg_descr lbi flags = do
        let targetProgPref = progdir (absoluteInstallDirs pkg_descr lbi NoCopyDest)
        let scratchPref = scratchDir lbi
        Hugs.install verbosity lbi libPref progPref binPref targetProgPref scratchPref (progPrefixPref, progSuffixPref) pkg_descr
-     NHC  -> do withLib pkg_descr $ NHC.installLib verbosity libPref buildPref (packageId pkg_descr)
+     NHC  -> do withLibLBI pkg_descr lbi $ NHC.installLib verbosity libPref buildPref (packageId pkg_descr)
                 withExe pkg_descr $ NHC.installExe verbosity binPref buildPref (progPrefixPref, progSuffixPref)
      UHC  -> do withLib pkg_descr $ UHC.installLib verbosity lbi libPref dynlibPref buildPref pkg_descr
      _    -> die $ "installing with "
                 ++ display (compilerFlavor (compiler lbi))
                 ++ " is not implemented"
-  return ()
   -- register step should be performed by caller.
 
 -- | Install the files listed in data-files

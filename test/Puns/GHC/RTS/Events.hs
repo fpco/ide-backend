@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP,BangPatterns,PatternGuards #-}
-{-# OPTIONS_GHC -funbox-strict-fields -fwarn-incomplete-patterns #-}
+{-# OPTIONS_GHC -funbox-strict-fields -fwarn-incomplete-patterns -fno-warn-deprecations #-}
 {-
  -   Parser functions for GHC RTS EventLog framework.
  -}
