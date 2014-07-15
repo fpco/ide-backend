@@ -5678,6 +5678,31 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSessionD session (updateSourceFile "test.c" cLBS) 3
         assertNoErrors session
     )
+  , ( "Using C files 5: C header files in subdirectories (#212)"
+    , withSession (withIncludes "include") $ \session -> do
+        let hfile, cfile, hsfile :: BSL8.ByteString
+            hfile = "#define foo \"hello\\n\""
+            cfile = BSLC.pack . unlines $
+                [ "#include <stdio.h>"
+                , "#include <blankheader.h>"
+                , "void hello(void) { printf(foo); }"
+                ]
+            hsfile = BSLC.pack . unlines $
+                [ "{-# LANGUAGE ForeignFunctionInterface #-}"
+                , "module Main where"
+                , "foreign import ccall \"hello\" hello :: IO ()"
+                , "main = hello"
+                ]
+
+        let go upd = do
+                updateSessionD session upd 3
+                assertNoErrors session
+
+        go $ updateDynamicOpts ["-Iinclude"]
+          <> updateSourceFile "include/blankheader.h" hfile
+          <> updateSourceFile "hello.c" cfile
+          <> updateSourceFile "Main.hs" hsfile
+    )
   , ( "ghc qAddDependentFile patch (#118)"
     , withSession defaultSession $ \session -> do
         let cb     = \_ -> return ()

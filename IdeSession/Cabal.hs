@@ -715,14 +715,13 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
                         , rcAbsC = absC
                         , rcAbsObj = absObj
                         , rcPref = pref
+                        , rcIncludeDirs = includeDirs
                         , .. } = do
   let verbosity = silent
       -- TODO: create dist.23412/build? see cabalMacrosLocation
       buildDir = ideDistDir
       lbi = localBuildInfo buildDir configPackageDBStack configExtraPathDirs
-      libBi = emptyBuildInfo
-                -- of these, only includeDirs and ccOptions are used,
-                -- but we don't set them for GHC API so far
+      libBi = emptyBuildInfo{includeDirs} -- TODO: set ccOptions?
       clbi = LibComponentLocalBuildInfo [] []
                -- a stub, this would be expensive (lookups in pkgIndex);
                -- TODO: is it needed? e.g., for C calling into Haskell?
@@ -790,6 +789,7 @@ data RunCcArgs = RunCcArgs
   , rcAbsC :: FilePath
   , rcAbsObj :: FilePath
   , rcPref :: FilePath
+  , rcIncludeDirs :: [FilePath]
   }
 
 data ExeCabalRequest =
@@ -854,10 +854,11 @@ instance Binary RunCcArgs where
     put rcAbsC
     put rcAbsObj
     put rcPref
+    put rcIncludeDirs
 
   get = RunCcArgs <$> get <*> get <*> get
                   <*> get <*> get <*> get
-                  <*> get <*> get
+                  <*> get <*> get <*> get
 
 instance Binary ExitCode where
   put ExitSuccess = putWord8 0

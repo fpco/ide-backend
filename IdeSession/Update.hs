@@ -1417,31 +1417,27 @@ nextLogicalTimestamp = do
 runGcc :: FilePath -> FilePath -> FilePath -> IdeSessionUpdate [SourceError]
 runGcc absC absObj pref = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
-    let ideDistDir = ideSessionDistDir ideSessionDir
+    callback                        <- asks ideSessionUpdateCallback
+    relIncl                         <- get ideRelativeIncludes
 
-    callback  <- asks ideSessionUpdateCallback
+    let ideDistDir   = ideSessionDistDir   ideSessionDir
+        ideSourceDir = ideSessionSourceDir ideSessionDir
+
     liftIO $ do
-     -- Direct call to gcc, for testing only:
-     let SessionConfig{configPackageDBStack, configExtraPathDirs} = ideConfig
-         _gcc :: FilePath
-         _gcc = "/usr/bin/gcc"
-         _args :: [String]
-         _args = [ "-c"
-                 , "-o", absObj
-                 , absC
-                 ]
-         _stdin :: String
-         _stdin = ""
-         stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
-         stderrLog = ideDistDir </> "ide-backend-cc.stderr"
-         runCcArgs = RunCcArgs{ rcPackageDBStack = configPackageDBStack
-                              , rcExtraPathDirs = configExtraPathDirs
-                              , rcDistDir = ideDistDir
-                              , rcStdoutLog = stdoutLog
-                              , rcStderrLog = stderrLog
-                              , rcAbsC = absC
-                              , rcAbsObj = absObj
-                              , rcPref = pref }
+     let SessionConfig{..} = ideConfig
+         stdoutLog   = ideDistDir </> "ide-backend-cc.stdout"
+         stderrLog   = ideDistDir </> "ide-backend-cc.stderr"
+         includeDirs = map (ideSourceDir </>) relIncl
+         runCcArgs   = RunCcArgs{ rcPackageDBStack = configPackageDBStack
+                                , rcExtraPathDirs  = configExtraPathDirs
+                                , rcDistDir        = ideDistDir
+                                , rcStdoutLog      = stdoutLog
+                                , rcStderrLog      = stderrLog
+                                , rcAbsC           = absC
+                                , rcAbsObj         = absObj
+                                , rcPref           = pref
+                                , rcIncludeDirs    = includeDirs
+                                }
      -- (_exitCode, _stdout, _stderr)
      --   <- readProcessWithExitCode _gcc _args _stdin
      -- The real deal; we call gcc via ghc via cabal functions:
