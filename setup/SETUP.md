@@ -238,7 +238,7 @@ only a few minor differences, explained when they come up.
   - the test suite requires the following packages (you might of course want to
     use a separate snippet DB for the test suite:)
 
-    * parallel-3.2.0.4 (not necessary for 7.8, is now in the ghc DB itself)
+    * parallel (tested with 3.2.0.4; necessary also for 7.8.3 now)
     * mtl (tested with 2.1.3.1, 2.2.1)
     * monads-tf (testd with 0.1.0.1, 0.1.0.2)
     * yesod-1.2.4 (optional; only required for one test; install with
@@ -355,10 +355,12 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
 * Get the corresponding version of the core libraries:
 
-      ./sync-all --no-dph get
+      ./sync-all --no-dph -r git://git.haskell.org get -b ghc-7.8 
 
-  (This is much easier and more reliable now since the version of ghc that we
-  work with, 7.8.3+, now uses git submodules.)
+  WARNING: There are no ghc-7.8.3-release tags for these libraries, so this
+  checks out the "latest" 7.8 branch for each dependency. This may or may not
+  break in the future. Just for reference, I have included the fingerprint of
+  the repo as I built it as ghc-7.8.3.fp in this directory.
 
 * Create build.mk
 
@@ -389,9 +391,15 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
   symlinks in ~/env/fpco-patched-7.8/local/bin:
 
       ghc              -> ../src/ghc/inplace/bin/ghc-stage2
-      ghc-7.8.1.20140411 -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-7.8.3.<date> -> ../src/ghc/inplace/bin/ghc-stage2
       ghc-pkg          -> ../src/ghc/inplace/bin/ghc-pkg
       haddock          -> ../src/ghc/inplace/bin/haddock
       hsc2hs           -> ../src/ghc/inplace/bin/hsc2hs
 
-  (TODO: version number will change)
+  (<date> will vary). 
+
+* You will probably also want to install the bundled Haddock: run
+
+      cabal install
+
+  in utils/haddock. 

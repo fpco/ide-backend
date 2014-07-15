@@ -54,22 +54,9 @@ executable ide-backend-server
     build-depends: old-time >= 1.1  && < 1.2,
                    haddock  >= 2.11 && < 2.12
     cpp-options: -DGHC_742
-  if impl(ghc == 7.7.*)
-    build-depends: time    >= 1.4  && < 1.5,
-                   haddock >= 2.14 && < 2.15
-    cpp-options: -DGHC_78
-    ghc-options: -dynamic
   if impl(ghc == 7.8.*)
-    build-depends: time    >= 1.4  && < 1.5,
-                   haddock >= 2.14 && < 2.15
-    cpp-options: -DGHC_78
-    ghc-options: -dynamic
-  -- ide-backend-experimental-78 currently reports itself as 7.9
-  -- (although it's nearly 7.8.3). Right now this requires haddock from git
-  -- (http://git.haskell.org/haddock.git)
-  if impl(ghc == 7.9.*)
-    build-depends: time    >= 1.4  && < 1.5,
-                   haddock >= 2.15 && < 2.16
+    build-depends: time    >= 1.4    && < 1.5,
+                   haddock == 2.14.3 
     cpp-options: -DGHC_78
     ghc-options: -dynamic
 

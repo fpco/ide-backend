@@ -871,7 +871,7 @@ instance FoldId id => Fold (LInstDecl id) where
     fold alg tfid_inst
 
 instance FoldId id => Fold (LDerivDecl id) where
-  fold alg (L span (DerivDecl deriv_type _deriv_overlap_mode)) = astMark alg (Just span) "LDerivDecl" $ do
+  fold alg (L span (DerivDecl deriv_type)) = astMark alg (Just span) "LDerivDecl" $ do
     fold alg deriv_type
 
 instance FoldId id => Fold (LFixitySig id) where
@@ -993,8 +993,7 @@ instance FoldId id => Fold (ClsInstDecl id) where
                         cid_binds
                         cid_sigs
                         cid_tyfam_insts
-                        cid_datafam_insts
-                       _cid_overlap_mode) = astMark alg Nothing "ClsInstDecl" $ do
+                        cid_datafam_insts) = astMark alg Nothing "ClsInstDecl" $ do
     fold alg cid_poly_ty
     fold alg cid_binds
     fold alg cid_sigs
