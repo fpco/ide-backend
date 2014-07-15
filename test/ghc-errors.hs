@@ -1002,11 +1002,11 @@ syntheticTests = [
         let update = updateSourceFile "M.hs"
                                   (BSLC.pack "module very-wrong where")
         updateSessionD session update 1
-        assertSourceErrors' session ["parse error on input `very'\n"]
+        assertSourceErrors' session ["parse error on input `very'"]
         let update2 = updateSourceFile "M.hs"
                                    (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update2 1
-        assertSourceErrors' session ["parse error on input `.'\n"]
+        assertSourceErrors' session ["parse error on input `.'"]
     )
   , ( "Interrupt runStmt (after 1 sec)"
     , withSession defaultSession $ \session -> do
@@ -7111,6 +7111,26 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
           assertEqual "" RunOk result
           assertEqual "" expectedResult output
     )
+  , ( "Missing location information (#213)"
+    , withSession defaultSession $ \session -> do
+        let upd = updateSourceFile "Main.hs" $ BSLC.unlines
+                [ "import DoesNotExist1"
+                , "import DoesNotExist2"
+                ]
+
+        updateSession session upd print
+        version <- getGhcVersion session
+        case version of
+          GHC742 -> -- 7.4.2 just reports the first module error
+            assertSourceErrors session [
+                [(Just "Main.hs", "Could not find module")]
+              ]
+          GHC78 -> -- 7.8 reports both; make sure we have location info (#213)
+            assertSourceErrors session [
+                [(Just "Main.hs", "Could not find module")]
+              , [(Just "Main.hs", "Could not find module")]
+              ]
+    )
   ]
 
 runWaitAll' :: forall a. RunActions a -> IO (BSL.ByteString, a)
@@ -7631,7 +7651,7 @@ assertErrorOneOf (SourceError _ loc actual) potentialExpected =
     matchesError expectedErr =
       if ignoreQuotes expectedErr `isInfixOf` ignoreQuotes (Text.unpack actual)
         then Right ()
-        else Left $ "Unexpected error: " ++ Text.unpack actual
+        else Left $ "Unexpected error: " ++ show (Text.unpack actual) ++ ".\nExpected: " ++ show expectedErr
 
 assertNoErrors :: IdeSession -> Assertion
 assertNoErrors session = do
