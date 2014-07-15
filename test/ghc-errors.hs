@@ -18,7 +18,7 @@ import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import Data.Monoid (mconcat, mempty, (<>))
 import Data.Text (Text)
-import Data.Char (isLower, isSpace)
+import Data.Char (isLower)
 import Data.Either (lefts)
 import qualified Data.Text as Text
 import Debug.Trace (traceEventIO)
@@ -438,15 +438,6 @@ syntheticTests = [
 
         status4 <- getBuildExeStatus session
         assertEqual "after all exe builds" (Just ExitSuccess) status4
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: Exception Maybes OrdList\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.for.lhs"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Build executable from some .lhs files with dynamic include path change"
     , withSession defaultSession $ \session -> do
@@ -511,23 +502,12 @@ syntheticTests = [
         updateSessionD session upd4 2
         status4 <- getBuildExeStatus session
         assertEqual "after all exe builds" (Just ExitSuccess) status4
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal for .lhs files" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: Exception Maybes OrdList\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.for.lhs"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Build haddocks from some .lhs files"
     , withSession defaultSession $ \session -> do
         status0 <- getBuildDocStatus session
         assertEqual "before module loading" Nothing status0
-        setCurrentDirectory "test/compiler/utils"
-        loadModulesFrom session "."
-        setCurrentDirectory "../../../"
+        withCurrentDirectory "test/compiler/utils" $ loadModulesFrom session "."
         assertNoErrors session
         let upd = buildDoc
         updateSessionD session upd 1
@@ -541,9 +521,7 @@ syntheticTests = [
     )
   , ( "Build haddocks and fail"
     , withSession defaultSession $ \session -> do
-        setCurrentDirectory "test/ABerror"
-        loadModulesFrom session "."
-        setCurrentDirectory "../.."
+        withCurrentDirectory "test/ABerror" $ loadModulesFrom session "."
         assertOneError session
         let upd = buildDoc
         -- Note that the stderr log file here is empty, but exit code is 1:
@@ -682,16 +660,6 @@ syntheticTests = [
                     "False\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "cabal_macros.h" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: M\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    install-includes: cabal_macros.h\n    ghc-options: -XCPP\n \n ") $ filterIdeBackendTestH "cabal_macros.h" $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.test"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XCPP' use 'extensions: CPP'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\nHackage would reject this package.\n")
     )
   , ( "Caching cabal macros"
     , do macros <- withSession defaultSession getCabalMacros
@@ -745,14 +713,13 @@ syntheticTests = [
     )
   , ( "Reject a program requiring -XNamedFieldPuns, then set the option"
     , withSession (withOpts ["-hide-package monads-tf"]) $ \session -> do
-        setCurrentDirectory "test/Puns"
-        loadModulesFrom session "."
-        assertMoreErrors session
-        let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
-            update2 = updateDynamicOpts punOpts
-        (_, lm) <- getModules session
-        updateSessionD session update2 (length lm)
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/Puns" $ do
+          loadModulesFrom session "."
+          assertMoreErrors session
+          let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
+              update2 = updateDynamicOpts punOpts
+          (_, lm) <- getModules session
+          updateSessionD session update2 (length lm)
         assertNoErrors session
         let m = "GHC.RTS.Events"
             upd2 = buildExe [] [(Text.pack m, "GHC/RTS/Events.hs")]
@@ -760,15 +727,6 @@ syntheticTests = [
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0, binary ==0.5.1.0,\n                   bytestring ==0.9.2.1, containers ==0.4.2.1, deepseq ==1.3.0.0,\n                   ghc-prim ==0.2.0.0, integer-gmp ==0.4.0.0, mtl ==2.1.2,\n                   transformers ==0.3.0.0\n    exposed-modules: GHC.RTS.EventParserUtils GHC.RTS.EventTypes\n                     GHC.RTS.Events\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    install-includes: EventLogFormat.h\n    ghc-options: -hide-package monads-tf -XNamedFieldPuns -XRecordWildCards\n \n ") $ filterIdeBackendTestH "EventLogFormat.h" $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.test"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XNamedFieldPuns -XRecordWildCards' use\n'extensions: NamedFieldPuns RecordWildCards'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\nHackage would reject this package.\n")
     )
   , ( "Build licenses from NamedFieldPuns (with errors)"
     , withSession (withOpts ["-hide-package monads-tf"]) $ \session -> do
@@ -962,11 +920,10 @@ syntheticTests = [
     )
   , ( "Test TH; code generation on"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
-        setCurrentDirectory "test"
-        (originalUpdate, lm) <- getModulesFrom session "TH"
-        let update = originalUpdate <> updateCodeGeneration True
-        updateSessionD session update (length lm)
-        setCurrentDirectory "../"
+        withCurrentDirectory "test" $ do
+          (originalUpdate, lm) <- getModulesFrom session "TH"
+          let update = originalUpdate <> updateCodeGeneration True
+          updateSessionD session update (length lm)
         assertNoErrors session
         runActions <- runStmt session "TH.TH" "main"
         (output, result) <- runWaitAll runActions
@@ -975,11 +932,10 @@ syntheticTests = [
     )
   , ( "Build executable from TH"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
-        setCurrentDirectory "test"
-        (originalUpdate, lm) <- getModulesFrom session "TH"
-        let update = originalUpdate <> updateCodeGeneration True
-        updateSessionD session update (length lm)
-        setCurrentDirectory "../"
+        withCurrentDirectory "test" $ do
+          (originalUpdate, lm) <- getModulesFrom session "TH"
+          let update = originalUpdate <> updateCodeGeneration True
+          updateSessionD session update (length lm)
         assertNoErrors session
         let m = "TH.TH"
             upd = buildExe ["-rtsopts=all", "-O0"] [(Text.pack m, "TH/TH.hs")]
@@ -996,23 +952,13 @@ syntheticTests = [
                     "(True,43)\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal from TH" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==0.4.0.0, base ==4.5.1.0,\n                   containers ==0.4.2.1, deepseq ==1.3.0.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, pretty ==1.1.1.0, template-haskell ==2.7.0.0\n    exposed-modules: TH.BlockingOps TH.TH\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    ghc-options: -XTemplateHaskell\n \n ") $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.for.lhs"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XTemplateHaskell' use 'extensions:\nTemplateHaskell'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\nHackage would reject this package.\n")
     )
   , ( "Build haddocks from TH"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
-        setCurrentDirectory "test"
-        (originalUpdate, lm) <- getModulesFrom session "TH"
-        let update = originalUpdate <> updateCodeGeneration True
-        updateSessionD session update (length lm)
-        setCurrentDirectory "../"
+        withCurrentDirectory "test" $ do
+          (originalUpdate, lm) <- getModulesFrom session "TH"
+          let update = originalUpdate <> updateCodeGeneration True
+          updateSessionD session update (length lm)
         assertNoErrors session
         let upd = buildDoc
         updateSessionD session upd 1
@@ -1718,21 +1664,6 @@ syntheticTests = [
            assertEqual "" result ExitSuccess
            assertEqual "" (BSLC.pack "Value2") output
     )
-  , ( "Update during run"
-    , withSession defaultSession $ \session -> do
-        let upd = (updateCodeGeneration True)
-               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
-                    [ "module M where"
-                    , "loop :: IO ()"
-                    , "loop = loop"
-                    ])
-        updateSessionD session upd 1
-        assertNoErrors session
-        _runActions <- runStmt session "M" "loop"
-        assertRaises ""
-          (== userError "Cannot update session in running mode")
-          (updateSessionD session upd 1)
-    )
   , ( "getSourceErrors during run"
     , withSession defaultSession $ \session -> do
         let upd = (updateCodeGeneration True)
@@ -2065,46 +1996,6 @@ syntheticTests = [
         result' <- runWait runActionsExe
         assertEqual "" result' (Right $ ExitFailure 2)
     )
-  , ( "Call runWait after termination (started new snippet in meantime)"
-    , withSession defaultSession $ \session -> do
-        let upd = (updateCodeGeneration True)
-               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
-                    [ "module M where"
-                    , "import Control.Concurrent"
-                    , "hello :: IO ()"
-                    , "hello = putStrLn \"Hello World\""
-                    , "slowHello :: IO ()"
-                    , "slowHello = threadDelay 2000000 >> putStrLn \"Oh, hello\""
-                    ])
-        updateSessionD session upd 1
-        assertNoErrors session
-
-        -- Start first snippet and wait for it to terminate
-        runActions1 <- runStmt session "M" "hello"
-        do (output, result) <- runWaitAll runActions1
-           assertEqual "" RunOk result
-           assertEqual "" (BSLC.pack "Hello World\n") output
-
-        -- Start second snippet
-        runActions2 <- runStmt session "M" "slowHello"
-
-        -- While it is running, call runWait again on the old runActions, make
-        -- sure it's still the same
-        do result <- runWait runActions1
-           assertEqual "" result (Right RunOk)
-
-        -- Make sure that a call to 'runStmt' throws an exception
-        -- (because we are still in running state)
-        assertRaises "runStmt during running code"
-          (== userError "State not idle")
-          (runStmt session "M" "hello")
-
-        -- Now call runWait on the *new* runActions and make sure we
-        -- get the right result
-        do (output, result) <- runWaitAll runActions2
-           assertEqual "" RunOk result
-           assertEqual "" (BSLC.pack "Oh, hello\n") output
-    )
   , ( "Don't recompile unnecessarily (single module)"
     , withSession defaultSession $ \session -> do
         let upd = (updateCodeGeneration True)
@@ -2230,7 +2121,7 @@ syntheticTests = [
         updateSession session updates2 $ const $ return ()
         ra2 <- runStmt session "Main" "main"
         out2b <- runWait ra2
-        assertEqual "ra2" out2b (Right RunOk)
+        assertEqual "" out2b (Right RunOk)
 
         let updates3 =
               updateSourceFile "Main.hs" (BSLC.pack "main = getLine >>= putStrLn")
@@ -2238,7 +2129,7 @@ syntheticTests = [
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-        assertEqual "ra3" out3b RunOk
+        assertEqual "" RunOk out3b
         assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "First snippet closes stderr; next snippet unaffected"
@@ -2250,7 +2141,7 @@ syntheticTests = [
         updateSession session updates2 $ const $ return ()
         ra2 <- runStmt session "Main" "main"
         out2b <- runWait ra2
-        assertEqual "ra2" out2b (Right RunOk)
+        assertEqual "" out2b (Right RunOk)
 
         let updates3 =
               updateSourceFile "Main.hs" (BSLC.pack "import System.IO\nmain = getLine >>= hPutStrLn stderr")
@@ -2258,7 +2149,7 @@ syntheticTests = [
         ra3 <- runStmt session "Main" "main"
         supplyStdin ra3 (BSSC.pack "Michael\n")
         (output, out3b) <- runWaitAll ra3
-        assertEqual "ra3" out3b RunOk
+        assertEqual "" RunOk out3b
         assertEqual "" (BSLC.pack "Michael\n") output
     )
   , ( "Snippet closes stderr, using timeout buffering"
@@ -2456,15 +2347,6 @@ syntheticTests = [
                     "42\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed: True\n    buildable: True\n    c-sources: life.c\n    default-language: Haskell2010\n    install-includes: life.h local.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.test"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Using the FFI with TH and MIN_VERSION_base via buildExe"
     , withSession defaultSession $ \session -> do
@@ -2476,9 +2358,7 @@ syntheticTests = [
               , updateSourceFileFromFile "ffiles/life.h"
               , updateSourceFileFromFile "ffiles/local.h"
               ]
-        setCurrentDirectory "test/FFI"
-        updateSessionD session upd 4
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/FFI" $ updateSessionD session upd 4
         assertNoErrors session
         let m = "Main"
             upd2 = buildExe [] [(Text.pack m, "Main3.hs")]
@@ -2494,15 +2374,6 @@ syntheticTests = [
                     "84\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.test"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Using the FFI with withIncludes, TH and MIN_VERSION_base via buildExe"
     , withSession (withIncludes "test/FFI") $ \session -> do
@@ -2530,15 +2401,6 @@ syntheticTests = [
                     "84\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.test"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Using the FFI with withIncludes, TH and MIN_VERSION_base via buildExe and with restartSession"
     , withSession (withIncludes "test/FFI") $ \session -> do
@@ -2584,15 +2446,6 @@ syntheticTests = [
                     "84\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.test"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Using the FFI with withIncludes and TargetsExclude"
     , withSession (withIncludes "test/FFI") $ \session -> do
@@ -2651,9 +2504,15 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
 
+        -- This is the one test where test the .cabal file; doing this
+        -- consistently in other tests is painful because the precise format of
+        -- the generated file changes so often
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h life.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
+        version <- getGhcVersion session
+        case version of
+          GHC742 -> assertEqual "dotCabal" (BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: test/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: test/FFI\n \n ") (ignoreVersions dotCabal)
+          GHC78  -> assertEqual "dotCabal" (BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: test/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: test/FFI\n \n ") (ignoreVersions dotCabal)
         let pkgDir = distDir </> "dotCabal.test"
         createDirectoryIfMissing False pkgDir
         BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -2695,15 +2554,6 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     "84\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.test"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Using the FFI with dynamic include and TargetsInclude"
     , withSession defaultSession $ \session -> do
@@ -2746,15 +2596,6 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     "84\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal" (filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest $ BSLC.pack "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: Truelife.c\n    default-language: Haskell2010life.h local.h\n \n ") $ filterIdeBackendTestH "life.h" $ filterIdeBackendTestC "life.c" $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.test"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Build executable from 2 TH files"
     , withSession defaultSession $ \session -> do
@@ -2797,10 +2638,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build executable from Main"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "ParFib.hs")]
         updateSessionD session upd 3
@@ -2815,15 +2655,6 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "main" $ Version [1, 0] []
-        assertEqual "dotCabal from Main" (filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.4\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.for.lhs"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "main.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Build executable from Main with explicit -package"
     , let packageOpts = [ "-hide-all-packages"
@@ -2832,10 +2663,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                         , "-package old-time"
                         ]
       in withSession (withOpts packageOpts) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "ParFib.hs")]
         updateSessionD session upd 3
@@ -2850,22 +2680,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal from Main with explicit -package" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.4\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    ghc-options: -hide-all-packages -package base -package parallel -package old-time\n \n ") $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.for.lhs"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Build executable from ParFib.Main"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let m = "ParFib.Main"
             upd = buildExe [] [ (Text.pack m, "ParFib.Main.hs")
                               , (Text.pack "Main", "ParFib.hs") ]
@@ -2884,22 +2704,12 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 7] []
-        assertEqual "dotCabal from ParFib.Main" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.7\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, old-locale ==1.0.0.4, old-time ==1.1.0.0,\n                   parallel ==3.2.0.4\n    exposed-modules: ParFib.Main\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.for.lhs"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Build executable with a wrong filename and fail"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let m = "Main"
             upd = buildExe [] [(Text.pack m, "foooooooooooooooo.hs")]
         status0 <- getBuildExeStatus session
@@ -2911,11 +2721,10 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build .cabal from TH with a wrong libname and don't fail"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
-        setCurrentDirectory "test"
-        (originalUpdate, lm) <- getModulesFrom session "TH"
-        let update = originalUpdate <> updateCodeGeneration True
-        updateSessionD session update (length lm)
-        setCurrentDirectory "../"
+        withCurrentDirectory "test" $ do
+          (originalUpdate, lm) <- getModulesFrom session "TH"
+          let update = originalUpdate <> updateCodeGeneration True
+          updateSessionD session update (length lm)
         assertNoErrors session
         dotCabalFromName <- getDotCabal session
         let dotCabal = dotCabalFromName "--///fo/name" $ Version [-1, -9] []
@@ -2923,11 +2732,10 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build licenses from TH with a wrong cabals dir and don't fail"
     , withSession (withOpts ["-XTemplateHaskell"]) $ \session -> do
-        setCurrentDirectory "test"
-        (originalUpdate, lm) <- getModulesFrom session "TH"
-        let update = originalUpdate <> updateCodeGeneration True
-        updateSessionD session update (length lm)
-        setCurrentDirectory "../"
+        withCurrentDirectory "test" $ do
+          (originalUpdate, lm) <- getModulesFrom session "TH"
+          let update = originalUpdate <> updateCodeGeneration True
+          updateSessionD session update (length lm)
         assertNoErrors session
         let upd = buildLicenses "--/fooo /fooo/foo"
         updateSessionD session upd 99
@@ -2939,10 +2747,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build haddocks from ParFib"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let upd = buildDoc
         updateSessionD session upd 1
         distDir <- getDistDir session
@@ -2958,10 +2765,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build licenses from ParFib"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/MainModule"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/MainModule" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let upd = buildLicenses "test/MainModule/cabals"
         updateSessionD session upd 6
         distDir <- getDistDir session
@@ -2976,10 +2782,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     )
   , ( "Build licenses from Cabal"
     , withSession (withOpts []) $ \session -> do
-        setCurrentDirectory "test/Cabal"
-        loadModulesFrom session "."
-        assertNoErrors session
-        setCurrentDirectory "../../"
+        withCurrentDirectory "test/Cabal" $ do
+          loadModulesFrom session "."
+          assertNoErrors session
         let upd = buildLicenses "test/Puns/cabals"  -- 7 packages missing
         updateSessionD session upd 99
         distDir <- getDistDir session
@@ -4436,15 +4241,6 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     outExe
         assertEqual "after runExe" ExitSuccess statusExe
         deletePackage "test/simple-lib17"
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-        assertEqual "dotCabal from simple-lib17" (filterIdeBackendTest $ BSLC.pack "name: libName\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0, simple-lib17 ==0.1.0.0\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n    ghc-options: -XCPP\n \n ") $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.for.lhs"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "libName.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertEqual "checkWarns for dotCabal for .lhs files" (filterCheckWarns checkWarns) (filterCheckWarns "The following warnings are likely affect your build negatively:\n* Instead of 'ghc-options: -XCPP' use 'extensions: CPP'\n\nThese warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\nHackage would reject this package.\n")
     )
   , ( "Make sure package DB is passed to ghc (configGenerateModInfo False)"
     , let packageOpts = ["-package parallel"]
@@ -7066,15 +6862,6 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSessionD session updDoc 1
         statusDoc <- getBuildDocStatus session
         assertEqual "after doc build" (Just ExitSuccess) statusDoc
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "main" $ Version [1, 0] []
-        assertEqual "dotCabal from Main" (filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.for.lhs"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "main.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Data files should not leak in exe building (#169), with a extra modules"
     , withSession defaultSession $ \session -> do
@@ -7096,15 +6883,6 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSessionD session updDoc 1
         statusDoc <- getBuildDocStatus session
         assertEqual "after doc build" (Just ExitSuccess) statusDoc
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "main" $ Version [1, 0] []
-        assertEqual "dotCabal from Main" (filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: NonMain NonMain2\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.for.lhs"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "main.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Data files should not leak in exe building (#169), with a non-'Main' main module"
     , withSession defaultSession $ \session -> do
@@ -7126,15 +6904,6 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSessionD session updDoc 1
         statusDoc <- getBuildDocStatus session
         assertEqual "after doc build" (Just ExitSuccess) statusDoc
-
-        dotCabalFromName <- getDotCabal session
-        let dotCabal = dotCabalFromName "main" $ Version [1, 0] []
-        assertEqual "dotCabal from Main" (filterIdeBackendTest $ BSLC.pack "name: main\nversion: 1.0\ncabal-version: 1.14.0\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: base ==4.5.1.0, ghc-prim ==0.2.0.0,\n                   integer-gmp ==0.4.0.0\n    exposed-modules: NonMain NonMain2\n    exposed: True\n    buildable: True\n    default-language: Haskell2010\n \n ") $ filterIdeBackendTest dotCabal
-        let pkgDir = distDir </> "dotCabal.for.lhs"
-        createDirectoryIfMissing False pkgDir
-        BSLC.writeFile (pkgDir </> "main.cabal") dotCabal
-        checkWarns <- checkPackage pkgDir
-        assertCheckWarns checkWarns
     )
   , ( "Start server without bracket (need MANUAL check that server will die; #194)"
     , do let (initParams, config) = defaultSession (defaultSessionInitParams, defaultSessionConfig)
@@ -7420,6 +7189,7 @@ modCn n = updateSourceFile "C.hs" $ BSLC.pack $ unlines [
   , "main = return ()"
   ]
 
+{-
 qsort :: IdeSessionUpdate ()
 qsort = (updateSourceFile "Main.hs" . BSLC.pack . unlines $ [
           --          1         2         3         4         5
@@ -7431,6 +7201,7 @@ qsort = (updateSourceFile "Main.hs" . BSLC.pack . unlines $ [
           , "main = print (qsort [8, 4, 0, 3, 1, 23, 11, 18])"
           ])
      <> (updateCodeGeneration True)
+-}
 
 _ignoreFailure :: IO () -> IO ()
 _ignoreFailure io = Ex.catch io $ \(HUnitFailure err) ->
@@ -7871,6 +7642,7 @@ assertLoadedModules session header goodMods = do
   loadedMods <- getLoadedModules session
   assertSameSet header (map Text.pack goodMods) loadedMods
 
+{-
 assertBreak :: IdeSession
             -> String                     -- ^ Module
             -> String                     -- ^ Location
@@ -7887,6 +7659,7 @@ assertBreak session mod loc resTy vars = do
     assertEqual      "var name" var (Text.unpack var')
     assertAlphaEquiv "var type" typ (Text.unpack typ')
     assertEqual      "var val"  val (Text.unpack val')
+-}
 
 isAsyncException :: RunResult -> Bool
 isAsyncException (RunProgException ex) =
@@ -8008,33 +7781,6 @@ testBufferMode bufferMode =
                         (x' : rest') -> (firstChunk ++ [x']) : chunkOn x rest'
                         []           -> [firstChunk]
 
-filterIdeBackendTest :: BSLC.ByteString -> BSSC.ByteString
-filterIdeBackendTest bsLazy =
-  let toStrict = BSSC.concat . BSLC.toChunks  -- not in our old bytestring pkg
-      bs = ignoreVersions $ toStrict bsLazy
-      (bs1Raw, rest1) = BSSC.breakSubstring (BSSC.pack "hs-source-dirs:") bs
-      (bs1, _) = BSSC.spanEnd isSpace bs1Raw
-      (_, bs2) = BSSC.breakSubstring (BSSC.pack "\n") rest1
-      bs3 = if BSSC.null rest1 then bs else BSSC.append bs1 bs2
-      (bs5Raw, rest5) = BSSC.breakSubstring (BSSC.pack "other-extensions:") bs3
-      (bs5, _) = BSSC.spanEnd isSpace bs5Raw
-      (_, bs6) = BSSC.breakSubstring (BSSC.pack "\n") rest5
-  in if BSSC.null rest5 then bs3 else BSSC.append bs5 bs6
-
-filterIdeBackendTestC :: String -> BSSC.ByteString -> BSSC.ByteString
-filterIdeBackendTestC lastFile bs =
-  let (bs1Raw, rest1) = BSSC.breakSubstring (BSSC.pack "c-sources:") bs
-      (bs1, _) = BSSC.spanEnd isSpace bs1Raw
-      (_, bs2) = BSSC.breakSubstring (BSSC.pack lastFile) rest1
-  in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
-
-filterIdeBackendTestH :: String -> BSSC.ByteString -> BSSC.ByteString
-filterIdeBackendTestH lastFile bs =
-  let (bs1Raw, rest1) = BSSC.breakSubstring (BSSC.pack "install-includes:") bs
-      (bs1, _) = BSSC.spanEnd isSpace bs1Raw
-      (_, bs2) = BSSC.breakSubstring (BSSC.pack lastFile) rest1
-  in if BSSC.null rest1 then bs else BSSC.append bs1 bs2
-
 {------------------------------------------------------------------------------
   Default configuration
 
@@ -8087,6 +7833,7 @@ assertCounter (Counter c) i = do
   j <- readIORef c
   assertEqual "" i j
 
+{-
 -- | Mark each element of the list with booleans indicating whether it's the
 -- first and/or the last element in the list
 mark :: [a] -> [(a, Bool, Bool)]
@@ -8097,6 +7844,7 @@ mark (x:xs) = (x, True, False) : aux xs
     aux []     = error "impossible"
     aux [y]    = [(y, False, True)]
     aux (y:ys) = (y, False, False) : aux ys
+-}
 
 -- | Replace everything that looks like a quote by a standard single quote.
 ignoreQuotes :: String -> String
@@ -8117,6 +7865,17 @@ concatFailures = go []
   where
     go acc []                    = HUnitFailure (unlines . reverse $ acc)
     go acc (HUnitFailure e : es) = go (e : acc) es
+
+-- | Temporarily switch directory
+--
+-- (and make sure to switch back even in the presence of exceptions)
+withCurrentDirectory :: FilePath -> IO a -> IO a
+withCurrentDirectory fp act =
+  Ex.bracket (do cwd <- getCurrentDirectory
+                 setCurrentDirectory fp
+                 return cwd)
+             (setCurrentDirectory)
+             (\_ -> act)
 
 {------------------------------------------------------------------------------
   Replace (type variables) with numbered type variables
@@ -8189,6 +7948,9 @@ instance IgnoreVersions a => IgnoreVersions (Maybe a) where
 
 instance IgnoreVersions BSSC.ByteString where
   ignoreVersions = BSSC.pack . ignoreVersions . BSSC.unpack
+
+instance IgnoreVersions BSL.ByteString where
+  ignoreVersions = BSLC.pack . ignoreVersions . BSLC.unpack
 
 instance IgnoreVersions Text where
   ignoreVersions = Text.pack . ignoreVersions . Text.unpack

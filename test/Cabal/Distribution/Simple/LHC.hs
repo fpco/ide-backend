@@ -81,16 +81,18 @@ import Distribution.Simple.PackageIndex
 import qualified Distribution.Simple.PackageIndex as PackageIndex
 import Distribution.ParseUtils  ( ParseResult(..) )
 import Distribution.Simple.LocalBuildInfo
-         ( LocalBuildInfo(..), ComponentLocalBuildInfo(..) )
+         ( LocalBuildInfo(..), ComponentLocalBuildInfo(..),
+           LibraryName(..) )
 import Distribution.Simple.InstallDirs
 import Distribution.Simple.BuildPaths
 import Distribution.Simple.Utils
 import Distribution.Package
-         ( PackageIdentifier, Package(..) )
+         ( Package(..) )
 import qualified Distribution.ModuleName as ModuleName
 import Distribution.Simple.Program
-         ( Program(..), ConfiguredProgram(..), ProgramConfiguration, ProgArg
-         , ProgramLocation(..), rawSystemProgram, rawSystemProgramConf
+         ( Program(..), ConfiguredProgram(..), ProgramConfiguration
+         , ProgramSearchPath, ProgramLocation(..)
+         , rawSystemProgram, rawSystemProgramConf
          , rawSystemProgramStdout, rawSystemProgramStdoutConf
          , requireProgramVersion
          , userMaybeSpecifyPath, programPath, lookupProgram, addKnownProgram
@@ -123,12 +125,13 @@ import System.FilePath          ( (</>), (<.>), takeExtension,
                                   takeDirectory, replaceExtension )
 import System.IO (hClose, hPutStrLn)
 import Distribution.Compat.Exception (catchExit, catchIO)
+import Distribution.System ( Platform )
 
 -- -----------------------------------------------------------------------------
 -- Configuring
 
 configure :: Verbosity -> Maybe FilePath -> Maybe FilePath
-          -> ProgramConfiguration -> IO (Compiler, ProgramConfiguration)
+          -> ProgramConfiguration -> IO (Compiler, Maybe Platform, ProgramConfiguration)
 configure verbosity hcPath hcPkgPath conf = do
 
   (lhcProg, lhcVersion, conf') <-
@@ -155,7 +158,8 @@ configure verbosity hcPath hcPkgPath conf = do
         compilerExtensions     = extensions
       }
       conf''' = configureToolchain lhcProg conf'' -- configure gcc and ld
-  return (comp, conf''')
+      compPlatform = Nothing
+  return (comp, compPlatform, conf''')
 
 -- | Adjust the way we find and configure gcc and ld
 --
@@ -178,32 +182,36 @@ configureToolchain lhcProg =
     isWindows   = case buildOS of Windows -> True; _ -> False
 
     -- on Windows finding and configuring ghc's gcc and ld is a bit special
-    findProg :: Program -> FilePath -> Verbosity -> IO (Maybe FilePath)
-    findProg prog location | isWindows = \verbosity -> do
+    findProg :: Program -> FilePath
+             -> Verbosity -> ProgramSearchPath -> IO (Maybe FilePath)
+    findProg prog location | isWindows = \verbosity searchpath -> do
         exists <- doesFileExist location
         if exists then return (Just location)
                   else do warn verbosity ("Couldn't find " ++ programName prog ++ " where I expected it. Trying the search path.")
-                          programFindLocation prog verbosity
+                          programFindLocation prog verbosity searchpath
       | otherwise = programFindLocation prog
 
-    configureGcc :: Verbosity -> ConfiguredProgram -> IO [ProgArg]
+    configureGcc :: Verbosity -> ConfiguredProgram -> IO ConfiguredProgram
     configureGcc
       | isWindows = \_ gccProg -> case programLocation gccProg of
           -- if it's found on system then it means we're using the result
           -- of programFindLocation above rather than a user-supplied path
           -- that means we should add this extra flag to tell ghc's gcc
           -- where it lives and thus where gcc can find its various files:
-          FoundOnSystem {} -> return ["-B" ++ libDir, "-I" ++ includeDir]
-          UserSpecified {} -> return []
-      | otherwise = \_ _   -> return []
+          FoundOnSystem {} -> return gccProg {
+                                programDefaultArgs = ["-B" ++ libDir,
+                                                      "-I" ++ includeDir]
+                              }
+          UserSpecified {} -> return gccProg
+      | otherwise = \_ gccProg -> return gccProg
 
     -- we need to find out if ld supports the -x flag
-    configureLd :: Verbosity -> ConfiguredProgram -> IO [ProgArg]
+    configureLd :: Verbosity -> ConfiguredProgram -> IO ConfiguredProgram
     configureLd verbosity ldProg = do
       tempDir <- getTemporaryDirectory
       ldx <- withTempFile tempDir ".c" $ \testcfile testchnd ->
              withTempFile tempDir ".o" $ \testofile testohnd -> do
-               hPutStrLn testchnd "int foo() {}"
+               hPutStrLn testchnd "int foo() { return 0; }"
                hClose testchnd; hClose testohnd
                rawSystemProgram verbosity lhcProg ["-c", testcfile,
                                                    "-o", testofile]
@@ -216,8 +224,8 @@ configureToolchain lhcProg =
                  `catchIO`   (\_ -> return False)
                  `catchExit` (\_ -> return False)
       if ldx
-        then return ["-x"]
-        else return []
+        then return ldProg { programDefaultArgs = ["-x"] }
+        else return ldProg
 
 getLanguages :: Verbosity -> ConfiguredProgram -> IO [(Language, Flag)]
 getLanguages _ _ = return [(Haskell98, "")]
@@ -332,6 +340,11 @@ substTopDir topDir ipo
 buildLib :: Verbosity -> PackageDescription -> LocalBuildInfo
                       -> Library            -> ComponentLocalBuildInfo -> IO ()
 buildLib verbosity pkg_descr lbi lib clbi = do
+  libName <- case componentLibraries clbi of
+             [libName] -> return libName
+             [] -> die "No library name found when building library"
+             _  -> die "Multiple library names found when building library"
+
   let pref = buildDir lbi
       pkgid = packageId pkg_descr
       runGhcProg = rawSystemProgramConf verbosity lhcProgram (withPrograms lbi)
@@ -385,11 +398,11 @@ buildLib verbosity pkg_descr lbi lib clbi = do
   info verbosity "Linking..."
   let cObjs = map (`replaceExtension` objExtension) (cSources libBi)
       cSharedObjs = map (`replaceExtension` ("dyn_" ++ objExtension)) (cSources libBi)
-      vanillaLibFilePath = libTargetDir </> mkLibName pkgid
-      profileLibFilePath = libTargetDir </> mkProfLibName pkgid
-      sharedLibFilePath  = libTargetDir </> mkSharedLibName pkgid
-                                              (compilerId (compiler lbi))
-      ghciLibFilePath    = libTargetDir </> mkGHCiLibName pkgid
+      cid = compilerId (compiler lbi)
+      vanillaLibFilePath = libTargetDir </> mkLibName           libName
+      profileLibFilePath = libTargetDir </> mkProfLibName       libName
+      sharedLibFilePath  = libTargetDir </> mkSharedLibName cid libName
+      ghciLibFilePath    = libTargetDir </> mkGHCiLibName       libName
 
   stubObjs <- fmap catMaybes $ sequence
     [ findFileWithExtension [objExtension] [libTargetDir]
@@ -695,8 +708,8 @@ ghcCcOptions lbi bi clbi odir
            _              -> ["-optc-O2"])
      ++ ["-odir", odir]
 
-mkGHCiLibName :: PackageIdentifier -> String
-mkGHCiLibName lib = "HS" ++ display lib <.> "o"
+mkGHCiLibName :: LibraryName -> String
+mkGHCiLibName (LibraryName lib) = lib <.> "o"
 
 -- -----------------------------------------------------------------------------
 -- Installing
@@ -747,8 +760,9 @@ installLib    :: Verbosity
               -> FilePath  -- ^Build location
               -> PackageDescription
               -> Library
+              -> ComponentLocalBuildInfo
               -> IO ()
-installLib verbosity lbi targetDir dynlibTargetDir builtDir pkg lib = do
+installLib verbosity lbi targetDir dynlibTargetDir builtDir _pkg lib clbi = do
   -- copy .hi files over:
   let copy src dst n = do
         createDirectoryIfMissingVerbose verbosity True dst
@@ -762,24 +776,24 @@ installLib verbosity lbi targetDir dynlibTargetDir builtDir pkg lib = do
   flip mapM_ hcrFiles $ \(srcBase, srcFile) -> runLhc ["--install-library", srcBase </> srcFile]
 
   -- copy the built library files over:
-  ifVanilla $ copy builtDir targetDir vanillaLibName
-  ifProf    $ copy builtDir targetDir profileLibName
-  ifGHCi    $ copy builtDir targetDir ghciLibName
-  ifShared  $ copy builtDir dynlibTargetDir sharedLibName
+  ifVanilla $ mapM_ (copy builtDir targetDir)       vanillaLibNames
+  ifProf    $ mapM_ (copy builtDir targetDir)       profileLibNames
+  ifGHCi    $ mapM_ (copy builtDir targetDir)       ghciLibNames
+  ifShared  $ mapM_ (copy builtDir dynlibTargetDir) sharedLibNames
 
   -- run ranlib if necessary:
-  ifVanilla $ updateLibArchive verbosity lbi
-                               (targetDir </> vanillaLibName)
-  ifProf    $ updateLibArchive verbosity lbi
-                               (targetDir </> profileLibName)
+  ifVanilla $ mapM_ (updateLibArchive verbosity lbi . (targetDir </>))
+                    vanillaLibNames
+  ifProf    $ mapM_ (updateLibArchive verbosity lbi . (targetDir </>))
+                    profileLibNames
 
   where
-    vanillaLibName = mkLibName pkgid
-    profileLibName = mkProfLibName pkgid
-    ghciLibName    = mkGHCiLibName pkgid
-    sharedLibName  = mkSharedLibName pkgid (compilerId (compiler lbi))
-
-    pkgid          = packageId pkg
+    cid = compilerId (compiler lbi)
+    libNames = componentLibraries clbi
+    vanillaLibNames = map mkLibName             libNames
+    profileLibNames = map mkProfLibName         libNames
+    ghciLibNames    = map mkGHCiLibName         libNames
+    sharedLibNames  = map (mkSharedLibName cid) libNames
 
     hasLib    = not $ null (libModules lib)
                    && null (cSources (libBuildInfo lib))

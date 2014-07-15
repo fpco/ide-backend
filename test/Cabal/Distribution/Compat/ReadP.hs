@@ -19,12 +19,10 @@
 -- This version of ReadP has been locally hacked to make it H98, by
 -- Martin Sj&#xF6;gren <mailto:msjogren@gmail.com>
 --
+-- The unit tests have been moved to UnitTest.Distribution.Compat.ReadP, by
+-- Mark Lentczner <mailto:mark@glyphic.com>
 -----------------------------------------------------------------------------
 
-{-# LANGUAGE CPP #-}
-#if __GLASGOW_HASKELL__ >= 707
-{-# OPTIONS_GHC -fno-warn-amp #-}
-#endif
 module Distribution.Compat.ReadP
   (
   -- * The 'ReadP' type
@@ -68,14 +66,12 @@ module Distribution.Compat.ReadP
   ReadS,      -- :: *; = String -> [(a,String)]
   readP_to_S, -- :: ReadP a -> ReadS a
   readS_to_P  -- :: ReadS a -> ReadP a
-
-  -- * Properties
-  -- $properties
   )
  where
 
-import Control.Monad( MonadPlus(..), liftM2 )
+import Control.Monad( MonadPlus(..), liftM, liftM2, ap )
 import Data.Char (isSpace)
+import Control.Applicative (Applicative(..), Alternative(empty, (<|>)))
 
 infixr 5 +++, <++
 
@@ -92,6 +88,13 @@ data P s a
 
 -- Monad, MonadPlus
 
+instance Functor (P s) where
+  fmap = liftM
+
+instance Applicative (P s) where
+  pure = return
+  (<*>) = ap
+
 instance Monad (P s) where
   return x = Result x Fail
 
@@ -102,6 +105,10 @@ instance Monad (P s) where
   (Final r)    >>= k = final [ys' | (x,s) <- r, ys' <- run (k x) s]
 
   fail _ = Fail
+
+instance Alternative (P s) where
+      empty = mzero
+      (<|>) = mplus
 
 instance MonadPlus (P s) where
   mzero = Fail
@@ -142,6 +149,10 @@ type ReadP r a = Parser r Char a
 
 instance Functor (Parser r s) where
   fmap h (R f) = R (\k -> f (k . h))
+
+instance Applicative (Parser r s) where
+  pure = return
+  (<*>) = ap
 
 instance Monad (Parser r s) where
   return x  = R (\k -> k x)
@@ -382,93 +393,5 @@ readS_to_P :: ReadS a -> ReadP r a
 readS_to_P r =
   R (\k -> Look (\s -> final [bs'' | (a,s') <- r s, bs'' <- run (k a) s']))
 
--- ---------------------------------------------------------------------------
--- QuickCheck properties that hold for the combinators
 
-{- $properties
-The following are QuickCheck specifications of what the combinators do.
-These can be seen as formal specifications of the behavior of the
-combinators.
-
-We use bags to give semantics to the combinators.
-
->  type Bag a = [a]
-
-Equality on bags does not care about the order of elements.
-
->  (=~) :: Ord a => Bag a -> Bag a -> Bool
->  xs =~ ys = sort xs == sort ys
-
-A special equality operator to avoid unresolved overloading
-when testing the properties.
-
->  (=~.) :: Bag (Int,String) -> Bag (Int,String) -> Bool
->  (=~.) = (=~)
-
-Here follow the properties:
-
->  prop_Get_Nil =
->    readP_to_S get [] =~ []
->
->  prop_Get_Cons c s =
->    readP_to_S get (c:s) =~ [(c,s)]
->
->  prop_Look s =
->    readP_to_S look s =~ [(s,s)]
->
->  prop_Fail s =
->    readP_to_S pfail s =~. []
->
->  prop_Return x s =
->    readP_to_S (return x) s =~. [(x,s)]
->
->  prop_Bind p k s =
->    readP_to_S (p >>= k) s =~.
->      [ ys''
->      | (x,s') <- readP_to_S p s
->      , ys''   <- readP_to_S (k (x::Int)) s'
->      ]
->
->  prop_Plus p q s =
->    readP_to_S (p +++ q) s =~.
->      (readP_to_S p s ++ readP_to_S q s)
->
->  prop_LeftPlus p q s =
->    readP_to_S (p <++ q) s =~.
->      (readP_to_S p s +<+ readP_to_S q s)
->   where
->    [] +<+ ys = ys
->    xs +<+ _  = xs
->
->  prop_Gather s =
->    forAll readPWithoutReadS $ \p ->
->      readP_to_S (gather p) s =~
->	 [ ((pre,x::Int),s')
->	 | (x,s') <- readP_to_S p s
->	 , let pre = take (length s - length s') s
->	 ]
->
->  prop_String_Yes this s =
->    readP_to_S (string this) (this ++ s) =~
->      [(this,s)]
->
->  prop_String_Maybe this s =
->    readP_to_S (string this) s =~
->      [(this, drop (length this) s) | this `isPrefixOf` s]
->
->  prop_Munch p s =
->    readP_to_S (munch p) s =~
->      [(takeWhile p s, dropWhile p s)]
->
->  prop_Munch1 p s =
->    readP_to_S (munch1 p) s =~
->      [(res,s') | let (res,s') = (takeWhile p s, dropWhile p s), not (null res)]
->
->  prop_Choice ps s =
->    readP_to_S (choice ps) s =~.
->      readP_to_S (foldr (+++) pfail ps) s
->
->  prop_ReadS r s =
->    readP_to_S (readS_to_P r) s =~. r s
--}
 

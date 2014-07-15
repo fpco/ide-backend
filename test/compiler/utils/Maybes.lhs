@@ -6,7 +6,7 @@
 \begin{code}
 {-# OPTIONS -fno-warn-tabs #-}
 {-# LANGUAGE CPP #-}
-#if __GLASGOW_HASKELL__ >= 707
+#if __GLASGOW_HASKELL__ == 708
 {-# OPTIONS_GHC -fno-warn-amp #-}
 #endif
 -- The above warning supression flag is a temporary kludge.

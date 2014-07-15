@@ -41,10 +41,6 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. -}
 
-{-# LANGUAGE CPP #-}
-#if __GLASGOW_HASKELL__ >= 707
-{-# OPTIONS_GHC -fno-warn-amp #-}
-#endif
 module Distribution.PackageDescription.Parse (
         -- * Package descriptions
         readPackageDescription,
@@ -76,8 +72,11 @@ import Data.Char  (isSpace)
 import Data.Maybe (listToMaybe, isJust)
 import Data.Monoid ( Monoid(..) )
 import Data.List  (nub, unfoldr, partition, (\\))
-import Control.Monad (liftM, foldM, when, unless)
+import Control.Monad (liftM, foldM, when, unless, ap)
+import Control.Applicative (Applicative(..))
+import Control.Arrow (first)
 import System.Directory (doesFileExist)
+import qualified Data.ByteString.Lazy.Char8 as BS.Char8
 
 import Distribution.Text
          ( Text(disp, parse), display, simpleParse )
@@ -87,6 +86,8 @@ import Text.PrettyPrint
 
 import Distribution.ParseUtils hiding (parseFields)
 import Distribution.PackageDescription
+import Distribution.PackageDescription.Utils
+         ( cabalBug, userBug )
 import Distribution.Package
          ( PackageIdentifier(..), Dependency(..), packageName, packageVersion )
 import Distribution.ModuleName ( ModuleName )
@@ -173,13 +174,16 @@ pkgDescrFieldDescrs =
  , listField "extra-tmp-files"
            showFilePath       parseFilePathQ
            extraTmpFiles          (\val pkg -> pkg{extraTmpFiles=val})
+ , listField "extra-doc-files"
+           showFilePath    parseFilePathQ
+           extraDocFiles          (\val pkg -> pkg{extraDocFiles=val})
  ]
 
 -- | Store any fields beginning with "x-" in the customFields field of
 --   a PackageDescription.  All other fields will generate a warning.
 storeXFieldsPD :: UnrecFieldParser PackageDescription
 storeXFieldsPD (f@('x':'-':_),val) pkg = Just pkg{ customFieldsPD =
-                                                        (customFieldsPD pkg) ++ [(f,val)]}
+                                                        customFieldsPD pkg ++ [(f,val)]}
 storeXFieldsPD _ _ = Nothing
 
 -- ---------------------------------------------------------------------------
@@ -197,7 +201,7 @@ libFieldDescrs =
 
 storeXFieldsLib :: UnrecFieldParser Library
 storeXFieldsLib (f@('x':'-':_), val) l@(Library { libBuildInfo = bi }) =
-    Just $ l {libBuildInfo = bi{ customFieldsBI = (customFieldsBI bi) ++ [(f,val)]}}
+    Just $ l {libBuildInfo = bi{ customFieldsBI = customFieldsBI bi ++ [(f,val)]}}
 storeXFieldsLib _ _ = Nothing
 
 -- ---------------------------------------------------------------------------
@@ -220,7 +224,7 @@ executableFieldDescrs =
 
 storeXFieldsExe :: UnrecFieldParser Executable
 storeXFieldsExe (f@('x':'-':_), val) e@(Executable { buildInfo = bi }) =
-    Just $ e {buildInfo = bi{ customFieldsBI = (f,val):(customFieldsBI bi)}}
+    Just $ e {buildInfo = bi{ customFieldsBI = (f,val):customFieldsBI bi}}
 storeXFieldsExe _ _ = Nothing
 
 -- ---------------------------------------------------------------------------
@@ -257,7 +261,7 @@ testSuiteFieldDescrs =
 
 storeXFieldsTest :: UnrecFieldParser TestSuiteStanza
 storeXFieldsTest (f@('x':'-':_), val) t@(TestSuiteStanza { testStanzaBuildInfo = bi }) =
-    Just $ t {testStanzaBuildInfo = bi{ customFieldsBI = (f,val):(customFieldsBI bi)}}
+    Just $ t {testStanzaBuildInfo = bi{ customFieldsBI = (f,val):customFieldsBI bi}}
 storeXFieldsTest _ _ = Nothing
 
 validateTestSuite :: LineNo -> TestSuiteStanza -> ParseResult TestSuite
@@ -343,7 +347,7 @@ storeXFieldsBenchmark :: UnrecFieldParser BenchmarkStanza
 storeXFieldsBenchmark (f@('x':'-':_), val)
     t@(BenchmarkStanza { benchmarkStanzaBuildInfo = bi }) =
         Just $ t {benchmarkStanzaBuildInfo =
-                       bi{ customFieldsBI = (f,val):(customFieldsBI bi)}}
+                       bi{ customFieldsBI = (f,val):customFieldsBI bi}}
 storeXFieldsBenchmark _ _ = Nothing
 
 validateBenchmark :: LineNo -> BenchmarkStanza -> ParseResult Benchmark
@@ -466,7 +470,7 @@ binfoFieldDescrs =
  ]
 
 storeXFieldsBI :: UnrecFieldParser BuildInfo
-storeXFieldsBI (f@('x':'-':_),val) bi = Just bi{ customFieldsBI = (f,val):(customFieldsBI bi) }
+storeXFieldsBI (f@('x':'-':_),val) bi = Just bi{ customFieldsBI = (f,val):customFieldsBI bi }
 storeXFieldsBI _ _ = Nothing
 
 ------------------------------------------------------------------------------
@@ -517,7 +521,8 @@ readAndParseFile :: (FilePath -> (String -> IO a) -> IO a)
                  -> FilePath -> IO a
 readAndParseFile withFileContents' parser verbosity fpath = do
   exists <- doesFileExist fpath
-  when (not exists) (die $ "Error Parsing: file \"" ++ fpath ++ "\" doesn't exist. Cannot continue.")
+  unless exists
+    (die $ "Error Parsing: file \"" ++ fpath ++ "\" doesn't exist. Cannot continue.")
   withFileContents' fpath $ \str -> case parser str of
     ParseFailed e -> do
         let (line, message) = locatedErrorMsg e
@@ -550,9 +555,9 @@ isStanzaHeader _ = False
 
 mapSimpleFields :: (Field -> ParseResult Field) -> [Field]
                 -> ParseResult [Field]
-mapSimpleFields f fs = mapM walk fs
+mapSimpleFields f = mapM walk
   where
-    walk fld@(F _ _ _) = f fld
+    walk fld@F{} = f fld
     walk (IfBlock l c fs1 fs2) = do
       fs1' <- mapM walk fs1
       fs2' <- mapM walk fs2
@@ -575,7 +580,7 @@ constraintFieldNames = ["build-depends"]
 parseConstraint :: Field -> ParseResult [Dependency]
 parseConstraint (F l n v)
     | n == "build-depends" = runP l n (parseCommaList parse) v
-parseConstraint f = bug $ "Constraint was expected (got: " ++ show f ++ ")"
+parseConstraint f = userBug $ "Constraint was expected (got: " ++ show f ++ ")"
 
 {-
 headerFieldNames :: [String]
@@ -599,6 +604,13 @@ buildInfoNames = map fieldName binfoFieldDescrs
 -- on the 'mtl' package.
 newtype StT s m a = StT { runStT :: s -> m (a,s) }
 
+instance Functor f => Functor (StT s f) where
+    fmap g (StT f) = StT $ fmap (first g)  . f
+
+instance (Monad m, Functor m) => Applicative (StT s m) where
+    pure = return
+    (<*>) = ap
+
 instance Monad m => Monad (StT s m) where
     return a = StT (\s -> return (a,s))
     StT f >>= g = StT $ \s -> do
@@ -615,7 +627,7 @@ lift :: Monad m => m a -> StT s m a
 lift m = StT $ \s -> m >>= \a -> return (a,s)
 
 evalStT :: Monad m => StT s m a -> s -> m a
-evalStT st s = runStT st s >>= return . fst
+evalStT st s = liftM fst $ runStT st s
 
 -- Our monad for parsing a list/tree of fields.
 --
@@ -626,7 +638,7 @@ type PM a = StT [Field] ParseResult a
 
 -- return look-ahead field or nothing if we're at the end of the file
 peekField :: PM (Maybe Field)
-peekField = get >>= return . listToMaybe
+peekField = liftM listToMaybe get
 
 -- Unconditionally discard the first field in our state.  Will error when it
 -- reaches end of file.  (Yes, that's evil.)
@@ -714,7 +726,7 @@ parsePackageDescription file = do
                    flags mlib exes tests bms
 
   where
-    oldSyntax flds = all isSimpleField flds
+    oldSyntax = all isSimpleField
     reportTabsError tabs =
         syntaxError (fst (head tabs)) $
           "Do not use tabs for indentation (use spaces instead)\n"
@@ -784,7 +796,7 @@ parsePackageDescription file = do
               | e == "executable" =
                   let (efs, r') = break ((=="executable") . fName) r
                   in Just (Section l "executable" n (deps ++ efs), r')
-            toExe _ = bug "unexpeced input to 'toExe'"
+            toExe _ = cabalBug "unexpected input to 'toExe'"
           in
             hdr ++
            (if null libfs then []
@@ -792,7 +804,7 @@ parsePackageDescription file = do
             ++ exes
       | otherwise = fs
 
-    isSimpleField (F _ _ _) = True
+    isSimpleField F{} = True
     isSimpleField _ = False
 
     -- warn if there's something at the end of the file
@@ -807,7 +819,7 @@ parsePackageDescription file = do
     -- fields
     getHeader :: [Field] -> PM [Field]
     getHeader acc = peekField >>= \mf -> case mf of
-        Just f@(F _ _ _) -> skipField >> getHeader (f:acc)
+        Just f@F{} -> skipField >> getHeader (f:acc)
         _ -> return (reverse acc)
 
     --
@@ -866,7 +878,7 @@ parsePackageDescription file = do
                     -- only one need one to specify a type because the
                     -- configure step uses 'mappend' to join together the
                     -- results of flag resolution.
-                    in hasTestType || (any checkComponent components)
+                    in hasTestType || any checkComponent components
             if checkTestType emptyTestSuite flds
                 then do
                     skipField
@@ -914,7 +926,7 @@ parsePackageDescription file = do
                     -- only one need one to specify a type because the
                     -- configure step uses 'mappend' to join together the
                     -- results of flag resolution.
-                    in hasBenchmarkType || (any checkComponent components)
+                    in hasBenchmarkType || any checkComponent components
             if checkBenchmarkType emptyBenchmark flds
                 then do
                     skipField
@@ -928,7 +940,7 @@ parsePackageDescription file = do
                       ++ intercalate ", " (map display knownBenchmarkTypes)
 
         | sec_type == "library" -> do
-            when (not (null sec_label)) $ lift $
+            unless (null sec_label) $ lift $
               syntaxError line_no "'library' expects no argument"
             flds <- collectFields parseLibFields sec_fields
             skipField
@@ -960,7 +972,7 @@ parsePackageDescription file = do
             repo <- lift $ parseFields
                     sourceRepoFieldDescrs
                     warnUnrec
-                    (SourceRepo {
+                    SourceRepo {
                       repoKind     = kind,
                       repoType     = Nothing,
                       repoLocation = Nothing,
@@ -968,7 +980,7 @@ parsePackageDescription file = do
                       repoBranch   = Nothing,
                       repoTag      = Nothing,
                       repoSubdir   = Nothing
-                    })
+                    }
                     sec_fields
             skipField
             (repos, flags, lib, exes, tests, bms) <- getBody
@@ -994,7 +1006,7 @@ parsePackageDescription file = do
     collectFields parser allflds = do
 
         let simplFlds = [ F l n v | F l n v <- allflds ]
-            condFlds = [ f | f@(IfBlock _ _ _ _) <- allflds ]
+            condFlds = [ f | f@IfBlock{} <- allflds ]
 
         let (depFlds, dataFlds) = partition isConstraint simplFlds
 
@@ -1016,7 +1028,7 @@ parsePackageDescription file = do
                    es -> do fs <- collectFields parser es
                             return (Just fs)
             return (cnd, t', e')
-        processIfs _ = bug "processIfs called with wrong field type"
+        processIfs _ = cabalBug "processIfs called with wrong field type"
 
     parseLibFields :: [Field] -> PM Library
     parseLibFields = lift . parseFields libFieldDescrs storeXFieldsLib emptyLibrary
@@ -1052,7 +1064,7 @@ parsePackageDescription file = do
     checkCondTreeFlags :: [FlagName] -> CondTree ConfVar c a -> PM ()
     checkCondTreeFlags definedFlags ct = do
         let fv = nub $ freeVars ct
-        when (not . all (`elem` definedFlags) $ fv) $
+        unless (all (`elem` definedFlags) fv) $
             fail $ "These flags are used without having been defined: "
                 ++ intercalate ", " [ n | FlagName n <- fv \\ definedFlags ]
 
@@ -1070,14 +1082,13 @@ parseFields :: [FieldDescr a]      -- ^ descriptions of fields we know how to
             -> ParseResult a
 parseFields descrs unrec ini fields =
     do (a, unknowns) <- foldM (parseField descrs unrec) (ini, []) fields
-       when (not (null unknowns)) $ do
-         warning $ render $
-           text "Unknown fields:" <+>
-                commaSep (map (\(l,u) -> u ++ " (line " ++ show l ++ ")")
-                              (reverse unknowns))
-           $+$
-           text "Fields allowed in this section:" $$
-             nest 4 (commaSep $ map fieldName descrs)
+       unless (null unknowns) $ warning $ render $
+         text "Unknown fields:" <+>
+              commaSep (map (\(l,u) -> u ++ " (line " ++ show l ++ ")")
+                            (reverse unknowns))
+         $+$
+         text "Fields allowed in this section:" $$
+           nest 4 (commaSep $ map fieldName descrs)
        return a
   where
     commaSep = fsep . punctuate comma . map text
@@ -1088,14 +1099,14 @@ parseField :: [FieldDescr a]     -- ^ list of parseable fields
            -> (a,[(Int,String)]) -- ^ accumulated result and warnings
            -> Field              -- ^ the field to be parsed
            -> ParseResult (a, [(Int,String)])
-parseField ((FieldDescr name _ parser):fields) unrec (a, us) (F line f val)
+parseField (FieldDescr name _ parser : fields) unrec (a, us) (F line f val)
   | name == f = parser line val a >>= \a' -> return (a',us)
   | otherwise = parseField fields unrec (a,us) (F line f val)
 parseField [] unrec (a,us) (F l f val) = return $
   case unrec (f,val) a of        -- no fields matched, see if the 'unrec'
     Just a' -> (a',us)           -- function wants to do anything with it
-    Nothing -> (a, ((l,f):us))
-parseField _ _ _ _ = bug "'parseField' called on a non-field"
+    Nothing -> (a, (l,f):us)
+parseField _ _ _ _ = cabalBug "'parseField' called on a non-field"
 
 deprecatedFields :: [(String,String)]
 deprecatedFields =
@@ -1117,7 +1128,7 @@ deprecField (F line fld val) = do
                       ++ "\" is deprecated, please use \"" ++ newName ++ "\""
               return newName
   return (F line fld' val)
-deprecField _ = bug "'deprecField' called on a non-field"
+deprecField _ = cabalBug "'deprecField' called on a non-field"
 
 
 parseHookedBuildInfo :: String -> ParseResult HookedBuildInfo
@@ -1129,17 +1140,17 @@ parseHookedBuildInfo inp = do
   return (mLib, biExes)
   where
     parseLib :: [Field] -> ParseResult (Maybe BuildInfo)
-    parseLib (bi@((F _ inFieldName _):_))
+    parseLib (bi@(F _ inFieldName _:_))
         | lowercase inFieldName /= "executable" = liftM Just (parseBI bi)
     parseLib _ = return Nothing
 
     parseExe :: [Field] -> ParseResult (String, BuildInfo)
-    parseExe ((F line inFieldName mName):bi)
+    parseExe (F line inFieldName mName:bi)
         | lowercase inFieldName == "executable"
             = do bis <- parseBI bi
                  return (mName, bis)
         | otherwise = syntaxError line "expecting 'executable' at top of stanza"
-    parseExe (_:_) = bug "`parseExe' called on a non-field"
+    parseExe (_:_) = cabalBug "`parseExe' called on a non-field"
     parseExe [] = syntaxError 0 "error in parsing buildinfo file. Expected executable stanza"
 
     parseBI st = parseFields binfoFieldDescrs storeXFieldsBI emptyBuildInfo st
@@ -1172,7 +1183,8 @@ ppCustomField :: (String,String) -> Doc
 ppCustomField (name,val) = text name <> colon <+> showFreeText val
 
 writeHookedBuildInfo :: FilePath -> HookedBuildInfo -> IO ()
-writeHookedBuildInfo fpath = writeFileAtomic fpath . showHookedBuildInfo
+writeHookedBuildInfo fpath = writeFileAtomic fpath . BS.Char8.pack
+                             . showHookedBuildInfo
 
 showHookedBuildInfo :: HookedBuildInfo -> String
 showHookedBuildInfo (mb_lib_bi, ex_bis) = render $
@@ -1202,6 +1214,3 @@ findIndentTabs = concatMap checkLine
 
 --test_findIndentTabs = findIndentTabs $ unlines $
 --    [ "foo", "  bar", " \t baz", "\t  biz\t", "\t\t \t mib" ]
-
-bug :: String -> a
-bug msg = error $ msg ++ ". Consider this a bug."

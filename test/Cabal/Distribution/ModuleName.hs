@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Distribution.ModuleName
@@ -50,6 +51,8 @@ module Distribution.ModuleName (
 import Distribution.Text
          ( Text(..) )
 
+import Data.Data (Data)
+import Data.Typeable (Typeable)
 import qualified Distribution.Compat.ReadP as Parse
 import qualified Text.PrettyPrint as Disp
 import qualified Data.Char as Char
@@ -57,12 +60,12 @@ import qualified Data.Char as Char
 import System.FilePath
          ( pathSeparator )
 import Data.List
-         ( intersperse )
+         ( intercalate, intersperse )
 
 -- | A valid Haskell module name.
 --
 newtype ModuleName = ModuleName [String]
-  deriving (Eq, Ord, Read, Show)
+  deriving (Eq, Ord, Read, Show, Typeable, Data)
 
 instance Text ModuleName where
   disp (ModuleName ms) =
@@ -127,4 +130,4 @@ components (ModuleName ms) = ms
 -- > toFilePath (fromString "A.B.C") = "A/B/C"
 --
 toFilePath :: ModuleName -> FilePath
-toFilePath = concat . intersperse [pathSeparator] . components
+toFilePath = intercalate [pathSeparator] . components

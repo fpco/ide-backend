@@ -17,18 +17,22 @@
 module Distribution.Simple.Program.Types (
     -- * Program and functions for constructing them
     Program(..),
+    ProgramSearchPath,
+    ProgramSearchPathEntry(..),
     simpleProgram,
 
     -- * Configured program and related functions
     ConfiguredProgram(..),
     programPath,
+    suppressOverrideArgs,
     ProgArg,
     ProgramLocation(..),
     simpleConfiguredProgram,
   ) where
 
-import Distribution.Simple.Utils
-         ( findProgramLocation )
+import Distribution.Simple.Program.Find
+         ( ProgramSearchPath, ProgramSearchPathEntry(..)
+         , findProgramOnSearchPath )
 import Distribution.Version
          ( Version )
 import Distribution.Verbosity
@@ -43,19 +47,23 @@ data Program = Program {
        -- | The simple name of the program, eg. ghc
        programName :: String,
 
-       -- | A function to search for the program if it's location was not
-       -- specified by the user. Usually this will just be a
-       programFindLocation :: Verbosity -> IO (Maybe FilePath),
+       -- | A function to search for the program if its location was not
+       -- specified by the user. Usually this will just be a call to
+       -- 'findProgramOnSearchPath'.
+       --
+       -- It is supplied with the prevailing search path which will typically
+       -- just be used as-is, but can be extended or ignored as needed.
+       programFindLocation :: Verbosity -> ProgramSearchPath
+                              -> IO (Maybe FilePath),
 
        -- | Try to find the version of the program. For many programs this is
        -- not possible or is not necessary so it's ok to return Nothing.
        programFindVersion :: Verbosity -> FilePath -> IO (Maybe Version),
 
        -- | A function to do any additional configuration after we have
-       -- located the program (and perhaps identified its version). It is
-       -- allowed to return additional flags that will be passed to the
-       -- program on every invocation.
-       programPostConf :: Verbosity -> ConfiguredProgram -> IO [ProgArg]
+       -- located the program (and perhaps identified its version). For example
+       -- it could add args, or environment vars.
+       programPostConf :: Verbosity -> ConfiguredProgram -> IO ConfiguredProgram
      }
 
 type ProgArg = String
@@ -83,6 +91,11 @@ data ConfiguredProgram = ConfiguredProgram {
        -- all earlier flags.
        programOverrideArgs :: [String],
 
+       -- | Override environment variables for this program.
+       -- These env vars will extend\/override the prevailing environment of
+       -- the current to form the environment for the new process.
+       programOverrideEnv :: [(String, Maybe String)],
+
        -- | Location of the program. eg. @\/usr\/bin\/ghc-6.4@
        programLocation :: ProgramLocation
      } deriving (Read, Show, Eq)
@@ -101,6 +114,10 @@ data ProgramLocation
 programPath :: ConfiguredProgram -> FilePath
 programPath = locationPath . programLocation
 
+-- | Suppress any extra arguments added by the user.
+suppressOverrideArgs :: ConfiguredProgram -> ConfiguredProgram
+suppressOverrideArgs prog = prog { programOverrideArgs = [] }
+
 -- | Make a simple named program.
 --
 -- By default we'll just search for it in the path and not try to find the
@@ -111,9 +128,9 @@ programPath = locationPath . programLocation
 simpleProgram :: String -> Program
 simpleProgram name = Program {
     programName         = name,
-    programFindLocation = \v   -> findProgramLocation v name,
+    programFindLocation = \v p -> findProgramOnSearchPath v p name,
     programFindVersion  = \_ _ -> return Nothing,
-    programPostConf     = \_ _ -> return []
+    programPostConf     = \_ p -> return p
   }
 
 -- | Make a simple 'ConfiguredProgram'.
@@ -126,5 +143,6 @@ simpleConfiguredProgram name loc = ConfiguredProgram {
      programVersion      = Nothing,
      programDefaultArgs  = [],
      programOverrideArgs = [],
+     programOverrideEnv  = [],
      programLocation     = loc
   }

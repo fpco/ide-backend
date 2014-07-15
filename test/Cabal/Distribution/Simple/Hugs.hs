@@ -118,12 +118,15 @@ import System.Directory
 import System.Exit
          ( ExitCode(ExitSuccess) )
 import Distribution.Compat.Exception
+import Distribution.System ( Platform )
+
+import qualified Data.ByteString.Lazy.Char8 as BS.Char8
 
 -- -----------------------------------------------------------------------------
 -- Configuring
 
 configure :: Verbosity -> Maybe FilePath -> Maybe FilePath
-          -> ProgramConfiguration -> IO (Compiler, ProgramConfiguration)
+          -> ProgramConfiguration -> IO (Compiler, Maybe Platform, ProgramConfiguration)
 configure verbosity hcPath _hcPkgPath conf = do
 
   (_ffihugsProg, conf') <- requireProgram verbosity ffihugsProgram
@@ -137,7 +140,8 @@ configure verbosity hcPath _hcPkgPath conf = do
         compilerLanguages      = hugsLanguages,
         compilerExtensions     = hugsLanguageExtensions
       }
-  return (comp, conf'')
+      compPlatform = Nothing
+  return (comp, compPlatform, conf'')
 
   where
     hugsProgram' = hugsProgram { programFindVersion = getVersion }
@@ -145,6 +149,7 @@ configure verbosity hcPath _hcPkgPath conf = do
 getVersion :: Verbosity -> FilePath -> IO (Maybe Version)
 getVersion verbosity hugsPath = do
   (output, _err, exit) <- rawSystemStdInOut verbosity hugsPath []
+                              Nothing Nothing
                               (Just (":quit", False)) False
   if exit == ExitSuccess
     then return $! findVersion output
@@ -597,7 +602,7 @@ install verbosity lbi libDir installProgDir binDir targetProgDir buildPref (prog
                              let args = hugsOptions ++ [targetName, "\"$@\""]
                              in unlines ["#! /bin/sh",
                                          unwords ("runhugs" : args)]
-        writeFileAtomic exeFile script
+        writeFileAtomic exeFile (BS.Char8.pack script)
         setFileExecutable exeFile
 
 hugsInstallSuffixes :: [String]

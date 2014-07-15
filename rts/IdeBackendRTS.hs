@@ -25,12 +25,15 @@ import GHC.IO.Handle.Internals (
   )
 import qualified GHC.IO.FD as FD
 
-run :: RunBufferMode -> RunBufferMode -> IO a -> IO a
+run :: RunBufferMode -> RunBufferMode -> IO a -> IO ()
 run outBMode errBMode io = do
-  resetStdin  IO.utf8
-  resetStdout IO.utf8
-  resetStderr IO.utf8
-  withBuffering IO.stdout outBMode $ withBuffering IO.stderr errBMode $ io
+  let resetHandles = do
+        resetStdin  IO.utf8
+        resetStdout IO.utf8
+        resetStderr IO.utf8
+  let io' = do _result <- io ; return () -- Throw away any snippet result
+  withBuffering IO.stdout outBMode (withBuffering IO.stderr errBMode io')
+    `Ex.finally` resetHandles
 
 {-------------------------------------------------------------------------------
   Buffer modes

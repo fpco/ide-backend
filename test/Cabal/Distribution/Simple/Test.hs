@@ -71,13 +71,13 @@ import Distribution.Simple.InstallDirs
 import qualified Distribution.Simple.LocalBuildInfo as LBI
     ( LocalBuildInfo(..) )
 import Distribution.Simple.Setup ( TestFlags(..), TestShowDetails(..), fromFlag )
-import Distribution.Simple.Utils ( die, notice )
+import Distribution.Simple.Utils ( die, notice, rawSystemIOWithEnv )
 import Distribution.TestSuite
     ( OptionDescr(..), Options, Progress(..), Result(..), TestInstance(..)
     , Test(..) )
 import Distribution.Text
 import Distribution.Verbosity ( normal, Verbosity )
-import Distribution.System ( buildPlatform, Platform )
+import Distribution.System ( Platform )
 
 import Control.Exception ( bracket )
 import Control.Monad ( when, unless, filterM )
@@ -86,12 +86,11 @@ import Data.Maybe ( mapMaybe )
 import System.Directory
     ( createDirectoryIfMissing, doesDirectoryExist, doesFileExist
     , getCurrentDirectory, getDirectoryContents, removeDirectoryRecursive
-    , removeFile )
-import System.Environment ( getEnvironment )
+    , removeFile, setCurrentDirectory )
+import Distribution.Compat.Environment ( getEnvironment )
 import System.Exit ( ExitCode(..), exitFailure, exitWith )
 import System.FilePath ( (</>), (<.>) )
 import System.IO ( hClose, IOMode(..), openFile )
-import System.Process ( runProcess, waitForProcess )
 
 -- | Logs all test results for a package, broken down first by test suite and
 -- then by test case.
@@ -108,7 +107,7 @@ localPackageLog :: PD.PackageDescription -> LBI.LocalBuildInfo -> PackageLog
 localPackageLog pkg_descr lbi = PackageLog
     { package = PD.package pkg_descr
     , compiler = compilerId $ LBI.compiler lbi
-    , platform = buildPlatform
+    , platform = LBI.hostPlatform lbi
     , testSuites = []
     }
 
@@ -191,10 +190,10 @@ testController flags pkg_descr lbi suite preTest cmd postTest logNamer = do
     pwd <- getCurrentDirectory
     existingEnv <- getEnvironment
     let dataDirPath = pwd </> PD.dataDir pkg_descr
-        shellEnv = Just $ (pkgPathEnvVar pkg_descr "datadir", dataDirPath)
-                        : ("HPCTIXFILE", (</>) pwd
-                            $ tixFilePath distPref $ PD.testName suite)
-                        : existingEnv
+        shellEnv = (pkgPathEnvVar pkg_descr "datadir", dataDirPath)
+                   : ("HPCTIXFILE", (</>) pwd
+                       $ tixFilePath distPref $ PD.testName suite)
+                   : existingEnv
 
     bracket (openCabalTemp testLogDir) deleteIfExists $ \tempLog ->
         bracket (openCabalTemp testLogDir) deleteIfExists $ \tempInput -> do
@@ -223,10 +222,9 @@ testController flags pkg_descr lbi suite preTest cmd postTest logNamer = do
             exit <- do
               hLog <- openFile tempLog AppendMode
               hIn  <- openFile tempInput ReadMode
-              -- these handles get closed by runProcess
-              proc <- runProcess cmd opts Nothing shellEnv
-                        (Just hIn) (Just hLog) (Just hLog)
-              waitForProcess proc
+              -- these handles get closed by rawSystemIOWithEnv
+              rawSystemIOWithEnv verbosity cmd opts Nothing (Just shellEnv)
+                                 (Just hIn) (Just hLog) (Just hLog)
 
             -- Generate TestSuiteLog from executable exit code and a machine-
             -- readable test log
@@ -432,6 +430,7 @@ testSuiteLogPath template pkg_descr lbi testLog =
     where
         env = initialPathTemplateEnv
                 (PD.package pkg_descr) (compilerId $ LBI.compiler lbi)
+                (LBI.hostPlatform lbi)
                 ++  [ (TestSuiteNameVar, toPathTemplate $ testSuiteName testLog)
                     , (TestSuiteResultVar, result)
                     ]
@@ -448,7 +447,8 @@ testOption pkg_descr lbi suite template =
     fromPathTemplate $ substPathTemplate env template
   where
     env = initialPathTemplateEnv
-          (PD.package pkg_descr) (compilerId $ LBI.compiler lbi) ++
+          (PD.package pkg_descr) (compilerId $ LBI.compiler lbi)
+          (LBI.hostPlatform lbi) ++
           [(TestSuiteNameVar, toPathTemplate $ PD.testName suite)]
 
 packageLogPath :: PathTemplate
@@ -460,6 +460,7 @@ packageLogPath template pkg_descr lbi =
     where
         env = initialPathTemplateEnv
                 (PD.package pkg_descr) (compilerId $ LBI.compiler lbi)
+                (LBI.hostPlatform lbi)
 
 -- | The filename of the source file for the stub executable associated with a
 -- library 'TestSuite'.
@@ -498,7 +499,10 @@ simpleTestStub m = unlines
 stubMain :: IO [Test] -> IO ()
 stubMain tests = do
     (f, n) <- fmap read getContents
-    tests >>= stubRunTests >>= stubWriteLog f n
+    dir <- getCurrentDirectory
+    results <- tests >>= stubRunTests
+    setCurrentDirectory dir
+    stubWriteLog f n results
 
 -- | The test runner used in library "TestSuite" stub executables.  Runs a list
 -- of 'Test's.  An executable calling this function is meant to be invoked as
@@ -541,4 +545,3 @@ stubWriteLog f n logs = do
     when (suiteError testLog) $ exitWith $ ExitFailure 2
     when (suiteFailed testLog) $ exitWith $ ExitFailure 1
     exitWith ExitSuccess
-

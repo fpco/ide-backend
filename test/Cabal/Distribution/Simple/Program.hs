@@ -35,6 +35,8 @@
 module Distribution.Simple.Program (
     -- * Program and functions for constructing them
       Program(..)
+    , ProgramSearchPath
+    , ProgramSearchPathEntry(..)
     , simpleProgram
     , findProgramLocation
     , findProgramVersion
@@ -46,6 +48,7 @@ module Distribution.Simple.Program (
     , ProgramLocation(..)
     , runProgram
     , getProgramOutput
+    , suppressOverrideArgs
 
     -- * Program invocations
     , ProgramInvocation(..)
@@ -67,6 +70,8 @@ module Distribution.Simple.Program (
     , addKnownPrograms
     , lookupKnownProgram
     , knownPrograms
+    , getProgramSearchPath
+    , setProgramSearchPath
     , userSpecifyPath
     , userSpecifyPaths
     , userMaybeSpecifyPath

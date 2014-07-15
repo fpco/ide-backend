@@ -1,6 +1,4 @@
 {-# LANGUAGE CPP, ForeignFunctionInterface #-}
-{-# OPTIONS_NHC98 -cpp #-}
-{-# OPTIONS_JHC -fcpp -fffi #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Distribution.Simple.InstallDirs
@@ -77,14 +75,12 @@ import Data.Maybe (fromMaybe)
 import Data.Monoid (Monoid(..))
 import System.Directory (getAppUserDataDirectory)
 import System.FilePath ((</>), isPathSeparator, pathSeparator)
-#if __HUGS__ || __GLASGOW_HASKELL__ > 606
 import System.FilePath (dropDrive)
-#endif
 
 import Distribution.Package
          ( PackageIdentifier, packageName, packageVersion )
 import Distribution.System
-         ( OS(..), buildOS, Platform(..), buildPlatform )
+         ( OS(..), buildOS, Platform(..) )
 import Distribution.Compiler
          ( CompilerId, CompilerFlavor(..) )
 import Distribution.Text
@@ -120,7 +116,8 @@ data InstallDirs dir = InstallDirs {
         docdir       :: dir,
         mandir       :: dir,
         htmldir      :: dir,
-        haddockdir   :: dir
+        haddockdir   :: dir,
+        sysconfdir   :: dir
     } deriving (Read, Show)
 
 instance Functor InstallDirs where
@@ -138,7 +135,8 @@ instance Functor InstallDirs where
     docdir       = f (docdir dirs),
     mandir       = f (mandir dirs),
     htmldir      = f (htmldir dirs),
-    haddockdir   = f (haddockdir dirs)
+    haddockdir   = f (haddockdir dirs),
+    sysconfdir   = f (sysconfdir dirs)
   }
 
 instance Monoid dir => Monoid (InstallDirs dir) where
@@ -156,7 +154,8 @@ instance Monoid dir => Monoid (InstallDirs dir) where
       docdir       = mempty,
       mandir       = mempty,
       htmldir      = mempty,
-      haddockdir   = mempty
+      haddockdir   = mempty,
+      sysconfdir   = mempty
   }
   mappend = combineInstallDirs mappend
 
@@ -178,7 +177,8 @@ combineInstallDirs combine a b = InstallDirs {
     docdir       = docdir a     `combine` docdir b,
     mandir       = mandir a     `combine` mandir b,
     htmldir      = htmldir a    `combine` htmldir b,
-    haddockdir   = haddockdir a `combine` haddockdir b
+    haddockdir   = haddockdir a `combine` haddockdir b,
+    sysconfdir   = sysconfdir a `combine` sysconfdir b
   }
 
 appendSubdirs :: (a -> a -> a) -> InstallDirs a -> InstallDirs a
@@ -240,7 +240,7 @@ defaultInstallDirs comp userInstall _hasLibs = do
            JHC    -> "$compiler"
            LHC    -> "$compiler"
            UHC    -> "$pkgid"
-           _other -> "$pkgid" </> "$compiler",
+           _other -> "$arch-$os-$compiler" </> "$pkgid",
       dynlibdir    = "$libdir",
       libexecdir   = case buildOS of
         Windows   -> "$prefix" </> "$pkgid"
@@ -250,11 +250,12 @@ defaultInstallDirs comp userInstall _hasLibs = do
       datadir      = case buildOS of
         Windows   -> "$prefix"
         _other    -> "$prefix" </> "share",
-      datasubdir   = "$pkgid",
-      docdir       = "$datadir" </> "doc" </> "$pkgid",
+      datasubdir   = "$arch-$os-$compiler" </> "$pkgid",
+      docdir       = "$datadir" </> "doc" </> "$arch-$os-$compiler" </> "$pkgid",
       mandir       = "$datadir" </> "man",
       htmldir      = "$docdir"  </> "html",
-      haddockdir   = "$htmldir"
+      haddockdir   = "$htmldir",
+      sysconfdir   = "$prefix" </> "etc"
   }
 
 -- ---------------------------------------------------------------------------
@@ -292,7 +293,8 @@ substituteInstallDirTemplates env dirs = dirs'
       mandir     = subst mandir     (prefixBinLibDataVars ++ [docdirVar]),
       htmldir    = subst htmldir    (prefixBinLibDataVars ++ [docdirVar]),
       haddockdir = subst haddockdir (prefixBinLibDataVars ++
-                                      [docdirVar, htmldirVar])
+                                      [docdirVar, htmldirVar]),
+      sysconfdir = subst sysconfdir prefixBinLibVars
     }
     subst dir env' = substPathTemplate (env'++env) (dir dirs)
 
@@ -310,10 +312,10 @@ substituteInstallDirTemplates env dirs = dirs'
 -- | Convert from abstract install directories to actual absolute ones by
 -- substituting for all the variables in the abstract paths, to get real
 -- absolute path.
-absoluteInstallDirs :: PackageIdentifier -> CompilerId -> CopyDest
+absoluteInstallDirs :: PackageIdentifier -> CompilerId -> CopyDest -> Platform
                     -> InstallDirs PathTemplate
                     -> InstallDirs FilePath
-absoluteInstallDirs pkgId compilerId copydest dirs =
+absoluteInstallDirs pkgId compilerId copydest platform dirs =
     (case copydest of
        CopyTo destdir -> fmap ((destdir </>) . dropDrive)
        _              -> id)
@@ -321,7 +323,7 @@ absoluteInstallDirs pkgId compilerId copydest dirs =
   . fmap fromPathTemplate
   $ substituteInstallDirTemplates env dirs
   where
-    env = initialPathTemplateEnv pkgId compilerId
+    env = initialPathTemplateEnv pkgId compilerId platform
 
 
 -- |The location prefix for the /copy/ command.
@@ -336,10 +338,10 @@ data CopyDest
 -- prevents us from making a relocatable package (also known as a \"prefix
 -- independent\" package).
 --
-prefixRelativeInstallDirs :: PackageIdentifier -> CompilerId
+prefixRelativeInstallDirs :: PackageIdentifier -> CompilerId -> Platform
                           -> InstallDirTemplates
                           -> InstallDirs (Maybe FilePath)
-prefixRelativeInstallDirs pkgId compilerId dirs =
+prefixRelativeInstallDirs pkgId compilerId platform dirs =
     fmap relative
   . appendSubdirs combinePathTemplate
   $ -- substitute the path template into each other, except that we map
@@ -349,7 +351,7 @@ prefixRelativeInstallDirs pkgId compilerId dirs =
       prefix = PathTemplate [Variable PrefixVar]
     }
   where
-    env = initialPathTemplateEnv pkgId compilerId
+    env = initialPathTemplateEnv pkgId compilerId platform
 
     -- If it starts with $prefix then it's relative and produce the relative
     -- path by stripping off $prefix/ or $prefix
@@ -390,7 +392,8 @@ data PathTemplateVariable =
      | ArchVar       -- ^ The cpu architecture name, eg @i386@ or @x86_64@
      | ExecutableNameVar -- ^ The executable name; used in shell wrappers
      | TestSuiteNameVar   -- ^ The name of the test suite being run
-     | TestSuiteResultVar -- ^ The result of the test suite being run, eg @pass@, @fail@, or @error@.
+     | TestSuiteResultVar -- ^ The result of the test suite being run, eg
+                          -- @pass@, @fail@, or @error@.
      | BenchmarkNameVar   -- ^ The name of the benchmark being run
   deriving Eq
 
@@ -421,12 +424,12 @@ substPathTemplate environment (PathTemplate template) =
                   Nothing                        -> [component]
 
 -- | The initial environment has all the static stuff but no paths
-initialPathTemplateEnv :: PackageIdentifier -> CompilerId -> PathTemplateEnv
-initialPathTemplateEnv pkgId compilerId =
+initialPathTemplateEnv :: PackageIdentifier -> CompilerId -> Platform
+                       -> PathTemplateEnv
+initialPathTemplateEnv pkgId compilerId platform =
      packageTemplateEnv  pkgId
   ++ compilerTemplateEnv compilerId
-  ++ platformTemplateEnv buildPlatform -- platform should be param if we want
-                                       -- to do cross-platform configuation
+  ++ platformTemplateEnv platform
 
 packageTemplateEnv :: PackageIdentifier -> PathTemplateEnv
 packageTemplateEnv pkgId =
@@ -561,9 +564,6 @@ getWindowsProgramFilesDir = do
 #if mingw32_HOST_OS
 shGetFolderPath :: CInt -> IO (Maybe FilePath)
 shGetFolderPath n =
-# if __HUGS__
-  return Nothing
-# else
   allocaArray long_path_size $ \pPath -> do
      r <- c_SHGetFolderPath nullPtr n nullPtr 0 pPath
      if (r /= 0)
@@ -571,7 +571,6 @@ shGetFolderPath n =
         else do s <- peekCWString pPath; return (Just s)
   where
     long_path_size      = 1024 -- MAX_PATH is 260, this should be plenty
-# endif
 
 csidl_PROGRAM_FILES :: CInt
 csidl_PROGRAM_FILES = 0x0026
@@ -585,20 +584,4 @@ foreign import stdcall unsafe "shlobj.h SHGetFolderPathW"
                               -> CInt
                               -> CWString
                               -> IO CInt
-#endif
-
-#if !(__HUGS__ || __GLASGOW_HASKELL__ > 606)
--- Compat: this function only appears in FilePath > 1.0
--- (which at the time of writing is unreleased)
-dropDrive :: FilePath -> FilePath
-dropDrive (c:cs) | isPathSeparator c = cs
-dropDrive (_:':':c:cs) | isWindows
-                      && isPathSeparator c = cs  -- path with drive letter
-dropDrive (_:':':cs)   | isWindows         = cs
-dropDrive cs = cs
-
-isWindows :: Bool
-isWindows = case buildOS of
-  Windows -> True
-  _       -> False
 #endif

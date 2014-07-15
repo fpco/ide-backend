@@ -238,9 +238,9 @@ only a few minor differences, explained when they come up.
   - the test suite requires the following packages (you might of course want to
     use a separate snippet DB for the test suite:)
 
-    * parallel-3.2.0.4 (not necessary for 7.8, is now in the ghc DB itself)
-    * mtl (tested with 2.1.3.1)
-    * monads-tf-0.1.0.1
+    * parallel (tested with 3.2.0.4; necessary also for 7.8.3 now)
+    * mtl (tested with 2.1.3.1, 2.2.1)
+    * monads-tf (testd with 0.1.0.1, 0.1.0.2)
     * yesod-1.2.4 (optional; only required for one test; install with
       cabal --max-backjumps=-1; do not attempt for 7.8 for now))
     * parsec-3.1.3 (optional; only required for one test)
@@ -310,6 +310,9 @@ ghc 7.4
 
   in the section for the "quick" build flavour (make sure there are no trailing
   spaces in your build.mk).
+  
+  NOTE: This assumes wanting to do ghc dev. For performance builds you should
+  pick a different build flavour.
 
 * Build as usual
 
@@ -352,13 +355,12 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
 * Get the corresponding version of the core libraries:
 
-      ./sync-all --extra --no-dph --nofib -r git://git.haskell.org get -b ghc-7.8
-      ./sync-all checkout -b ghc-7.8.2 ghc-7.8.2-release
+      ./sync-all --no-dph -r git://git.haskell.org get -b ghc-7.8 
 
-  (The second line checks out the 7.8.2 release of the libraries _where
-  available_; unfortunately, not all libraries have this tag. This will be
-  resolved once we move to 7.8.3, which uses proper git submodules
-  consistently.)
+  WARNING: There are no ghc-7.8.3-release tags for these libraries, so this
+  checks out the "latest" 7.8 branch for each dependency. This may or may not
+  break in the future. Just for reference, I have included the fingerprint of
+  the repo as I built it as ghc-7.8.3.fp in this directory.
 
 * Create build.mk
 
@@ -375,6 +377,9 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
   in the section for the "quick" build flavour (make sure there are no trailing
   spaces in your build.mk).
 
+  NOTE: This assumes wanting to do ghc dev. For performance builds you should
+  pick a different build flavour.
+
 * Build as usual
 
       perl boot && ./configure && make -j8
@@ -386,9 +391,15 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
   symlinks in ~/env/fpco-patched-7.8/local/bin:
 
       ghc              -> ../src/ghc/inplace/bin/ghc-stage2
-      ghc-7.8.1.20140411 -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-7.8.3.<date> -> ../src/ghc/inplace/bin/ghc-stage2
       ghc-pkg          -> ../src/ghc/inplace/bin/ghc-pkg
       haddock          -> ../src/ghc/inplace/bin/haddock
       hsc2hs           -> ../src/ghc/inplace/bin/hsc2hs
 
-  (TODO: version number will change)
+  (<date> will vary). 
+
+* You will probably also want to install the bundled Haddock: run
+
+      cabal install
+
+  in utils/haddock. 

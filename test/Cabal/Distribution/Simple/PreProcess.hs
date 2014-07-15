@@ -51,7 +51,7 @@ module Distribution.Simple.PreProcess (preprocessComponent, knownSuffixHandlers,
                                 ppSuffixes, PPSuffixHandler, PreProcessor(..),
                                 mkSimplePreProcessor, runSimplePreProcessor,
                                 ppCpp, ppCpp', ppGreenCard, ppC2hs, ppHsc2hs,
-                                ppHappy, ppAlex, ppUnlit
+                                ppHappy, ppAlex, ppUnlit, platformDefines
                                )
     where
 
@@ -71,14 +71,16 @@ import Distribution.PackageDescription as PD
 import qualified Distribution.InstalledPackageInfo as Installed
          ( InstalledPackageInfo_(..) )
 import qualified Distribution.Simple.PackageIndex as PackageIndex
+import Distribution.Simple.CCompiler
+         ( cSourceExtensions )
 import Distribution.Simple.Compiler
-         ( CompilerFlavor(..), Compiler(..), compilerFlavor, compilerVersion )
+         ( CompilerFlavor(..), compilerFlavor, compilerVersion )
 import Distribution.Simple.LocalBuildInfo
          ( LocalBuildInfo(..), Component(..) )
 import Distribution.Simple.BuildPaths (autogenModulesDir,cppHeaderName)
 import Distribution.Simple.Utils
          ( createDirectoryIfMissingVerbose, withUTF8FileContents, writeUTF8File
-         , die, setupMessage, intercalate, copyFileVerbose
+         , die, setupMessage, intercalate, copyFileVerbose, moreRecentFile
          , findFileWithExtension, findFileWithExtension' )
 import Distribution.Simple.Program
          ( Program(..), ConfiguredProgram(..), programPath
@@ -88,7 +90,7 @@ import Distribution.Simple.Program
          , happyProgram, alexProgram, haddockProgram, ghcProgram, gccProgram )
 import Distribution.Simple.Test ( writeSimpleTestStub, stubFilePath, stubName )
 import Distribution.System
-         ( OS(OSX, Windows), buildOS )
+         ( OS(..), buildOS, Arch(..), Platform(..) )
 import Distribution.Text
 import Distribution.Version
          ( Version(..), anyVersion, orLaterVersion )
@@ -96,7 +98,7 @@ import Distribution.Verbosity
 
 import Data.Maybe (fromMaybe)
 import Data.List (nub)
-import System.Directory (getModificationTime, doesFileExist)
+import System.Directory (doesFileExist)
 import System.Info (os, arch)
 import System.FilePath (splitExtension, dropExtensions, (</>), (<.>),
                         takeDirectory, normalise, replaceExtension)
@@ -219,9 +221,11 @@ preprocessComponent pd comp lbi isSrcDist verbosity handlers = case comp of
       BenchmarkUnsupported tt -> die $ "No support for preprocessing benchmark "
                                  ++ "type " ++ display tt
   where
-    builtinSuffixes
+    builtinHaskellSuffixes
       | NHC == compilerFlavor (compiler lbi) = ["hs", "lhs", "gc"]
       | otherwise                            = ["hs", "lhs"]
+    builtinCSuffixes = cSourceExtensions
+    builtinSuffixes = builtinHaskellSuffixes ++ builtinCSuffixes
     localHandlers bi = [(ext, h bi lbi) | (ext, h) <- handlers]
     pre dirs dir lhndlrs fp =
       preprocessFile dirs dir isSrcDist fp verbosity builtinSuffixes lhndlrs
@@ -232,7 +236,7 @@ preprocessComponent pd comp lbi isSrcDist verbosity handlers = case comp of
     preProcessComponent bi modules exePath dir = do
         let biHandlers = localHandlers bi
             sourceDirs = hsSourceDirs bi ++ [ autogenModulesDir lbi ]
-        sequence_ [ preprocessFile sourceDirs (buildDir lbi) isSrcDist
+        sequence_ [ preprocessFile sourceDirs dir isSrcDist
                 (ModuleName.toFilePath modu) verbosity builtinSuffixes
                 biHandlers
                 | modu <- modules ]
@@ -294,10 +298,8 @@ preprocessFile searchLoc buildLoc forSDist baseFile verbosity builtinSuffixes ha
               ppsrcFiles <- findFileWithExtension builtinSuffixes [buildLoc] baseFile
               recomp <- case ppsrcFiles of
                           Nothing -> return True
-                          Just ppsrcFile -> do
-                              btime <- getModificationTime ppsrcFile
-                              ptime <- getModificationTime psrcFile
-                              return (btime < ptime)
+                          Just ppsrcFile ->
+                              psrcFile `moreRecentFile` ppsrcFile
               when recomp $ do
                 let destDir = buildLoc </> dirName srcStem
                 createDirectoryIfMissingVerbose verbosity True destDir
@@ -445,8 +447,7 @@ ppHsc2hs bi lbi =
           -- system's dynamic linker. This is needed because hsc2hs works by
           -- compiling a C program and then running it.
 
-       ++ [ "--cflag="   ++ opt | opt <- hcDefines (compiler lbi) ]
-       ++ [ "--cflag="   ++ opt | opt <- sysDefines ]
+       ++ [ "--cflag="   ++ opt | opt <- platformDefines lbi ]
 
           -- Options from the current package:
        ++ [ "--cflag=-I" ++ dir | dir <- PD.includeDirs  bi ]
@@ -530,43 +531,74 @@ ppC2hs bi lbi =
 --TODO: remove cc-options from cpphs for cabal-version: >= 1.10
 getCppOptions :: BuildInfo -> LocalBuildInfo -> [String]
 getCppOptions bi lbi
-    = hcDefines (compiler lbi)
-   ++ sysDefines
+    = platformDefines lbi
    ++ cppOptions bi
    ++ ["-I" ++ dir | dir <- PD.includeDirs bi]
    ++ [opt | opt@('-':c:_) <- PD.ccOptions bi, c `elem` "DIU"]
 
-sysDefines :: [String]
-sysDefines = ["-D" ++ os   ++ "_" ++ loc ++ "_OS"   | loc <- locations]
-          ++ ["-D" ++ arch ++ "_" ++ loc ++ "_ARCH" | loc <- locations]
-  where
-    locations = ["BUILD", "HOST"]
-
-hcDefines :: Compiler -> [String]
-hcDefines comp =
+platformDefines :: LocalBuildInfo -> [String]
+platformDefines lbi =
   case compilerFlavor comp of
-    GHC  -> ["-D__GLASGOW_HASKELL__=" ++ versionInt version]
+    GHC  ->
+        let ghcOS = case hostOS of
+                    Linux     -> ["linux"]
+                    Windows   -> ["mingw32"]
+                    OSX       -> ["darwin"]
+                    FreeBSD   -> ["freebsd"]
+                    OpenBSD   -> ["openbsd"]
+                    NetBSD    -> ["netbsd"]
+                    Solaris   -> ["solaris2"]
+                    AIX       -> ["aix"]
+                    HPUX      -> ["hpux"]
+                    IRIX      -> ["irix"]
+                    HaLVM     -> []
+                    IOS       -> ["ios"]
+                    OtherOS _ -> []
+            ghcArch = case hostArch of
+                      I386        -> ["i386"]
+                      X86_64      -> ["x86_64"]
+                      PPC         -> ["powerpc"]
+                      PPC64       -> ["powerpc64"]
+                      Sparc       -> ["sparc"]
+                      Arm         -> ["arm"]
+                      Mips        -> ["mips"]
+                      SH          -> []
+                      IA64        -> ["ia64"]
+                      S390        -> ["s390"]
+                      Alpha       -> ["alpha"]
+                      Hppa        -> ["hppa"]
+                      Rs6000      -> ["rs6000"]
+                      M68k        -> ["m68k"]
+                      Vax         -> ["vax"]
+                      OtherArch _ -> []
+        in ["-D__GLASGOW_HASKELL__=" ++ versionInt version] ++
+           ["-D" ++ os   ++ "_BUILD_OS=1"] ++
+           ["-D" ++ arch ++ "_BUILD_ARCH=1"] ++
+           map (\os'   -> "-D" ++ os'   ++ "_HOST_OS=1")   ghcOS ++
+           map (\arch' -> "-D" ++ arch' ++ "_HOST_ARCH=1") ghcArch
     JHC  -> ["-D__JHC__=" ++ versionInt version]
     NHC  -> ["-D__NHC__=" ++ versionInt version]
     Hugs -> ["-D__HUGS__"]
     _    -> []
-  where version = compilerVersion comp
-
--- TODO: move this into the compiler abstraction
--- FIXME: this forces GHC's crazy 4.8.2 -> 408 convention on all the other
--- compilers. Check if that's really what they want.
-versionInt :: Version -> String
-versionInt (Version { versionBranch = [] }) = "1"
-versionInt (Version { versionBranch = [n] }) = show n
-versionInt (Version { versionBranch = n1:n2:_ })
-  = -- 6.8.x -> 608
-    -- 6.10.x -> 610
-    let s1 = show n1
-        s2 = show n2
-        middle = case s2 of
-                 _ : _ : _ -> ""
-                 _         -> "0"
-    in s1 ++ middle ++ s2
+  where
+    comp = compiler lbi
+    Platform hostArch hostOS = hostPlatform lbi
+    version = compilerVersion comp
+    -- TODO: move this into the compiler abstraction
+    -- FIXME: this forces GHC's crazy 4.8.2 -> 408 convention on all
+    -- the other compilers. Check if that's really what they want.
+    versionInt :: Version -> String
+    versionInt (Version { versionBranch = [] }) = "1"
+    versionInt (Version { versionBranch = [n] }) = show n
+    versionInt (Version { versionBranch = n1:n2:_ })
+      = -- 6.8.x -> 608
+        -- 6.10.x -> 610
+        let s1 = show n1
+            s2 = show n2
+            middle = case s2 of
+                     _ : _ : _ -> ""
+                     _         -> "0"
+        in s1 ++ middle ++ s2
 
 ppHappy :: BuildInfo -> LocalBuildInfo -> PreProcessor
 ppHappy _ lbi = pp { platformIndependent = True }
