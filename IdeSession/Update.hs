@@ -23,6 +23,7 @@ module IdeSession.Update (
   , updateDataFile
   , updateDataFileFromFile
   , updateDataFileDelete
+  , updateDeleteManagedFiles
   , updateEnv
   , updateArgs
   , updateStdoutBufferMode
@@ -848,6 +849,13 @@ updateSourceFileFromFile fp =
         }
   in do filesChanged <- Free (FileCmd (FileCopy fileInfo fp) Pure)
         when filesChanged $ schedule (\r -> r { pendingUpdatedCode = True })
+
+-- | Delete all files currently managed in this session
+updateDeleteManagedFiles :: IdeSessionUpdate ()
+updateDeleteManagedFiles = do
+  ManagedFilesInternal{..} <- get ideManagedFiles
+  forM_ _managedSource $ updateSourceFileDelete . fst
+  forM_ _managedData   $ updateDataFileDelete   . fst
 
 -- | A session update that deletes an existing source file.
 --

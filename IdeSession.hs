@@ -125,6 +125,7 @@ module IdeSession (
   , updateDataFile
   , updateDataFileFromFile
   , updateDataFileDelete
+  , updateDeleteManagedFiles
   , updateEnv
   , updateArgs
   , updateStdoutBufferMode
