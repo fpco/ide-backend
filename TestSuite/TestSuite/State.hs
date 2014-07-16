@@ -116,6 +116,7 @@ withAvailableSession' TestSuiteEnv{..} dynOpts act = do
     updateSession session
                   (    updateDynamicOpts dynOpts
                     <> updateDeleteManagedFiles
+                    <> updateCodeGeneration False
                   )
                   (\_ -> return ())
 
