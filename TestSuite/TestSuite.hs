@@ -1,14 +1,23 @@
 module Main where
 
+import Test.HUnit
 import Test.Tasty
 
 import IdeSession
 import TestSuite.State
 import TestSuite.Tests.TypeInformation
 
+-- | Sanity check: make sure we can communicate with the server at all
+-- and that we get the expected version
+testGetGhcVersion :: TestSuiteEnv -> Assertion
+testGetGhcVersion env = withAvailableSession env $ \session -> do
+  version <- getGhcVersion session
+  assertEqual ""  (testSuiteEnvGhcVersion env) version
+
 allTests :: String -> TestSuiteEnv -> TestTree
 allTests name env = testGroup name [
-    testGroupTypeInformation env
+    stdTest env "getGhcVersion" testGetGhcVersion
+  , testGroupTypeInformation env
   ]
 
 main :: IO ()

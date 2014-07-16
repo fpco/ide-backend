@@ -272,13 +272,6 @@ multipleTests =
 
 syntheticTests :: [(String, Assertion)]
 syntheticTests = [
-    ( "getGhcVersion"
-    , withSession defaultSession $ \session -> do
-        -- This is just a sanity check to make sure we get _a_ reply
-        version <- getGhcVersion session
-        assertBool ""  $ version == GHC742
-                      || version == GHC78
-    )
   , ( "Maintain list of compiled modules I"
     , withSession defaultSession $ \session -> do
         updateSessionD session (loadModule "XXX.hs" "a = 5") 1
