@@ -5703,6 +5703,33 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
           <> updateSourceFile "hello.c" cfile
           <> updateSourceFile "Main.hs" hsfile
     )
+  , ( "Using C files 6: C code writes to stdout (#210)"
+    , withSession defaultSession $ \session -> do
+        let cfile, hsfile :: BSL8.ByteString
+            cfile = BSLC.pack . unlines $
+                [ "#include <stdio.h>"
+                , "void hello(void) { printf(\"hello\\n\"); }"
+                ]
+            hsfile = BSLC.pack . unlines $
+                [ "{-# LANGUAGE ForeignFunctionInterface #-}"
+                , "module Main where"
+                , "import System.IO"
+                , "foreign import ccall \"hello\" hello :: IO ()"
+                , "main = hello"
+                ]
+
+        let upd = updateCodeGeneration True
+               <> updateSourceFile "hello.c" cfile
+               <> updateSourceFile "Main.hs" hsfile
+
+        updateSessionD session upd 3
+        assertNoErrors session
+
+        ra <- runStmt session "Main" "main"
+        (output, result) <- runWaitAll ra
+        assertEqual "" result RunOk
+        assertEqual "" output (BSLC.pack "hello\n")
+    )
   , ( "ghc qAddDependentFile patch (#118)"
     , withSession defaultSession $ \session -> do
         let cb     = \_ -> return ()
