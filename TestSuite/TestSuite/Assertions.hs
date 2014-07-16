@@ -7,7 +7,10 @@ module TestSuite.Assertions (
   , assertNoErrors
     -- * Assertions about type information
   , assertIdInfo
+  , assertIdInfo'
+  , assertExpTypes
   , ignoreVersions
+  , allVersions
   ) where
 
 import Prelude hiding (mod, span)
@@ -172,6 +175,22 @@ assertIdInfo' session
             Just actualHome -> assertEqual "home" (ignoreVersions expectedHome)
                                                   (ignoreVersions (show actualHome))
         ]
+
+assertExpTypes :: (ModuleName -> SourceSpan -> [(SourceSpan, T.Text)])
+               -> String
+               -> (Int, Int, Int, Int)
+               -> [(Int, Int, Int, Int, String)]
+               -> Assertion
+assertExpTypes expTypes mod loc expected =
+    assertAlphaEquiv "" expected actual
+  where
+    actual = flip map (uncurry expTypes $ mkSpan mod loc) $ \(span, typ) ->
+      ( spanFromLine   span
+      , spanFromColumn span
+      , spanToLine     span
+      , spanToColumn   span
+      , T.unpack       typ
+      )
 
 mkSpan :: String -> (Int, Int, Int, Int) -> (ModuleName, SourceSpan)
 mkSpan mod (frLine, frCol, toLine, toCol) = (T.pack mod, span)

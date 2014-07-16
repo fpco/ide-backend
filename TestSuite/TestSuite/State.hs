@@ -8,7 +8,9 @@ module TestSuite.State (
   , testSuiteCommandLineOptions
     -- * Operations on the test suite state
   , withAvailableSession
+  , withAvailableSession'
   , requireHaddocks
+  , skipTest
     -- * Constructing tests
   , stdTest
   , docTest
@@ -18,6 +20,7 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Data.Maybe
+import Data.Monoid
 import Data.Proxy
 import Data.Typeable
 import System.Directory (getHomeDirectory)
@@ -91,18 +94,41 @@ testSuite tests =
   Stateful operations (on the test suite state)
 -------------------------------------------------------------------------------}
 
+-- | Run the given action with an available session (new or previously created)
 withAvailableSession :: TestSuiteEnv -> (IdeSession -> IO a) -> IO a
-withAvailableSession TestSuiteEnv{..} act = do
+withAvailableSession env = withAvailableSession' env []
+
+-- | Like 'withAvailableSession', but provide convenient way to set dynamic opts
+withAvailableSession' :: TestSuiteEnv -> [String] -> (IdeSession -> IO a) -> IO a
+withAvailableSession' TestSuiteEnv{..} dynOpts act = do
     TestSuiteState{..} <- testSuiteEnvState
+
+    -- Find an available session, if one exists
     msession <- extractMVar ((== testSuiteServerConfig) . fst)
                             testSuiteStateAvailableSessions
-    session  <- case msession of
-                  Just session -> return (snd session)
-                  Nothing      -> startNewSession testSuiteServerConfig
-    result   <- act session
+
+    -- If there is none, start a new one
+    session <- case msession of
+                 Just session -> return (snd session)
+                 Nothing      -> startNewSession testSuiteServerConfig
+
+    -- Reset session state
+    updateSession session
+                  (    updateDynamicOpts dynOpts
+                    <> updateDeleteManagedFiles
+                  )
+                  (\_ -> return ())
+
+    -- Run the test
+    result <- act session
+
+    -- Make the session available for further tests, or shut it down if the
+    -- @--no-session-reuse@ command line option was used
     if testSuiteConfigNoSessionReuse testSuiteEnvConfig
       then shutdownSession session
       else consMVar (testSuiteServerConfig, session) testSuiteStateAvailableSessions
+
+    -- Return test result
     return result
   where
     testSuiteServerConfig = TestSuiteServerConfig {
@@ -115,6 +141,10 @@ requireHaddocks :: TestSuiteEnv -> IO ()
 requireHaddocks st = do
   let TestSuiteConfig{..} = testSuiteEnvConfig st
   when testSuiteConfigNoHaddocks $ throwIO $ SkipTest "--no-haddocks"
+
+-- | Skip (the remainder of) this test
+skipTest :: String -> IO ()
+skipTest = throwIO . SkipTest
 
 {-------------------------------------------------------------------------------
   Constructing tests
