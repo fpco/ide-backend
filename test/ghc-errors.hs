@@ -2862,31 +2862,6 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 63619
     )
-  , ( "Type information 1: Local identifiers and Prelude"
-    , ifIdeBackendHaddockTestsEnabled defaultSession $ \session -> do
-        let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
-                    [ "module A where"
-                    , "a = (5 :: Int)"
-                    , "b = a + 6"
-                    , "c = True"
-                    , "d = foldr"
-                    ])
-        updateSessionD session upd 1
-        assertNoErrors session
-        assertIdInfo session "A" (2,1,2,2) "a" VarName "Int" "main:A" "A.hs@2:1-2:2" "" "binding occurrence"
-        assertIdInfo session "A" (3,1,3,2) "b" VarName "Int" "main:A" "A.hs@3:1-3:2" "" "binding occurrence"
-        assertIdInfo session "A" (3,5,3,6) "a" VarName "Int" "main:A" "A.hs@2:1-2:2" "" "defined locally"
-        assertIdInfo session "A" (3,7,3,8) "+" VarName "Num a => a -> a -> a" "base-4.5.1.0:GHC.Num" "<no location info>" "base-4.5.1.0:Prelude" "imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9"
-        assertIdInfo session "A" (4,1,4,2) "c" VarName "Bool" "main:A" "A.hs@4:1-4:2" "" "binding occurrence"
-        assertIdInfo session "A" (4,5,4,9) "True" DataName "" "ghc-prim-0.2.0.0:GHC.Types" "<wired into compiler>" "base-4.5.1.0:Data.Bool" "wired in to the compiler"
-        assertIdInfo session "A" (5,1,5,2) "d" VarName "(a -> b -> b) -> b -> [a] -> b" "main:A" "A.hs@5:1-5:2" "" "binding occurrence"
-        assertIdInfo session "A" (5,5,5,10) "foldr" VarName "(a1 -> b1 -> b1) -> b1 -> [a1] -> b1" "base-4.5.1.0:GHC.Base" "<no location info>" "base-4.5.1.0:Data.List" "imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9"
-        {- TODO: reenable
-        assertEqual "Haddock link for A.b should be correct"
-                    "main/latest/doc/html/A.html#v:b" $
-                    haddockLink (idMapToMap idMapB Map.! SourceSpan "B.hs" 5 8 5 9)
-        -}
-    )
   , ( "Type information 2: Simple ADTs"
     , withSession defaultSession $ \session -> do
         let upd = (updateSourceFile "A.hs" . BSLC.pack . unlines $
@@ -7490,30 +7465,6 @@ updateSessionP session update expectedProgressUpdates = do
                   Just actualMsg -> msg `isInfixOf` Text.unpack actualMsg
                   Nothing        -> False)
 
-updateSessionD :: IdeSession -> IdeSessionUpdate () -> Int -> IO ()
-updateSessionD session update numProgressUpdates = do
-  progressRef <- newIORef []
-
-  -- We just collect the progress messages first, and verify them afterwards
-  updateSession session update $ \p -> do
-    progressUpdates <- readIORef progressRef
-    writeIORef progressRef $ progressUpdates ++ [p]
-
-  -- These progress messages are often something like
-  --
-  -- [18 of 27] Compiling IdeSession.Types.Private ( IdeSession/Types/Private.hs, dist/build/IdeSession/Types/Private.o )
-  -- [19 of 27] Compiling IdeSession.GHC.API ( IdeSession/GHC/API.hs, dist/build/IdeSession/GHC/API.o )
-  -- [20 of 27] Compiling IdeSession.GHC.Client ( IdeSession/GHC/Client.hs, dist/build/IdeSession/GHC/Client.p_o )
-  -- [21 of 27] Compiling IdeSession.Types.Translation ( IdeSession/Types/Translation.hs, dist/build/IdeSession/Types/Translation.p_o )
-  -- [23 of 27] Compiling IdeSession.State ( IdeSession/State.hs, dist/build/IdeSession/State.p_o )
-  --
-  -- So these numbers don't need to start at 1, may be discontiguous, out of
-  -- order, and may not end with [X of X]. The only thing we can check here is
-  -- that we get at most the number of progress messages we expect.
-  progressUpdates <- readIORef progressRef
-  assertBool ("We expected " ++ show numProgressUpdates ++ " progress messages, but got " ++ show progressUpdates)
-             (length progressUpdates <= numProgressUpdates)
-
 -- Extra test tools.
 --
 
@@ -7545,115 +7496,6 @@ loadModule file contents =
                       []              -> Nothing
                       (_ : haystack') -> substr needle haystack'
 
-assertIdInfo :: IdeSession
-             -> String                -- ^ Module
-             -> (Int, Int, Int, Int)  -- ^ Location
-             -> String                -- ^ Name
-             -> IdNameSpace           -- ^ Namespace
-             -> String                -- ^ Type
-             -> String                -- ^ Defining module
-             -> String                -- ^ Defining span
-             -> String                -- ^ Home module
-             -> String                -- ^ Scope
-             -> Assertion
-assertIdInfo session
-             mod
-             (frLine, frCol, toLine, toCol)
-             expectedName
-             expectedNameSpace
-             expectedType
-             expectedDefModule
-             expectedDefSpan
-             expectedHome
-             expectedScope =
-  assertIdInfo' session
-                mod
-                (frLine, frCol, toLine, toCol)
-                (frLine, frCol, toLine, toCol)
-                expectedName
-                expectedNameSpace
-                (case expectedType of "" -> []
-                                      _  -> allVersions expectedType)
-                expectedDefModule
-                (allVersions expectedDefSpan)
-                expectedHome
-                (allVersions expectedScope)
-
--- | If no answer is specified for a given version, it will not be verified
-type PerVersion a = [(GhcVersion, a)]
-
-allVersions :: a -> PerVersion a
-allVersions x = [(GHC742, x), (GHC78, x)]
-
-assertIdInfo' :: IdeSession
-              -> String                -- ^ Module
-              -> (Int, Int, Int, Int)  -- ^ Location
-              -> (Int, Int, Int, Int)  -- ^ Precise location
-              -> String                -- ^ Name
-              -> IdNameSpace           -- ^ Namespace
-              -> PerVersion String     -- ^ Type
-              -> String                -- ^ Defining module
-              -> PerVersion String     -- ^ Defining span
-              -> String                -- ^ Home module
-              -> PerVersion String     -- ^ Scope
-              -> Assertion
-assertIdInfo' session
-              mod
-              givenLocation
-              expectedLocation
-              expectedName
-              expectedNameSpace
-              expectedTypes
-              expectedDefModule
-              expectedDefSpans
-              expectedHome
-              expectedScopes = do
-    idInfo  <- getSpanInfo session
-    version <- getGhcVersion session
-    case idInfo (Text.pack mod) givenSpan of
-      (actualSpan, SpanId actualInfo) : _ -> compareIdInfo version actualSpan actualInfo
-      (actualSpan, SpanQQ actualInfo) : _ -> compareIdInfo version actualSpan actualInfo
-      _ -> assertFailure $ "No id info found for " ++ show expectedName
-                        ++ " at " ++ show mod ++ ":" ++ show givenLocation
-  where
-    givenSpan, expectedSpan :: SourceSpan
-    (_givenMod,    givenSpan)    = mkSpan mod givenLocation
-    (_expectedMod, expectedSpan) = mkSpan mod expectedLocation
-
-    compareIdInfo :: GhcVersion -> SourceSpan -> IdInfo -> Assertion
-    compareIdInfo version actualSpan IdInfo{idProp = IdProp{..}, idScope} =
-      collectErrors [
-          assertEqual "name"      expectedName      (Text.unpack idName)
-        , assertEqual "location"  expectedSpan      actualSpan
-        , assertEqual "namespace" expectedNameSpace idSpace
-
-        , case lookup version expectedDefSpans of
-            Nothing              -> return ()
-            Just expectedDefSpan -> assertEqual "def span" expectedDefSpan
-                                                           (show idDefSpan)
-
-        , assertEqual "def module" (ignoreVersions expectedDefModule)
-                                   (ignoreVersions (show idDefinedIn))
-
-        , case lookup version expectedScopes of
-            Nothing            -> return ()
-            Just expectedScope -> assertEqual "scope" (ignoreVersions expectedScope)
-                                                      (ignoreVersions (show idScope))
-
-        , case (lookup version expectedTypes, idType) of
-            (Just expectedType, Just actualType) ->
-              assertAlphaEquiv "type" expectedType (Text.unpack actualType)
-            (Just expectedType, Nothing) ->
-              assertFailure $ "expected type " ++ expectedType ++ ", but got none"
-            (Nothing, _) ->
-              -- Not checking
-              return ()
-
-        , case idHomeModule of
-            Nothing         -> assertEqual "home" expectedHome ""
-            Just actualHome -> assertEqual "home" (ignoreVersions expectedHome)
-                                                  (ignoreVersions (show actualHome))
-        ]
 
 assertExpTypes :: (ModuleName -> SourceSpan -> [(SourceSpan, Text)])
                -> String
@@ -7682,15 +7524,6 @@ assertUseSites useSites mod loc symbol expected =
   where
     actual = map show (uncurry useSites $ mkSpan mod loc)
 
-mkSpan :: String -> (Int, Int, Int, Int) -> (ModuleName, SourceSpan)
-mkSpan mod (frLine, frCol, toLine, toCol) = (Text.pack mod, span)
-  where
-    span = SourceSpan { spanFilePath   = mod ++ ".hs"
-                      , spanFromLine   = frLine
-                      , spanFromColumn = frCol
-                      , spanToLine     = toLine
-                      , spanToColumn   = toCol
-                      }
 
 assertSourceErrors' :: IdeSession -> [String] -> Assertion
 assertSourceErrors' session = assertSourceErrors session . map
@@ -7732,11 +7565,6 @@ assertErrorOneOf (SourceError _ loc actual) potentialExpected =
         then Right ()
         else Left $ "Unexpected error: " ++ show (Text.unpack actual) ++ ".\nExpected: " ++ show expectedErr
 
-assertNoErrors :: IdeSession -> Assertion
-assertNoErrors session = do
-  errs <- getSourceErrors session
-  assertBool ("Unexpected errors: " ++ show3errors errs) $ null errs
-
 assertSomeErrors :: [SourceError] -> Assertion
 assertSomeErrors msgs = do
   assertBool "An error was expected, but not found" $ length msgs >= 1
@@ -7753,13 +7581,6 @@ assertMoreErrors session = do
   msgs <- getSourceErrors session
   assertBool ("Too few type errors: " ++ show3errors msgs)
     $ length msgs >= 2
-
-show3errors :: [SourceError] -> String
-show3errors errs =
-  let shown = List.intercalate "\n" (map show $ take 3 $ errs)
-      more | length errs > 3 = "\n... and more ..."
-           | otherwise       = ""
-  in shown ++ more
 
 assertLoadedModules :: IdeSession -> String -> [String] -> Assertion
 assertLoadedModules session header goodMods = do
@@ -7977,19 +7798,6 @@ ignoreQuotes s = subRegex (mkRegex quoteRegexp) s "'"
     quoteRegexp :: String
     quoteRegexp = "[‘‛’`\"]"
 
-collectErrors :: [Assertion] -> Assertion
-collectErrors as = do
-    es <- lefts `liftM` (sequence $ map Ex.try as)
-    if null es
-      then return ()
-      else Ex.throwIO (concatFailures es)
-
-concatFailures :: [HUnitFailure] -> HUnitFailure
-concatFailures = go []
-  where
-    go acc []                    = HUnitFailure (unlines . reverse $ acc)
-    go acc (HUnitFailure e : es) = go (e : acc) es
-
 -- | Temporarily switch directory
 --
 -- (and make sure to switch back even in the presence of exceptions)
@@ -8000,106 +7808,6 @@ withCurrentDirectory fp act =
                  return cwd)
              (setCurrentDirectory)
              (\_ -> act)
-
-{------------------------------------------------------------------------------
-  Replace (type variables) with numbered type variables
-
-  i.e., change "b -> [c]" to "a1 -> [a2]"
-
-  useful for comparing types for alpha-equivalence
-------------------------------------------------------------------------------}
-
-assertAlphaEquiv :: (IgnoreVarNames a, Eq a, Show a) => String -> a -> a -> Assertion
-assertAlphaEquiv label a b =
-  if ignoreVarNames a == ignoreVarNames b
-    then return ()
-    else assertFailure $ label ++ "\n"
-                      ++ "expected: " ++ show a
-                      ++ " but got: " ++ show b
-
-class IgnoreVarNames a where
-  ignoreVarNames :: a -> a
-
-instance IgnoreVarNames a => IgnoreVarNames [a] where
-  ignoreVarNames = map ignoreVarNames
-
-instance IgnoreVarNames a => IgnoreVarNames (Int, Int, Int, Int, a) where
-  ignoreVarNames (a, b, c, d, e) = (a, b, c, d, ignoreVarNames e)
-
-instance IgnoreVarNames String where
-  ignoreVarNames = unwords . go [] [] . tokenize
-    where
-      go :: [String] -> [String] -> [String] -> [String]
-      go _vars acc [] = reverse acc
-      go  vars acc (x:xs)
-        | isVar x   = case elemIndex x vars of
-                        Just n  -> go vars (var n : acc) xs
-                        Nothing -> go (vars ++ [x]) acc (x : xs)
-        | otherwise = go vars (x : acc) xs
-
-      isVar :: String -> Bool
-      isVar []    = False
-      isVar (x:_) = isLower x
-
-      var :: Int -> String
-      var n = "a" ++ show n
-
--- | Repeatedly call lex
-tokenize :: String -> [String]
-tokenize [] = [[]]
-tokenize xs = case lex xs of
-                [(token, xs')] -> token : tokenize xs'
-                _ -> error "tokenize failed"
-
-{------------------------------------------------------------------------------
-  Abstract away versions
-------------------------------------------------------------------------------}
-
-class IgnoreVersions a where
-  ignoreVersions :: a -> a
-
-instance IgnoreVersions String where
-  ignoreVersions s = subRegex (mkRegex versionRegexp) s "X.Y.Z"
-    where
-      versionRegexp :: String
-      versionRegexp = "[0-9]+(\\.[0-9]+)+"
-
-instance IgnoreVersions a => IgnoreVersions [a] where
-  ignoreVersions = map ignoreVersions
-
-instance IgnoreVersions a => IgnoreVersions (Maybe a) where
-  ignoreVersions = fmap ignoreVersions
-
-instance IgnoreVersions BSSC.ByteString where
-  ignoreVersions = BSSC.pack . ignoreVersions . BSSC.unpack
-
-instance IgnoreVersions BSL.ByteString where
-  ignoreVersions = BSLC.pack . ignoreVersions . BSLC.unpack
-
-instance IgnoreVersions Text where
-  ignoreVersions = Text.pack . ignoreVersions . Text.unpack
-
-instance IgnoreVersions Import where
-  ignoreVersions Import{..} = Import {
-      importModule    = ignoreVersions importModule
-    , importPackage   = importPackage
-    , importQualified = importQualified
-    , importImplicit  = importImplicit
-    , importAs        = importAs
-    , importEntities  = importEntities
-    }
-
-instance IgnoreVersions ModuleId where
-  ignoreVersions ModuleId{..} = ModuleId {
-      moduleName    = moduleName
-    , modulePackage = ignoreVersions modulePackage
-    }
-
-instance IgnoreVersions PackageId where
-  ignoreVersions PackageId{..} = PackageId {
-      packageName    = packageName
-    , packageVersion = ignoreVersions packageVersion
-    }
 
 {------------------------------------------------------------------------------
   Known problems
