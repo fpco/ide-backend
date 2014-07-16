@@ -39,6 +39,9 @@ data TestSuiteConfig = TestSuiteConfig {
     -- | Keep session temp files
     testSuiteConfigKeepTempFiles :: Bool
 
+    -- | Start a new session for each test
+  , testSuiteConfigNoSessionReuse :: Bool
+
     -- | No haddock documentation installed on the test system
   , testSuiteConfigNoHaddocks :: Bool
 
@@ -97,9 +100,9 @@ withAvailableSession TestSuiteEnv{..} act = do
                   Just session -> return (snd session)
                   Nothing      -> startNewSession testSuiteServerConfig
     result   <- act session
-    -- TODO: Depending on test configuration we may or may not want to make this
-    -- session available for reuse
-    consMVar (testSuiteServerConfig, session) testSuiteStateAvailableSessions
+    if testSuiteConfigNoSessionReuse testSuiteEnvConfig
+      then shutdownSession session
+      else consMVar (testSuiteServerConfig, session) testSuiteStateAvailableSessions
     return result
   where
     testSuiteServerConfig = TestSuiteServerConfig {
@@ -163,7 +166,7 @@ data TestSuiteServerConfig = TestSuiteServerConfig {
   deriving (Eq, Show)
 
 startNewSession :: TestSuiteServerConfig -> IO IdeSession
-startNewSession cfg@TestSuiteServerConfig{..} =
+startNewSession TestSuiteServerConfig{..} =
     initSession
       defaultSessionInitParams
       defaultSessionConfig {
@@ -201,6 +204,8 @@ cleanupTestSuiteState TestSuiteState{..} = do
 
 newtype TestSuiteOptionKeepTempFiles = TestSuiteOptionKeepTempFiles Bool
   deriving (Eq, Ord, Typeable)
+newtype TestSuiteOptionNoSessionReuse = TestSuiteOptionNoSessionReuse Bool
+  deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionNoHaddocks = TestSuiteOptionNoHaddocks Bool
   deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionPackageDb74 = TestSuiteOptionPackageDb74 (Maybe String)
@@ -222,6 +227,13 @@ instance IsOption TestSuiteOptionKeepTempFiles where
   optionName     = return "keep-temp-files"
   optionHelp     = return "Keep session temp files"
   optionCLParser = flagCLParser Nothing (TestSuiteOptionKeepTempFiles True)
+
+instance IsOption TestSuiteOptionNoSessionReuse where
+  defaultValue   = TestSuiteOptionNoSessionReuse False
+  parseValue     = fmap TestSuiteOptionNoSessionReuse . safeRead
+  optionName     = return "no-session-reuse"
+  optionHelp     = return "Start a new session for each test"
+  optionCLParser = flagCLParser Nothing (TestSuiteOptionNoSessionReuse True)
 
 instance IsOption TestSuiteOptionNoHaddocks where
   defaultValue   = TestSuiteOptionNoHaddocks False
@@ -271,6 +283,7 @@ instance IsOption TestSuiteOptionTest78 where
 testSuiteCommandLineOptions :: [OptionDescription]
 testSuiteCommandLineOptions = [
     Option (Proxy :: Proxy TestSuiteOptionKeepTempFiles)
+  , Option (Proxy :: Proxy TestSuiteOptionNoSessionReuse)
   , Option (Proxy :: Proxy TestSuiteOptionNoHaddocks)
   , Option (Proxy :: Proxy TestSuiteOptionPackageDb74)
   , Option (Proxy :: Proxy TestSuiteOptionPackageDb78)
@@ -282,14 +295,15 @@ testSuiteCommandLineOptions = [
 
 parseOptions :: (TestSuiteConfig -> TestTree) -> TestTree
 parseOptions f =
-  askOption $ \(TestSuiteOptionKeepTempFiles testSuiteConfigKeepTempFiles) ->
-  askOption $ \(TestSuiteOptionNoHaddocks    testSuiteConfigNoHaddocks)    ->
-  askOption $ \(TestSuiteOptionPackageDb74   testSuiteConfigPackageDb74)   ->
-  askOption $ \(TestSuiteOptionPackageDb78   testSuiteConfigPackageDb78)   ->
-  askOption $ \(TestSuiteOptionExtraPaths74  testSuiteConfigExtraPaths74)  ->
-  askOption $ \(TestSuiteOptionExtraPaths78  testSuiteConfigExtraPaths78)  ->
-  askOption $ \(TestSuiteOptionTest74        testSuiteConfigTest74)        ->
-  askOption $ \(TestSuiteOptionTest78        testSuiteConfigTest78)        ->
+  askOption $ \(TestSuiteOptionKeepTempFiles  testSuiteConfigKeepTempFiles) ->
+  askOption $ \(TestSuiteOptionNoSessionReuse testSuiteConfigNoSessionReuse) ->
+  askOption $ \(TestSuiteOptionNoHaddocks     testSuiteConfigNoHaddocks)    ->
+  askOption $ \(TestSuiteOptionPackageDb74    testSuiteConfigPackageDb74)   ->
+  askOption $ \(TestSuiteOptionPackageDb78    testSuiteConfigPackageDb78)   ->
+  askOption $ \(TestSuiteOptionExtraPaths74   testSuiteConfigExtraPaths74)  ->
+  askOption $ \(TestSuiteOptionExtraPaths78   testSuiteConfigExtraPaths78)  ->
+  askOption $ \(TestSuiteOptionTest74         testSuiteConfigTest74)        ->
+  askOption $ \(TestSuiteOptionTest78         testSuiteConfigTest78)        ->
   f TestSuiteConfig{..}
 
 {-------------------------------------------------------------------------------
