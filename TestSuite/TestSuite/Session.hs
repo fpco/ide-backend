@@ -88,7 +88,7 @@ getModules session = do
 
 -- | Update the session with all modules of the given directory.
 getModulesFrom :: IdeSession -> FilePath -> IO (IdeSessionUpdate (), [FilePath])
-getModulesFrom session originalSourcesDir = do
+getModulesFrom _session originalSourcesDir = do
   -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
   -- using the IdeSession's update mechanism.
   originalFiles <- find always

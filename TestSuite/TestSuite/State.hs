@@ -160,6 +160,7 @@ newtype TestCase = TestCase Assertion
   deriving Typeable
 
 instance IsTest TestCase where
+  -- TODO: Measure time and use for testPassed in normal case
   run _ (TestCase assertion) _ = do
     (assertion >> return (testPassed "")) `catches` [
         Handler $ \(HUnitFailure msg) -> return (testFailed msg)

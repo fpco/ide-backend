@@ -9,6 +9,8 @@ import TestSuite.Tests.TypeInformation
 import TestSuite.Tests.SessionState
 import TestSuite.Tests.Compilation
 import TestSuite.Tests.InterruptRunStmt
+import TestSuite.Tests.InterruptRunExe
+import TestSuite.Tests.StdIO
 
 -- | Sanity check: make sure we can communicate with the server at all
 -- and that we get the expected version
@@ -23,6 +25,8 @@ allTests name env = testGroup name [
   , testGroupSessionState     env
   , testGroupCompilation      env
   , testGroupInterruptRunStmt env
+  , testGroupInterruptRunExe  env
+  , testGroupStdIO            env
   , testGroupTypeInformation  env
   ]
 
