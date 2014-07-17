@@ -311,7 +311,6 @@ runInGhc :: RunCmd -> Ghc RunResult
 runInGhc cmd = do
   flags <- getSessionDynFlags
   defaultCleanupHandler flags . handleErrors $ do
-    handleErrors $ do
       runRes <- runCmd cmd
       case runRes of
         GHC.RunOk _ ->
