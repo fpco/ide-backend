@@ -190,7 +190,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
           -- Make sure 'ideComputed' is set on first call to updateSession
           -- TODO: Would be nicer if we did this a different way
           pendingUpdatedCode = True
-        , pendingUpdatedEnv  = []
+        , pendingUpdatedEnv  = Nothing
         , pendingUpdatedArgs = Nothing -- Server default is []
         , pendingUpdatedOpts = Nothing
         , pendingUpdatedIncl = Nothing
@@ -355,7 +355,7 @@ restartSession IdeSession{ideStaticInfo, ideState} mInitParams = do
               -- idleState happens to be the server default.
               pendingRemoteChanges = pendingChanges {
                   pendingUpdatedCode = True
-                , pendingUpdatedEnv  = pendingUpdatedEnv  pendingChanges ++        idleState ^. ideEnv
+                , pendingUpdatedEnv  = pendingUpdatedEnv  pendingChanges <|> Just (idleState ^. ideEnv)
                 , pendingUpdatedArgs = pendingUpdatedArgs pendingChanges <|> Just (idleState ^. ideArgs)
                 , pendingUpdatedOpts = pendingUpdatedOpts pendingChanges <|> Just (idleState ^. ideDynamicOpts)
                 , pendingUpdatedIncl = pendingUpdatedIncl pendingChanges <|> Just (idleState ^. ideRelativeIncludes)
@@ -570,17 +570,9 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
 
            -- Update environment
            ideEnv' <- case pendingUpdatedEnv pendingChanges' of
-             [] -> return $ idleState' ^. ideEnv
-             cs -> do let newEnv :: [(String, Maybe String)] -> [(String, Maybe String)]
-                          newEnv [] =
-                            idleState' ^. ideEnv
-                          newEnv ((var, val) : cs') =
-                            lookup' var ^= Just val $ newEnv cs'
-
-                          ideEnv' = newEnv cs
-
-                      rpcSetEnv (idleState ^. ideGhcServer) ideEnv'
-                      return ideEnv'
+             Nothing        -> return $ idleState' ^. ideEnv
+             Just overrides -> do rpcSetEnv (idleState ^. ideGhcServer) overrides
+                                  return overrides
 
            -- Update command line arguments
            ideArgs' <- case pendingUpdatedArgs pendingChanges' of
@@ -948,9 +940,15 @@ updateDataFileDelete fp =
 -- | Set an environment variable
 --
 -- Use @updateEnv var Nothing@ to unset @var@.
-updateEnv :: String -> Maybe String -> IdeSessionUpdate ()
-updateEnv var val =
-  schedule $ \r -> r { pendingUpdatedEnv = (var, val) : pendingUpdatedEnv r }
+--
+-- Note that this is intended to be stateless:
+--
+-- > updateEnv []
+--
+-- will reset the environment to the server's original environment.
+updateEnv :: [(String, Maybe String)] -> IdeSessionUpdate ()
+updateEnv overrides =
+  schedule $ \r -> r { pendingUpdatedEnv = Just overrides }
 
 -- | Set command line arguments for snippets
 -- (i.e., the expected value of `getArgs`)

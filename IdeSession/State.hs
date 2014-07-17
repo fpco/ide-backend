@@ -113,13 +113,7 @@ data PendingRemoteChanges = PendingRemoteChanges {
 
     -- | Has the environment (as recorded in this state) diverged from the
     -- environment on the server?
-    --
-    -- Since we have a "cumulative" API for environments, rather than replacing
-    -- the entire environment on very call, this is interpreted as a list of
-    -- changes: the empty list means no changes. The list of changes is recorded
-    -- _in reverse order_: the change that is meant to be applied last is
-    -- the first change in the list.
-  , pendingUpdatedEnv :: [(String, Maybe String)]
+  , pendingUpdatedEnv :: Maybe [(String, Maybe String)]
 
     -- | Has the value of ideArgs diverged from what's recorded on the server?
   , pendingUpdatedArgs :: Maybe [String]
@@ -140,7 +134,7 @@ data PendingRemoteChanges = PendingRemoteChanges {
 noPendingRemoteChanges :: PendingRemoteChanges
 noPendingRemoteChanges = PendingRemoteChanges {
     pendingUpdatedCode = False
-  , pendingUpdatedEnv  = []
+  , pendingUpdatedEnv  = Nothing
   , pendingUpdatedArgs = Nothing
   , pendingUpdatedOpts = Nothing
   , pendingUpdatedIncl = Nothing

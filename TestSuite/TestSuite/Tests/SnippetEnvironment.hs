@@ -37,7 +37,7 @@ test_SetEnvVars env = withAvailableSession env $ \session -> do
          _ -> assertFailure $ "Unexpected result " ++ show result
 
     -- Update Foo, leave Bar undefined
-    updateSession session (updateEnv "Foo" (Just "Value1")) (\_ -> return ())
+    updateSession session (updateEnv [("Foo", Just "Value1")]) (\_ -> return ())
     do runActions <- runStmt session "M" "printFoo"
        (output, result) <- runWaitAll runActions
        assertEqual "" RunOk result
@@ -47,7 +47,7 @@ test_SetEnvVars env = withAvailableSession env $ \session -> do
        assertEqual "" result (RunProgException "IOException: Bar: getEnv: does not exist (no environment variable)")
 
     -- Update Bar, leave Foo defined
-    updateSession session (updateEnv "Bar" (Just "Value2")) (\_ -> return ())
+    updateSession session (updateEnv [("Foo", Just "Value1"), ("Bar", Just "Value2")]) (\_ -> return ())
     do runActions <- runStmt session "M" "printFoo"
        (output, result) <- runWaitAll runActions
        assertEqual "" RunOk result
@@ -58,7 +58,7 @@ test_SetEnvVars env = withAvailableSession env $ \session -> do
        assertEqual "" "Value2" output
 
     -- Unset Foo, leave Bar defined
-    updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
+    updateSession session (updateEnv [("Foo", Nothing), ("Bar", Just "Value2")]) (\_ -> return ())
     do runActions <- runStmt session "M" "printFoo"
        (_, result) <- runWaitAll runActions
        assertEqual "" result (RunProgException "IOException: Foo: getEnv: does not exist (no environment variable)")
@@ -66,6 +66,19 @@ test_SetEnvVars env = withAvailableSession env $ \session -> do
        (output, result) <- runWaitAll runActions
        assertEqual "" RunOk result
        assertEqual "" "Value2" output
+
+    -- Rely on statelessness of updateEnv to reset Bar
+    updateSession session (updateEnv []) (\_ -> return ())
+    do runActions <- runStmt session "M" "printFoo"
+       (_, result) <- runWaitAll runActions
+       case result of
+         RunProgException ex -> assertEqual "" ex "IOException: Foo: getEnv: does not exist (no environment variable)"
+         _ -> assertFailure $ "Unexpected result " ++ show result
+    do runActions <- runStmt session "M" "printBar"
+       (_, result) <- runWaitAll runActions
+       case result of
+         RunProgException ex -> assertEqual "" ex "IOException: Bar: getEnv: does not exist (no environment variable)"
+         _ -> assertFailure $ "Unexpected result " ++ show result
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $
@@ -97,7 +110,7 @@ test_SetEnvVars_runExe env = withAvailableSession env $ \session -> do
        assertEqual "" result (ExitFailure 1)
 
     -- Update Foo, leave Bar undefined
-    updateSession session (updateEnv "Foo" (Just "Value1")) (\_ -> return ())
+    updateSession session (updateEnv [("Foo", Just "Value1")]) (\_ -> return ())
     do updateSessionD session (updateArgs ["Foo"]) 1
        runActions <- runExe session "M"
        (output, result) <- runWaitAll runActions
@@ -109,7 +122,7 @@ test_SetEnvVars_runExe env = withAvailableSession env $ \session -> do
        assertEqual "" result (ExitFailure 1)
 
     -- Update Bar, leave Foo defined
-    updateSession session (updateEnv "Bar" (Just "Value2")) (\_ -> return ())
+    updateSession session (updateEnv [("Foo", Just "Value1"), ("Bar", Just "Value2")]) (\_ -> return ())
     do updateSessionD session (updateArgs ["Foo"]) 1
        runActions <- runExe session "M"
        (output, result) <- runWaitAll runActions
@@ -122,7 +135,7 @@ test_SetEnvVars_runExe env = withAvailableSession env $ \session -> do
        assertEqual "" "Value2" output
 
     -- Unset Foo, leave Bar defined
-    updateSession session (updateEnv "Foo" Nothing) (\_ -> return ())
+    updateSession session (updateEnv [("Foo", Nothing), ("Bar", Just "Value2")]) (\_ -> return ())
     do updateSessionD session (updateArgs ["Foo"]) 1
        runActions <- runExe session "M"
        (_, result) <- runWaitAll runActions
@@ -132,6 +145,17 @@ test_SetEnvVars_runExe env = withAvailableSession env $ \session -> do
        (output, result) <- runWaitAll runActions
        assertEqual "" result ExitSuccess
        assertEqual "" "Value2" output
+
+    -- Rely on statelessness of updateEnv to reset Bar
+    updateSession session (updateEnv []) (\_ -> return ())
+    do updateSessionD session (updateArgs ["Foo"]) 1
+       runActions <- runExe session "M"
+       (_, result) <- runWaitAll runActions
+       assertEqual "" result (ExitFailure 1)
+    do updateSessionD session (updateArgs ["Bar"]) 1
+       runActions <- runExe session "M"
+       (_, result) <- runWaitAll runActions
+       assertEqual "" result (ExitFailure 1)
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $

@@ -154,10 +154,22 @@ makeBlocks n = go . BSL.toChunks
             []         -> [bs]
             (bs':bss') -> go (BSS.append bs bs' : bss')
 
-setupEnv :: [(String, Maybe String)] -> IO ()
-setupEnv env = forM_ env $ \(var, mVal) ->
-  case mVal of Just val -> setEnv var val True
-               Nothing  -> unsetEnv var
+-- | First restore the environment to the specified initial environment, then
+-- apply the given overrides
+setupEnv :: [(String, String)] -> [(String, Maybe String)] -> IO ()
+setupEnv initEnv overrides = do
+  -- Delete everything in the current environment
+  curEnv <- getEnvironment
+  forM_ curEnv $ \(var, _val) -> unsetEnv var
+
+  -- Restore initial environment
+  forM_ initEnv $ \(var, val) -> setEnv var val True
+
+  -- Apply overrides
+  forM_ overrides $ \(var, mVal) ->
+    case mVal of
+      Just val -> setEnv var val True
+      Nothing  -> unsetEnv var
 
 relInclToOpts :: FilePath -> [FilePath] -> [String]
 relInclToOpts sourcesDir relIncl =

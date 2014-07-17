@@ -15,7 +15,7 @@ import Data.Accessor.Monad.MTL.State (set)
 import Data.Function (on)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.C.Types (CFile)
-import System.Environment (withArgs)
+import System.Environment (withArgs, getEnvironment)
 import System.FilePath ((</>))
 import System.IO (Handle, hFlush)
 import System.IO.Temp (createTempDirectory)
@@ -81,6 +81,9 @@ ghcServerEngine conv@RpcConversation{..} = do
   importsRef <- newIORef StrictMap.empty
   stRef      <- newIORef initExtractIdsSuspendedState
 
+  -- Get environment on server startup so that we can restore it
+  initEnv <- getEnvironment
+
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
     -- Register startup options and perhaps our plugin in dynamic flags.
@@ -139,7 +142,7 @@ ghcServerEngine conv@RpcConversation{..} = do
               liftIO $ put (pid, stdin, stdout, stderr)
               return args
             ReqSetEnv env -> do
-              ghcHandleSetEnv conv env
+              ghcHandleSetEnv conv initEnv env
               return args
             ReqSetArgs args' -> do
               liftIO $ put ()
@@ -575,9 +578,9 @@ ghcHandleRun RpcConversation{..} runCmd = do
       return (stdInputWr', stdInputBackup)
 
 -- | Handle a set-environment request
-ghcHandleSetEnv :: RpcConversation -> [(String, Maybe String)] -> Ghc ()
-ghcHandleSetEnv RpcConversation{put} env = liftIO $ do
-  setupEnv env
+ghcHandleSetEnv :: RpcConversation -> [(String, String)] -> [(String, Maybe String)] -> Ghc ()
+ghcHandleSetEnv RpcConversation{put} initEnv overrides = liftIO $ do
+  setupEnv initEnv overrides
   put ()
 
 -- | Set ghc options

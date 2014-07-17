@@ -158,8 +158,10 @@ runWaitAll RunActions{runWait} = go []
 
 -- | Set the environment
 rpcSetEnv :: GhcServer -> [(String, Maybe String)] -> IO ()
-rpcSetEnv (OutProcess server) env = rpc server (ReqSetEnv env)
-rpcSetEnv (InProcess _ _)     env = setupEnv env
+rpcSetEnv (OutProcess server) env =
+  rpc server (ReqSetEnv env)
+rpcSetEnv (InProcess _ _) _ =
+  error "rpcSetEnv not supported for in-process server"
 
 -- | Set command line arguments
 rpcSetArgs :: GhcServer -> [String] -> IO ()
