@@ -158,7 +158,7 @@ testMultipleModules env = withAvailableSession env $ \session -> do
             ])
 
 testExternalPkgs :: TestSuiteEnv -> Assertion
-testExternalPkgs env = withAvailableSession' env opts $ \session -> do
+testExternalPkgs env = withAvailableSession' env (withOpts opts (defaultSessionSetup env)) $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
     assertIdInfo session "A" (3,1,3,2) "e" VarName "Bool" "main:A" "A.hs@3:1-3:2" "" "binding occurrence"
@@ -230,7 +230,7 @@ testExternalPkgs env = withAvailableSession' env opts $ \session -> do
             ]
 
 testReusingTypeVariables :: TestSuiteEnv -> Assertion
-testReusingTypeVariables env = withAvailableSession' env ["-XScopedTypeVariables"] $ \session -> do
+testReusingTypeVariables env = withAvailableSession' env (withOpts ["-XScopedTypeVariables"] (defaultSessionSetup env)) $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
     assertIdInfo session "A" (2,1,2,3) "f1" VarName "(t, t1) -> t" "main:A" "A.hs@2:1-2:3" "" "binding occurrence"

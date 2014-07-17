@@ -4,11 +4,17 @@ module TestSuite.State (
     TestSuiteState -- Opaque
   , TestSuiteConfig(..)
   , TestSuiteEnv(..)
+  , TestSuiteServerConfig(..)
+  , TestSuiteSessionSetup(..)
   , testSuite
   , testSuiteCommandLineOptions
     -- * Operations on the test suite state
   , withAvailableSession
   , withAvailableSession'
+  , defaultSessionSetup
+  , defaultServerConfig
+  , withOpts
+  , withIncludes
   , requireHaddocks
   , skipTest
     -- * Constructing tests
@@ -96,25 +102,48 @@ testSuite tests =
 
 -- | Run the given action with an available session (new or previously created)
 withAvailableSession :: TestSuiteEnv -> (IdeSession -> IO a) -> IO a
-withAvailableSession env = withAvailableSession' env []
+withAvailableSession env = withAvailableSession' env (defaultSessionSetup env)
 
--- | Like 'withAvailableSession', but provide convenient way to set dynamic opts
-withAvailableSession' :: TestSuiteEnv -> [String] -> (IdeSession -> IO a) -> IO a
-withAvailableSession' TestSuiteEnv{..} dynOpts act = do
+data TestSuiteSessionSetup = TestSuiteSessionSetup {
+    testSuiteSessionServer  :: TestSuiteServerConfig
+  , testSuiteSessionDynOpts :: [String]
+  }
+
+defaultSessionSetup :: TestSuiteEnv -> TestSuiteSessionSetup
+defaultSessionSetup env = TestSuiteSessionSetup {
+    testSuiteSessionServer  = defaultServerConfig env
+  , testSuiteSessionDynOpts = []
+  }
+
+withOpts :: [String] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
+withOpts opts setup = setup {
+    testSuiteSessionDynOpts = opts
+  }
+
+withIncludes :: [FilePath] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
+withIncludes incls setup = setup {
+    testSuiteSessionServer = (testSuiteSessionServer setup) {
+        testSuiteServerRelativeIncludes = Just (incls ++ configRelativeIncludes defaultSessionConfig)
+      }
+  }
+
+-- | More general version of 'withAvailableSession'
+withAvailableSession' :: TestSuiteEnv -> TestSuiteSessionSetup -> (IdeSession -> IO a) -> IO a
+withAvailableSession' TestSuiteEnv{..} TestSuiteSessionSetup{..} act = do
     TestSuiteState{..} <- testSuiteEnvState
 
     -- Find an available session, if one exists
-    msession <- extractMVar ((== testSuiteServerConfig) . fst)
+    msession <- extractMVar ((== testSuiteSessionServer) . fst)
                             testSuiteStateAvailableSessions
 
     -- If there is none, start a new one
     session <- case msession of
                  Just session -> return (snd session)
-                 Nothing      -> startNewSession testSuiteServerConfig
+                 Nothing      -> startNewSession testSuiteSessionServer
 
     -- Reset session state
     updateSession session
-                  (    updateDynamicOpts dynOpts
+                  (    updateDynamicOpts testSuiteSessionDynOpts
                     <> updateDeleteManagedFiles
                     <> updateCodeGeneration False
                   )
@@ -127,17 +156,19 @@ withAvailableSession' TestSuiteEnv{..} dynOpts act = do
     -- @--no-session-reuse@ command line option was used
     if testSuiteConfigNoSessionReuse testSuiteEnvConfig
       then shutdownSession session
-      else consMVar (testSuiteServerConfig, session) testSuiteStateAvailableSessions
+      else consMVar (testSuiteSessionServer, session) testSuiteStateAvailableSessions
 
     -- Return test result
     case mresult of
       Left  ex     -> throwIO (ex :: SomeException)
       Right result -> return result
-  where
-    testSuiteServerConfig = TestSuiteServerConfig {
-        testSuiteServerConfig     = testSuiteEnvConfig
-      , testSuiteServerGhcVersion = testSuiteEnvGhcVersion
-      }
+
+defaultServerConfig :: TestSuiteEnv -> TestSuiteServerConfig
+defaultServerConfig TestSuiteEnv{..} = TestSuiteServerConfig {
+      testSuiteServerConfig           = testSuiteEnvConfig
+    , testSuiteServerGhcVersion       = testSuiteEnvGhcVersion
+    , testSuiteServerRelativeIncludes = Nothing
+    }
 
 -- | Skip this test if the --no-haddocks flag is passed
 requireHaddocks :: TestSuiteEnv -> IO ()
@@ -194,8 +225,9 @@ docTest st name test = stdTest st name (\env' -> requireHaddocks env' >> test en
 -- 2. The server configuration should be determined fully by a
 --    'TestSuiteServerConfig'.
 data TestSuiteServerConfig = TestSuiteServerConfig {
-    testSuiteServerConfig     :: TestSuiteConfig
-  , testSuiteServerGhcVersion :: GhcVersion
+    testSuiteServerConfig           :: TestSuiteConfig
+  , testSuiteServerGhcVersion       :: GhcVersion
+  , testSuiteServerRelativeIncludes :: Maybe [FilePath]
   }
   deriving (Eq, Show)
 
@@ -216,6 +248,9 @@ startNewSession TestSuiteServerConfig{..} =
             splitSearchPath $ case testSuiteServerGhcVersion of
                                 GHC742 -> testSuiteConfigExtraPaths74
                                 GHC78  -> testSuiteConfigExtraPaths78
+        , configRelativeIncludes =
+            fromMaybe (configRelativeIncludes defaultSessionConfig) $
+              testSuiteServerRelativeIncludes
         }
   where
     TestSuiteConfig{..} = testSuiteServerConfig

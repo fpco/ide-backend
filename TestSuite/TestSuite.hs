@@ -12,6 +12,8 @@ import TestSuite.Tests.InterruptRunStmt
 import TestSuite.Tests.InterruptRunExe
 import TestSuite.Tests.SnippetEnvironment
 import TestSuite.Tests.StdIO
+import TestSuite.Tests.BuildExe
+import TestSuite.Tests.BuildDoc
 
 -- | Sanity check: make sure we can communicate with the server at all
 -- and that we get the expected version
@@ -30,6 +32,8 @@ allTests name env = testGroup name [
   , testGroupStdIO              env
   , testGroupSnippetEnvironment env
   , testGroupTypeInformation    env
+  , testGroupBuildExe           env
+  , testGroupBuildDoc           env
   ]
 
 main :: IO ()

@@ -192,6 +192,7 @@ test-suite TestSuite
                       regex-compat,
                       filepath,
                       filemanip,
+                      process,
                       directory
   default-language:   Haskell2010
   ghc-options:        -Wall 
