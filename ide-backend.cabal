@@ -193,7 +193,8 @@ test-suite TestSuite
                       filepath,
                       filemanip,
                       process,
-                      directory
+                      directory,
+                      stm
   default-language:   Haskell2010
   ghc-options:        -Wall 
                       -threaded

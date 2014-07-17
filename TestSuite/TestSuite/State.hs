@@ -25,6 +25,7 @@ module TestSuite.State (
   ) where
 
 import Control.Concurrent
+import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
 import Data.Maybe
@@ -196,7 +197,7 @@ newtype TestCase = TestCase Assertion
 instance IsTest TestCase where
   -- TODO: Measure time and use for testPassed in normal case
   run _ (TestCase assertion) _ = do
-    (assertion >> return (testPassed "")) `catches` [
+    (registerTest assertion >> return (testPassed "")) `catches` [
         Handler $ \(HUnitFailure msg) -> return (testFailed msg)
       , Handler $ \(SkipTest msg)     -> return (testPassed ("Skipped (" ++ msg ++ ")"))
       ]
@@ -387,12 +388,115 @@ parseOptions f =
 -- (and make sure to switch back even in the presence of exceptions)
 withCurrentDirectory :: FilePath -> IO a -> IO a
 withCurrentDirectory fp act =
-  bracket (do cwd <- getCurrentDirectory
-              setCurrentDirectory fp
-              return cwd)
-          (setCurrentDirectory)
-          (\_ -> act)
+  requireExclusiveAccess $
+    bracket (do cwd <- getCurrentDirectory
+                setCurrentDirectory fp
+                return cwd)
+            (setCurrentDirectory)
+            (\_ -> act)
 
+-- | We run many tests concurrently, but occassionally a test needs to modify
+-- the test global state (for instance, it might need to modify the current
+-- working directory temporarily). When this happens, no other tests should
+-- currently be executing.
+data TestSuiteThreads =
+    -- | Normal execution of multiple threads, none of have exclusive access
+    -- right now
+    --
+    -- We record the set of running threads as well as the set of threads
+    -- waiting to gain exclusive access, so that we don't start new threads
+    -- when there are other threads waiting for exclusive access.
+    NormalExecution [ThreadId] [ThreadId]
+
+    -- | A thread currently has exclusive access
+    --
+    -- We record which other threads were waiting to gain exclusive access
+  | ExclusiveExecution [ThreadId]
+  deriving Show
+
+testSuiteThreadsTVar :: TVar TestSuiteThreads
+{-# NOINLINE testSuiteThreadsTVar #-}
+testSuiteThreadsTVar = unsafePerformIO $ newTVarIO $ NormalExecution [] []
+
+-- | Every test execution should be wrapped in registerTest
+registerTest :: IO a -> IO a
+registerTest act = do
+    tid <- myThreadId
+    bracket_ (register tid) (unregister tid) act
+  where
+    register :: ThreadId -> IO ()
+    register t = atomically $ do
+      testSuiteThreads <- readTVar testSuiteThreadsTVar
+      case testSuiteThreads of
+        NormalExecution running waiting -> do
+          -- Don't start if there are threads waiting for exclusive access
+          guard (waiting == [])
+          writeTVar testSuiteThreadsTVar $ NormalExecution (t:running) []
+        ExclusiveExecution _ ->
+          -- Some other thread currently needs exclusive access.. Wait.
+          retry
+
+    unregister :: ThreadId -> IO ()
+    unregister t = atomically $ do
+      testSuiteThreads <- readTVar testSuiteThreadsTVar
+      case testSuiteThreads of
+        NormalExecution running waiting -> do
+          let Just (_, running') = extract (== t) running
+          writeTVar testSuiteThreadsTVar $ NormalExecution running' waiting
+        ExclusiveExecution _ ->
+          -- This should never happen
+          error "The impossible happened"
+
+requireExclusiveAccess :: IO a -> IO a
+requireExclusiveAccess act = do
+    tid <- myThreadId
+    bracket_ (lock tid) (unlock tid) act
+  where
+    lock :: ThreadId -> IO ()
+    lock t = do
+      -- Record that we are no longer running, but are waiting
+      atomically $ do
+        testSuiteThreads <- readTVar testSuiteThreadsTVar
+        case testSuiteThreads of
+          NormalExecution running waiting -> do
+            let Just (_, running') = extract (== t) running
+                waiting'           = t : waiting
+            writeTVar testSuiteThreadsTVar $ NormalExecution running' waiting'
+          ExclusiveExecution _ ->
+            error "lock: the impossible happened"
+
+      -- Wait until there are no more threads running (i.e., all other threads
+      -- have terminated or are themselves waiting to get exclusive access)
+      atomically $ do
+        testSuiteThreads <- readTVar testSuiteThreadsTVar
+        case testSuiteThreads of
+          NormalExecution [] waiting -> do
+            let Just (_, waiting') = extract (== t) waiting
+            writeTVar testSuiteThreadsTVar (ExclusiveExecution waiting')
+          _  -> retry
+
+    unlock :: ThreadId -> IO ()
+    unlock t = do
+      -- Give up exclusive access
+      atomically $ do
+        testSuiteThreads <- readTVar testSuiteThreadsTVar
+        case testSuiteThreads of
+          NormalExecution _ _ ->
+            error "unlock: the impossible happened"
+          ExclusiveExecution waiting ->
+            writeTVar testSuiteThreadsTVar (NormalExecution [] waiting)
+
+      -- And try to start running again
+      atomically $ do
+        testSuiteThreads <- readTVar testSuiteThreadsTVar
+        case testSuiteThreads of
+          NormalExecution running waiting -> do
+            -- Don't start if there are threads waiting for exclusive access
+            guard (waiting == [])
+            writeTVar testSuiteThreadsTVar $ NormalExecution (t:running) []
+          ExclusiveExecution _ ->
+            -- Some other thread currently needs exclusive access.. Wait.
+            retry
 
 {-------------------------------------------------------------------------------
   Auxiliary
