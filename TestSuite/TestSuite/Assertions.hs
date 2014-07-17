@@ -9,6 +9,8 @@ module TestSuite.Assertions (
   , assertLoadedModules
     -- * Assertions about source code errors
   , assertNoErrors
+  , assertOneError
+  , assertSomeErrors
   , assertSourceErrors
   , assertErrorOneOf
     -- * Assertions about type information
@@ -80,6 +82,17 @@ assertNoErrors :: IdeSession -> Assertion
 assertNoErrors session = do
   errs <- getSourceErrors session
   assertBool ("Unexpected errors: " ++ show3errors errs) $ null errs
+
+assertOneError :: IdeSession -> Assertion
+assertOneError session = do
+  msgs <- getSourceErrors session
+  assertSomeErrors msgs
+  assertBool ("Too many type errors: " ++ show3errors msgs)
+    $ length msgs <= 1
+
+assertSomeErrors :: [SourceError] -> Assertion
+assertSomeErrors msgs = do
+  assertBool "An error was expected, but not found" $ length msgs >= 1
 
 show3errors :: [SourceError] -> String
 show3errors errs =

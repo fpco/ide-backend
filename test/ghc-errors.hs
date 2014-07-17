@@ -5980,16 +5980,6 @@ assertSourceErrors' session = assertSourceErrors session . map
   (\err -> [(Nothing, err)])
 
 
-assertSomeErrors :: [SourceError] -> Assertion
-assertSomeErrors msgs = do
-  assertBool "An error was expected, but not found" $ length msgs >= 1
-
-assertOneError :: IdeSession -> Assertion
-assertOneError session = do
-  msgs <- getSourceErrors session
-  assertSomeErrors msgs
-  assertBool ("Too many type errors: " ++ show3errors msgs)
-    $ length msgs <= 1
 
 assertMoreErrors :: IdeSession -> Assertion
 assertMoreErrors session = do
@@ -6194,17 +6184,6 @@ mark (x:xs) = (x, True, False) : aux xs
     aux [y]    = [(y, False, True)]
     aux (y:ys) = (y, False, False) : aux ys
 -}
-
--- | Temporarily switch directory
---
--- (and make sure to switch back even in the presence of exceptions)
-withCurrentDirectory :: FilePath -> IO a -> IO a
-withCurrentDirectory fp act =
-  Ex.bracket (do cwd <- getCurrentDirectory
-                 setCurrentDirectory fp
-                 return cwd)
-             (setCurrentDirectory)
-             (\_ -> act)
 
 {------------------------------------------------------------------------------
   Known problems

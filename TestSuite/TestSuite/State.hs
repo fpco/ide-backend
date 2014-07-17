@@ -20,6 +20,8 @@ module TestSuite.State (
     -- * Constructing tests
   , stdTest
   , docTest
+    -- * Test suite global state
+  , withCurrentDirectory
   ) where
 
 import Control.Concurrent
@@ -29,7 +31,7 @@ import Data.Maybe
 import Data.Monoid
 import Data.Proxy
 import Data.Typeable
-import System.Directory (getHomeDirectory)
+import System.Directory
 import System.FilePath (splitSearchPath)
 import System.IO.Unsafe (unsafePerformIO)
 import Test.HUnit (Assertion)
@@ -375,6 +377,22 @@ parseOptions f =
   askOption $ \(TestSuiteOptionTest74         testSuiteConfigTest74)        ->
   askOption $ \(TestSuiteOptionTest78         testSuiteConfigTest78)        ->
   f TestSuiteConfig{..}
+
+{-------------------------------------------------------------------------------
+  Test suite global state
+-------------------------------------------------------------------------------}
+
+-- | Temporarily switch directory
+--
+-- (and make sure to switch back even in the presence of exceptions)
+withCurrentDirectory :: FilePath -> IO a -> IO a
+withCurrentDirectory fp act =
+  bracket (do cwd <- getCurrentDirectory
+              setCurrentDirectory fp
+              return cwd)
+          (setCurrentDirectory)
+          (\_ -> act)
+
 
 {-------------------------------------------------------------------------------
   Auxiliary

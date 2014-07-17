@@ -1,9 +1,10 @@
 module TestSuite.Tests.BuildDoc (testGroupBuildDoc) where
 
-import Data.Monoid
+import System.Directory
+import System.Exit
+import System.FilePath
 import Test.Tasty
 import Test.HUnit
-import qualified Data.Text as T
 
 import IdeSession
 import TestSuite.State
@@ -12,11 +13,10 @@ import TestSuite.Assertions
 
 testGroupBuildDoc :: TestSuiteEnv -> TestTree
 testGroupBuildDoc env = testGroup "Build haddocks" [
---    stdTest env "From some .lhs files" test_fromLhsFiles
---  , stdTest env "Fail"                 test_fail
+    stdTest env "From some .lhs files" test_fromLhsFiles
+  , stdTest env "Fail"                 test_fail
   ]
 
-{-
 test_fromLhsFiles :: TestSuiteEnv -> Assertion
 test_fromLhsFiles env = withAvailableSession env $ \session -> do
     status0 <- getBuildDocStatus session
@@ -42,4 +42,3 @@ test_fail env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     status1 <- getBuildDocStatus session
     assertEqual "failure after doc build" (Just $ ExitFailure 1) status1
--}
