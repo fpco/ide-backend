@@ -5,11 +5,11 @@
 module IdeSession.Cabal (
     buildDeps, externalDeps
   , configureAndBuild, configureAndHaddock
-  , buildLicenseCatenation
   , generateMacros, buildDotCabal
   , runComponentCc
-  , BuildExeArgs(..), RunCcArgs(..), ExeCabalRequest(..), ExeCabalResponse(..)
-  , buildLicsFromPkgs  -- for testing only
+  , BuildExeArgs(..), RunCcArgs(..), LicenseArgs(..)
+  , ExeCabalRequest(..), ExeCabalResponse(..)
+  , buildLicsFromPkgs
   ) where
 
 import Control.Applicative ((<$>), (<*>))
@@ -80,7 +80,6 @@ import Language.Haskell.Extension (Extension(..), KnownExtension(..),
                                    Language (Haskell2010))
 import Language.Haskell.TH.Syntax (lift, runIO)
 
-import IdeSession.Config
 import IdeSession.GHC.API (cExtensions, cHeaderExtensions)
 import IdeSession.Licenses ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
 import IdeSession.State
@@ -426,33 +425,19 @@ lFieldDescrs =
      (\(_, _, t3) -> fromMaybe "???" t3) (\a (t1, t2, _) -> (t1, t2, Just a))
  ]
 
--- | Build the concatenation of all licence files. See 'buildLicenses'.
-buildLicenseCatenation :: SessionConfig          -- ^ session configuration
-                       -> Strict Maybe Computed  -- ^ compilation state
-                       -> FilePath               -- ^ the directory with all the .cabal files
-                       -> FilePath               -- ^ the working directory; the resulting file is written there
-                       -> (Progress -> IO ())    -- ^ progress callback
-                       -> IO ExitCode
-buildLicenseCatenation ideConfig mcomputed cabalsDir ideDistDir callback = do
-  (_, pkgs) <- buildDeps mcomputed
-  buildLicsFromPkgs ideConfig pkgs cabalsDir ideDistDir
-                    (configLicenseFixed ideConfig) callback
-
--- | Build the concatenation of all licence files from a given list
--- of packages.
-buildLicsFromPkgs :: SessionConfig          -- ^ session configuration
-                  -> [PackageId]            -- ^ the list of packages to process
-                  -> FilePath               -- ^ the directory with all the .cabal files
-                  -> FilePath               -- ^ the working directory; the resulting file is written there
-                  -> [( String
-                      , (Maybe License, Maybe FilePath, Maybe String)
-                      )]                    -- ^ see 'configLicenseFixed'
+-- | Build the concatenation of all license files from a given list
+-- of packages. See 'buildLicenses'.
+buildLicsFromPkgs :: LicenseArgs
                   -> (Progress -> IO ())    -- ^ progress callback
                   -> IO ExitCode
-buildLicsFromPkgs SessionConfig{ configExtraPathDirs
-                               , configPackageDBStack
-                               , configLicenseExc }
-                  pkgs cabalsDir ideDistDir licenseFixed callback = do
+buildLicsFromPkgs LicenseArgs{ liPackageDBStack = configPackageDBStack
+                             , liExtraPathDirs = configExtraPathDirs
+                             , liLicenseExc = configLicenseExc
+                             , liDistDir = ideDistDir
+                             , licenseFixed
+                             , liCabalsDir = cabalsDir
+                             , liPkgs = pkgs
+                             } callback = do
   -- The following computations are very expensive, so should be done once,
   -- instead of at each invocation of @findLicense@ that needs to perform
   -- @lookupSourcePackageId@.
@@ -494,9 +479,9 @@ buildLicsFromPkgs SessionConfig{ configExtraPathDirs
                 parseFields lFieldDescrs (Nothing, Nothing, Nothing) pkgS
           findLicense parseResult nameString version packageFile
         else case lookup nameString licenseFixed of
-          Just fixedLicence -> do
+          Just fixedLicense -> do
             hPutStrLn licensesFile $ "\nLicense for " ++ nameString ++ ":\n"
-            let fakeParseResult = ParseOk undefined fixedLicence
+            let fakeParseResult = ParseOk undefined fixedLicense
             findLicense fakeParseResult nameString version packageFile
           Nothing ->
             unless (nameString `elem` configLicenseExc) $ do
@@ -530,7 +515,7 @@ buildLicsFromPkgs SessionConfig{ configExtraPathDirs
                   pkgInfos = lookupSourcePackageId pkgIndex pkgId
               case pkgInfos of
                 InstalledPackageInfo{haddockInterfaces = hIn : _} : _ -> do
-                  -- Since the licence file path can't be specified
+                  -- Since the license file path can't be specified
                   -- in InstalledPackageInfo, we can only guess what it is
                   -- and we do that on the basis of the haddock interfaces path.
                   -- TODO: on next rewrite (and re-testing), base it on htmldir
@@ -543,7 +528,7 @@ buildLicsFromPkgs SessionConfig{ configExtraPathDirs
                             -- covers another case for in-place packages
                         ]
                       tryPaths (p : ps) = do
-                        -- The directory of the licence file is ignored
+                        -- The directory of the license file is ignored
                         -- in installed packages, hence @takeFileName@.
                         let loc = p </> takeFileName lf
                         exists <- doesFileExist loc
@@ -792,6 +777,19 @@ data RunCcArgs = RunCcArgs
   , rcIncludeDirs :: [FilePath]
   }
 
+data LicenseArgs = LicenseArgs
+  { liPackageDBStack :: PackageDBStack  -- ^ 3 fields from session configuration
+  , liExtraPathDirs :: [FilePath]
+  , liLicenseExc :: [String]
+  , liDistDir :: FilePath    -- ^ the working directory;
+                             --   the resulting file is written there
+  , licenseFixed :: [( String
+                     , (Maybe License, Maybe FilePath, Maybe String)
+                     )]       -- ^ see 'configLicenseFixed'
+  , liCabalsDir :: FilePath  -- ^ the directory with all the .cabal files
+  , liPkgs :: [PackageId]    -- ^ the list of packages to process
+  }
+
 data ExeCabalRequest =
     ReqExeBuild BuildExeArgs [(ModuleName, FilePath)]
   | ReqExeDoc BuildExeArgs
@@ -859,6 +857,24 @@ instance Binary RunCcArgs where
   get = RunCcArgs <$> get <*> get <*> get
                   <*> get <*> get <*> get
                   <*> get <*> get <*> get
+
+instance Binary LicenseArgs where
+  put LicenseArgs{..} = do
+    put liPackageDBStack
+    put liExtraPathDirs
+    put liLicenseExc
+    put liDistDir
+    put licenseFixed
+    put liCabalsDir
+    put liPkgs
+
+  get = LicenseArgs <$> get <*> get <*> get
+                    <*> get <*> get <*> get
+                    <*> get
+
+instance Binary License where
+  put = put . show
+  get = read <$> get
 
 instance Binary ExitCode where
   put ExitSuccess = putWord8 0

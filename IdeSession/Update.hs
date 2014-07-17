@@ -1334,8 +1334,18 @@ buildLicenses cabalsDir = do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    exitCode <- liftIO $
-      buildLicenseCatenation ideConfig mcomputed cabalsDir ideDistDir callback
+    exitCode <- liftIO $ do
+      (_, pkgs) <- buildDeps mcomputed
+      let liArgs =
+            LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
+                       , liExtraPathDirs = configExtraPathDirs ideConfig
+                       , liLicenseExc = configLicenseExc ideConfig
+                       , liDistDir = ideDistDir
+                       , licenseFixed = configLicenseFixed ideConfig
+                       , liCabalsDir = cabalsDir
+                       , liPkgs = pkgs
+                       }
+      buildLicsFromPkgs liArgs callback
     set ideBuildLicensesStatus (Just exitCode)
 
 {------------------------------------------------------------------------------
