@@ -1188,7 +1188,6 @@ buildExe extraOpts ms = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     let SessionConfig{..} = ideConfig
     let ideDistDir   = ideSessionDistDir   ideSessionDir
-        ideDataDir   = ideSessionDataDir   ideSessionDir
         ideSourceDir = ideSessionSourceDir ideSessionDir
 
     callback          <- asks ideSessionUpdateCallback
@@ -1215,11 +1214,7 @@ buildExe extraOpts ms = do
       else do
         let ghcOpts = "-rtsopts=some"
                     : configStaticOpts ++ dynamicOpts ++ extraOpts
-        liftIO $ Ex.bracket
-          Dir.getCurrentDirectory
-          Dir.setCurrentDirectory
-          (const $
-             do Dir.setCurrentDirectory ideDataDir
+        liftIO $ do
                 (loadedMs, pkgs) <- buildDeps mcomputed
                 libDeps <- externalDeps pkgs
                 let beArgs =
@@ -1234,7 +1229,7 @@ buildExe extraOpts ms = do
                                   , beStdoutLog
                                   , beStderrLog
                                   }
-                invokeExeCabal ideStaticInfo (ReqExeBuild beArgs ms) callback)
+                invokeExeCabal ideStaticInfo (ReqExeBuild beArgs ms) callback
     -- Solution 2. to #119: update timestamps of .o (and all other) files
     -- according to the session's artificial timestamp.
     newTS <- nextLogicalTimestamp
@@ -1268,7 +1263,6 @@ buildDoc = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     let SessionConfig{..} = ideConfig
     let ideDistDir   = ideSessionDistDir   ideSessionDir
-        ideDataDir   = ideSessionDataDir   ideSessionDir
         ideSourceDir = ideSessionSourceDir ideSessionDir
 
     callback          <- asks ideSessionUpdateCallback
@@ -1282,10 +1276,7 @@ buildDoc = do
     let ghcOpts = configStaticOpts ++ dynamicOpts
         beStdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
         beStderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
-    exitCode <- liftIO $ Ex.bracket
-      Dir.getCurrentDirectory
-      Dir.setCurrentDirectory
-      (const $ do Dir.setCurrentDirectory ideDataDir
+    exitCode <- liftIO $ do
                   (loadedMs, pkgs) <- buildDeps mcomputed
                   libDeps <- externalDeps pkgs
                   let beArgs =
@@ -1300,7 +1291,7 @@ buildDoc = do
                                     , beStdoutLog
                                     , beStderrLog
                                     }
-                  invokeExeCabal ideStaticInfo (ReqExeDoc beArgs) callback)
+                  invokeExeCabal ideStaticInfo (ReqExeDoc beArgs) callback
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
