@@ -10,6 +10,7 @@ import TestSuite.Tests.SessionState
 import TestSuite.Tests.Compilation
 import TestSuite.Tests.InterruptRunStmt
 import TestSuite.Tests.InterruptRunExe
+import TestSuite.Tests.SnippetEnvironment
 import TestSuite.Tests.StdIO
 
 -- | Sanity check: make sure we can communicate with the server at all
@@ -22,12 +23,13 @@ testGetGhcVersion env = withAvailableSession env $ \session -> do
 allTests :: String -> TestSuiteEnv -> TestTree
 allTests name env = testGroup name [
     stdTest env "getGhcVersion" testGetGhcVersion
-  , testGroupSessionState     env
-  , testGroupCompilation      env
-  , testGroupInterruptRunStmt env
-  , testGroupInterruptRunExe  env
-  , testGroupStdIO            env
-  , testGroupTypeInformation  env
+  , testGroupSessionState       env
+  , testGroupCompilation        env
+  , testGroupInterruptRunStmt   env
+  , testGroupInterruptRunExe    env
+  , testGroupStdIO              env
+  , testGroupSnippetEnvironment env
+  , testGroupTypeInformation    env
   ]
 
 main :: IO ()
