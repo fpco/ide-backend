@@ -6,6 +6,9 @@ import Test.Tasty
 import IdeSession
 import TestSuite.State
 import TestSuite.Tests.TypeInformation
+import TestSuite.Tests.SessionState
+import TestSuite.Tests.Compilation
+import TestSuite.Tests.InterruptRunStmt
 
 -- | Sanity check: make sure we can communicate with the server at all
 -- and that we get the expected version
@@ -17,7 +20,10 @@ testGetGhcVersion env = withAvailableSession env $ \session -> do
 allTests :: String -> TestSuiteEnv -> TestTree
 allTests name env = testGroup name [
     stdTest env "getGhcVersion" testGetGhcVersion
-  , testGroupTypeInformation env
+  , testGroupSessionState     env
+  , testGroupCompilation      env
+  , testGroupInterruptRunStmt env
+  , testGroupTypeInformation  env
   ]
 
 main :: IO ()

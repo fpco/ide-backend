@@ -3,21 +3,29 @@
 module TestSuite.Assertions (
     -- * General assertions
     collectErrors
+  , assertSameSet
+  , assertSameList
+    -- * Assertions about session state
+  , assertLoadedModules
     -- * Assertions about source code errors
   , assertNoErrors
+  , assertSourceErrors
+  , assertErrorOneOf
     -- * Assertions about type information
   , assertIdInfo
   , assertIdInfo'
   , assertExpTypes
   , ignoreVersions
   , allVersions
+    -- * Auxiliary
+  , isAsyncException
   ) where
 
 import Prelude hiding (mod, span)
 import Control.Monad
 import Data.Char
 import Data.Either
-import Data.List (elemIndex, intercalate)
+import Data.List hiding (span)
 import Test.HUnit
 import Test.HUnit.Lang
 import Text.Regex (mkRegex, subRegex)
@@ -46,6 +54,24 @@ collectErrors as = do
         go acc []                    = HUnitFailure (unlines . reverse $ acc)
         go acc (HUnitFailure e : es) = go (e : acc) es
 
+assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
+assertSameSet header xs ys = assertSameList header (sort xs) (sort ys)
+
+assertSameList :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
+assertSameList header xs ys =
+  case diff xs ys of
+    [] -> return ()
+    ds -> assertFailure (header ++ unlines ds)
+
+{-------------------------------------------------------------------------------
+  Assertions about session state
+-------------------------------------------------------------------------------}
+
+assertLoadedModules :: IdeSession -> String -> [String] -> Assertion
+assertLoadedModules session header goodMods = do
+  loadedMods <- getLoadedModules session
+  assertSameSet header (map T.pack goodMods) loadedMods
+
 {-------------------------------------------------------------------------------
   Assertions about source code errors
 -------------------------------------------------------------------------------}
@@ -61,6 +87,42 @@ show3errors errs =
       more | length errs > 3 = "\n... and more ..."
            | otherwise       = ""
   in shown ++ more
+
+-- @assertSourceErrors session [[a,b,c],[d,e,f],..] checks that there are
+-- exactly as many errors as elements in the outer list, and each of those
+-- errors must match one of the errors inside the inner lists
+assertSourceErrors :: IdeSession -> [[(Maybe FilePath, String)]] -> Assertion
+assertSourceErrors session expected = do
+  errs <- getSourceErrors session
+  if length errs /= length expected
+    then assertFailure $ "Unexpected source errors: " ++ show3errors errs
+    else forM_ (zip expected errs) $ \(potentialExpected, actualErr) ->
+           assertErrorOneOf actualErr potentialExpected
+
+assertErrorOneOf :: SourceError -> [(Maybe FilePath, String)] -> Assertion
+assertErrorOneOf (SourceError _ loc actual) potentialExpected =
+    case foldr1 mplus (map matches potentialExpected) of
+      Left err -> assertFailure err
+      Right () -> return ()
+  where
+    matches (mFP, expErr) = do
+      matchesFilePath mFP
+      matchesError expErr
+
+    matchesFilePath Nothing = Right ()
+    matchesFilePath (Just expectedPath) =
+      case loc of
+        ProperSpan (SourceSpan actualPath _ _ _ _) ->
+          if expectedPath `isSuffixOf` actualPath
+            then Right ()
+            else Left "Wrong file"
+        _ ->
+          Left "Expected location"
+
+    matchesError expectedErr =
+      if ignoreQuotes expectedErr `isInfixOf` ignoreQuotes (T.unpack actual)
+        then Right ()
+        else Left $ "Unexpected error: " ++ show (T.unpack actual) ++ ".\nExpected: " ++ show expectedErr
 
 {-------------------------------------------------------------------------------
   Assertions about type information
@@ -302,3 +364,32 @@ instance IgnoreVersions PackageId where
     , packageVersion = ignoreVersions packageVersion
     }
 
+{-------------------------------------------------------------------------------
+  Auxiliary
+-------------------------------------------------------------------------------}
+
+-- | Compare two lists, both assumed sorted
+--
+-- @diff expected actual@ returns a list of differences between two lists,
+-- or an empty lists if the input lists are identical
+diff :: (Ord a, Show a) => [a] -> [a] -> [String]
+diff [] [] = []
+diff xs [] = map (\x -> "Missing "    ++ show x) xs
+diff [] ys = map (\y -> "Unexpected " ++ show y) ys
+diff (x:xs) (y:ys)
+  | x <  y    = ("Missing "    ++ show x) : diff xs (y:ys)
+  | x >  y    = ("Unexpected " ++ show y) : diff (x:xs) ys
+  | otherwise = diff xs ys
+
+-- | Replace everything that looks like a quote by a standard single quote.
+ignoreQuotes :: String -> String
+ignoreQuotes s = subRegex (mkRegex quoteRegexp) s "'"
+  where
+    quoteRegexp :: String
+    quoteRegexp = "[‘‛’`\"]"
+
+isAsyncException :: RunResult -> Bool
+isAsyncException (RunProgException ex) =
+     (ex == "AsyncException: user interrupt")
+  || (ex == "SomeAsyncException: user interrupt")
+isAsyncException _ = False

@@ -1,10 +1,22 @@
 -- | Working with IDE sessions
 module TestSuite.Session (
     updateSessionD
+  , loadModule
+  , loadModulesFrom
+  , loadModulesFrom'
+  , getModules
+  , getModulesFrom
   ) where
 
+import Prelude hiding (mod)
+import Control.Monad
 import Data.IORef
+import Data.List (isPrefixOf)
+import Data.Monoid
+import System.FilePath
+import System.FilePath.Find (always, extension, find)
 import Test.HUnit
+import qualified Data.ByteString.Lazy.UTF8 as L
 
 import IdeSession
 
@@ -32,3 +44,56 @@ updateSessionD session update numProgressUpdates = do
   assertBool ("We expected " ++ show numProgressUpdates ++ " progress messages, but got " ++ show progressUpdates)
              (length progressUpdates <= numProgressUpdates)
 
+loadModule :: FilePath -> String -> IdeSessionUpdate ()
+loadModule file contents =
+    let mod =  "module " ++ mname file ++ " where\n" ++ contents
+    in updateSourceFile file (L.fromString mod)
+  where
+    -- This is a hack: construct a module name from a filename
+    mname :: FilePath -> String
+    mname path = case "test/" `substr` path of
+      Just rest -> dotToSlash . dropExtension . dropFirstPathComponent $ rest
+      Nothing   -> takeBaseName path
+
+    dropFirstPathComponent :: FilePath -> FilePath
+    dropFirstPathComponent = tail . dropWhile (/= '/')
+
+    dotToSlash :: String -> String
+    dotToSlash = map $ \c -> if c == '/' then '.' else c
+
+    -- | Specification:
+    --
+    -- > bs `substr` (as ++ bs ++ cs) == Just cs
+    -- > bs `substr` _                == Nothing
+    substr :: Eq a => [a] -> [a] -> Maybe [a]
+    substr needle haystack
+      | needle `isPrefixOf` haystack = Just $ drop (length needle) haystack
+      | otherwise = case haystack of
+                      []              -> Nothing
+                      (_ : haystack') -> substr needle haystack'
+
+loadModulesFrom :: IdeSession -> FilePath -> IO ()
+loadModulesFrom session originalSourcesDir =
+  loadModulesFrom' session originalSourcesDir $ TargetsExclude []
+
+loadModulesFrom' :: IdeSession -> FilePath -> Targets -> IO ()
+loadModulesFrom' session originalSourcesDir targets = do
+  (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
+  updateSessionD session (originalUpdate <> updateTargets targets) (length lm)
+
+getModules :: IdeSession -> IO (IdeSessionUpdate (), [FilePath])
+getModules session = do
+  sourcesDir <- getSourcesDir session
+  getModulesFrom session sourcesDir
+
+-- | Update the session with all modules of the given directory.
+getModulesFrom :: IdeSession -> FilePath -> IO (IdeSessionUpdate (), [FilePath])
+getModulesFrom session originalSourcesDir = do
+  -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
+  -- using the IdeSession's update mechanism.
+  originalFiles <- find always
+                        ((`elem` sourceExtensions) `liftM` extension)
+                        originalSourcesDir
+  let originalUpdate = updateCodeGeneration False
+                    <> (mconcat $ map updateSourceFileFromFile originalFiles)
+  return (originalUpdate, originalFiles)

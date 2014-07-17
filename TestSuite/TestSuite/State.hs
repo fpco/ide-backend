@@ -121,7 +121,7 @@ withAvailableSession' TestSuiteEnv{..} dynOpts act = do
                   (\_ -> return ())
 
     -- Run the test
-    result <- act session
+    mresult <- try $ act session
 
     -- Make the session available for further tests, or shut it down if the
     -- @--no-session-reuse@ command line option was used
@@ -130,7 +130,9 @@ withAvailableSession' TestSuiteEnv{..} dynOpts act = do
       else consMVar (testSuiteServerConfig, session) testSuiteStateAvailableSessions
 
     -- Return test result
-    return result
+    case mresult of
+      Left  ex     -> throwIO (ex :: SomeException)
+      Right result -> return result
   where
     testSuiteServerConfig = TestSuiteServerConfig {
         testSuiteServerConfig     = testSuiteEnvConfig

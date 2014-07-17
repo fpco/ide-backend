@@ -191,6 +191,7 @@ test-suite TestSuite
                       bytestring,
                       regex-compat,
                       filepath,
+                      filemanip,
                       directory
   default-language:   Haskell2010
   ghc-options:        -Wall 

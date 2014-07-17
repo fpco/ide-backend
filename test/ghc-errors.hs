@@ -56,34 +56,7 @@ import TestTools
 -- Tests using various functions of the IdeSession API
 -- and a variety of small test Haskell projects.
 
--- | Update the session with all modules of the given directory.
-getModulesFrom :: IdeSession -> FilePath -> IO (IdeSessionUpdate (), [FilePath])
-getModulesFrom session originalSourcesDir = do
-  sourcesDir <- getSourcesDir session
-  debug dVerbosity $ "\nCopying files from: " ++ originalSourcesDir
-                     ++ " to: " ++ sourcesDir
-  -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
-  -- using the IdeSession's update mechanism.
-  originalFiles <- find always
-                        ((`elem` sourceExtensions) `liftM` extension)
-                        originalSourcesDir
-  let originalUpdate = updateCodeGeneration False
-                    <> (mconcat $ map updateSourceFileFromFile originalFiles)
-  return (originalUpdate, originalFiles)
 
-getModules :: IdeSession -> IO (IdeSessionUpdate (), [FilePath])
-getModules session = do
-  sourcesDir <- getSourcesDir session
-  getModulesFrom session sourcesDir
-
-loadModulesFrom :: IdeSession -> FilePath -> IO ()
-loadModulesFrom session originalSourcesDir =
-  loadModulesFrom' session originalSourcesDir $ TargetsExclude []
-
-loadModulesFrom' :: IdeSession -> FilePath -> Targets -> IO ()
-loadModulesFrom' session originalSourcesDir targets = do
-  (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
-  updateSessionD session (originalUpdate <> updateTargets targets) (length lm)
 
 ifIdeBackendHaddockTestsEnabled :: SessionSetup -> (IdeSession -> IO ()) -> IO ()
 ifIdeBackendHaddockTestsEnabled setup io = do
@@ -272,67 +245,6 @@ multipleTests =
 
 syntheticTests :: [(String, Assertion)]
 syntheticTests = [
-  , ( "Maintain list of compiled modules I"
-    , withSession defaultSession $ \session -> do
-        updateSessionD session (loadModule "XXX.hs" "a = 5") 1
-        assertLoadedModules session "XXX" ["XXX"]
-        updateSessionD session (loadModule "A.hs" "a = 5") 1
-        assertLoadedModules session "[m1]" ["A", "XXX"]
-        updateSessionD session (loadModule "A2.hs" "import A\na2 = A.a") 1
-        assertLoadedModules session "[m1, m2]" ["A", "A2", "XXX"]
-        updateSessionD session (loadModule "A3.hs" "") 1
-        assertLoadedModules session "[m1, m2, m3]" ["A", "A2", "A3", "XXX"]
-        updateSessionD session (loadModule "Wrong.hs" "import A4\na2 = A4.a + 1") 1
-        assertLoadedModules session "wrong1" ["A", "A2", "A3", "XXX"]
-        updateSessionD session (loadModule "Wrong.hs" "import A\na2 = A.a + c") 1
-        assertLoadedModules session "wrong2" ["A", "A2", "A3", "XXX"]
-        updateSessionD session (loadModule "A.hs" "a = c") 1
-        -- Module "A" is compiled before "Wrong", fails, so it's invalidated
-        -- and all modules that depend on it are invalidated. Module "Wrong"
-        -- is never compiled.
-        assertLoadedModules session "wrong3" ["A3", "XXX"]
-    )
-  , ( "Maintain list of compiled modules II"
-    , withSession defaultSession $ \session -> do
-        updateSessionD session (loadModule "XXX.hs" "a = 5") 1
-        assertLoadedModules session "XXX" ["XXX"]
-        updateSessionD session (loadModule "A.hs" "a = 5") 1
-        assertLoadedModules session "[m1]" ["A", "XXX"]
-        updateSessionD session (loadModule "A2.hs" "import A\na2 = A.a") 1
-        assertLoadedModules session "[m1, m2]" ["A", "A2", "XXX"]
-        updateSessionD session (loadModule "A3.hs" "") 1
-        assertLoadedModules session "[m1, m2, m3]" ["A", "A2", "A3", "XXX"]
-        updateSessionD session (loadModule "Wrong.hs" "import A4\na2 = A4.a + 1") 1
-        assertLoadedModules session "wrong1" ["A", "A2", "A3", "XXX"]
-        -- This has to be disabled to get the different outcome below:
-          -- updateSessionD session (loadModule m4 "import A\na2 = A.a + c") 1
-          -- assertLoadedModules session "wrong2" [m1, m2, m3, xxx]
-        -- We get this differemnt outcome both in original 7.4.2
-        -- and after the GHC#7231 fix. It's probably caused by target
-        -- Wrong place before or after target "A" depending on what kind
-        -- of error Wrong had. This is strange, but not incorrect.
-        updateSessionD session (loadModule "A.hs" "a = c") 1
-        -- Module "Wrong" is compiled first here, fails, so module "A"
-        -- is never comipiled, so it's not invalidated.
-        assertLoadedModules session "wrong3" ["A", "A2", "A3", "XXX"]
-    )
-  , ( "Maintain list of compiled modules III"
-    , withSession defaultSession $ \session -> do
-        updateSessionD session (loadModule "A.hs" "a = 5") 1
-        assertLoadedModules session "1 [A]" ["A"]
-        updateSessionD session (loadModule "A.hs" "a = 5 + True") 1
-        assertLoadedModules session "1 []" []
-        updateSessionD session (loadModule "A.hs" "a = 5") 1
-        assertLoadedModules session "2 [A]" ["A"]
-        updateSessionD session (loadModule "A.hs" "a = 5 + wrong") 1
-        assertLoadedModules session "2 []" []
-        updateSessionD session (loadModule "A.hs" "a = 5") 1
-        assertLoadedModules session "3 [A]" ["A"]
-        updateSessionD session (loadModule "A.hs" "import WRONG\na = 5") 1
-        assertLoadedModules session "3 [A]; wrong imports do not unload old modules" ["A"]
-        updateSessionD session (loadModule "A.hs" "a = 5 + True") 1
-        assertLoadedModules session "3 []" []
-    )
   , ( "Duplicate shutdown"
     , withSession defaultSession $ \session ->
         -- withConfiguredSession will shutdown the session as well
@@ -353,28 +265,6 @@ syntheticTests = [
             updateSessionD s3 update3 1
             assertNoErrors session
             shutdownSession s5 -- <-- duplicate "nested" shutdown
-    )
-  , ( "Compile a project: A depends on B, error in A"
-    , withSession defaultSession $ \session -> do
-        loadModulesFrom session "test/AerrorB"
-        assertSourceErrors session [[(Just "A.hs", "No instance for (Num (IO ()))")]]
-     )
-  , ( "Compile a project: A depends on B, error in B"
-    , withSession defaultSession $ \session -> do
-        loadModulesFrom session "test/ABerror"
-        assertSourceErrors session [[(Just "B.hs", "No instance for (Num (IO ()))")]]
-    )
-  , ( "Compile and run a project with some .lhs files"
-    , withSession defaultSession $ \session -> do
-        loadModulesFrom session "test/compiler/utils"
-        assertNoErrors session
-        let update2 = updateCodeGeneration True
-        updateSessionD session update2 4
-        assertNoErrors session
-        runActions <- runStmt session "Maybes" "main"
-        (output, result) <- runWaitAll runActions
-        assertEqual "" RunOk result
-        assertEqual "" output (BSLC.pack "False\n")
     )
   , ( "Build executable from some .lhs files"
     , withSession (withIncludes "test/compiler/utils") $ \session -> do
@@ -997,82 +887,6 @@ syntheticTests = [
                                    (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update2 1
         assertSourceErrors' session ["parse error on input `.'"]
-    )
-  , ( "Interrupt runStmt (after 1 sec)"
-    , withSession defaultSession $ \session -> do
-        let upd = (updateCodeGeneration True)
-               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
-                    [ "module M where"
-                    , "import Control.Concurrent (threadDelay)"
-                    , "loop :: IO ()"
-                    , "loop = threadDelay 100000 >> loop"
-                    ])
-        updateSessionD session upd 1
-        assertNoErrors session
-        runActions <- runStmt session "M" "loop"
-        threadDelay 1000000
-        interrupt runActions
-        resOrEx <- runWait runActions
-        case resOrEx of
-          Right result -> assertBool "" (isAsyncException result)
-          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
-    )
-  , ( "Interrupt runStmt (immediately)"
-    , withSession defaultSession $ \session -> do
-        let upd = (updateCodeGeneration True)
-               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
-                    [ "module M where"
-                    , "import Control.Concurrent (threadDelay)"
-                    , "loop :: IO ()"
-                    , "loop = threadDelay 100000 >> loop"
-                    ])
-        updateSessionD session upd 1
-        assertNoErrors session
-        runActions <- runStmt session "M" "loop"
-        interrupt runActions
-        resOrEx <- runWait runActions
-        case resOrEx of
-          Right result -> assertBool "" (isAsyncException result)
-          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
-    )
-  , ( "Interrupt runStmt (black hole; after 1 sec)"
-    , withSession defaultSession $ \session -> do
-        let upd = (updateCodeGeneration True)
-               <> (updateSourceFile "M.hs" . BSLC.pack . unlines $
-                    [ "module M where"
-                    , "loop :: IO ()"
-                    , "loop = loop"
-                    ])
-        updateSessionD session upd 1
-        assertNoErrors session
-        runActions <- runStmt session "M" "loop"
-        threadDelay 1000000
-        forceCancel runActions -- Black hole cannot (always) be interrupted using an exception
-        resOrEx <- runWait runActions
-        case resOrEx of
-          Right RunForceCancelled -> return ()
-          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
-    )
-  , ( "Interrupt runStmt many times, preferably without deadlock :) (#58)"
-    , withSession defaultSession $ \session -> do
-        let upd = (updateCodeGeneration True)
-               <> (updateSourceFile "Main.hs" . BSLC.pack $
-                    "main = putStrLn \"Hi!\" >> getLine >> return ()")
-               <> (updateStdoutBufferMode (RunLineBuffering Nothing))
-        updateSessionD session upd 1
-        assertNoErrors session
-
-        replicateM_ 100 $ do
-          runActions <- runStmt session "Main" "main"
-          interrupt runActions
-          (_output, result) <- runWaitAll runActions
-          assertBool ("Expected asynchronous exception; got " ++ show result) (isAsyncException result)
-
-        runActions <- runStmt session "Main" "main"
-        supplyStdin runActions "\n"
-        (output, result) <- runWaitAll runActions
-        assertEqual "" RunOk result
-        assertEqual "" (BSLC.pack "Hi!\n") output
     )
   , ( "Interrupt runExe (after 1 sec)"
     , withSession defaultSession $ \session -> do
@@ -6720,27 +6534,6 @@ filterCheckWarns s =
       (_, bs2) = BSSC.breakSubstring (BSSC.pack "These warnings may cause trouble") rest1
   in BSSC.append bs1 bs2
 
-assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
-assertSameSet header xs ys = assertSameList header (sort xs) (sort ys)
-
-assertSameList :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
-assertSameList header xs ys =
-  case diff xs ys of
-    [] -> return ()
-    ds -> assertFailure (header ++ unlines ds)
-
--- | Compare two lists, both assumed sorted
---
--- @diff expected actual@ returns a list of differences between two lists,
--- or an empty lists if the input lists are identical
-diff :: (Ord a, Show a) => [a] -> [a] -> [String]
-diff [] [] = []
-diff xs [] = map (\x -> "Missing "    ++ show x) xs
-diff [] ys = map (\y -> "Unexpected " ++ show y) ys
-diff (x:xs) (y:ys)
-  | x <  y    = ("Missing "    ++ show x) : diff xs (y:ys)
-  | x >  y    = ("Unexpected " ++ show y) : diff (x:xs) ys
-  | otherwise = diff xs ys
 
 -- Set of projects and options to use for them.
 projects :: [(String, FilePath, [String])]
@@ -6810,33 +6603,6 @@ updateSessionP session update expectedProgressUpdates = do
 -- Extra test tools.
 --
 
-loadModule :: FilePath -> String -> IdeSessionUpdate ()
-loadModule file contents =
-    let mod =  "module " ++ mname file ++ " where\n" ++ contents
-    in updateSourceFile file (BSLC.pack mod)
-  where
-    -- This is a hack: construct a module name from a filename
-    mname :: FilePath -> String
-    mname path = case "test/" `substr` path of
-      Just rest -> dotToSlash . dropExtension . dropFirstPathComponent $ rest
-      Nothing   -> takeBaseName path
-
-    dropFirstPathComponent :: FilePath -> FilePath
-    dropFirstPathComponent = tail . dropWhile (/= '/')
-
-    dotToSlash :: String -> String
-    dotToSlash = map $ \c -> if c == '/' then '.' else c
-
-    -- | Specification:
-    --
-    -- > bs `substr` (as ++ bs ++ cs) == Just cs
-    -- > bs `substr` _                == Nothing
-    substr :: Eq a => [a] -> [a] -> Maybe [a]
-    substr needle haystack
-      | needle `isPrefixOf` haystack = Just $ drop (length needle) haystack
-      | otherwise = case haystack of
-                      []              -> Nothing
-                      (_ : haystack') -> substr needle haystack'
 
 
 
@@ -6856,41 +6622,6 @@ assertSourceErrors' :: IdeSession -> [String] -> Assertion
 assertSourceErrors' session = assertSourceErrors session . map
   (\err -> [(Nothing, err)])
 
--- @assertSourceErrors session [[a,b,c],[d,e,f],..] checks that there are
--- exactly as many errors as elements in the outer list, and each of those
--- errors must match one of the errors inside the inner lists
-assertSourceErrors :: IdeSession -> [[(Maybe FilePath, String)]] -> Assertion
-assertSourceErrors session expected = do
-  errs <- getSourceErrors session
-  if length errs /= length expected
-    then assertFailure $ "Unexpected source errors: " ++ show3errors errs
-    else forM_ (zip expected errs) $ \(potentialExpected, actualErr) ->
-           assertErrorOneOf actualErr potentialExpected
-
-assertErrorOneOf :: SourceError -> [(Maybe FilePath, String)] -> Assertion
-assertErrorOneOf (SourceError _ loc actual) potentialExpected =
-    case foldr1 mplus (map matches potentialExpected) of
-      Left err -> assertFailure err
-      Right () -> return ()
-  where
-    matches (mFP, expErr) = do
-      matchesFilePath mFP
-      matchesError expErr
-
-    matchesFilePath Nothing = Right ()
-    matchesFilePath (Just expectedPath) =
-      case loc of
-        ProperSpan (SourceSpan actualPath _ _ _ _) ->
-          if expectedPath `isSuffixOf` actualPath
-            then Right ()
-            else Left "Wrong file"
-        _ ->
-          Left "Expected location"
-
-    matchesError expectedErr =
-      if ignoreQuotes expectedErr `isInfixOf` ignoreQuotes (Text.unpack actual)
-        then Right ()
-        else Left $ "Unexpected error: " ++ show (Text.unpack actual) ++ ".\nExpected: " ++ show expectedErr
 
 assertSomeErrors :: [SourceError] -> Assertion
 assertSomeErrors msgs = do
@@ -6908,11 +6639,6 @@ assertMoreErrors session = do
   msgs <- getSourceErrors session
   assertBool ("Too few type errors: " ++ show3errors msgs)
     $ length msgs >= 2
-
-assertLoadedModules :: IdeSession -> String -> [String] -> Assertion
-assertLoadedModules session header goodMods = do
-  loadedMods <- getLoadedModules session
-  assertSameSet header (map Text.pack goodMods) loadedMods
 
 {-
 assertBreak :: IdeSession
@@ -6932,12 +6658,6 @@ assertBreak session mod loc resTy vars = do
     assertAlphaEquiv "var type" typ (Text.unpack typ')
     assertEqual      "var val"  val (Text.unpack val')
 -}
-
-isAsyncException :: RunResult -> Bool
-isAsyncException (RunProgException ex) =
-     (ex == "AsyncException: user interrupt")
-  || (ex == "SomeAsyncException: user interrupt")
-isAsyncException _ = False
 
 restartRun :: [String] -> ExitCode -> Assertion
 restartRun code exitCode =
@@ -7117,13 +6837,6 @@ mark (x:xs) = (x, True, False) : aux xs
     aux [y]    = [(y, False, True)]
     aux (y:ys) = (y, False, False) : aux ys
 -}
-
--- | Replace everything that looks like a quote by a standard single quote.
-ignoreQuotes :: String -> String
-ignoreQuotes s = subRegex (mkRegex quoteRegexp) s "'"
-  where
-    quoteRegexp :: String
-    quoteRegexp = "[‘‛’`\"]"
 
 -- | Temporarily switch directory
 --
