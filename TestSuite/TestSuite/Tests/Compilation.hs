@@ -18,16 +18,22 @@ import TestSuite.Assertions
 
 testGroupCompilation :: TestSuiteEnv -> TestTree
 testGroupCompilation env = testGroup "Compilation" [
-    stdTest env "Compile a project: A depends on B, error in A"                    test_AdependsB_errorA
-  , stdTest env "Compile a project: A depends on B, error in B"                    test_AdependsB_errorB
-  , stdTest env "Compile and run a project with some .lhs files"                   test_lhs
-  , stdTest env "Test recursive modules"                                           test_recursiveModules
-  , stdTest env "Test recursive modules with dynamic include path change"          test_dynamicIncludePathChange
-  , stdTest env "Test CPP: ifdefed module header"                                  test_CPP_ifdefModuleHeader
-  , stdTest env "Reject a wrong CPP directive"                                     test_rejectWrongCPP
-  , stdTest env "Reject a program requiring -XNamedFieldPuns, then set the option" test_NamedFieldPuns
-  , stdTest env "Don't recompile unnecessarily (single module)"                    test_DontRecompile_SingleModule
-  , stdTest env "Don't recompile unnecessarily (A depends on B)"                   test_DontRecompile_Depends
+    stdTest env "Compile a project: A depends on B, error in A"                                         test_AdependsB_errorA
+  , stdTest env "Compile a project: A depends on B, error in B"                                         test_AdependsB_errorB
+  , stdTest env "Compile and run a project with some .lhs files"                                        test_lhs
+  , stdTest env "Test recursive modules"                                                                test_recursiveModules
+  , stdTest env "Test recursive modules with dynamic include path change"                               test_dynamicIncludePathChange
+  , stdTest env "Test CPP: ifdefed module header"                                                       test_CPP_ifdefModuleHeader
+  , stdTest env "Reject a wrong CPP directive"                                                          test_rejectWrongCPP
+  , stdTest env "Reject a program requiring -XNamedFieldPuns, then set the option"                      test_NamedFieldPuns
+  , stdTest env "Don't recompile unnecessarily (single module)"                                         test_DontRecompile_SingleModule
+  , stdTest env "Don't recompile unnecessarily (A depends on B)"                                        test_DontRecompile_Depends
+  , stdTest env "Support for hs-boot files (#155)"                                                      test_HsBoot
+  , stdTest env "Support for lhs-boot files (#155)"                                                     test_LhsBoot
+  , stdTest env "Support for hs-boot files from a subdirectory (#177)"                                  test_HsBoot_SubDir
+  , stdTest env "Support for hs-boot files from a subdirectory (#177) with dynamic include path change" test_HsBoot_SubDir_InclPathChange
+  , stdTest env "Relative include paths (#156)"                                                         test_RelInclPath
+  , stdTest env "Relative include paths (#156) with dynamic include path change"                        test_RelInclPath_InclPathChange
   ]
 
 test_AdependsB_errorA :: TestSuiteEnv -> Assertion
@@ -214,6 +220,216 @@ test_DontRecompile_Depends env = withAvailableSession env $ \session -> do
                | i <- [0 .. n :: Int]
                ]
     upd = updateCodeGeneration True <> updA 0 <> updB 0
+
+test_HsBoot :: TestSuiteEnv -> Assertion
+test_HsBoot env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 3
+    assertNoErrors session
+
+    let m = "A"
+        updE = buildExe ["-rtsopts", "-O1"] [(T.pack m, m <.> "hs")]
+    updateSessionD session updE 4
+    distDir <- getDistDir session
+    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+    assertEqual "buildStderr empty" "" buildStderr
+    status <- getBuildExeStatus session
+    assertEqual "after exe build" (Just ExitSuccess) status
+    out <- readProcess (distDir </> "build" </> m </> m)
+                       ["+RTS", "-C0.005", "-RTS"] []
+    assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
+    runActionsExe <- runExe session m
+    (outExe, statusExe) <- runWaitAll runActionsExe
+    assertEqual "Output from runExe"
+                "[1,1,2,3,5,8,13,21,34,55]\n"
+                outExe
+    assertEqual "after runExe" ExitSuccess statusExe
+  where
+    upd = (updateCodeGeneration True)
+       <> (updateSourceFile "A.hs" $ L.unlines [
+              "module A where"
+
+            , "import {-# SOURCE #-} B"
+
+            , "f :: Int -> Int"
+            , "f 0 = 1"
+            , "f 1 = 1"
+            , "f n = g (n - 1) + g (n - 2)"
+
+            , "main :: IO ()"
+            , "main = print $ map f [0..9]"
+            ])
+       <> (updateSourceFile "B.hs" $ L.unlines [
+              "module B where"
+
+            , "import A"
+
+            , "g :: Int -> Int"
+            , "g = f"
+            ])
+       <> (updateSourceFile "B.hs-boot" $ L.unlines [
+              "module B where"
+
+            , "g :: Int -> Int"
+            ])
+
+test_LhsBoot :: TestSuiteEnv -> Assertion
+test_LhsBoot env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 3
+    assertNoErrors session
+
+    let m = "A"
+        updE = buildExe [] [(T.pack m, m <.> "lhs")]
+    updateSessionD session updE 4
+    distDir <- getDistDir session
+    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+    assertEqual "buildStderr empty" "" buildStderr
+    status <- getBuildExeStatus session
+    assertEqual "after exe build" (Just ExitSuccess) status
+    out <- readProcess (distDir </> "build" </> m </> m) [] []
+    assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
+    runActionsExe <- runExe session m
+    (outExe, statusExe) <- runWaitAll runActionsExe
+    assertEqual "Output from runExe"
+                "[1,1,2,3,5,8,13,21,34,55]\n"
+                outExe
+    assertEqual "after runExe" ExitSuccess statusExe
+  where
+    upd = (updateCodeGeneration True)
+       <> (updateSourceFile "A.lhs" $ L.unlines [
+              "> module A where"
+
+            , "> import {-# SOURCE #-} B"
+
+            , "> f :: Int -> Int"
+            , "> f 0 = 1"
+            , "> f 1 = 1"
+            , "> f n = g (n - 1) + g (n - 2)"
+
+            , "> main :: IO ()"
+            , "> main = print $ map f [0..9]"
+            ])
+       <> (updateSourceFile "B.lhs" $ L.unlines [
+              "> module B where"
+
+            , "> import A"
+
+            , "> g :: Int -> Int"
+            , "> g = f"
+            ])
+       <> (updateSourceFile "B.lhs-boot" $ L.unlines [
+              "> module B where"
+
+            , "> g :: Int -> Int"
+            ])
+
+test_HsBoot_SubDir :: TestSuiteEnv -> Assertion
+test_HsBoot_SubDir env = withAvailableSession' env (withIncludes ["src"]) $ \session -> do
+    updateSessionD session update 3
+    assertNoErrors session
+
+    let m = "B"
+        updE = buildExe [] [(T.pack m, m <.> "hs")]
+    updateSessionD session updE 4
+    distDir <- getDistDir session
+    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+    assertEqual "buildStderr empty" "" buildStderr
+    status <- getBuildExeStatus session
+    assertEqual "after exe build" (Just ExitSuccess) status
+    out <- readProcess (distDir </> "build" </> m </> m) [] []
+    assertEqual "" "42\n" out
+    runActionsExe <- runExe session m
+    (outExe, statusExe) <- runWaitAll runActionsExe
+    assertEqual "Output from runExe"
+                "42\n"
+                outExe
+    assertEqual "after runExe" ExitSuccess statusExe
+  where
+    ahs     = "module A where\nimport B( TB(..) )\nnewtype TA = MkTA Int\nf :: TB -> TA\nf (MkTB x) = MkTA x"
+    ahsboot = "module A where\nnewtype TA = MkTA Int"
+    bhs     = "module B where\nimport {-# SOURCE #-} A( TA(..) )\ndata TB = MkTB !Int\ng :: TA -> TB\ng (MkTA x) = MkTB x\nmain = print 42"
+
+    update = updateSourceFile "src/A.hs" ahs
+          <> updateSourceFile "src/A.hs-boot" ahsboot
+          <> updateSourceFile "src/B.hs" bhs
+          <> updateCodeGeneration True
+
+test_HsBoot_SubDir_InclPathChange :: TestSuiteEnv -> Assertion
+test_HsBoot_SubDir_InclPathChange env = withAvailableSession env $ \session -> do
+    updateSessionD session update 3
+    assertOneError session
+
+    updateSessionD session
+                   (updateRelativeIncludes ["src"])
+                   3
+    assertNoErrors session
+
+    let m = "B"
+        updE = buildExe [] [(T.pack m, m <.> "hs")]
+    updateSessionD session updE 4
+    distDir <- getDistDir session
+    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+    assertEqual "buildStderr empty" "" buildStderr
+    status <- getBuildExeStatus session
+    assertEqual "after exe build" (Just ExitSuccess) status
+    out <- readProcess (distDir </> "build" </> m </> m) [] []
+    assertEqual "" "42\n" out
+    runActionsExe <- runExe session m
+    (outExe, statusExe) <- runWaitAll runActionsExe
+    assertEqual "Output from runExe"
+                "42\n"
+                outExe
+    assertEqual "after runExe" ExitSuccess statusExe
+  where
+    ahs     = "module A where\nimport B( TB(..) )\nnewtype TA = MkTA Int\nf :: TB -> TA\nf (MkTB x) = MkTA x"
+    ahsboot = "module A where\nnewtype TA = MkTA Int"
+    bhs     = "module B where\nimport {-# SOURCE #-} A( TA(..) )\ndata TB = MkTB !Int\ng :: TA -> TB\ng (MkTA x) = MkTB x\nmain = print 42"
+
+    update = updateSourceFile "src/A.hs" ahs
+          <> updateSourceFile "src/A.hs-boot" ahsboot
+          <> updateSourceFile "src/B.hs" bhs
+          <> updateCodeGeneration True
+
+test_RelInclPath :: TestSuiteEnv -> Assertion
+test_RelInclPath env = withAvailableSession' env (withIncludes ["test/ABnoError"]) $ \session -> do
+    -- Since we set the target explicitly, ghc will need to be able to find
+    -- the other module (B) on its own; that means it will need an include
+    -- path to <ideSourcesDir>/test/ABnoError
+    loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
+    assertNoErrors session
+
+    let updE = buildExe [] [(T.pack "Main", "test/ABnoError/A.hs")]
+    updateSessionD session updE 3
+    status <- getBuildExeStatus session
+    assertEqual "after exe build" (Just ExitSuccess) status
+
+    let updE2 = buildExe [] [(T.pack "Main", "A.hs")]
+    updateSessionD session updE2 0
+    status2 <- getBuildExeStatus session
+    assertEqual "after exe build" (Just ExitSuccess) status2
+
+test_RelInclPath_InclPathChange :: TestSuiteEnv -> Assertion
+test_RelInclPath_InclPathChange env = withAvailableSession env $ \session -> do
+    -- Since we set the target explicitly, ghc will need to be able to find
+    -- the other module (B) on its own; that means it will need an include
+    -- path to <ideSourcesDir>/test/ABnoError
+    loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
+    assertOneError session
+
+    updateSessionD session
+                   (updateRelativeIncludes ["test/ABnoError"])
+                   2  -- note the recompilation
+    assertNoErrors session
+
+    let updE = buildExe [] [(T.pack "Main", "test/ABnoError/A.hs")]
+    updateSessionD session updE 1
+    status <- getBuildExeStatus session
+    -- Path "" no longer in include paths here!
+    assertEqual "after exe build" (Just $ ExitFailure 1) status
+
+    let updE2 = buildExe [] [(T.pack "Main", "A.hs")]
+    updateSessionD session updE2 2
+    status2 <- getBuildExeStatus session
+    assertEqual "after exe build" (Just ExitSuccess) status2
 
 {-------------------------------------------------------------------------------
   Auxiliary: counter

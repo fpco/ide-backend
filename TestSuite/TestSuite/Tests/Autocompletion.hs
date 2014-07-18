@@ -13,6 +13,11 @@ import TestSuite.State
 import TestSuite.Session
 import TestSuite.Assertions
 
+-- TODO: Autocomplete test that checks import errors:
+--
+-- * Explicitly importing something that wasn't exported
+-- * Explicitly hiding something that wasn't exported
+-- * Use of PackageImports without the flag
 testGroupAutoCompletion :: TestSuiteEnv -> TestTree
 testGroupAutoCompletion env = testGroup "Autocompletion" [
     stdTest env "Autocomplete 1: Imports for partial module"                          test_PartialModule

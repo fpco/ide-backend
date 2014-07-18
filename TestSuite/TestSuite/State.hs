@@ -15,6 +15,8 @@ module TestSuite.State (
   , defaultServerConfig
   , withOpts
   , withIncludes
+  , withModInfo
+  , withDBStack
   , requireHaddocks
   , skipTest
     -- * Constructing tests
@@ -140,6 +142,20 @@ withIncludes incls setup = setup {
       }
   }
 
+withModInfo :: Bool -> TestSuiteSessionSetup -> TestSuiteSessionSetup
+withModInfo modInfo setup = setup {
+    testSuiteSessionServer = (testSuiteSessionServer setup) {
+        testSuiteServerGenerateModInfo = Just modInfo
+      }
+  }
+
+withDBStack :: PackageDBStack -> TestSuiteSessionSetup -> TestSuiteSessionSetup
+withDBStack dbStack setup = setup {
+    testSuiteSessionServer = (testSuiteSessionServer setup) {
+        testSuiteServerPackageDBStack = Just dbStack
+      }
+  }
+
 -- | More general version of 'withAvailableSession'
 withAvailableSession' :: TestSuiteEnv -> (TestSuiteSessionSetup -> TestSuiteSessionSetup) -> (IdeSession -> IO a) -> IO a
 withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
@@ -187,6 +203,8 @@ defaultServerConfig TestSuiteEnv{..} = TestSuiteServerConfig {
       testSuiteServerConfig           = testSuiteEnvConfig
     , testSuiteServerGhcVersion       = testSuiteEnvGhcVersion
     , testSuiteServerRelativeIncludes = Nothing
+    , testSuiteServerGenerateModInfo  = Nothing
+    , testSuiteServerPackageDBStack   = Nothing
     }
 
 -- | Skip this test if the --no-haddocks flag is passed
@@ -247,6 +265,8 @@ data TestSuiteServerConfig = TestSuiteServerConfig {
     testSuiteServerConfig           :: TestSuiteConfig
   , testSuiteServerGhcVersion       :: GhcVersion
   , testSuiteServerRelativeIncludes :: Maybe [FilePath]
+  , testSuiteServerGenerateModInfo  :: Maybe Bool
+  , testSuiteServerPackageDBStack   :: Maybe PackageDBStack
   }
   deriving (Eq, Show)
 
@@ -258,11 +278,15 @@ startNewSession TestSuiteServerConfig{..} =
           configDeleteTempFiles =
             not testSuiteConfigKeepTempFiles
         , configPackageDBStack  =
-            fromMaybe (configPackageDBStack defaultSessionConfig) $ do
-              packageDb <- case testSuiteServerGhcVersion of
-                             GHC742 -> testSuiteConfigPackageDb74
-                             GHC78  -> testSuiteConfigPackageDb78
-              return [GlobalPackageDB, SpecificPackageDB packageDb]
+            fromMaybe (configPackageDBStack defaultSessionConfig) $
+              (
+                testSuiteServerPackageDBStack
+              `mplus`
+                do packageDb <- case testSuiteServerGhcVersion of
+                                  GHC742 -> testSuiteConfigPackageDb74
+                                  GHC78  -> testSuiteConfigPackageDb78
+                   return [GlobalPackageDB, SpecificPackageDB packageDb]
+              )
         , configExtraPathDirs =
             splitSearchPath $ case testSuiteServerGhcVersion of
                                 GHC742 -> testSuiteConfigExtraPaths74
@@ -270,6 +294,9 @@ startNewSession TestSuiteServerConfig{..} =
         , configRelativeIncludes =
             fromMaybe (configRelativeIncludes defaultSessionConfig) $
               testSuiteServerRelativeIncludes
+        , configGenerateModInfo =
+            fromMaybe (configGenerateModInfo defaultSessionConfig) $
+              testSuiteServerGenerateModInfo
         }
   where
     TestSuiteConfig{..} = testSuiteServerConfig

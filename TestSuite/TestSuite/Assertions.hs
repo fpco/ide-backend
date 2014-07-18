@@ -22,6 +22,7 @@ module TestSuite.Assertions (
   , assertExpTypes
   , ignoreVersions
   , allVersions
+  , assertUseSites
     -- * Auxiliary
   , isAsyncException
   ) where
@@ -281,15 +282,16 @@ assertExpTypes expTypes mod loc expected =
       , T.unpack       typ
       )
 
-mkSpan :: String -> (Int, Int, Int, Int) -> (ModuleName, SourceSpan)
-mkSpan mod (frLine, frCol, toLine, toCol) = (T.pack mod, span)
+assertUseSites :: (ModuleName -> SourceSpan -> [SourceSpan])
+               -> String
+               -> (Int, Int, Int, Int)
+               -> String
+               -> [String]
+               -> Assertion
+assertUseSites useSites mod loc symbol expected =
+    assertEqual ("Use sites of `" ++ symbol ++ "` in " ++ show mod) expected actual
   where
-    span = SourceSpan { spanFilePath   = mod ++ ".hs"
-                      , spanFromLine   = frLine
-                      , spanFromColumn = frCol
-                      , spanToLine     = toLine
-                      , spanToColumn   = toCol
-                      }
+    actual = map show (uncurry useSites $ mkSpan mod loc)
 
 {------------------------------------------------------------------------------
   Replace (type variables) with numbered type variables
@@ -420,3 +422,14 @@ isAsyncException (RunProgException ex) =
      (ex == "AsyncException: user interrupt")
   || (ex == "SomeAsyncException: user interrupt")
 isAsyncException _ = False
+
+mkSpan :: String -> (Int, Int, Int, Int) -> (ModuleName, SourceSpan)
+mkSpan mod (frLine, frCol, toLine, toCol) = (T.pack mod, span)
+  where
+    span = SourceSpan { spanFilePath   = mod ++ ".hs"
+                      , spanFromLine   = frLine
+                      , spanFromColumn = frCol
+                      , spanToLine     = toLine
+                      , spanToColumn   = toCol
+                      }
+

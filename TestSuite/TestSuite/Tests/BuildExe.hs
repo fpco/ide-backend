@@ -23,6 +23,7 @@ testGroupBuildExe env = testGroup "Build executable" [
   , stdTest env "Build executable from Main with explicit -package"     test_explicitPackage
   , stdTest env "Build executable from ParFib.Main"                     test_ParfibMain
   , stdTest env "Build executable with a wrong filename and fail"       test_wrongFilename
+  , stdTest env "buildExe on code with type errors (#160)"              test_typeErrors
   ]
 
 -- TODO: We should mark this session as dont-reuse (there is no point)
@@ -269,3 +270,20 @@ test_wrongFilename env = withAvailableSession env $ \session -> do
     assertNoErrors session
     status1 <- getBuildExeStatus session
     assertEqual "failure after exe build" (Just $ ExitFailure 1) status1
+
+test_typeErrors :: TestSuiteEnv -> Assertion
+test_typeErrors env = withAvailableSession env $ \session -> do
+    updateSessionD session upd1 1
+    assertOneError session
+
+    updateSessionD session upd2 1
+
+    distDir <- getDistDir session
+    status <- getBuildExeStatus session
+    assertEqual "" (Just $ ExitFailure 1) status
+    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+    assertEqual "" "Source errors encountered. Not attempting to build executables." buildStderr
+  where
+    upd1 = (updateCodeGeneration True)
+        <> (updateSourceFile "Main.hs" "main = foo")
+    upd2 = buildExe [] [("Main", "Main.hs")]

@@ -18,10 +18,12 @@ import TestSuite.State
 
 testGroupSnippetEnvironment :: TestSuiteEnv -> TestTree
 testGroupSnippetEnvironment env = testGroup "Snippet environment" [
-    stdTest env "Set environment variables"           test_SetEnvVars
-  , stdTest env "Set environment variables in runExe" test_SetEnvVars_runExe
-  , stdTest env "Test CWD by reading a data file"     test_readDataFile
-  , stdTest env "Test CWD in executable building"     test_CwdInExeBuilding
+    stdTest env "Set environment variables"                                test_SetEnvVars
+  , stdTest env "Set environment variables in runExe"                      test_SetEnvVars_runExe
+  , stdTest env "Test CWD by reading a data file"                          test_readDataFile
+  , stdTest env "Test CWD in executable building"                          test_CwdInExeBuilding
+  , stdTest env "Set command line arguments"                               test_SetCmdLineArgs
+  , stdTest env "Check that command line arguments survive restartSession" test_CmdLineArgsAfterRestart
   ]
 
 test_SetEnvVars :: TestSuiteEnv -> Assertion
@@ -239,3 +241,128 @@ test_CwdInExeBuilding env = withAvailableSession env $ \session -> do
                 output
                 outExe
     assertEqual "after runExe" ExitSuccess statusExe
+
+test_SetCmdLineArgs :: TestSuiteEnv -> Assertion
+test_SetCmdLineArgs env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 1
+    assertNoErrors session
+
+    let m = "M"
+        updExe = buildExe [] [(T.pack m, "M.hs")]
+    updateSessionD session updExe 2
+
+    -- Check that default is []
+    do runActions <- runStmt session "M" "printArgs"
+       (output, result) <- runWaitAll runActions
+       assertEqual "" RunOk result
+       assertEqual "" "[]\n" output
+
+    do runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "after runExe" ExitSuccess statusExe
+       assertEqual "Output from runExe"
+                   "[]\n"
+                   outExe
+
+    -- Check that we can set command line arguments
+    updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
+    do runActions <- runStmt session "M" "printArgs"
+       (output, result) <- runWaitAll runActions
+       assertEqual "" RunOk result
+       assertEqual "" "[\"A\",\"B\",\"C\"]\n" output
+
+    do runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "after runExe" ExitSuccess statusExe
+       assertEqual "Output from runExe"
+                   "[\"A\",\"B\",\"C\"]\n"
+                   outExe
+
+    -- Check that we can change command line arguments
+    updateSession session (updateArgs ["D", "E"]) (\_ -> return ())
+    do runActions <- runStmt session "M" "printArgs"
+       (output, result) <- runWaitAll runActions
+       assertEqual "" RunOk result
+       assertEqual "" "[\"D\",\"E\"]\n" output
+
+    do runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "after runExe" ExitSuccess statusExe
+       assertEqual "Output from runExe"
+                   "[\"D\",\"E\"]\n"
+                   outExe
+
+    -- Check that we can clear command line arguments
+    updateSession session (updateArgs []) (\_ -> return ())
+    do runActions <- runStmt session "M" "printArgs"
+       (output, result) <- runWaitAll runActions
+       assertEqual "" RunOk result
+       assertEqual "" "[]\n" output
+
+    do runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "after runExe" ExitSuccess statusExe
+       assertEqual "Output from runExe"
+                   "[]\n"
+                   outExe
+  where
+    upd = (updateCodeGeneration True)
+       <> (updateSourceFile "M.hs" $ L.unlines
+            [ "module M where"
+            , "import System.Environment (getArgs)"
+            , "printArgs :: IO ()"
+            , "printArgs = getArgs >>= print"
+            , "main :: IO ()"
+            , "main = printArgs"
+            ])
+
+test_CmdLineArgsAfterRestart :: TestSuiteEnv -> Assertion
+test_CmdLineArgsAfterRestart env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 1
+    assertNoErrors session
+
+    let m = "M"
+        updExe = buildExe [] [(T.pack m, "M.hs")]
+    updateSessionD session updExe 2
+
+    -- Sanity check: check before restart session
+    updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
+    do runActions <- runStmt session "M" "printArgs"
+       (output, result) <- runWaitAll runActions
+       assertEqual "" RunOk result
+       assertEqual "" "[\"A\",\"B\",\"C\"]\n" output
+
+    do runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "after runExe" ExitSuccess statusExe
+       assertEqual "Output from runExe"
+                   "[\"A\",\"B\",\"C\"]\n"
+                   outExe
+
+    -- Restart and update the session
+    restartSession session Nothing
+    updateSessionD session upd 1
+    assertNoErrors session
+
+    -- Check that arguments are still here
+    do runActions <- runStmt session "M" "printArgs"
+       (output, result) <- runWaitAll runActions
+       assertEqual "" RunOk result
+       assertEqual "" "[\"A\",\"B\",\"C\"]\n" output
+
+    do runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "after runExe" ExitSuccess statusExe
+       assertEqual "Output from runExe"
+                   "[\"A\",\"B\",\"C\"]\n"
+                   outExe
+  where
+    upd = (updateCodeGeneration True)
+       <> (updateSourceFile "M.hs" $ L.unlines
+            [ "module M where"
+            , "import System.Environment (getArgs)"
+            , "printArgs :: IO ()"
+            , "printArgs = getArgs >>= print"
+            , "main :: IO ()"
+            , "main = printArgs"
+            ])
