@@ -1,4 +1,4 @@
-module TestSuite.Tests.AutoCompletion (testGroupAutoCompletion) where
+module TestSuite.Tests.Autocompletion (testGroupAutocompletion) where
 
 import Prelude hiding (mod, span)
 import Data.Maybe
@@ -18,8 +18,8 @@ import TestSuite.Assertions
 -- * Explicitly importing something that wasn't exported
 -- * Explicitly hiding something that wasn't exported
 -- * Use of PackageImports without the flag
-testGroupAutoCompletion :: TestSuiteEnv -> TestTree
-testGroupAutoCompletion env = testGroup "Autocompletion" [
+testGroupAutocompletion :: TestSuiteEnv -> TestTree
+testGroupAutocompletion env = testGroup "Autocompletion" [
     stdTest env "Autocomplete 1: Imports for partial module"                          test_PartialModule
   , stdTest env "Autocomplete 2: Recompute after recompilation"                       test_Recompute
   , docTest env "Autocomplete 3: Autocompletion entries should have home module info" test_HomeModuleInfo

@@ -5,7 +5,7 @@ import Test.Tasty
 
 import IdeSession
 import TestSuite.State
-import TestSuite.Tests.AutoCompletion
+import TestSuite.Tests.Autocompletion
 import TestSuite.Tests.BufferMode
 import TestSuite.Tests.BuildDoc
 import TestSuite.Tests.BuildExe
@@ -46,7 +46,7 @@ allTests name env = testGroup name [
   , testGroupBufferMode         env
   , testGroupSnippetEnvironment env
   , testGroupTypeInformation    env
-  , testGroupAutoCompletion     env
+  , testGroupAutocompletion     env
   , testGroupFFI                env
   , testGroupC                  env
   , testGroupBuildExe           env
