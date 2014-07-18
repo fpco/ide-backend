@@ -105,7 +105,7 @@ testSuite tests =
 
 -- | Run the given action with an available session (new or previously created)
 withAvailableSession :: TestSuiteEnv -> (IdeSession -> IO a) -> IO a
-withAvailableSession env = withAvailableSession' env (defaultSessionSetup env)
+withAvailableSession env = withAvailableSession' env id
 
 data TestSuiteSessionSetup = TestSuiteSessionSetup {
     testSuiteSessionServer  :: TestSuiteServerConfig
@@ -131,8 +131,8 @@ withIncludes incls setup = setup {
   }
 
 -- | More general version of 'withAvailableSession'
-withAvailableSession' :: TestSuiteEnv -> TestSuiteSessionSetup -> (IdeSession -> IO a) -> IO a
-withAvailableSession' TestSuiteEnv{..} TestSuiteSessionSetup{..} act = do
+withAvailableSession' :: TestSuiteEnv -> (TestSuiteSessionSetup -> TestSuiteSessionSetup) -> (IdeSession -> IO a) -> IO a
+withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
     TestSuiteState{..} <- testSuiteEnvState
 
     -- Find an available session, if one exists
@@ -166,6 +166,8 @@ withAvailableSession' TestSuiteEnv{..} TestSuiteSessionSetup{..} act = do
     case mresult of
       Left  ex     -> throwIO (ex :: SomeException)
       Right result -> return result
+  where
+    TestSuiteSessionSetup{..} = sessionSetup (defaultSessionSetup env)
 
 defaultServerConfig :: TestSuiteEnv -> TestSuiteServerConfig
 defaultServerConfig TestSuiteEnv{..} = TestSuiteServerConfig {

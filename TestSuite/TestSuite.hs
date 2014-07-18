@@ -14,6 +14,8 @@ import TestSuite.Tests.SnippetEnvironment
 import TestSuite.Tests.StdIO
 import TestSuite.Tests.BuildExe
 import TestSuite.Tests.BuildDoc
+import TestSuite.Tests.BuildLicenses
+import TestSuite.Tests.CabalMacros
 
 -- | Sanity check: make sure we can communicate with the server at all
 -- and that we get the expected version
@@ -34,6 +36,8 @@ allTests name env = testGroup name [
   , testGroupTypeInformation    env
   , testGroupBuildExe           env
   , testGroupBuildDoc           env
+  , testGroupBuildLicenses      env
+  , testGroupCabalMacros        env
   ]
 
 main :: IO ()

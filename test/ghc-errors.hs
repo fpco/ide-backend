@@ -266,138 +266,6 @@ syntheticTests = [
             assertNoErrors session
             shutdownSession s5 -- <-- duplicate "nested" shutdown
     )
-  , ( "Use cabal macro MIN_VERSION for a package we really depend on"
-    , withSession (withOpts ["-XCPP"]) $ \session -> do
-        macros <- getCabalMacros session
-        assertBool "Main with cabal macro exe output" (not $ BSLC.null macros)
-        -- assertEqual "Main with cabal macro exe output" (BSLC.pack "") macros
-        let update = updateSourceFile "Main.hs" $ BSLC.pack $ unlines
-              [ "#if !MIN_VERSION_base(999,0,0)"
-              , "main = print 5"
-              , "#else"
-              , "terrible error"
-              , "#endif"
-              ]
-        updateSessionD session update 1
-        assertNoErrors session
-        let update2 = updateCodeGeneration True
-        updateSessionD session update2 1
-        assertNoErrors session
-        runActions <- runStmt session "Main" "main"
-        (output, _) <- runWaitAll runActions
-        assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
-        let m = "Main"
-            upd = buildExe [] [(Text.pack m, "Main.hs")]
-        updateSessionD session upd 2
-        distDir <- getDistDir session
-        mOut <- readProcess (distDir </> "build" </> m </> m) [] []
-        assertEqual "Main with cabal macro exe output" "5\n" mOut
-        runActionsExe <- runExe session m
-        (outExe, statusExe) <- runWaitAll runActionsExe
-        assertEqual "Output from runExe"
-                    "5\n"
-                    outExe
-        assertEqual "after runExe" ExitSuccess statusExe
-    )
-  , ( "Use cabal macro MIN_VERSION for a package we don't really depend on"
-    , withSession (withOpts ["-XCPP"]) $ \session -> do
-        let update = updateSourceFile "Main.hs" $ BSLC.pack $ unlines
-              [ "#if !MIN_VERSION_containers(999,0,0)"
-              , "main = print 5"
-              , "#else"
-              , "terrible error"
-              , "#endif"
-              ]
-        updateSessionD session update 1
-        assertNoErrors session
-        let update2 = updateCodeGeneration True
-        updateSessionD session update2 1
-        assertNoErrors session
-        runActions <- runStmt session "Main" "main"
-        (output, _) <- runWaitAll runActions
-        assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
-{- FIXME
-        let m = "Main"
-            upd = buildExe [] [(Text.pack m, "Main.hs")]
-        updateSessionD session upd 2
-        assertNoErrors session
-        distDir <- getDistDir session
-        mOut <- readProcess (distDir </> "build" </> m </> m) [] []
-        assertEqual "Main with cabal macro exe output" "5\n" mOut
-
-        runActionsExe <- runExe session m
-        (outExe, statusExe) <- runWaitAll runActionsExe
-        assertEqual "Output from runExe"
-                    "5\n"
-                    outExe
-        assertEqual "after runExe" ExitSuccess statusExe -}
-    )
-  , ( "Use cabal macro VERSION by checking if defined"
-    , withSession (withOpts ["-XCPP"]) $ \session -> do
-        macros <- getCabalMacros session
-        assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
-        let update = updateSourceFile "M.hs" $ BSLC.pack $ unlines
-              [ "module M where"
-              , "#ifdef VERSION_base"
-              , ""
-              , "#if defined(VERSION_base)"
-              , "main = print 5"
-              , "#else"
-              , "terrible error"
-              , "#endif"
-              , ""
-              , "#else"
-              , "terrible error 2"
-              , "#endif"
-              ]
-        updateSessionD session (update <> updateCodeGeneration True) 1
-        assertNoErrors session
-        runActions <- runStmt session "M" "main"
-        (output, _) <- runWaitAll runActions
-        assertEqual "result of ifdefed print 5" (BSLC.pack "5\n") output
-        let m = "M"
-            upd = buildExe [] [(Text.pack m, "M.hs")]
-        updateSessionD session upd 2
-        distDir <- getDistDir session
-        mOut <- readProcess (distDir </> "build" </> m </> m) [] []
-        assertEqual "M with cabal macro exe output" "5\n" mOut
-        runActionsExe <- runExe session m
-        (outExe, statusExe) <- runWaitAll runActionsExe
-        assertEqual "Output from runExe"
-                    "5\n"
-                    outExe
-        assertEqual "after runExe" ExitSuccess statusExe
-    )
-  , ( "Use cabal macro VERSION by including an external macros file"
-    , withSession (withOpts ["-XCPP"]) $ \session -> do
-        macros <- getCabalMacros session
-        assertBool "M with cabal macro exe output" (not $ BSLC.null macros)
-        let update = updateSourceFile "M.hs" ( BSLC.pack $ unlines
-              [ "module M where"
-              , "#include \"cabal_macros.h\""
-              , "main = print $ MY_VERSION_base == \"foo\""
-              ])
-              <> updateSourceFile "cabal_macros.h" (BSLC.pack $ unlines
-              [ "#define MY_VERSION_base \"4.5.1.0\""
-              ])
-        updateSessionD session (update <> updateCodeGeneration True) 1
-        assertNoErrors session
-        runActions <- runStmt session "M" "main"
-        (output, _) <- runWaitAll runActions
-        assertEqual "result of ifdefed print 5" (BSLC.pack "False\n") output
-        let m = "M"
-            upd = buildExe [] [(Text.pack m, "M.hs")]
-        updateSessionD session upd 2
-        distDir <- getDistDir session
-        mOut <- readProcess (distDir </> "build" </> m </> m) [] []
-        assertEqual "M with cabal macro exe output" "False\n" mOut
-        runActionsExe <- runExe session m
-        (outExe, statusExe) <- runWaitAll runActionsExe
-        assertEqual "Output from runExe"
-                    "False\n"
-                    outExe
-        assertEqual "after runExe" ExitSuccess statusExe
-    )
   , ( "Caching cabal macros"
     , do macros <- withSession defaultSession getCabalMacros
          withSession (withOpts ["-XCPP"] . withMacros macros) $ \session -> do
@@ -464,45 +332,6 @@ syntheticTests = [
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
-    )
-  , ( "Build licenses from NamedFieldPuns (with errors)"
-    , withSession (withOpts ["-hide-package monads-tf"]) $ \session -> do
-        loadModulesFrom session "test/Puns"
-        assertMoreErrors session
-        cabalsPath <- canonicalizePath "test/Puns/cabals"
-        let upd = buildLicenses cabalsPath
-        updateSessionD session upd 99
-        assertMoreErrors session
-        distDir <- getDistDir session
-        licensesWarns <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licensesWarns length" 3 (length $ lines licensesWarns)
-        status <- getBuildLicensesStatus session
-        assertEqual "after license build" (Just ExitSuccess) status
-        licenses <- readFile $ distDir </> "licenses.txt"
-        assertBool "licenses length" $ length licenses >= 27142
-    )
-  , ( "Build licenses with wrong cabal files and fail"
-    , withSession (withOpts ["-hide-package monads-tf"]) $ \session -> do
-        loadModulesFrom session "test/Puns"
-        assertMoreErrors session
-        cabalsPath <- canonicalizePath "test/Puns/cabals/parse_error"
-        let updL = buildLicenses cabalsPath
-            punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
-            upd = updL <> updateDynamicOpts punOpts
-        updateSessionD session upd 99
-        assertNoErrors session
-        status <- getBuildLicensesStatus session
-        assertEqual "after license parse_error" (Just ExitSuccess) status
-        distDir <- getDistDir session
-        licensesErr <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licensesErr length" 18 (length $ lines licensesErr)
-        cabalsPath2 <- canonicalizePath "test/Puns/cabals/no_text_error"
-        let upd2 = buildLicenses cabalsPath2
-        updateSessionD session upd2 99
-        status2 <- getBuildLicensesStatus session
-        assertEqual "after license no_text_error" (Just ExitSuccess) status2
-        licensesErr2 <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licensesErr2 length" 18 (length $ lines licensesErr2)
     )
   , ( "Test CWD by reading a data file"
     , withSession defaultSession $ \session -> do
@@ -5658,7 +5487,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
               ]
     )
   , ( "Changing linker flags (#214)"
-    , withSession defaultSession $ \sess -> do 
+    , withSession defaultSession $ \sess -> do
         let upd =
                 updateCodeGeneration True <>
                 updateDynamicOpts ["-lz"] <>
@@ -5697,7 +5526,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
             (_output, result) <- runWaitAll runActions
             assertEqual "" RunOk result
             forceCancel runActions
-    ) 
+    )
   ]
 
 runWaitAll' :: forall a. RunActions a -> IO (BSL.ByteString, a)
@@ -5981,11 +5810,6 @@ assertSourceErrors' session = assertSourceErrors session . map
 
 
 
-assertMoreErrors :: IdeSession -> Assertion
-assertMoreErrors session = do
-  msgs <- getSourceErrors session
-  assertBool ("Too few type errors: " ++ show3errors msgs)
-    $ length msgs >= 2
 
 {-
 assertBreak :: IdeSession

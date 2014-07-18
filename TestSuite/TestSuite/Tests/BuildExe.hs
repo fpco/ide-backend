@@ -20,7 +20,7 @@ testGroupBuildExe env = testGroup "Build executable" [
 
 -- TODO: We should mark this session as dont-reuse (there is no point)
 test_fromLhsFiles :: TestSuiteEnv -> Assertion
-test_fromLhsFiles env = withAvailableSession' env (withIncludes ["test/compiler/utils"] (defaultSessionSetup env)) $ \session -> do
+test_fromLhsFiles env = withAvailableSession' env (withIncludes ["test/compiler/utils"]) $ \session -> do
     loadModulesFrom session "test/compiler/utils"
     assertNoErrors session
     status0 <- getBuildExeStatus session

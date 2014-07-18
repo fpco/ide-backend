@@ -11,6 +11,7 @@ module TestSuite.Assertions (
   , assertNoErrors
   , assertOneError
   , assertSomeErrors
+  , assertMoreErrors
   , assertSourceErrors
   , assertErrorOneOf
     -- * Assertions about type information
@@ -93,6 +94,12 @@ assertOneError session = do
 assertSomeErrors :: [SourceError] -> Assertion
 assertSomeErrors msgs = do
   assertBool "An error was expected, but not found" $ length msgs >= 1
+
+assertMoreErrors :: IdeSession -> Assertion
+assertMoreErrors session = do
+  msgs <- getSourceErrors session
+  assertBool ("Too few type errors: " ++ show3errors msgs)
+    $ length msgs >= 2
 
 show3errors :: [SourceError] -> String
 show3errors errs =
