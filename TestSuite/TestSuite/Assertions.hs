@@ -5,6 +5,7 @@ module TestSuite.Assertions (
     collectErrors
   , assertSameSet
   , assertSameList
+  , assertRaises
     -- * Assertions about session state
   , assertLoadedModules
     -- * Assertions about source code errors
@@ -13,6 +14,7 @@ module TestSuite.Assertions (
   , assertSomeErrors
   , assertMoreErrors
   , assertSourceErrors
+  , assertSourceErrors'
   , assertErrorOneOf
     -- * Assertions about type information
   , assertIdInfo
@@ -38,6 +40,7 @@ import qualified Data.ByteString.UTF8      as S
 import qualified Data.Text                 as T
 
 import IdeSession
+import TestTools
 
 {-------------------------------------------------------------------------------
   General assertions
@@ -118,6 +121,10 @@ assertSourceErrors session expected = do
     then assertFailure $ "Unexpected source errors: " ++ show3errors errs
     else forM_ (zip expected errs) $ \(potentialExpected, actualErr) ->
            assertErrorOneOf actualErr potentialExpected
+
+assertSourceErrors' :: IdeSession -> [String] -> Assertion
+assertSourceErrors' session = assertSourceErrors session . map
+  (\err -> [(Nothing, err)])
 
 assertErrorOneOf :: SourceError -> [(Maybe FilePath, String)] -> Assertion
 assertErrorOneOf (SourceError _ loc actual) potentialExpected =

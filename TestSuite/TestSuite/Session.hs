@@ -1,6 +1,7 @@
 -- | Working with IDE sessions
 module TestSuite.Session (
     updateSessionD
+  , updateSessionP
   , loadModule
   , loadModulesFrom
   , loadModulesFrom'
@@ -11,12 +12,13 @@ module TestSuite.Session (
 import Prelude hiding (mod)
 import Control.Monad
 import Data.IORef
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, isInfixOf)
 import Data.Monoid
 import System.FilePath
 import System.FilePath.Find (always, extension, find)
 import Test.HUnit
 import qualified Data.ByteString.Lazy.UTF8 as L
+import qualified Data.Text                 as T
 
 import IdeSession
 
@@ -43,6 +45,27 @@ updateSessionD session update numProgressUpdates = do
   progressUpdates <- readIORef progressRef
   assertBool ("We expected " ++ show numProgressUpdates ++ " progress messages, but got " ++ show progressUpdates)
              (length progressUpdates <= numProgressUpdates)
+
+updateSessionP :: IdeSession -> IdeSessionUpdate () -> [(Int, Int, String)] -> IO ()
+updateSessionP session update expectedProgressUpdates = do
+  progressRef <- newIORef []
+
+  -- We just collect the progress messages first, and verify them afterwards
+  updateSession session update $ \p -> do
+    progressUpdates <- readIORef progressRef
+    writeIORef progressRef $ progressUpdates ++ [p]
+
+  progressUpdates <- readIORef progressRef
+  assertBool ("We expected " ++ show expectedProgressUpdates ++ ", but got " ++ show progressUpdates)
+             (length progressUpdates <= length expectedProgressUpdates)
+
+  forM_ (zip progressUpdates expectedProgressUpdates) $ \(actual, expected@(step, numSteps, msg)) ->
+    assertBool ("Unexpected progress update " ++ show actual ++ "; expected " ++ show expected)
+               (progressStep actual == step &&
+                progressNumSteps actual == numSteps &&
+                case progressOrigMsg actual of
+                  Just actualMsg -> msg `isInfixOf` T.unpack actualMsg
+                  Nothing        -> False)
 
 loadModule :: FilePath -> String -> IdeSessionUpdate ()
 loadModule file contents =

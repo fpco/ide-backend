@@ -13,7 +13,9 @@ import TestSuite.Assertions
 
 testGroupTypeInformation :: TestSuiteEnv -> TestTree
 testGroupTypeInformation env = testGroup "Type Information" [
-    docTest env "Local identifiers and Prelude"                                    testLocalIdentifiersAndPrelude
+    stdTest env "Test internal consistency of local id markers"                    test_Consistency_Local
+  , stdTest env  "Test internal consistency of imported id markers"                test_Consistency_Imported
+  , docTest env "Local identifiers and Prelude"                                    testLocalIdentifiersAndPrelude
   , docTest env "Simple ADTs"                                                      testSimpleADTs
   , docTest env "Polymorphism"                                                     testPolymorphism
   , docTest env "Multiple modules"                                                 testMultipleModules
@@ -36,6 +38,40 @@ testGroupTypeInformation env = testGroup "Type Information" [
   , docTest env "Updated session (#142)"                                           testUpdatedSession
   , docTest env "spanInfo vs expTypes (#3043)"                                     testSpanInfoVsExpTypes
   ]
+
+test_Consistency_Local :: TestSuiteEnv -> Assertion
+test_Consistency_Local env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 1
+    assertOneError session
+  where
+    upd = (updateSourceFile "M.hs" . L.unlines $
+            [ "module M where"
+            , "import qualified Text.PrettyPrint as Disp"
+            , "class Text a where"
+            , "  disp  :: a -> Disp.Doc"
+            , "display :: Text a => a -> String"
+            , "display = Disp.renderStyle style . disp"
+            , "  where style = Disp.Style {}"
+            ])
+
+test_Consistency_Imported :: TestSuiteEnv -> Assertion
+test_Consistency_Imported env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 1
+    assertNoErrors session
+  where
+    upd = (updateSourceFile "M.hs" . L.unlines $
+            [ "module M where"
+            , "import qualified Text.PrettyPrint as Disp"
+            , "class Text a where"
+            , "  disp  :: a -> Disp.Doc"
+            , "display :: Text a => a -> String"
+            , "display = Disp.renderStyle astyle . disp"
+            , "  where astyle = Disp.Style {"
+            , "          Disp.mode            = Disp.PageMode,"
+            , "          Disp.lineLength      = 79,"
+            , "          Disp.ribbonsPerLine  = 1.0"
+            , "        }"
+            ])
 
 testLocalIdentifiersAndPrelude :: TestSuiteEnv -> Assertion
 testLocalIdentifiersAndPrelude env = withAvailableSession env $ \session -> do
@@ -734,3 +770,4 @@ testSpanInfoVsExpTypes env = withAvailableSession env $ \session -> do
       --         1234567890123456789012345678901234567 890123 4
       , {- 7 -} "  where getNum = runParserT digit () \"x.txt\""
       ]
+

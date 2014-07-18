@@ -22,10 +22,15 @@ module TestSuite.State (
   , docTest
     -- * Test suite global state
   , withCurrentDirectory
+  , findExe
+  , packageDelete
+  , packageInstall
+  , packageCheck
   ) where
 
 import Control.Concurrent
 import Control.Concurrent.STM
+import Control.DeepSeq (rnf)
 import Control.Exception
 import Control.Monad
 import Data.Maybe
@@ -33,13 +38,18 @@ import Data.Monoid
 import Data.Proxy
 import Data.Typeable
 import System.Directory
-import System.FilePath (splitSearchPath)
+import System.Environment
+import System.FilePath
+import System.IO (hGetContents, hClose)
 import System.IO.Unsafe (unsafePerformIO)
+import System.Process
 import Test.HUnit (Assertion)
 import Test.HUnit.Lang (HUnitFailure(..))
 import Test.Tasty
 import Test.Tasty.Options
 import Test.Tasty.Providers
+import qualified Data.Map                         as Map
+import qualified Distribution.Simple.Program.Find as OurCabal
 
 import IdeSession
 
@@ -145,6 +155,9 @@ withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
                  Nothing      -> startNewSession testSuiteSessionServer
 
     -- Reset session state
+    --
+    -- TODO: We should really reset dynamic includes here, but that will
+    -- cause a session restart every time. We need to fix that.
     updateSession session
                   (    updateDynamicOpts testSuiteSessionDynOpts
                     <> updateDeleteManagedFiles
@@ -396,6 +409,100 @@ withCurrentDirectory fp act =
                 return cwd)
             (setCurrentDirectory)
             (\_ -> act)
+
+findExe :: TestSuiteEnv -> String -> IO FilePath
+findExe TestSuiteEnv{..} name = do
+    mLoc <- OurCabal.findProgramOnSearchPath minBound searchPath name
+    case mLoc of
+      Nothing   -> fail $ "Could not find " ++ name
+      Just prog -> return prog
+  where
+    extraPathDirs =
+      case testSuiteEnvGhcVersion of
+        GHC742 -> testSuiteConfigExtraPaths74 testSuiteEnvConfig
+        GHC78  -> testSuiteConfigExtraPaths78 testSuiteEnvConfig
+
+    searchPath :: OurCabal.ProgramSearchPath
+    searchPath = OurCabal.ProgramSearchPathDefault
+               : map OurCabal.ProgramSearchPathDir (splitSearchPath extraPathDirs)
+
+
+-- TODO: We need to be careful with concurrency here
+--
+-- I don't know what the right approach here. It would be simpler if we could
+-- replace packageDelete and packageInstall with a 'withPackage'.
+packageDelete :: TestSuiteEnv -> FilePath -> IO ()
+packageDelete env@TestSuiteEnv{..} pkgDir = do
+    ghcPkgExe  <- findExe env "ghc-pkg"
+    (_,_,_,r2) <- createProcess (proc ghcPkgExe opts)
+                    { cwd     = Just pkgDir
+                    , std_err = CreatePipe
+                    }
+    void $ waitForProcess r2
+  where
+    packageDb = fromMaybe "" $
+      case testSuiteEnvGhcVersion of
+        GHC742 -> testSuiteConfigPackageDb74 testSuiteEnvConfig
+        GHC78  -> testSuiteConfigPackageDb78 testSuiteEnvConfig
+
+    opts = [ "--package-conf=" ++ packageDb, "-v0", "unregister"
+           , takeFileName pkgDir
+           ]
+
+-- TODO: We need to be careful with concurrency here
+--
+-- See comments for packageDelete.
+packageInstall :: TestSuiteEnv -> FilePath -> IO ()
+packageInstall env@TestSuiteEnv{..} pkgDir = do
+  cabalExe <- findExe env "cabal"
+  oldEnv   <- System.Environment.getEnvironment
+  let oldEnvMap          = Map.fromList oldEnv
+      adjustPATH oldPATH = extraPathDirs ++ ":" ++ oldPATH
+      newEnvMap          = Map.adjust adjustPATH "PATH" oldEnvMap
+      newEnv             = Map.toList newEnvMap
+  forM_ [ ["clean"]
+        , ["configure", "--package-db=" ++ packageDb, "--disable-library-profiling"]
+        , ["build"]
+        , ["copy"]
+        , ["register"]
+        ] $ \cmd -> do
+    let opts = cmd ++ ["-v0"]
+    (_,_,_,r2) <- createProcess (proc cabalExe opts)
+                    { cwd = Just pkgDir
+                    , env = Just newEnv
+                    }
+    void $ waitForProcess r2
+  where
+    extraPathDirs =
+      case testSuiteEnvGhcVersion of
+        GHC742 -> testSuiteConfigExtraPaths74 testSuiteEnvConfig
+        GHC78  -> testSuiteConfigExtraPaths78 testSuiteEnvConfig
+    packageDb = fromMaybe "" $
+      case testSuiteEnvGhcVersion of
+        GHC742 -> testSuiteConfigPackageDb74 testSuiteEnvConfig
+        GHC78  -> testSuiteConfigPackageDb78 testSuiteEnvConfig
+
+-- TODO: We need to be careful with concurrency here
+--
+-- See comments for packageDelete.
+packageCheck :: TestSuiteEnv -> FilePath -> IO String
+packageCheck env pkgDir = do
+    cabalExe <- findExe env "cabal"
+    (_, mlocal_std_out, _, r2)
+      <- createProcess (proc cabalExe ["check"])
+           { cwd     = Just pkgDir
+           , std_out = CreatePipe
+           }
+    let local_std_out = fromJust mlocal_std_out
+    checkWarns <- hGetContents local_std_out
+    evaluate $ rnf checkWarns
+    hClose local_std_out
+    void $ waitForProcess r2
+    return checkWarns
+
+{-------------------------------------------------------------------------------
+  Concurrency control
+-------------------------------------------------------------------------------}
 
 -- | We run many tests concurrently, but occassionally a test needs to modify
 -- the test global state (for instance, it might need to modify the current

@@ -5,17 +5,23 @@ import Test.Tasty
 
 import IdeSession
 import TestSuite.State
-import TestSuite.Tests.TypeInformation
-import TestSuite.Tests.SessionState
+import TestSuite.Tests.AutoCompletion
+import TestSuite.Tests.BufferMode
+import TestSuite.Tests.BuildDoc
+import TestSuite.Tests.BuildExe
+import TestSuite.Tests.BuildLicenses
+import TestSuite.Tests.C
+import TestSuite.Tests.CabalMacros
 import TestSuite.Tests.Compilation
-import TestSuite.Tests.InterruptRunStmt
+import TestSuite.Tests.FFI
 import TestSuite.Tests.InterruptRunExe
+import TestSuite.Tests.InterruptRunStmt
+import TestSuite.Tests.SessionRestart
+import TestSuite.Tests.SessionState
 import TestSuite.Tests.SnippetEnvironment
 import TestSuite.Tests.StdIO
-import TestSuite.Tests.BuildExe
-import TestSuite.Tests.BuildDoc
-import TestSuite.Tests.BuildLicenses
-import TestSuite.Tests.CabalMacros
+import TestSuite.Tests.TH
+import TestSuite.Tests.TypeInformation
 
 -- | Sanity check: make sure we can communicate with the server at all
 -- and that we get the expected version
@@ -32,12 +38,18 @@ allTests name env = testGroup name [
   , testGroupInterruptRunStmt   env
   , testGroupInterruptRunExe    env
   , testGroupStdIO              env
+  , testGroupBufferMode         env
   , testGroupSnippetEnvironment env
   , testGroupTypeInformation    env
+  , testGroupAutoCompletion     env
+  , testGroupFFI                env
+  , testGroupC                  env
   , testGroupBuildExe           env
   , testGroupBuildDoc           env
   , testGroupBuildLicenses      env
   , testGroupCabalMacros        env
+  , testGroupTH                 env
+  , testGroupSessionRestart     env
   ]
 
 main :: IO ()

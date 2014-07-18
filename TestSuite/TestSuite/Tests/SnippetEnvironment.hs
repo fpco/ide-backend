@@ -3,9 +3,12 @@ module TestSuite.Tests.SnippetEnvironment (testGroupSnippetEnvironment) where
 
 import Data.Monoid
 import System.Exit
+import System.FilePath
+import System.Process
 import Test.Tasty
 import Test.HUnit
 import qualified Data.ByteString.Lazy.Char8 as L (unlines)
+import qualified Data.ByteString.Lazy.UTF8  as L
 import qualified Data.Text                  as T
 
 import IdeSession
@@ -17,6 +20,8 @@ testGroupSnippetEnvironment :: TestSuiteEnv -> TestTree
 testGroupSnippetEnvironment env = testGroup "Snippet environment" [
     stdTest env "Set environment variables"           test_SetEnvVars
   , stdTest env "Set environment variables in runExe" test_SetEnvVars_runExe
+  , stdTest env "Test CWD by reading a data file"     test_readDataFile
+  , stdTest env "Test CWD in executable building"     test_CwdInExeBuilding
   ]
 
 test_SetEnvVars :: TestSuiteEnv -> Assertion
@@ -169,3 +174,68 @@ test_SetEnvVars_runExe env = withAvailableSession env $ \session -> do
             , "    [\"Bar\"] -> getEnv \"Bar\" >>= putStr"
             , "    _ -> fail \"wrong args\""
             ])
+
+test_readDataFile :: TestSuiteEnv -> Assertion
+test_readDataFile env = withAvailableSession env $ \session -> do
+    let update = updateDataFile "datafile.dat" "test data content"
+    updateSessionD session update 0
+    let update2 = loadModule "Main.hs"
+          "main = readFile \"datafile.dat\" >>= putStrLn"
+    updateSessionD session update2 1
+    assertNoErrors session
+    let update3 = updateCodeGeneration True
+    updateSessionD session update3 1
+    runActions <- runStmt session "Main" "main"
+    (output, _) <- runWaitAll runActions
+    assertEqual "compare test data content" "test data content\n" output
+    let m = "Main"
+        updExe = buildExe [] [(T.pack m, "Main.hs")]
+    updateSessionD session updExe 2
+    runActionsExe <- runExe session m
+    (outExe, statusExe) <- runWaitAll runActionsExe
+    assertEqual "Output from runExe"
+                "test data content\n"
+                outExe
+    assertEqual "after runExe" ExitSuccess statusExe
+    let update4 = updateDataFile "datafile.dat" "new content"
+                  <> update2
+    updateSessionD session update4 1
+    runActions2 <- runStmt session "Main" "main"
+    (output2, _) <- runWaitAll runActions2
+    assertEqual "compare new content" "new content\n" output2
+    let updExe2 = buildExe [] [(T.pack m, "Main.hs")]
+    updateSessionD session updExe2 2
+    runActionsExe2 <- runExe session m
+    (outExe2, statusExe2) <- runWaitAll runActionsExe2
+    assertEqual "Output from runExe"
+                "new content\n"
+                outExe2
+    assertEqual "after runExe" ExitSuccess statusExe2
+
+test_CwdInExeBuilding :: TestSuiteEnv -> Assertion
+test_CwdInExeBuilding env = withAvailableSession env $ \session -> do
+    let update = updateCodeGeneration True
+                 <> updateDataFile "test.txt" "test data"
+    let update2 = updateSourceFile "Main.hs" $ L.unlines
+          [ "{-# LANGUAGE TemplateHaskell #-}"
+          , "module Main where"
+          , "import Language.Haskell.TH.Syntax"
+          , "main = putStrLn $(qRunIO (readFile \"test.txt\") >>= lift)"
+          ]
+    updateSessionD session (update <> update2) 1
+    assertNoErrors session
+    runActions <- runStmt session "Main" "main"
+    (output, _) <- runWaitAll runActions
+    assertEqual "compare test data" "test data\n" output
+    let m = "Main"
+        upd = buildExe [] [(T.pack m, "Main.hs")]
+    updateSessionD session upd 2
+    distDir <- getDistDir session
+    out <- readProcess (distDir </> "build" </> m </> m) [] []
+    assertEqual "CWD exe output" (L.toString output) out
+    runActionsExe <- runExe session m
+    (outExe, statusExe) <- runWaitAll runActionsExe
+    assertEqual "Output from runExe"
+                output
+                outExe
+    assertEqual "after runExe" ExitSuccess statusExe

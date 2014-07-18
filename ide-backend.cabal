@@ -181,6 +181,10 @@ test-suite TestSuite
   type:               exitcode-stdio-1.0
   main-is:            TestSuite.hs
   hs-source-dirs:     TestSuite
+                      -- TODO: This is only necessary for TestTools, which in
+                      -- turn is used by the RPC test suite too. We should
+                      -- probably merge that in, too.
+                      test
   build-depends:      base,
                       ide-backend,
                       tasty,
@@ -194,7 +198,12 @@ test-suite TestSuite
                       filemanip,
                       process,
                       directory,
-                      stm
+                      stm,
+                      unix,
+                      random,
+                      Cabal-ide-backend,
+                      containers,
+                      deepseq
   default-language:   Haskell2010
   ghc-options:        -Wall 
                       -threaded
