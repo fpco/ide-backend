@@ -732,18 +732,15 @@ syntheticTests = [
     , withSession (withOpts ["-hide-package monads-tf"]) $ \session -> do
         loadModulesFrom session "test/Puns"
         assertMoreErrors session
-        let upd = buildLicenses "test/Puns/cabals"
+        cabalsPath <- canonicalizePath "test/Puns/cabals"
+        let upd = buildLicenses cabalsPath
         updateSessionD session upd 99
         assertMoreErrors session
         distDir <- getDistDir session
-        errExists <- doesFileExist $ distDir </> "licenses.stderr"
-        when errExists $ do
-          licensesErr <- readFile $ distDir </> "licenses.stderr"
-          assertEqual "license errors" "" licensesErr
+        licensesWarns <- readFile $ distDir </> "licenses.stderr"
+        assertEqual "licensesWarns length" 3 (length $ lines licensesWarns)
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
-        licensesWarns <- readFile $ distDir </> "licenses.stdout"
-        assertEqual "licensesWarns length" 367 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 27142
     )
@@ -751,7 +748,8 @@ syntheticTests = [
     , withSession (withOpts ["-hide-package monads-tf"]) $ \session -> do
         loadModulesFrom session "test/Puns"
         assertMoreErrors session
-        let updL = buildLicenses "test/Puns/cabals/parse_error"
+        cabalsPath <- canonicalizePath "test/Puns/cabals/parse_error"
+        let updL = buildLicenses cabalsPath
             punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
             upd = updL <> updateDynamicOpts punOpts
         updateSessionD session upd 99
@@ -760,15 +758,14 @@ syntheticTests = [
         assertEqual "after license parse_error" (Just ExitSuccess) status
         distDir <- getDistDir session
         licensesErr <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licenses parse_error msgs" licensesErr
-          "Parse of field 'license' failed.\nNo .cabal file provided for package transformers so no license can be found.\n"
-        let upd2 = buildLicenses "test/Puns/cabals/no_text_error"
+        assertEqual "licensesErr length" 18 (length $ lines licensesErr)
+        cabalsPath2 <- canonicalizePath "test/Puns/cabals/no_text_error"
+        let upd2 = buildLicenses cabalsPath2
         updateSessionD session upd2 99
         status2 <- getBuildLicensesStatus session
         assertEqual "after license no_text_error" (Just ExitSuccess) status2
         licensesErr2 <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licenses no_text_error msgs" licensesErr2
-          "No license text can be found for package mtl.\nNo .cabal file provided for package transformers so no license can be found.\n"
+        assertEqual "licensesErr2 length" 18 (length $ lines licensesErr2)
     )
   , ( "Test CWD by reading a data file"
     , withSession defaultSession $ \session -> do
@@ -2768,15 +2765,14 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         withCurrentDirectory "test/MainModule" $ do
           loadModulesFrom session "."
           assertNoErrors session
-        let upd = buildLicenses "test/MainModule/cabals"
+        cabalsPath <- canonicalizePath "test/MainModule/cabals"
+        let upd = buildLicenses cabalsPath
         updateSessionD session upd 6
         distDir <- getDistDir session
         licensesErrs <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licensesErrs length" 0 (length licensesErrs)
+        assertEqual "licensesErrs" "" licensesErrs
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
-        licensesWarns <- readFile $ distDir </> "licenses.stdout"
-        assertEqual "licensesWarns length" 0 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 21409
     )
@@ -2785,15 +2781,14 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         withCurrentDirectory "test/Cabal" $ do
           loadModulesFrom session "."
           assertNoErrors session
-        let upd = buildLicenses "test/Puns/cabals"  -- 7 packages missing
+        cabalsPath <- canonicalizePath "test/Puns/cabals"  -- 7 packages missing
+        let upd = buildLicenses cabalsPath
         updateSessionD session upd 99
         distDir <- getDistDir session
         licensesErrs <- readFile $ distDir </> "licenses.stderr"
-        assertBool "licensesErrs length" $ length licensesErrs <= 576
+        assertBool "licensesErrs length" $ length (lines licensesErrs) < 10
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
-        licensesWarns <- readFile $ distDir </> "licenses.stdout"
-        assertEqual "licensesWarns length" 138 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 21423
     )
@@ -2813,11 +2808,22 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                          PackageId{ packageName = Text.pack name
                                   , packageVersion = Just $ Text.pack "1.0" }
                        ) lics
-        status <- buildLicsFromPkgs defaultSessionConfig
-                    pkgs "test" distDir lics (\_ -> return ())
+        let liStdoutLog = distDir </> "licenses.stdout"
+            liStderrLog = distDir </> "licenses.stderr"
+            ideConfig = defaultSessionConfig
+            liArgs =
+              LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
+                         , liExtraPathDirs = configExtraPathDirs ideConfig
+                         , liLicenseExc = configLicenseExc ideConfig
+                         , liDistDir = distDir
+                         , liStdoutLog
+                         , liStderrLog
+                         , licenseFixed = lics
+                         , liCabalsDir = "test"
+                         , liPkgs = pkgs
+                         }
+        status <- buildLicsFromPkgs False liArgs
         assertEqual "after license build" ExitSuccess status
-        licensesErrs <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licensesErrs length" 0 (length licensesErrs)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 1527726
     )
@@ -2837,11 +2843,22 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                          PackageId{ packageName = Text.pack name
                                   , packageVersion = Just $ Text.pack "1.0" }
                        ) lics
-        status <- buildLicsFromPkgs defaultSessionConfig
-                    pkgs "test" distDir lics (\_ -> return ())
+        let liStdoutLog = distDir </> "licenses.stdout"
+            liStderrLog = distDir </> "licenses.stderr"
+            ideConfig = defaultSessionConfig
+            liArgs =
+              LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
+                         , liExtraPathDirs = configExtraPathDirs ideConfig
+                         , liLicenseExc = configLicenseExc ideConfig
+                         , liDistDir = distDir
+                         , liStdoutLog
+                         , liStderrLog
+                         , licenseFixed = lics
+                         , liCabalsDir = "test"
+                         , liPkgs = pkgs
+                         }
+        status <- buildLicsFromPkgs False liArgs
         assertEqual "after license build" ExitSuccess status
-        licensesWarns <- readFile $ distDir </> "licenses.stdout"
-        assertEqual "licensesWarns length" 0 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 63619
     )

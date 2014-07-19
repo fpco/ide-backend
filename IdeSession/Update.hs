@@ -41,6 +41,7 @@ module IdeSession.Update (
   , forceRecompile
   , crashGhcServer
   , buildLicsFromPkgs
+  , LicenseArgs(..)
   )
   where
 
@@ -1301,7 +1302,8 @@ buildDoc = do
 --
 -- The function expects .cabal files of all used packages,
 -- except those mentioned in 'configLicenseExc',
--- to be gathered in the directory given as the first argument.
+-- to be gathered in the directory given as the first argument
+-- (which needs to be an absolute path or a path relative to the data dir).
 -- The code then expects to find those packages installed and their
 -- license files in the usual place that Cabal puts them
 -- (or the in-place packages should be correctly embedded in the GHC tree).
@@ -1325,7 +1327,7 @@ buildDoc = do
 -- 'Config.configDynLink' needs to be set. See #162.
 buildLicenses :: FilePath -> IdeSessionUpdate ()
 buildLicenses cabalsDir = do
-    IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     let SessionConfig{configGenerateModInfo} = ideConfig
     let ideDistDir = ideSessionDistDir ideSessionDir
 
@@ -1334,6 +1336,8 @@ buildLicenses cabalsDir = do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
+    let liStdoutLog = ideDistDir </> "licenses.stdout"  -- progress
+        liStderrLog = ideDistDir </> "licenses.stderr"  -- warnings and errors
     exitCode <- liftIO $ do
       (_, pkgs) <- buildDeps mcomputed
       let liArgs =
@@ -1341,11 +1345,13 @@ buildLicenses cabalsDir = do
                        , liExtraPathDirs = configExtraPathDirs ideConfig
                        , liLicenseExc = configLicenseExc ideConfig
                        , liDistDir = ideDistDir
+                       , liStdoutLog
+                       , liStderrLog
                        , licenseFixed = configLicenseFixed ideConfig
                        , liCabalsDir = cabalsDir
                        , liPkgs = pkgs
                        }
-      buildLicsFromPkgs liArgs callback
+      invokeExeCabal ideStaticInfo (ReqExeLic liArgs) callback
     set ideBuildLicensesStatus (Just exitCode)
 
 {------------------------------------------------------------------------------

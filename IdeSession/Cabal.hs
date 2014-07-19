@@ -427,27 +427,26 @@ lFieldDescrs =
 
 -- | Build the concatenation of all license files from a given list
 -- of packages. See 'buildLicenses'.
-buildLicsFromPkgs :: LicenseArgs
-                  -> (Progress -> IO ())    -- ^ progress callback
+buildLicsFromPkgs :: Bool -> LicenseArgs
                   -> IO ExitCode
-buildLicsFromPkgs LicenseArgs{ liPackageDBStack = configPackageDBStack
+buildLicsFromPkgs logProgress
+                  LicenseArgs{ liPackageDBStack = configPackageDBStack
                              , liExtraPathDirs = configExtraPathDirs
                              , liLicenseExc = configLicenseExc
                              , liDistDir = ideDistDir
+                             , liStdoutLog = stdoutLogFN
+                             , liStderrLog = stderrLogFN
                              , licenseFixed
                              , liCabalsDir = cabalsDir
                              , liPkgs = pkgs
-                             } callback = do
+                             } = do
   -- The following computations are very expensive, so should be done once,
   -- instead of at each invocation of @findLicense@ that needs to perform
   -- @lookupSourcePackageId@.
   programDB <- configureAllKnownPrograms  -- won't die
                  minBound (defaultProgramConfiguration configExtraPathDirs)
   pkgIndex <- getInstalledPackages minBound configPackageDBStack programDB
-  let stdoutLogFN = ideDistDir </> "licenses.stdout"  -- warnings
-      stderrLogFN = ideDistDir </> "licenses.stderr"  -- errors
-      licensesFN  = ideDistDir </> "licenses.txt"     -- result
-  stdoutLog <- openBinaryFile stdoutLogFN WriteMode
+  let licensesFN  = ideDistDir </> "licenses.txt"     -- result
   stderrLog <- openBinaryFile stderrLogFN WriteMode
   licensesFile <- openBinaryFile licensesFN WriteMode
   -- The file containing concatenated licenses for core components.
@@ -456,10 +455,14 @@ buildLicsFromPkgs LicenseArgs{ liPackageDBStack = configPackageDBStack
 
   let numSteps        = length pkgs
       mainPackageName = Text.pack "main"
+      printProgress step packageName =
+        when logProgress $
+          putStrLn $ "[" ++ show step ++ " of " ++ show numSteps
+                     ++ "] " ++ Text.unpack packageName
 
       f :: (PackageId, Int) -> IO ()
       f (PackageId{packageName}, step) | packageName == mainPackageName =
-        callback $ Progress step numSteps (Just packageName) (Just packageName)
+        printProgress step packageName
       f (PackageId{..}, step) = do
         let nameString = Text.unpack packageName
             packageFile = cabalsDir </> nameString ++ ".cabal"
@@ -470,7 +473,7 @@ buildLicsFromPkgs LicenseArgs{ liPackageDBStack = configPackageDBStack
             _outputWarns warns = do
               let warnMsg = "Parse warnings for " ++ packageFile ++ ":\n"
                             ++ unlines (map (showPWarning packageFile) warns)
-              hPutStrLn stdoutLog warnMsg
+              hPutStrLn stderrLog warnMsg
         cabalFileExists <- doesFileExist packageFile
         if cabalFileExists then do
           hPutStrLn licensesFile $ "\nLicense for " ++ nameString ++ ":\n"
@@ -489,7 +492,7 @@ buildLicsFromPkgs LicenseArgs{ liPackageDBStack = configPackageDBStack
                              ++ nameString ++ " so no license can be found."
               hPutStrLn licensesFile errorMsg
               hPutStrLn stderrLog errorMsg
-        callback $ Progress step numSteps (Just packageName) (Just packageName)
+        printProgress step packageName
 
       findLicense :: ParseResult (Maybe License, Maybe FilePath, Maybe String)
                   -> String -> Version -> FilePath
@@ -558,7 +561,7 @@ buildLicsFromPkgs LicenseArgs{ liPackageDBStack = configPackageDBStack
                 let warnMsg =
                       "WARNING: Package " ++ packageFile
                       ++ " has no license nor license file specified."
-                hPutStrLn stdoutLog warnMsg
+                hPutStrLn stderrLog warnMsg
               let license = fromMaybe BSD3 l
                   author = fromMaybe "???" mauthor
               ms <- licenseText license author
@@ -580,10 +583,9 @@ buildLicsFromPkgs LicenseArgs{ liPackageDBStack = configPackageDBStack
                         ++ " license is "
                         ++ show license
                         ++ ". Reproducing standard license text."
-                  hPutStrLn stdoutLog warnMsg
+                  hPutStrLn stderrLog warnMsg
 
   res <- Ex.try $ mapM_ f (zip pkgs [1..])
-  hClose stdoutLog
   hClose stderrLog
   hClose licensesFile
   let handler :: Ex.IOException -> IO ExitCode
@@ -783,6 +785,8 @@ data LicenseArgs = LicenseArgs
   , liLicenseExc :: [String]
   , liDistDir :: FilePath    -- ^ the working directory;
                              --   the resulting file is written there
+  , liStdoutLog :: FilePath
+  , liStderrLog :: FilePath
   , licenseFixed :: [( String
                      , (Maybe License, Maybe FilePath, Maybe String)
                      )]       -- ^ see 'configLicenseFixed'
@@ -794,6 +798,7 @@ data ExeCabalRequest =
     ReqExeBuild BuildExeArgs [(ModuleName, FilePath)]
   | ReqExeDoc BuildExeArgs
   | ReqExeCc RunCcArgs
+  | ReqExeLic LicenseArgs
   deriving Typeable
 
 data ExeCabalResponse =
@@ -805,6 +810,7 @@ instance Binary ExeCabalRequest where
   put (ReqExeBuild buildArgs ms) = putWord8 0 >> put buildArgs >> put ms
   put (ReqExeDoc buildArgs) = putWord8 1 >> put buildArgs
   put (ReqExeCc ccArgs) = putWord8 2 >> put ccArgs
+  put (ReqExeLic licenseArgs) = putWord8 3 >> put licenseArgs
 
   get = do
     header <- getWord8
@@ -812,6 +818,7 @@ instance Binary ExeCabalRequest where
       0 -> ReqExeBuild <$> get <*> get
       1 -> ReqExeDoc <$> get
       2 -> ReqExeCc <$> get
+      3 -> ReqExeLic <$> get
       _ -> fail "ExeCabalRequest.get: invalid header"
 
 instance Binary ExeCabalResponse where
@@ -864,13 +871,15 @@ instance Binary LicenseArgs where
     put liExtraPathDirs
     put liLicenseExc
     put liDistDir
+    put liStdoutLog
+    put liStderrLog
     put licenseFixed
     put liCabalsDir
     put liPkgs
 
   get = LicenseArgs <$> get <*> get <*> get
                     <*> get <*> get <*> get
-                    <*> get
+                    <*> get <*> get <*> get
 
 instance Binary License where
   put = put . show
