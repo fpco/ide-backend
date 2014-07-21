@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TemplateHaskell, RecordWildCards #-}
+{-# LANGUAGE CPP, TemplateHaskell, RecordWildCards, ScopedTypeVariables #-}
 -- Copyright   : (c) JP Moresmau 2011,
 --                   Well-Typed 2012
 -- (JP Moresmau's buildwrapper package used as template for GHC API use)
@@ -67,8 +67,10 @@ import System.IO.Unsafe (unsafePerformIO)
 -- is not fixed in this version. Compilation should fail,
 -- because the problem is not minor and not easy to spot otherwise.
 #else
+import Bag (bagToList)
 import DynFlags (defaultDynFlags)
 import Exception (ghandle)
+import ErrUtils (ErrMsg)
 import FastString ( unpackFS )
 import GHC hiding (
     ModuleName
@@ -212,7 +214,7 @@ compileInGhc configSourcesDir generateCode mTargets errsRef = do
       debug dVerbosity $ "handleSourceError: " ++ show e
       errs <- readIORef errsRef
       e'   <- fromHscSourceError e
-      writeIORef errsRef (e' `StrictList.cons` errs)
+      writeIORef errsRef (force e' StrictList.++ errs)
 
     -- A workaround for http://hackage.haskell.org/trac/ghc/ticket/7430.
     -- Some errors are reported as exceptions instead.
@@ -309,7 +311,6 @@ runInGhc :: RunCmd -> Ghc RunResult
 runInGhc cmd = do
   flags <- getSessionDynFlags
   defaultCleanupHandler flags . handleErrors $ do
-    handleErrors $ do
       runRes <- runCmd cmd
       case runRes of
         GHC.RunOk _ ->
@@ -514,14 +515,20 @@ collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
 -- our control (and so, e.g., not relative to the project root).
 -- But at least the IDE could point somewhere in the code.
 -- | Convert GHC's SourceError type into ours.
-fromHscSourceError :: MonadFilePathCaching m => HscTypes.SourceError -> m SourceError
-fromHscSourceError e = case sourceErrorSpan e of
-    Just real -> do xSpan <- extractSourceSpan real
-                    return $ SourceError KindError xSpan err
-    Nothing   -> return $ SourceError KindError (TextSpan noloc) err
+fromHscSourceError :: forall m. MonadFilePathCaching m => HscTypes.SourceError -> m [SourceError]
+fromHscSourceError = mapM aux . bagToList . HscTypes.srcErrorMessages
   where
-    err   = Text.pack (show e)
-    noloc = Text.pack "<no location info>"
+    aux :: ErrMsg -> m SourceError
+    aux e = do
+      let err   = Text.pack (show e)
+          noloc = Text.pack "<no location info>"
+
+      case sourceErrorSpan e of
+        Just real -> do
+          xSpan <- extractSourceSpan real
+          return $ SourceError KindError xSpan err
+        Nothing ->
+          return $ SourceError KindError (TextSpan noloc) err
 
 -----------------------
 -- GHC version compat

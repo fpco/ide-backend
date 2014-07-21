@@ -13,6 +13,8 @@ import Control.Monad.Trans.Class (lift)
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
 import Data.Function (on)
+import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.C.Types (CFile)
 import System.Environment (withArgs)
 import System.FilePath ((</>))
 import System.IO (Handle, hFlush)
@@ -49,6 +51,8 @@ import Run
 import HsWalk
 import Debug
 import GhcShim
+
+foreign import ccall "fflush" fflush :: Ptr CFile -> IO ()
 
 --------------------------------------------------------------------------------
 -- Server-side operations                                                     --
@@ -481,6 +485,9 @@ ghcHandleRun RpcConversation{..} runCmd = do
         (\() -> runInGhc runCmd)
 
     liftIO $ do
+      -- Make sure the C buffers are also flushed before swapping the handles
+      fflush nullPtr
+
       -- Restore stdin and stdout
       dupTo stdOutputBackup stdOutput >> closeFd stdOutputBackup
       dupTo stdErrorBackup  stdError  >> closeFd stdErrorBackup

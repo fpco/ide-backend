@@ -218,6 +218,7 @@ module IdeSession (
   , sourceExtensions
   , ideBackendApiVersion
   , buildLicsFromPkgs
+  , LicenseArgs(..)
   -- * DEPRECATED aliases
   , updateModule
   , updateModuleFromFile

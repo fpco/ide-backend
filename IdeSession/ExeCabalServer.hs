@@ -51,6 +51,7 @@ runExeCabal conv req = do
         ReqExeBuild buildExeArgs _ -> beStdoutLog buildExeArgs
         ReqExeDoc buildExeArgs -> beStdoutLog buildExeArgs
         ReqExeCc runCcArgs -> rcStdoutLog runCcArgs
+        ReqExeLic licenseArgs -> liStdoutLog licenseArgs
   stdoutThread <- async $ readStdout conv stdOutputRdHandle stdoutLog
 
   exitCode <- case req of
@@ -60,6 +61,8 @@ runExeCabal conv req = do
       configureAndHaddock buildExeArgs
     ReqExeCc runCcArgs ->
       runComponentCc runCcArgs
+    ReqExeLic licenseArgs ->
+      buildLicsFromPkgs True licenseArgs
 
   -- Restore stdout
   IO.hFlush IO.stdout

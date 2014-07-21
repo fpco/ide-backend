@@ -42,7 +42,6 @@ import DynFlags
 import ErrUtils
 import FastString
 import GHC hiding (getBreak)
-import HscTypes
 import Linker
 import MonadUtils
 import Outputable hiding (showSDoc)
@@ -101,14 +100,10 @@ deriving instance Show Severity
   Source errors
 ------------------------------------------------------------------------------}
 
-sourceErrorSpan :: SourceError -> Maybe SrcSpan
-sourceErrorSpan e =
-  case bagToList (HscTypes.srcErrorMessages e) of
-    [errMsg] -> case errMsgSpan errMsg of
-      real@RealSrcSpan{} -> Just real
-      _                  -> Nothing
-    _ ->
-      Nothing
+sourceErrorSpan :: ErrMsg -> Maybe SrcSpan
+sourceErrorSpan errMsg = case errMsgSpan errMsg of
+  real@RealSrcSpan{} -> Just real
+  _                  -> Nothing
 
 {------------------------------------------------------------------------------
   Breakpoints

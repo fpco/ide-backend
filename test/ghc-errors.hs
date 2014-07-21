@@ -732,18 +732,15 @@ syntheticTests = [
     , withSession (withOpts ["-hide-package monads-tf"]) $ \session -> do
         loadModulesFrom session "test/Puns"
         assertMoreErrors session
-        let upd = buildLicenses "test/Puns/cabals"
+        cabalsPath <- canonicalizePath "test/Puns/cabals"
+        let upd = buildLicenses cabalsPath
         updateSessionD session upd 99
         assertMoreErrors session
         distDir <- getDistDir session
-        errExists <- doesFileExist $ distDir </> "licenses.stderr"
-        when errExists $ do
-          licensesErr <- readFile $ distDir </> "licenses.stderr"
-          assertEqual "license errors" "" licensesErr
+        licensesWarns <- readFile $ distDir </> "licenses.stderr"
+        assertEqual "licensesWarns length" 3 (length $ lines licensesWarns)
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
-        licensesWarns <- readFile $ distDir </> "licenses.stdout"
-        assertEqual "licensesWarns length" 367 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 27142
     )
@@ -751,7 +748,8 @@ syntheticTests = [
     , withSession (withOpts ["-hide-package monads-tf"]) $ \session -> do
         loadModulesFrom session "test/Puns"
         assertMoreErrors session
-        let updL = buildLicenses "test/Puns/cabals/parse_error"
+        cabalsPath <- canonicalizePath "test/Puns/cabals/parse_error"
+        let updL = buildLicenses cabalsPath
             punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
             upd = updL <> updateDynamicOpts punOpts
         updateSessionD session upd 99
@@ -760,15 +758,14 @@ syntheticTests = [
         assertEqual "after license parse_error" (Just ExitSuccess) status
         distDir <- getDistDir session
         licensesErr <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licenses parse_error msgs" licensesErr
-          "Parse of field 'license' failed.\nNo .cabal file provided for package transformers so no license can be found.\n"
-        let upd2 = buildLicenses "test/Puns/cabals/no_text_error"
+        assertEqual "licensesErr length" 18 (length $ lines licensesErr)
+        cabalsPath2 <- canonicalizePath "test/Puns/cabals/no_text_error"
+        let upd2 = buildLicenses cabalsPath2
         updateSessionD session upd2 99
         status2 <- getBuildLicensesStatus session
         assertEqual "after license no_text_error" (Just ExitSuccess) status2
         licensesErr2 <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licenses no_text_error msgs" licensesErr2
-          "No license text can be found for package mtl.\nNo .cabal file provided for package transformers so no license can be found.\n"
+        assertEqual "licensesErr2 length" 18 (length $ lines licensesErr2)
     )
   , ( "Test CWD by reading a data file"
     , withSession defaultSession $ \session -> do
@@ -1002,11 +999,11 @@ syntheticTests = [
         let update = updateSourceFile "M.hs"
                                   (BSLC.pack "module very-wrong where")
         updateSessionD session update 1
-        assertSourceErrors' session ["parse error on input `very'\n"]
+        assertSourceErrors' session ["parse error on input `very'"]
         let update2 = updateSourceFile "M.hs"
                                    (BSLC.pack "module M.1.2.3.8.T where")
         updateSessionD session update2 1
-        assertSourceErrors' session ["parse error on input `.'\n"]
+        assertSourceErrors' session ["parse error on input `.'"]
     )
   , ( "Interrupt runStmt (after 1 sec)"
     , withSession defaultSession $ \session -> do
@@ -2768,15 +2765,14 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         withCurrentDirectory "test/MainModule" $ do
           loadModulesFrom session "."
           assertNoErrors session
-        let upd = buildLicenses "test/MainModule/cabals"
+        cabalsPath <- canonicalizePath "test/MainModule/cabals"
+        let upd = buildLicenses cabalsPath
         updateSessionD session upd 6
         distDir <- getDistDir session
         licensesErrs <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licensesErrs length" 0 (length licensesErrs)
+        assertEqual "licensesErrs" "" licensesErrs
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
-        licensesWarns <- readFile $ distDir </> "licenses.stdout"
-        assertEqual "licensesWarns length" 0 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 21409
     )
@@ -2785,15 +2781,14 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         withCurrentDirectory "test/Cabal" $ do
           loadModulesFrom session "."
           assertNoErrors session
-        let upd = buildLicenses "test/Puns/cabals"  -- 7 packages missing
+        cabalsPath <- canonicalizePath "test/Puns/cabals"  -- 7 packages missing
+        let upd = buildLicenses cabalsPath
         updateSessionD session upd 99
         distDir <- getDistDir session
         licensesErrs <- readFile $ distDir </> "licenses.stderr"
-        assertBool "licensesErrs length" $ length licensesErrs <= 576
+        assertBool "licensesErrs length" $ length (lines licensesErrs) < 10
         status <- getBuildLicensesStatus session
         assertEqual "after license build" (Just ExitSuccess) status
-        licensesWarns <- readFile $ distDir </> "licenses.stdout"
-        assertEqual "licensesWarns length" 138 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 21423
     )
@@ -2813,11 +2808,22 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                          PackageId{ packageName = Text.pack name
                                   , packageVersion = Just $ Text.pack "1.0" }
                        ) lics
-        status <- buildLicsFromPkgs defaultSessionConfig
-                    pkgs "test" distDir lics (\_ -> return ())
+        let liStdoutLog = distDir </> "licenses.stdout"
+            liStderrLog = distDir </> "licenses.stderr"
+            ideConfig = defaultSessionConfig
+            liArgs =
+              LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
+                         , liExtraPathDirs = configExtraPathDirs ideConfig
+                         , liLicenseExc = configLicenseExc ideConfig
+                         , liDistDir = distDir
+                         , liStdoutLog
+                         , liStderrLog
+                         , licenseFixed = lics
+                         , liCabalsDir = "test"
+                         , liPkgs = pkgs
+                         }
+        status <- buildLicsFromPkgs False liArgs
         assertEqual "after license build" ExitSuccess status
-        licensesErrs <- readFile $ distDir </> "licenses.stderr"
-        assertEqual "licensesErrs length" 0 (length licensesErrs)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 1527726
     )
@@ -2837,11 +2843,22 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                          PackageId{ packageName = Text.pack name
                                   , packageVersion = Just $ Text.pack "1.0" }
                        ) lics
-        status <- buildLicsFromPkgs defaultSessionConfig
-                    pkgs "test" distDir lics (\_ -> return ())
+        let liStdoutLog = distDir </> "licenses.stdout"
+            liStderrLog = distDir </> "licenses.stderr"
+            ideConfig = defaultSessionConfig
+            liArgs =
+              LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
+                         , liExtraPathDirs = configExtraPathDirs ideConfig
+                         , liLicenseExc = configLicenseExc ideConfig
+                         , liDistDir = distDir
+                         , liStdoutLog
+                         , liStderrLog
+                         , licenseFixed = lics
+                         , liCabalsDir = "test"
+                         , liPkgs = pkgs
+                         }
+        status <- buildLicsFromPkgs False liArgs
         assertEqual "after license build" ExitSuccess status
-        licensesWarns <- readFile $ distDir </> "licenses.stdout"
-        assertEqual "licensesWarns length" 0 (length licensesWarns)
         licenses <- readFile $ distDir </> "licenses.txt"
         assertBool "licenses length" $ length licenses >= 63619
     )
@@ -5678,6 +5695,58 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSessionD session (updateSourceFile "test.c" cLBS) 3
         assertNoErrors session
     )
+  , ( "Using C files 5: C header files in subdirectories (#212)"
+    , withSession (withIncludes "include") $ \session -> do
+        let hfile, cfile, hsfile :: BSL8.ByteString
+            hfile = "#define foo \"hello\\n\""
+            cfile = BSLC.pack . unlines $
+                [ "#include <stdio.h>"
+                , "#include <blankheader.h>"
+                , "void hello(void) { printf(foo); }"
+                ]
+            hsfile = BSLC.pack . unlines $
+                [ "{-# LANGUAGE ForeignFunctionInterface #-}"
+                , "module Main where"
+                , "foreign import ccall \"hello\" hello :: IO ()"
+                , "main = hello"
+                ]
+
+        let go upd = do
+                updateSessionD session upd 3
+                assertNoErrors session
+
+        go $ updateDynamicOpts ["-Iinclude"]
+          <> updateSourceFile "include/blankheader.h" hfile
+          <> updateSourceFile "hello.c" cfile
+          <> updateSourceFile "Main.hs" hsfile
+    )
+  , ( "Using C files 6: C code writes to stdout (#210)"
+    , withSession defaultSession $ \session -> do
+        let cfile, hsfile :: BSL8.ByteString
+            cfile = BSLC.pack . unlines $
+                [ "#include <stdio.h>"
+                , "void hello(void) { printf(\"hello\\n\"); }"
+                ]
+            hsfile = BSLC.pack . unlines $
+                [ "{-# LANGUAGE ForeignFunctionInterface #-}"
+                , "module Main where"
+                , "import System.IO"
+                , "foreign import ccall \"hello\" hello :: IO ()"
+                , "main = hello"
+                ]
+
+        let upd = updateCodeGeneration True
+               <> updateSourceFile "hello.c" cfile
+               <> updateSourceFile "Main.hs" hsfile
+
+        updateSessionD session upd 3
+        assertNoErrors session
+
+        ra <- runStmt session "Main" "main"
+        (output, result) <- runWaitAll ra
+        assertEqual "" result RunOk
+        assertEqual "" output (BSLC.pack "hello\n")
+    )
   , ( "ghc qAddDependentFile patch (#118)"
     , withSession defaultSession $ \session -> do
         let cb     = \_ -> return ()
@@ -7086,6 +7155,26 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
           assertEqual "" RunOk result
           assertEqual "" expectedResult output
     )
+  , ( "Missing location information (#213)"
+    , withSession defaultSession $ \session -> do
+        let upd = updateSourceFile "Main.hs" $ BSLC.unlines
+                [ "import DoesNotExist1"
+                , "import DoesNotExist2"
+                ]
+
+        updateSession session upd print
+        version <- getGhcVersion session
+        case version of
+          GHC742 -> -- 7.4.2 just reports the first module error
+            assertSourceErrors session [
+                [(Just "Main.hs", "Could not find module")]
+              ]
+          GHC78 -> -- 7.8 reports both; make sure we have location info (#213)
+            assertSourceErrors session [
+                [(Just "Main.hs", "Could not find module")]
+              , [(Just "Main.hs", "Could not find module")]
+              ]
+    )
   ]
 
 runWaitAll' :: forall a. RunActions a -> IO (BSL.ByteString, a)
@@ -7606,7 +7695,7 @@ assertErrorOneOf (SourceError _ loc actual) potentialExpected =
     matchesError expectedErr =
       if ignoreQuotes expectedErr `isInfixOf` ignoreQuotes (Text.unpack actual)
         then Right ()
-        else Left $ "Unexpected error: " ++ Text.unpack actual
+        else Left $ "Unexpected error: " ++ show (Text.unpack actual) ++ ".\nExpected: " ++ show expectedErr
 
 assertNoErrors :: IdeSession -> Assertion
 assertNoErrors session = do

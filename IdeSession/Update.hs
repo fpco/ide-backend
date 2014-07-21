@@ -41,6 +41,7 @@ module IdeSession.Update (
   , forceRecompile
   , crashGhcServer
   , buildLicsFromPkgs
+  , LicenseArgs(..)
   )
   where
 
@@ -1188,7 +1189,6 @@ buildExe extraOpts ms = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     let SessionConfig{..} = ideConfig
     let ideDistDir   = ideSessionDistDir   ideSessionDir
-        ideDataDir   = ideSessionDataDir   ideSessionDir
         ideSourceDir = ideSessionSourceDir ideSessionDir
 
     callback          <- asks ideSessionUpdateCallback
@@ -1215,11 +1215,7 @@ buildExe extraOpts ms = do
       else do
         let ghcOpts = "-rtsopts=some"
                     : configStaticOpts ++ dynamicOpts ++ extraOpts
-        liftIO $ Ex.bracket
-          Dir.getCurrentDirectory
-          Dir.setCurrentDirectory
-          (const $
-             do Dir.setCurrentDirectory ideDataDir
+        liftIO $ do
                 (loadedMs, pkgs) <- buildDeps mcomputed
                 libDeps <- externalDeps pkgs
                 let beArgs =
@@ -1234,7 +1230,7 @@ buildExe extraOpts ms = do
                                   , beStdoutLog
                                   , beStderrLog
                                   }
-                invokeExeCabal ideStaticInfo (ReqExeBuild beArgs ms) callback)
+                invokeExeCabal ideStaticInfo (ReqExeBuild beArgs ms) callback
     -- Solution 2. to #119: update timestamps of .o (and all other) files
     -- according to the session's artificial timestamp.
     newTS <- nextLogicalTimestamp
@@ -1268,7 +1264,6 @@ buildDoc = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     let SessionConfig{..} = ideConfig
     let ideDistDir   = ideSessionDistDir   ideSessionDir
-        ideDataDir   = ideSessionDataDir   ideSessionDir
         ideSourceDir = ideSessionSourceDir ideSessionDir
 
     callback          <- asks ideSessionUpdateCallback
@@ -1282,10 +1277,7 @@ buildDoc = do
     let ghcOpts = configStaticOpts ++ dynamicOpts
         beStdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
         beStderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
-    exitCode <- liftIO $ Ex.bracket
-      Dir.getCurrentDirectory
-      Dir.setCurrentDirectory
-      (const $ do Dir.setCurrentDirectory ideDataDir
+    exitCode <- liftIO $ do
                   (loadedMs, pkgs) <- buildDeps mcomputed
                   libDeps <- externalDeps pkgs
                   let beArgs =
@@ -1300,7 +1292,7 @@ buildDoc = do
                                     , beStdoutLog
                                     , beStderrLog
                                     }
-                  invokeExeCabal ideStaticInfo (ReqExeDoc beArgs) callback)
+                  invokeExeCabal ideStaticInfo (ReqExeDoc beArgs) callback
     set ideBuildDocStatus (Just exitCode)
 
 -- | Build a file containing licenses of all used packages.
@@ -1310,7 +1302,8 @@ buildDoc = do
 --
 -- The function expects .cabal files of all used packages,
 -- except those mentioned in 'configLicenseExc',
--- to be gathered in the directory given as the first argument.
+-- to be gathered in the directory given as the first argument
+-- (which needs to be an absolute path or a path relative to the data dir).
 -- The code then expects to find those packages installed and their
 -- license files in the usual place that Cabal puts them
 -- (or the in-place packages should be correctly embedded in the GHC tree).
@@ -1334,7 +1327,7 @@ buildDoc = do
 -- 'Config.configDynLink' needs to be set. See #162.
 buildLicenses :: FilePath -> IdeSessionUpdate ()
 buildLicenses cabalsDir = do
-    IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+    ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
     let SessionConfig{configGenerateModInfo} = ideConfig
     let ideDistDir = ideSessionDistDir ideSessionDir
 
@@ -1343,8 +1336,22 @@ buildLicenses cabalsDir = do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    exitCode <- liftIO $
-      buildLicenseCatenation ideConfig mcomputed cabalsDir ideDistDir callback
+    let liStdoutLog = ideDistDir </> "licenses.stdout"  -- progress
+        liStderrLog = ideDistDir </> "licenses.stderr"  -- warnings and errors
+    exitCode <- liftIO $ do
+      (_, pkgs) <- buildDeps mcomputed
+      let liArgs =
+            LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
+                       , liExtraPathDirs = configExtraPathDirs ideConfig
+                       , liLicenseExc = configLicenseExc ideConfig
+                       , liDistDir = ideDistDir
+                       , liStdoutLog
+                       , liStderrLog
+                       , licenseFixed = configLicenseFixed ideConfig
+                       , liCabalsDir = cabalsDir
+                       , liPkgs = pkgs
+                       }
+      invokeExeCabal ideStaticInfo (ReqExeLic liArgs) callback
     set ideBuildLicensesStatus (Just exitCode)
 
 {------------------------------------------------------------------------------
@@ -1417,31 +1424,27 @@ nextLogicalTimestamp = do
 runGcc :: FilePath -> FilePath -> FilePath -> IdeSessionUpdate [SourceError]
 runGcc absC absObj pref = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
-    let ideDistDir = ideSessionDistDir ideSessionDir
+    callback                        <- asks ideSessionUpdateCallback
+    relIncl                         <- get ideRelativeIncludes
 
-    callback  <- asks ideSessionUpdateCallback
+    let ideDistDir   = ideSessionDistDir   ideSessionDir
+        ideSourceDir = ideSessionSourceDir ideSessionDir
+
     liftIO $ do
-     -- Direct call to gcc, for testing only:
-     let SessionConfig{configPackageDBStack, configExtraPathDirs} = ideConfig
-         _gcc :: FilePath
-         _gcc = "/usr/bin/gcc"
-         _args :: [String]
-         _args = [ "-c"
-                 , "-o", absObj
-                 , absC
-                 ]
-         _stdin :: String
-         _stdin = ""
-         stdoutLog = ideDistDir </> "ide-backend-cc.stdout"
-         stderrLog = ideDistDir </> "ide-backend-cc.stderr"
-         runCcArgs = RunCcArgs{ rcPackageDBStack = configPackageDBStack
-                              , rcExtraPathDirs = configExtraPathDirs
-                              , rcDistDir = ideDistDir
-                              , rcStdoutLog = stdoutLog
-                              , rcStderrLog = stderrLog
-                              , rcAbsC = absC
-                              , rcAbsObj = absObj
-                              , rcPref = pref }
+     let SessionConfig{..} = ideConfig
+         stdoutLog   = ideDistDir </> "ide-backend-cc.stdout"
+         stderrLog   = ideDistDir </> "ide-backend-cc.stderr"
+         includeDirs = map (ideSourceDir </>) relIncl
+         runCcArgs   = RunCcArgs{ rcPackageDBStack = configPackageDBStack
+                                , rcExtraPathDirs  = configExtraPathDirs
+                                , rcDistDir        = ideDistDir
+                                , rcStdoutLog      = stdoutLog
+                                , rcStderrLog      = stderrLog
+                                , rcAbsC           = absC
+                                , rcAbsObj         = absObj
+                                , rcPref           = pref
+                                , rcIncludeDirs    = includeDirs
+                                }
      -- (_exitCode, _stdout, _stderr)
      --   <- readProcessWithExitCode _gcc _args _stdin
      -- The real deal; we call gcc via ghc via cabal functions:
