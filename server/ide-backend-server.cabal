@@ -74,3 +74,4 @@ executable ide-backend-server
 
 -- MSS 2014-07-10: I modified the cabal file with this comment simply to force
 -- fpbuild to rebuild.
+-- MSS 2014-07-21: Same as above
