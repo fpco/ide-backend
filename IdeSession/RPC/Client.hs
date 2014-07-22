@@ -15,15 +15,17 @@ module IdeSession.RPC.Client (
   ) where
 
 import Control.Applicative ((<$>))
+import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newMVar, tryTakeMVar)
 import Control.Monad (void, unless)
 import Data.Binary (Binary, encode, decode)
+import Data.Function (fix)
 import Data.IORef (writeIORef, readIORef, newIORef)
 import Data.Typeable (Typeable)
 import Prelude hiding (take)
 import System.Directory (canonicalizePath, getPermissions, executable)
 import System.Exit (ExitCode)
-import System.IO (Handle)
+import System.IO (Handle, hClose)
 import System.Posix.IO (createPipe, closeFd, fdToHandle)
 import System.Posix.Signals (signalProcess, sigKILL)
 import System.Posix.Types (Fd)
@@ -32,11 +34,13 @@ import System.Process
   , proc
   , ProcessHandle
   , waitForProcess
-  , CreateProcess(cwd, env)
+  , CreateProcess(cwd, env, std_in, std_out, std_err)
   , getProcessExitCode
+  , StdStream (CreatePipe)
   )
 import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
 import qualified Control.Exception as Ex
+import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy.Char8 as BSL
 
 import IdeSession.Util.BlockingOps
@@ -108,10 +112,22 @@ forkRpcServer path args workingDir menv = do
                                  ]
 
   fullPath <- pathToExecutable path
-  (Nothing, Nothing, Nothing, ph) <- createProcess (proc fullPath args') {
+  (Just stdinH, Just stdoutH, Just stderrH, ph) <-
+    createProcess (proc fullPath args') {
                                          cwd = workingDir,
-                                         env = menv
+                                         env = menv,
+                                         std_in = CreatePipe,
+                                         std_out = CreatePipe,
+                                         std_err = CreatePipe
                                        }
+  hClose stdinH
+  let drain name h = void $ forkIO $ fix $ \loop -> do
+        bs <- S.hGetSome h 4096
+        if S.null bs
+          then return ()
+          else print ("forkRpcServer output", name, bs) >> loop
+  drain "stdout" stdoutH
+  drain "stderr" stderrH
 
   -- Close the ends of the pipes that we're not using, and convert the rest
   -- to handles
