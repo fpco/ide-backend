@@ -5509,9 +5509,8 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         -- TODO: Ideally, we'd fix this jump in the reported total number of
         -- progress messages
         updateSessionP session upd [
-            (1, 2, "Compiling MC.c")
-          , (2, 2, "Loading MC.o")
-          , (3, 3, "Compiling M")
+            (1, 1, "Compiling MC.c")
+          , (2, 2, "Compiling M")
           ]
         assertNoErrors session
         do runActions <- runStmt session "M" "hello"
@@ -5565,10 +5564,8 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     , "}"
                     ])
         updateSessionP session upd3 [
-            (1 ,3, "Unloading MC.o")
-          , (2, 3, "Compiling MC.c")
-          , (3, 3, "Loading MC.o")
-          , (4, 4, "Compiling M")
+            (1, 1, "Compiling MC.c")
+          , (2, 2, "Compiling M")
           ]
         assertNoErrors session
         do runActions <- runStmt session "M" "hello"
@@ -5610,11 +5607,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     , "}"
                     ])
         updateSessionP session upd [
-            (1, 4, "Compiling a/MC.c")
-          , (2, 4, "Loading a/MC.o")
-          , (3, 4, "Compiling b/MC.c")
-          , (4, 4, "Loading b/MC.o")
-          , (5, 5, "Compiling M")
+            (1, 2, "Compiling a/MC.c")
+          , (2, 2, "Compiling b/MC.c")
+          , (3, 3, "Compiling M")
           ]
         assertNoErrors session
         do runActions <- runStmt session "M" "hello"
@@ -5651,9 +5646,8 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                     , "}"
                     ])
         updateSessionP session upd [
-            (1, 2, "Compiling MC.c")
-          , (2, 2, "Skipped loading MC.o")
-          , (3, 3, "Compiling M")
+            (1, 1, "Compiling MC.c")
+          , (2, 2, "Compiling M")
           ]
         errors <- getSourceErrors session
         case errors of
@@ -7174,6 +7168,21 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                 [(Just "Main.hs", "Could not find module")]
               , [(Just "Main.hs", "Could not find module")]
               ]
+    )
+  , ( "Changing linker flags (#214)"
+    , withSession defaultSession $ \sess -> do 
+        let upd =
+                updateCodeGeneration True <>
+                updateDynamicOpts ["-lz"] <>
+                updateSourceFile "Main.hs" "import GHC.Prim" <>
+                updateSourceFile "foo.c" (BSLC.unlines
+                    [ "#include <zlib.h>"
+                    , "int streaming_commons_inflate_init2(z_stream *stream, int window_bits) {"
+                    , "return inflateInit2(stream, window_bits);}"
+                    ])
+
+        updateSession sess upd print
+        assertNoErrors sess
     )
   ]
 

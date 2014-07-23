@@ -193,6 +193,8 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
         , pendingUpdatedArgs = Nothing -- Server default is []
         , pendingUpdatedOpts = Nothing
         , pendingUpdatedIncl = Nothing
+        , pendingLoads       = [] 
+        , pendingUnloads     = []
         }
 
   ideState <- newMVar (state pendingRemoteChanges idleState)
@@ -623,6 +625,12 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
              else
                return $ force []
 
+           -- Load and unload object files
+           forM_ (pendingUnloads pendingChanges') $ \fp ->
+             rpcLoad (idleState ^. ideGhcServer) fp True
+           forM_ (pendingLoads pendingChanges') $ \fp -> 
+             rpcLoad (idleState ^. ideGhcServer) fp False 
+
            -- Recompile
            computed <- if pendingUpdatedCode pendingChanges'
              then do
@@ -738,11 +746,8 @@ recompileObjectFiles = do
           srcDir = ideSessionSourceDir ideSessionDir
           objDir = ideSessionObjDir    ideSessionDir
 
-          compiling, loading, unloading, skipped :: FilePath -> String
-          compiling src = "Compiling "       ++ makeRelative srcDir src
-          loading   obj = "Loading "         ++ makeRelative objDir obj
-          unloading obj = "Unloading "       ++ makeRelative objDir obj
-          skipped   obj = "Skipped loading " ++ makeRelative objDir obj
+          compiling :: FilePath -> String
+          compiling src = "Compiling " ++ makeRelative srcDir src
 
       forM_ cFiles $ \(fp, ts) -> do
         let absC     = srcDir </> fp
@@ -753,9 +758,7 @@ recompileObjectFiles = do
         -- Unload the old object (if necessary)
         case mObjFile of
           Just (objFile, ts') | ts' < ts -> do
-            delay $ \callback -> do
-              callback (unloading objFile)
-              lift $ unloadObject objFile
+            lift $ schedule (\r -> r { pendingUnloads = objFile : pendingUnloads r }) 
           _ ->
             return ()
 
@@ -777,14 +780,12 @@ recompileObjectFiles = do
                   else
                     set (ideObjectFiles .> lookup' fp) Nothing
                 return errs
-              if null errs then tellSt ([fp], [])
-                           else tellSt ([], errs)
-            delay $ \callback -> do
-              (compiled, _errs) <- St.get
-              if (fp `elem` compiled)
-                then do callback (loading absObj)
-                        lift $ loadObject absObj
-                else callback (skipped absObj)
+              if null errs 
+                then do 
+                  lift $ schedule $ (\r -> r { pendingLoads = absObj : pendingLoads r }) 
+                  tellSt ([fp], [])
+                else 
+                  tellSt ([], errs)
 
     delay :: MonadWriter [RecompileAction] m => RecompileAction -> m ()
     delay act = tell [act]
@@ -1378,18 +1379,6 @@ crashGhcServer IdeSession{..} delay = $withStrictMVar ideState $ \state ->
 {------------------------------------------------------------------------------
   Internal session updates
 ------------------------------------------------------------------------------}
-
--- | Load an object file
-loadObject :: FilePath -> IdeSessionUpdate ()
-loadObject path = do
-  ghcServer <- get ideGhcServer
-  liftIO $ rpcLoad ghcServer path False
-
--- | Unload an object file
-unloadObject :: FilePath -> IdeSessionUpdate ()
-unloadObject path = do
-  ghcServer <- get ideGhcServer
-  liftIO $ rpcLoad ghcServer path True
 
 -- | Force recompilation of the given modules
 --

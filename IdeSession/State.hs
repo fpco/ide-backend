@@ -129,6 +129,12 @@ data PendingRemoteChanges = PendingRemoteChanges {
 
     -- | Was the value of relative includes changed?
   , pendingUpdatedIncl :: Maybe [FilePath]
+
+    -- | Object files to be uploaded
+  , pendingUnloads :: [FilePath]
+ 
+    -- | Object files to be loaded
+  , pendingLoads :: [FilePath]
   }
 
 noPendingRemoteChanges :: PendingRemoteChanges
@@ -138,6 +144,8 @@ noPendingRemoteChanges = PendingRemoteChanges {
   , pendingUpdatedArgs = Nothing
   , pendingUpdatedOpts = Nothing
   , pendingUpdatedIncl = Nothing
+  , pendingUnloads     = []
+  , pendingLoads       = []
   }
 
 data IdeSessionState =
