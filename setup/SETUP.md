@@ -403,3 +403,26 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
       cabal install
 
   in utils/haddock. 
+
+DEBUGGING
+---------
+
+* If ide-backend complains about being unable to open dynamic libraries (even
+  with ghc 7.4, or with ghc 7.8 NOT configured for dynamic libraries), such as
+  when running the test-suite:
+
+        Capture stdout (single putStrLn): [Failed]
+        Unexpected errors: SourceError {errorKind = KindError, errorSpan = <from GhcException>, errorMsg = "<command line>: can't load .so/.DLL for: libHSide-backend-rts-0.1.3.dylib (dlopen(libHSide-backend-rts-0.1.3.dylib, 9): image not found)"}
+
+  it is possible that cross-sandbox references are not absolute; for example, check the output of
+
+        ghc-pkg --package-conf=/Users/dev/env/fpco-patched-7.4/dot-ghc/snippet-db describe ide-backend-rts
+
+  all paths there should be absolute. See section about "install-dirs user" above.
+
+  Note that this error is not about dynamic libraries _per se_, which is why
+  this is so confusing. ghc looks for the RTS (ide-backend-rts) and it looks
+  for it in a number of places; the .dylib is simply the last place (or perhaps
+  the first, not 100% sure) and that just happens to be the error message that
+  is generated, even if it also checked elsewhere (in particular, even if it
+  also tried to load static libraries).
