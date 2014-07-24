@@ -130,7 +130,7 @@ ghcGetVersion = GHC742
 
 packageDBFlags :: Bool -> [String] -> [String]
 packageDBFlags userDB specificDBs =
-     ["-no-user-package-conf" | userDB]
+     ["-no-user-package-conf" | not userDB]
   ++ concat [["-package-conf", db] | db <- specificDBs]
 
 -- | Set GHC options

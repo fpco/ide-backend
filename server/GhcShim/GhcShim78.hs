@@ -136,7 +136,7 @@ ghcGetVersion = GHC78
 
 packageDBFlags :: Bool -> [String] -> [String]
 packageDBFlags userDB specificDBs =
-     ["-no-user-package-db" | userDB]
+     ["-no-user-package-db" | not userDB]
   ++ concat [["-package-db", db] | db <- specificDBs]
 
 -- | Set GHC options
