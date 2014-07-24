@@ -7184,6 +7184,19 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         updateSession sess upd print
         assertNoErrors sess
     )
+  , ( "runStmt gets corrupted by async exceptions (#219)"
+    , withSession defaultSession $ \sess -> do
+        updateSession sess
+            (updateSourceFile "Main.hs" "main = return ()" <> updateCodeGeneration True)
+            print
+        assertNoErrors sess
+
+        _ <- timeout 1 $ runStmt sess "Main" "main"
+
+        runActions <- runStmt sess "Main" "main"
+        (_output, result) <- runWaitAll runActions
+        assertEqual "" RunOk result
+    )
   ]
 
 runWaitAll' :: forall a. RunActions a -> IO (BSL.ByteString, a)

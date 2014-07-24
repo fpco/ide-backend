@@ -221,7 +221,14 @@ rpcRun server cmd translateResult = do
 
   -- Communicate with the snippet using an independent, concurrent, conversation
   (pid, server') <- do
-    (pid, stdin, stdout, stderr) <- ghcRpc server (ReqRun cmd)
+    -- We don't want an asynchronous exception against rpcRun to interrupt
+    -- communication with the main server, because that would make the whole
+    -- session unuseable.
+    --
+    -- TODO: This is of course a tad dangerous, because if for whatever reason
+    -- the communication with the main server stalls we cannot interrupt it.
+    -- Perhaps we should introduce a separate timeout for that?
+    (pid, stdin, stdout, stderr) <- Ex.mask_ $ ghcRpc server (ReqRun cmd)
     server' <- OutProcess <$> connectToRpcServer stdin stdout stderr
     return (pid, server')
 
