@@ -282,7 +282,7 @@ rpcRun server cmd translateResult = do
     , interrupt   = writeChan reqChan GhcRunInterrupt
     , supplyStdin = writeChan reqChan . GhcRunInput
     , forceCancel = do
-        signalProcess sigKILL pid
+        ignoreIOExceptions $ signalProcess sigKILL pid
         writeChan runWaitChan SnippetForceTerminated
         cancel respThread
     }
@@ -327,3 +327,8 @@ ghcRpc :: (Typeable req, Typeable resp, Binary req, Binary resp)
        => GhcServer -> req -> IO resp
 ghcRpc (OutProcess server) = rpc server
 ghcRpc (InProcess _ _)     = error "ghcRpc not implemented for in-process server"
+
+ignoreIOExceptions :: IO () -> IO ()
+ignoreIOExceptions = let handler :: Ex.IOException -> IO ()
+                         handler _ = return ()
+                     in Ex.handle handler
