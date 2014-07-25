@@ -203,10 +203,10 @@ rpcBreakpoint :: GhcServer
 rpcBreakpoint server reqBreakpointModule reqBreakpointSpan reqBreakpointValue =
   ghcRpc server ReqBreakpoint{..}
 
-data SnippetAction a =
+data SnippetAction =
        SnippetOutput BSS.ByteString
-     | SnippetTerminated a
-     | SnippetForceTerminated a
+     | SnippetTerminated RunResult 
+     | SnippetForceTerminated 
 
 -- | Run code
 rpcRun :: forall a.
@@ -216,7 +216,7 @@ rpcRun :: forall a.
                                     -- @Nothing@ indicates force cancellation
        -> IO (RunActions a)
 rpcRun server cmd translateResult = do
-  runWaitChan <- newChan :: IO (Chan (SnippetAction a))
+  runWaitChan <- newChan :: IO (Chan SnippetAction)
   reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
   -- Communicate with the snippet using an independent, concurrent, conversation
@@ -250,17 +250,16 @@ rpcRun server cmd translateResult = do
       withAsync (sendRequests put reqChan) $ \_reqThread -> do
         let go = do resp <- get
                     case resp of
-                      GhcRunDone result -> do
-                        result' <- translateResult (Just result)
-                        writeChan runWaitChan (SnippetTerminated result')
+                      GhcRunDone result -> 
+                        writeChan runWaitChan (SnippetTerminated result)
                       GhcRunOutp bs -> do
                         writeChan runWaitChan (SnippetOutput bs)
                         go
         go
 
-  -- The runActionState holds 'Just' the result of the snippet, or 'Nothing' if
-  -- it has not yet terminated.  initially is the termination callback to be
-  -- called
+  -- runActionsState is used to make sure that once a snippet has terminated,
+  -- any subsequent calls to runWait simply return the final result.
+  -- This also makes sure that we call translateResult at most once.
   runActionsState <- newMVar Nothing
 
   return RunActions {
@@ -274,16 +273,17 @@ rpcRun server cmd translateResult = do
               case outcome of
                 SnippetOutput bs ->
                   return (Nothing, Left bs)
-                SnippetForceTerminated res -> do
+                SnippetForceTerminated -> do
+                  res <- translateResult Nothing 
                   return (Just res, Right res)
-                SnippetTerminated res -> do
+                SnippetTerminated res' -> do
+                  res <- translateResult (Just res')
                   return (Just res, Right res)
     , interrupt   = writeChan reqChan GhcRunInterrupt
     , supplyStdin = writeChan reqChan . GhcRunInput
     , forceCancel = do
         signalProcess sigKILL pid
-        result <- translateResult Nothing
-        writeChan runWaitChan (SnippetForceTerminated result)
+        writeChan runWaitChan SnippetForceTerminated
         cancel respThread
     }
   where
@@ -292,12 +292,11 @@ rpcRun server cmd translateResult = do
 
     -- TODO: should we restart the session when ghc crashes?
     -- Maybe recommend that the session is started on GhcExceptions?
-    handleExternalException :: Chan (SnippetAction a)
+    handleExternalException :: Chan SnippetAction
                             -> ExternalException
                             -> IO ()
-    handleExternalException ch e = do
-      result <- translateResult . Just . RunGhcException . show $ e
-      writeChan ch $ SnippetTerminated result
+    handleExternalException ch = 
+      writeChan ch . SnippetTerminated . RunGhcException . show 
 
 -- | Print a variable
 rpcPrint :: GhcServer -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv

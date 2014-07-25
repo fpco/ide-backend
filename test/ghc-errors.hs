@@ -7197,6 +7197,19 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
         (_output, result) <- runWaitAll runActions
         assertEqual "" RunOk result
     )
+  , ( "Calling forceCancel can have detrimental side-effects (#220)"
+    , withSession defaultSession $ \sess -> do
+        updateSession sess
+            (updateSourceFile "Main.hs" "main = return ()" <> updateCodeGeneration True)
+            print
+        assertNoErrors sess
+
+        replicateM_ 100 $ do
+            runActions <- runStmt sess "Main" "main"
+            (_output, result) <- runWaitAll runActions
+            assertEqual "" RunOk result
+            forceCancel runActions
+    ) 
   ]
 
 runWaitAll' :: forall a. RunActions a -> IO (BSL.ByteString, a)
