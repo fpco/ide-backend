@@ -63,6 +63,8 @@ data RpcServer = RpcServer {
   , rpcResponseR :: Stream Response
     -- | Server state
   , rpcState :: MVar RpcClientSideState
+    -- | Identity of this server (for debugging purposes)
+  , rpcIdentity :: String
   }
 
 -- | RPC server state
@@ -130,6 +132,7 @@ forkRpcServer path args workingDir menv = do
     , rpcProc      = Just ph
     , rpcState     = st
     , rpcResponseR = input
+    , rpcIdentity  = path
     }
   where
     pathToExecutable :: FilePath -> IO FilePath
@@ -161,6 +164,7 @@ connectToRpcServer requestW responseR errorsR = do
     , rpcProc      = Nothing
     , rpcState     = st
     , rpcResponseR = input
+    , rpcIdentity  = requestW 
     }
   where
     timeout :: Int
@@ -299,7 +303,7 @@ withRpcServer server io =
         return a
       Left ex -> do
    --     terminate server
-        $putMVar (rpcState server) (RpcStopped ex)
+        $putMVar (rpcState server) (RpcStopped (Ex.toException (userError (rpcIdentity server ++ ": " ++ show (ex :: Ex.SomeException)))))
         Ex.throwIO ex
 
 -- | Get the exit code of the RPC server, unless still running.

@@ -228,7 +228,7 @@ rpcRun server cmd translateResult = do
     -- TODO: This is of course a tad dangerous, because if for whatever reason
     -- the communication with the main server stalls we cannot interrupt it.
     -- Perhaps we should introduce a separate timeout for that?
-    (pid, stdin, stdout, stderr) <- Ex.mask_ $ ghcRpc server (ReqRun cmd)
+    (pid, stdin, stdout, stderr) <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
     server' <- OutProcess <$> connectToRpcServer stdin stdout stderr
     return (pid, server')
 
