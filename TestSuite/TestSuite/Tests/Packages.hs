@@ -484,7 +484,7 @@ test_UnhideHide env = withAvailableSession env $ \session -> do
        assertOneError session
 
 test_TrustDistrust :: TestSuiteEnv -> Assertion
-test_TrustDistrust env = withAvailableSession' env (withDynOpts ["-XSafe", "-fpackage-trust"]) $ \session -> do
+test_TrustDistrust env = withAvailableSession' env (withStaticOpts ["-XSafe", "-fpackage-trust"]) $ \session -> do
     let runCode = do
           runActions <- runStmt session "A" "test"
           (output, result) <- runWaitAll runActions
