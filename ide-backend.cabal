@@ -160,6 +160,36 @@ test-suite TestSuite
                       -- turn is used by the RPC test suite too. We should
                       -- probably merge that in, too.
                       test
+  other-modules:      TestSuite.State                      
+                      TestSuite.Assertions
+                      TestSuite.Session
+                      TestSuite.Tests.API
+                      TestSuite.Tests.Autocompletion
+                      TestSuite.Tests.BufferMode
+                      TestSuite.Tests.BuildDoc
+                      TestSuite.Tests.BuildExe
+                      TestSuite.Tests.BuildLicenses
+                      TestSuite.Tests.C
+                      TestSuite.Tests.CabalMacros
+                      TestSuite.Tests.Compilation
+                      TestSuite.Tests.Compliance
+                      TestSuite.Tests.Concurrency
+                      TestSuite.Tests.Crash
+                      TestSuite.Tests.Debugger
+                      TestSuite.Tests.FFI
+                      TestSuite.Tests.Integration
+                      TestSuite.Tests.InterruptRunExe
+                      TestSuite.Tests.InterruptRunStmt
+                      TestSuite.Tests.Issues
+                      TestSuite.Tests.Packages
+                      TestSuite.Tests.Performance
+                      TestSuite.Tests.SessionRestart
+                      TestSuite.Tests.SessionState
+                      TestSuite.Tests.SnippetEnvironment
+                      TestSuite.Tests.StdIO
+                      TestSuite.Tests.TH
+                      TestSuite.Tests.TypeInformation
+                      TestSuite.Tests.UpdateTargets
   build-depends:      base,
                       ide-backend,
                       tasty,

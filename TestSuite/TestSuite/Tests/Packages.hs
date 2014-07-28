@@ -59,14 +59,12 @@ test_PackageDependencies env = withAvailableSession' env (withDynOpts ["-hide-pa
 
 test_Register_NoRestart :: TestSuiteEnv -> Assertion
 test_Register_NoRestart env = do
-  packageDelete env "test/simple-lib17"
-  withAvailableSession' env (withDynOpts ["-package simple-lib17"]) $ \session -> do
-    packageInstall env "test/simple-lib17"
-    -- No restartSession yet, hence the exception at session init.
-    let expected = "<command line>: cannot satisfy -package simple-lib17"
-    updateSessionD session upd 1
-    assertSourceErrors' session [expected]
-    packageDelete env "test/simple-lib17"
+  withAvailableSession' env (withStaticOpts ["-package simple-lib17"]) $ \session -> do
+    withInstalledPackage env "test/simple-lib17" $ do
+      -- No restartSession yet, hence the exception at session init.
+      let expected = "<command line>: cannot satisfy -package simple-lib17"
+      updateSessionD session upd 1
+      assertSourceErrors' session [expected]
   where
     upd = updateSourceFile "Main.hs" . L.unlines $
             [ "module Main where"
@@ -76,36 +74,35 @@ test_Register_NoRestart env = do
 
 test_Register_Restart :: TestSuiteEnv -> Assertion
 test_Register_Restart env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
-    packageDelete env "test/simple-lib17"
     restartSession session (Just defaultSessionInitParams)
-    let upd = updateSourceFile "Main.hs" . L.unlines $
-                [ "module Main where"
-                , "import SimpleLib (simpleLib)"
-                , "#if MIN_VERSION_simple_lib17(0,1,0)"
-                , "main = print simpleLib"
-                , "#else"
-                , "terrible error"
-                , "#endif"
-                ]
-    packageInstall env "test/simple-lib17"
-    restartSession session (Just defaultSessionInitParams) -- only now the package accessible
-    updateSessionD session upd 1
-    assertNoErrors session
-    let m = "Main"
-        upd2 = buildExe [] [(T.pack m, "Main.hs")]
-    updateSessionD session upd2 2
-    distDir <- getDistDir session
-    out <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "DB exe output"
-                "42\n"
-                out
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "42\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
-    packageDelete env "test/simple-lib17"
+    withInstalledPackage env "test/simple-lib17" $ do
+      restartSession session (Just defaultSessionInitParams) -- only now the package accessible
+      updateSessionD session upd 1
+      assertNoErrors session
+      let m = "Main"
+          upd2 = buildExe [] [(T.pack m, "Main.hs")]
+      updateSessionD session upd2 2
+      distDir <- getDistDir session
+      out <- readProcess (distDir </> "build" </> m </> m) [] []
+      assertEqual "DB exe output"
+                  "42\n"
+                  out
+      runActionsExe <- runExe session m
+      (outExe, statusExe) <- runWaitAll runActionsExe
+      assertEqual "Output from runExe"
+                  "42\n"
+                  outExe
+      assertEqual "after runExe" ExitSuccess statusExe
+  where
+    upd = updateSourceFile "Main.hs" . L.unlines $
+            [ "module Main where"
+            , "import SimpleLib (simpleLib)"
+            , "#if MIN_VERSION_simple_lib17(0,1,0)"
+            , "main = print simpleLib"
+            , "#else"
+            , "terrible error"
+            , "#endif"
+            ]
 
 test_PackageDB_ModInfoFalse :: TestSuiteEnv -> Assertion
 test_PackageDB_ModInfoFalse env = withAvailableSession' env setup $ \session -> do

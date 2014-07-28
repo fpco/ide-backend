@@ -28,8 +28,7 @@ module TestSuite.State (
     -- * Test suite global state
   , withCurrentDirectory
   , findExe
-  , packageDelete
-  , packageInstall
+  , withInstalledPackage
   , packageCheck
   ) where
 
@@ -486,32 +485,16 @@ findExe TestSuiteEnv{..} name = do
     searchPath = OurCabal.ProgramSearchPathDefault
                : map OurCabal.ProgramSearchPathDir (splitSearchPath extraPathDirs)
 
+withInstalledPackage :: TestSuiteEnv -> FilePath -> IO a -> IO a
+withInstalledPackage env pkgDir act =
+    requireExclusiveAccess $
+      bracket_ (packageInstall env pkgDir)
+               (packageDelete  env pkgDir)
+               act
 
--- TODO: We need to be careful with concurrency here
+-- | Used only in the definition of 'withInstalledPackage'
 --
--- I don't know what the right approach here. It would be simpler if we could
--- replace packageDelete and packageInstall with a 'withPackage'.
-packageDelete :: TestSuiteEnv -> FilePath -> IO ()
-packageDelete env@TestSuiteEnv{..} pkgDir = do
-    ghcPkgExe  <- findExe env "ghc-pkg"
-    (_,_,_,r2) <- createProcess (proc ghcPkgExe opts)
-                    { cwd     = Just pkgDir
-                    , std_err = CreatePipe
-                    }
-    void $ waitForProcess r2
-  where
-    packageDb = fromMaybe "" $
-      case testSuiteEnvGhcVersion of
-        GHC742 -> testSuiteConfigPackageDb74 testSuiteEnvConfig
-        GHC78  -> testSuiteConfigPackageDb78 testSuiteEnvConfig
-
-    opts = [ "--package-conf=" ++ packageDb, "-v0", "unregister"
-           , takeFileName pkgDir
-           ]
-
--- TODO: We need to be careful with concurrency here
---
--- See comments for packageDelete.
+-- This should not be used in isolation because it changes test global state.
 packageInstall :: TestSuiteEnv -> FilePath -> IO ()
 packageInstall env@TestSuiteEnv{..} pkgDir = do
   cabalExe <- findExe env "cabal"
@@ -541,6 +524,28 @@ packageInstall env@TestSuiteEnv{..} pkgDir = do
       case testSuiteEnvGhcVersion of
         GHC742 -> testSuiteConfigPackageDb74 testSuiteEnvConfig
         GHC78  -> testSuiteConfigPackageDb78 testSuiteEnvConfig
+
+-- | Used only in the definition of 'withInstalledPackage'
+--
+-- This should not be used in isolation because it changes test global state.
+packageDelete :: TestSuiteEnv -> FilePath -> IO ()
+packageDelete env@TestSuiteEnv{..} pkgDir = do
+    ghcPkgExe  <- findExe env "ghc-pkg"
+    (_,_,_,r2) <- createProcess (proc ghcPkgExe opts)
+                    { cwd     = Just pkgDir
+                    , std_err = CreatePipe
+                    }
+    void $ waitForProcess r2
+  where
+    packageDb = fromMaybe "" $
+      case testSuiteEnvGhcVersion of
+        GHC742 -> testSuiteConfigPackageDb74 testSuiteEnvConfig
+        GHC78  -> testSuiteConfigPackageDb78 testSuiteEnvConfig
+
+    opts = [ "--package-conf=" ++ packageDb, "-v0", "unregister"
+           , takeFileName pkgDir
+           ]
+
 
 -- TODO: We need to be careful with concurrency here
 --
