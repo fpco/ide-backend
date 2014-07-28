@@ -39,7 +39,7 @@ testGroupTypeInformation env = testGroup "Type Information" [
   , docTest env "Updated session (#142)"                                                     testUpdatedSession
   , docTest env "spanInfo vs expTypes (#3043)"                                               testSpanInfoVsExpTypes
   , docTest env "Consistency of IdMap/explicit sharing cache through multiple updates (#88)" test_StateOfCacheThroughoutUpdates
-    -- TODO: Should these we docTest instead?
+    -- TODO: Should these be docTest instead?
   , stdTest env "Subexpression types 1: Simple expressions"                                  test_SubExp_Simple
   , stdTest env "Subexpression types 2: TH and QQ"                                           test_SubExp_TH
   , stdTest env "Subexpression types 3: Type families (fpco #2609)"                          test_SubExp_TypeFamilies

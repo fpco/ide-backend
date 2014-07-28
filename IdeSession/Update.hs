@@ -194,7 +194,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
         , pendingUpdatedArgs = Nothing -- Server default is []
         , pendingUpdatedOpts = Nothing
         , pendingUpdatedIncl = Nothing
-        , pendingLoads       = [] 
+        , pendingLoads       = []
         , pendingUnloads     = []
         }
 
@@ -621,8 +621,8 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
            -- Load and unload object files
            forM_ (pendingUnloads pendingChanges') $ \fp ->
              rpcLoad (idleState ^. ideGhcServer) fp True
-           forM_ (pendingLoads pendingChanges') $ \fp -> 
-             rpcLoad (idleState ^. ideGhcServer) fp False 
+           forM_ (pendingLoads pendingChanges') $ \fp ->
+             rpcLoad (idleState ^. ideGhcServer) fp False
 
            -- Recompile
            computed <- if pendingUpdatedCode pendingChanges'
@@ -751,7 +751,7 @@ recompileObjectFiles = do
         -- Unload the old object (if necessary)
         case mObjFile of
           Just (objFile, ts') | ts' < ts -> do
-            lift $ schedule (\r -> r { pendingUnloads = objFile : pendingUnloads r }) 
+            lift $ schedule (\r -> r { pendingUnloads = objFile : pendingUnloads r })
           _ ->
             return ()
 
@@ -773,11 +773,11 @@ recompileObjectFiles = do
                   else
                     set (ideObjectFiles .> lookup' fp) Nothing
                 return errs
-              if null errs 
-                then do 
-                  lift $ schedule $ (\r -> r { pendingLoads = absObj : pendingLoads r }) 
+              if null errs
+                then do
+                  lift $ schedule $ (\r -> r { pendingLoads = absObj : pendingLoads r })
                   tellSt ([fp], [])
-                else 
+                else
                   tellSt ([], errs)
 
     delay :: MonadWriter [RecompileAction] m => RecompileAction -> m ()
@@ -888,7 +888,9 @@ updateRelativeIncludes relIncl = do
       pendingUpdatedCode = True -- In case we need to recompile due to new opts:
     , pendingUpdatedIncl = Just relIncl
     }
-  restartSession'
+
+  oldRelIncl <- get ideRelativeIncludes
+  when (oldRelIncl /= relIncl) $ restartSession'
 
 -- | Enable or disable code generation in addition
 -- to type-checking. Required by 'runStmt'.
@@ -970,14 +972,18 @@ updateStderrBufferMode = set ideStderrBufferMode
 updateTargets :: Public.Targets -> IdeSessionUpdate ()
 updateTargets targets = do
   IdeStaticInfo{..} <- asks ideSessionUpdateStaticInfo
+
   let sourceDir = ideSessionSourceDir ideSessionDir
-  let dirTargets = case targets of
+      newTargets = case targets of
         Public.TargetsInclude l ->
           Public.TargetsInclude $ map (sourceDir </>) l
         Public.TargetsExclude l ->
           Public.TargetsExclude $ map (sourceDir </>) l
-  set ideTargets dirTargets
-  restartSession'
+
+  oldTargets <- get ideTargets
+  when (oldTargets /= newTargets) $ do
+    set ideTargets newTargets
+    restartSession'
 
 -- | Run a given function in a given module (the name of the module
 -- is the one between @module ... end@, which may differ from the file name).

@@ -181,14 +181,13 @@ withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
                  Nothing      -> startNewSession testSuiteSessionServer
 
     -- Reset session state
-    --
-    -- TODO: We should really reset dynamic includes here, but that will
-    -- cause a session restart every time. We need to fix that.
     updateSession session
                   (    updateDynamicOpts testSuiteSessionDynOpts
                     <> updateDeleteManagedFiles
                     <> updateCodeGeneration False
                     <> updateEnv []
+                    <> updateTargets (TargetsExclude [])
+                    <> updateRelativeIncludes (configRelativeIncludes (deriveSessionConfig testSuiteSessionServer))
                   )
                   (\_ -> return ())
 
@@ -295,41 +294,47 @@ data TestSuiteServerConfig = TestSuiteServerConfig {
   deriving (Eq, Show)
 
 startNewSession :: TestSuiteServerConfig -> IO IdeSession
-startNewSession TestSuiteServerConfig{..} =
-    initSession
-      defaultSessionInitParams {
-          sessionInitCabalMacros =
-              testSuiteServerCabalMacros
-            `mplus`
-              sessionInitCabalMacros defaultSessionInitParams
-        }
-      defaultSessionConfig {
-          configDeleteTempFiles =
-            not testSuiteConfigKeepTempFiles
-        , configPackageDBStack  =
-            fromMaybe (configPackageDBStack defaultSessionConfig) $
-              (
-                testSuiteServerPackageDBStack
-              `mplus`
-                do packageDb <- case testSuiteServerGhcVersion of
-                                  GHC742 -> testSuiteConfigPackageDb74
-                                  GHC78  -> testSuiteConfigPackageDb78
-                   return [GlobalPackageDB, SpecificPackageDB packageDb]
-              )
-        , configExtraPathDirs =
-            splitSearchPath $ case testSuiteServerGhcVersion of
-                                GHC742 -> testSuiteConfigExtraPaths74
-                                GHC78  -> testSuiteConfigExtraPaths78
-        , configRelativeIncludes =
-            fromMaybe (configRelativeIncludes defaultSessionConfig) $
-              testSuiteServerRelativeIncludes
-        , configGenerateModInfo =
-            fromMaybe (configGenerateModInfo defaultSessionConfig) $
-              testSuiteServerGenerateModInfo
-        , configStaticOpts =
-            fromMaybe (configStaticOpts defaultSessionConfig) $
-              testSuiteServerStaticOpts
-        }
+startNewSession cfg = initSession (deriveSessionInitParams cfg)
+                                  (deriveSessionConfig     cfg)
+
+deriveSessionInitParams :: TestSuiteServerConfig -> SessionInitParams
+deriveSessionInitParams TestSuiteServerConfig{..} = defaultSessionInitParams {
+      sessionInitCabalMacros =
+          testSuiteServerCabalMacros
+        `mplus`
+          sessionInitCabalMacros defaultSessionInitParams
+    }
+  where
+    TestSuiteConfig{..} = testSuiteServerConfig
+
+deriveSessionConfig :: TestSuiteServerConfig -> SessionConfig
+deriveSessionConfig TestSuiteServerConfig{..} = defaultSessionConfig {
+      configDeleteTempFiles =
+        not testSuiteConfigKeepTempFiles
+    , configPackageDBStack  =
+        fromMaybe (configPackageDBStack defaultSessionConfig) $
+          (
+            testSuiteServerPackageDBStack
+          `mplus`
+            do packageDb <- case testSuiteServerGhcVersion of
+                              GHC742 -> testSuiteConfigPackageDb74
+                              GHC78  -> testSuiteConfigPackageDb78
+               return [GlobalPackageDB, SpecificPackageDB packageDb]
+          )
+    , configExtraPathDirs =
+        splitSearchPath $ case testSuiteServerGhcVersion of
+                            GHC742 -> testSuiteConfigExtraPaths74
+                            GHC78  -> testSuiteConfigExtraPaths78
+    , configRelativeIncludes =
+        fromMaybe (configRelativeIncludes defaultSessionConfig) $
+          testSuiteServerRelativeIncludes
+    , configGenerateModInfo =
+        fromMaybe (configGenerateModInfo defaultSessionConfig) $
+          testSuiteServerGenerateModInfo
+    , configStaticOpts =
+        fromMaybe (configStaticOpts defaultSessionConfig) $
+          testSuiteServerStaticOpts
+    }
   where
     TestSuiteConfig{..} = testSuiteServerConfig
 
