@@ -269,7 +269,7 @@ The most conversative way to run the test suite is:
       --test-74 \
       --test-78 \
       --no-session-reuse \
-      --j1 
+      -j1 
 
 The test suite runs the tests against both 7.4 and 7.8, and configures the
 sessions correspondingly given the above command line options. In this example
