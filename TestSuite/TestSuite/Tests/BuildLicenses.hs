@@ -171,7 +171,7 @@ test_1000_noUsefulInfo env = withAvailableSession env $ \session -> do
 test_TH :: TestSuiteEnv -> Assertion
 test_TH env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \session -> do
     withCurrentDirectory "test" $ do
-      (originalUpdate, lm) <- getModulesFrom session "TH"
+      (originalUpdate, lm) <- getModulesFrom "TH"
       let update = originalUpdate <> updateCodeGeneration True
       updateSessionD session update (length lm)
     assertNoErrors session

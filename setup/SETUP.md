@@ -256,18 +256,32 @@ Running the tests
 The tests (as well as the ide-backend client library itself) will be compiled
 in the fpco-stock-7.4 sandbox, and can be run inside that sandbox (or indeed in
 an empty sandbox where no ghc compiler is available on the path at all), as
-long as we specify the right paths:
+long as we specify the right paths.
+
+The most conversative way to run the test suite is:
 
     PATH=/bin:/usr/bin \
-    IDE_BACKEND_EXTRA_PATH_DIRS=~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
-    IDE_BACKEND_PACKAGE_DB=~/env/fpco-patched-7.4/dot-ghc/snippet-db \
-    dist/build/ghc-errors/ghc-errors
+    dist/build/TestSuite/TestSuite \
+      --extra-paths-74 ~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
+      --extra-paths-78 ~/env/fpco-patched-7.8/local/bin:~/env/fpco-patched-7.8/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
+      --package-db-74 ~/env/fpco-patched-7.4/dot-ghc/snippet-db \
+      --package-db-78 ~/env/fpco-patched-7.8/dot-ghc/snippet-db \
+      --test-74 \
+      --test-78 \
+      --no-session-reuse \
+      --j1 
 
-(These environment variables are translated by the test-suite to the
-corresponding options in SessionConfig, they are *not* part of the ide-backend
-library itself. The path with `fpco-stock-7.4` is intended to make the
-`ide-backend-exe-cabal` executable available --- modify it if you put
-the executable elsewhere.)
+The test suite runs the tests against both 7.4 and 7.8, and configures the
+sessions correspondingly given the above command line options. In this example
+we make sure that the stock 7.4 DB is always in the path because that's where
+we assume we can find ide-backend-exe-cabal. The --test-74 and --test-78 are
+used to specify against which GHC version we want to run the tests; you can
+omit either (or both, in which case no tests will run at all).
+
+The --no-session-reuse option runs every test in a fresh session; this isolated
+the effects of that particular test and should be used on test failure, but
+slows the tests down so can be omitted. The -j1 option runs one test at a time,
+for similar reasons.
 
 Installing the patched versions of ghc
 ======================================

@@ -101,17 +101,15 @@ loadModulesFrom session originalSourcesDir =
 
 loadModulesFrom' :: IdeSession -> FilePath -> Targets -> IO ()
 loadModulesFrom' session originalSourcesDir targets = do
-  (originalUpdate, lm) <- getModulesFrom session originalSourcesDir
+  (originalUpdate, lm) <- getModulesFrom originalSourcesDir
   updateSessionD session (originalUpdate <> updateTargets targets) (length lm)
 
 getModules :: IdeSession -> IO (IdeSessionUpdate (), [FilePath])
-getModules session = do
-  sourcesDir <- getSourcesDir session
-  getModulesFrom session sourcesDir
+getModules session = getModulesFrom =<< getSourcesDir session
 
 -- | Update the session with all modules of the given directory.
-getModulesFrom :: IdeSession -> FilePath -> IO (IdeSessionUpdate (), [FilePath])
-getModulesFrom _session originalSourcesDir = do
+getModulesFrom :: FilePath -> IO (IdeSessionUpdate (), [FilePath])
+getModulesFrom originalSourcesDir = do
   -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
   -- using the IdeSession's update mechanism.
   originalFiles <- find always

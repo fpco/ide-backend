@@ -27,7 +27,7 @@ testGroupTH env = testGroup "TH" [
 test_codeGenOn :: TestSuiteEnv -> Assertion
 test_codeGenOn env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \session -> do
     withCurrentDirectory "test" $ do
-      (originalUpdate, lm) <- getModulesFrom session "TH"
+      (originalUpdate, lm) <- getModulesFrom "TH"
       let update = originalUpdate <> updateCodeGeneration True
       updateSessionD session update (length lm)
     assertNoErrors session
@@ -39,7 +39,7 @@ test_codeGenOn env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"
 test_buildExe :: TestSuiteEnv -> Assertion
 test_buildExe env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \session -> do
     withCurrentDirectory "test" $ do
-      (originalUpdate, lm) <- getModulesFrom session "TH"
+      (originalUpdate, lm) <- getModulesFrom "TH"
       let update = originalUpdate <> updateCodeGeneration True
       updateSessionD session update (length lm)
     assertNoErrors session
@@ -62,7 +62,7 @@ test_buildExe env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]
 test_TH :: TestSuiteEnv -> Assertion
 test_TH env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \session -> do
     withCurrentDirectory "test" $ do
-      (originalUpdate, lm) <- getModulesFrom session "TH"
+      (originalUpdate, lm) <- getModulesFrom "TH"
       let update = originalUpdate <> updateCodeGeneration True
       updateSessionD session update (length lm)
     assertNoErrors session
@@ -77,7 +77,7 @@ test_TH env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \s
 test_Cabal :: TestSuiteEnv -> Assertion
 test_Cabal env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \session -> do
     withCurrentDirectory "test" $ do
-      (originalUpdate, lm) <- getModulesFrom session "TH"
+      (originalUpdate, lm) <- getModulesFrom "TH"
       let update = originalUpdate <> updateCodeGeneration True
       updateSessionD session update (length lm)
     assertNoErrors session

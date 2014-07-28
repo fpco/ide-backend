@@ -19,6 +19,7 @@ import TestSuite.Tests.Concurrency
 import TestSuite.Tests.Crash
 import TestSuite.Tests.Debugger
 import TestSuite.Tests.FFI
+import TestSuite.Tests.Integration
 import TestSuite.Tests.InterruptRunExe
 import TestSuite.Tests.InterruptRunStmt
 import TestSuite.Tests.Issues
@@ -42,6 +43,7 @@ testGetGhcVersion env = withAvailableSession env $ \session -> do
 allTests :: String -> TestSuiteEnv -> TestTree
 allTests name env = testGroup name [
     stdTest env "getGhcVersion" testGetGhcVersion
+  , testGroupIntegration        env
   , testGroupAPI                env
   , testGroupSessionState       env
   , testGroupCompilation        env
