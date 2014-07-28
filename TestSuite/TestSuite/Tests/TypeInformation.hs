@@ -782,8 +782,10 @@ testSpanInfoVsExpTypes env = withAvailableSession env $ \session -> do
       , {- 7 -} "  where getNum = runParserT digit () \"x.txt\""
       ]
 
+-- TODO: Currently we mark this session as dont reuse because
+-- hiding all packages leaves the session unuseable (see #224)
 test_StateOfCacheThroughoutUpdates :: TestSuiteEnv -> Assertion
-test_StateOfCacheThroughoutUpdates env = withAvailableSession' env (withDynOpts packageOpts) $ \sess -> do
+test_StateOfCacheThroughoutUpdates env = withAvailableSession' env (dontReuse . withDynOpts packageOpts) $ \sess -> do
     let cb     = \_ -> return ()
         update = flip (updateSession sess) cb
         updMod = \mod code -> updateSourceFile mod (L.fromString code)

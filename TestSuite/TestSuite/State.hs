@@ -19,6 +19,7 @@ module TestSuite.State (
   , withIncludes
   , withModInfo
   , withDBStack
+  , dontReuse
   , requireHaddocks
   , skipTest
     -- * Constructing tests
@@ -125,12 +126,14 @@ withAvailableSession env = withAvailableSession' env id
 data TestSuiteSessionSetup = TestSuiteSessionSetup {
     testSuiteSessionServer  :: TestSuiteServerConfig
   , testSuiteSessionDynOpts :: [String]
+  , testSuiteSessionReuse   :: Bool
   }
 
 defaultSessionSetup :: TestSuiteEnv -> TestSuiteSessionSetup
 defaultSessionSetup env = TestSuiteSessionSetup {
     testSuiteSessionServer  = defaultServerConfig env
   , testSuiteSessionDynOpts = []
+  , testSuiteSessionReuse   = True
   }
 
 withDynOpts :: [String] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
@@ -166,6 +169,11 @@ withDBStack dbStack setup = setup {
       }
   }
 
+dontReuse :: TestSuiteSessionSetup -> TestSuiteSessionSetup
+dontReuse setup = setup {
+    testSuiteSessionReuse = False
+  }
+
 -- | More general version of 'withAvailableSession'
 withAvailableSession' :: TestSuiteEnv -> (TestSuiteSessionSetup -> TestSuiteSessionSetup) -> (IdeSession -> IO a) -> IO a
 withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
@@ -196,7 +204,7 @@ withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
 
     -- Make the session available for further tests, or shut it down if the
     -- @--no-session-reuse@ command line option was used
-    if testSuiteConfigNoSessionReuse testSuiteEnvConfig
+    if testSuiteConfigNoSessionReuse testSuiteEnvConfig || not testSuiteSessionReuse
       then shutdownSession session
       else consMVar (testSuiteSessionServer, session) testSuiteStateAvailableSessions
 
