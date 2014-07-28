@@ -26,7 +26,7 @@ testGroupBuildLicenses env = testGroup "Build licenses" [
   ]
 
 test_NamedFieldPuns :: TestSuiteEnv -> Assertion
-test_NamedFieldPuns env = withAvailableSession' env (withOpts ["-hide-package monads-tf"]) $ \session -> do
+test_NamedFieldPuns env = withAvailableSession' env (withDynOpts ["-hide-package monads-tf"]) $ \session -> do
     loadModulesFrom session "test/Puns"
     assertMoreErrors session
     cabalsPath <- canonicalizePath "test/Puns/cabals"
@@ -42,7 +42,7 @@ test_NamedFieldPuns env = withAvailableSession' env (withOpts ["-hide-package mo
     assertBool "licenses length" $ length licenses >= 27142
 
 test_wrongCabalFile :: TestSuiteEnv -> Assertion
-test_wrongCabalFile env = withAvailableSession' env (withOpts ["-hide-package monads-tf"]) $ \session -> do
+test_wrongCabalFile env = withAvailableSession' env (withDynOpts ["-hide-package monads-tf"]) $ \session -> do
     loadModulesFrom session "test/Puns"
     assertMoreErrors session
     cabalsPath <- canonicalizePath "test/Puns/cabals/parse_error"
@@ -169,7 +169,7 @@ test_1000_noUsefulInfo env = withAvailableSession env $ \session -> do
                ) lics
 
 test_TH :: TestSuiteEnv -> Assertion
-test_TH env = withAvailableSession' env (withOpts ["-XTemplateHaskell"]) $ \session -> do
+test_TH env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \session -> do
     withCurrentDirectory "test" $ do
       (originalUpdate, lm) <- getModulesFrom session "TH"
       let update = originalUpdate <> updateCodeGeneration True

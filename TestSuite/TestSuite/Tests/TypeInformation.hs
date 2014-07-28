@@ -205,7 +205,7 @@ testMultipleModules env = withAvailableSession env $ \session -> do
             ])
 
 testExternalPkgs :: TestSuiteEnv -> Assertion
-testExternalPkgs env = withAvailableSession' env (withOpts opts) $ \session -> do
+testExternalPkgs env = withAvailableSession' env (withDynOpts opts) $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
     assertIdInfo session "A" (3,1,3,2) "e" VarName "Bool" "main:A" "A.hs@3:1-3:2" "" "binding occurrence"
@@ -277,7 +277,7 @@ testExternalPkgs env = withAvailableSession' env (withOpts opts) $ \session -> d
             ]
 
 testReusingTypeVariables :: TestSuiteEnv -> Assertion
-testReusingTypeVariables env = withAvailableSession' env (withOpts ["-XScopedTypeVariables"]) $ \session -> do
+testReusingTypeVariables env = withAvailableSession' env (withDynOpts ["-XScopedTypeVariables"]) $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
     assertIdInfo session "A" (2,1,2,3) "f1" VarName "(t, t1) -> t" "main:A" "A.hs@2:1-2:3" "" "binding occurrence"
@@ -783,7 +783,7 @@ testSpanInfoVsExpTypes env = withAvailableSession env $ \session -> do
       ]
 
 test_StateOfCacheThroughoutUpdates :: TestSuiteEnv -> Assertion
-test_StateOfCacheThroughoutUpdates env = withAvailableSession' env (withOpts packageOpts) $ \sess -> do
+test_StateOfCacheThroughoutUpdates env = withAvailableSession' env (withDynOpts packageOpts) $ \sess -> do
     let cb     = \_ -> return ()
         update = flip (updateSession sess) cb
         updMod = \mod code -> updateSourceFile mod (L.fromString code)
@@ -853,7 +853,7 @@ test_StateOfCacheThroughoutUpdates env = withAvailableSession' env (withOpts pac
                   ]
 
 test_SubExp_Simple :: TestSuiteEnv -> Assertion
-test_SubExp_Simple env = withAvailableSession' env (withOpts ["-XNoMonomorphismRestriction"]) $ \session -> do
+test_SubExp_Simple env = withAvailableSession' env (withDynOpts ["-XNoMonomorphismRestriction"]) $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
@@ -1074,7 +1074,7 @@ test_SubExp_Simple env = withAvailableSession' env (withOpts ["-XNoMonomorphismR
             ])
 
 test_SubExp_TH :: TestSuiteEnv -> Assertion
-test_SubExp_TH env = withAvailableSession' env (withOpts ["-XNoMonomorphismRestriction", "-XTemplateHaskell"]) $ \session -> do
+test_SubExp_TH env = withAvailableSession' env (withDynOpts ["-XNoMonomorphismRestriction", "-XTemplateHaskell"]) $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
 
@@ -1121,7 +1121,7 @@ test_SubExp_TH env = withAvailableSession' env (withOpts ["-XNoMonomorphismRestr
        <> (updateCodeGeneration True)
 
 test_SubExp_TypeFamilies :: TestSuiteEnv -> Assertion
-test_SubExp_TypeFamilies env = withAvailableSession' env (withOpts ["-XTypeFamilies"]) $ \session -> do
+test_SubExp_TypeFamilies env = withAvailableSession' env (withDynOpts ["-XTypeFamilies"]) $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
@@ -1152,7 +1152,7 @@ test_SubExp_TypeFamilies env = withAvailableSession' env (withOpts ["-XTypeFamil
              ])
 
 test_SubExp_HigherRank :: TestSuiteEnv -> Assertion
-test_SubExp_HigherRank env = withAvailableSession' env (withOpts ["-XRank2Types"]) $ \session -> do
+test_SubExp_HigherRank env = withAvailableSession' env (withDynOpts ["-XRank2Types"]) $ \session -> do
     -- Note: intentionally using (==) in this test rather than (<=) so that
     -- the "definition type" is different from the "usage type"
     -- (forall a. Eq a => a -> a -> Bool) vs (forall a. Ord a => a -> a -> Bool)
@@ -1410,7 +1410,7 @@ test_UseSites_Types env = withAvailableSession env $ \session -> do
       ]
 
 test_UseSites_Local :: TestSuiteEnv -> Assertion
-test_UseSites_Local env = withAvailableSession' env (withOpts ["-XScopedTypeVariables"]) $ \session -> do
+test_UseSites_Local env = withAvailableSession' env (withDynOpts ["-XScopedTypeVariables"]) $ \session -> do
     updateSessionD session upd1 2
     assertNoErrors session
     useSites <- getUseSites session

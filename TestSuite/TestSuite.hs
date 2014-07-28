@@ -5,6 +5,7 @@ import Test.Tasty
 
 import IdeSession
 import TestSuite.State
+import TestSuite.Tests.API
 import TestSuite.Tests.Autocompletion
 import TestSuite.Tests.BufferMode
 import TestSuite.Tests.BuildDoc
@@ -13,10 +14,14 @@ import TestSuite.Tests.BuildLicenses
 import TestSuite.Tests.C
 import TestSuite.Tests.CabalMacros
 import TestSuite.Tests.Compilation
+import TestSuite.Tests.Compliance
+import TestSuite.Tests.Concurrency
 import TestSuite.Tests.Crash
+import TestSuite.Tests.Debugger
 import TestSuite.Tests.FFI
 import TestSuite.Tests.InterruptRunExe
 import TestSuite.Tests.InterruptRunStmt
+import TestSuite.Tests.Issues
 import TestSuite.Tests.Packages
 import TestSuite.Tests.Performance
 import TestSuite.Tests.SessionRestart
@@ -37,6 +42,7 @@ testGetGhcVersion env = withAvailableSession env $ \session -> do
 allTests :: String -> TestSuiteEnv -> TestTree
 allTests name env = testGroup name [
     stdTest env "getGhcVersion" testGetGhcVersion
+  , testGroupAPI                env
   , testGroupSessionState       env
   , testGroupCompilation        env
   , testGroupUpdateTargets      env
@@ -54,9 +60,13 @@ allTests name env = testGroup name [
   , testGroupBuildLicenses      env
   , testGroupCabalMacros        env
   , testGroupTH                 env
+  , testGroupIssues             env
   , testGroupPackages           env
   , testGroupSessionRestart     env
   , testGroupCrash              env
+  , testGroupCompliance         env
+  , testGroupDebugger           env
+  , testGroupConcurrency        env
   , testGroupPerformance        env
   ]
 

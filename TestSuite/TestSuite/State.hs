@@ -11,9 +11,11 @@ module TestSuite.State (
     -- * Operations on the test suite state
   , withAvailableSession
   , withAvailableSession'
+  , startNewSession
   , defaultSessionSetup
   , defaultServerConfig
-  , withOpts
+  , withDynOpts
+  , withStaticOpts
   , withIncludes
   , withModInfo
   , withDBStack
@@ -21,6 +23,7 @@ module TestSuite.State (
   , skipTest
     -- * Constructing tests
   , stdTest
+  , withOK
   , docTest
     -- * Test suite global state
   , withCurrentDirectory
@@ -52,6 +55,7 @@ import Test.Tasty.Options
 import Test.Tasty.Providers
 import qualified Data.Map                         as Map
 import qualified Distribution.Simple.Program.Find as OurCabal
+import qualified Data.ByteString.Lazy             as L
 
 import IdeSession
 
@@ -130,9 +134,16 @@ defaultSessionSetup env = TestSuiteSessionSetup {
   , testSuiteSessionDynOpts = []
   }
 
-withOpts :: [String] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
-withOpts opts setup = setup {
+withDynOpts :: [String] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
+withDynOpts opts setup = setup {
     testSuiteSessionDynOpts = opts
+  }
+
+withStaticOpts :: [String] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
+withStaticOpts opts setup = setup {
+    testSuiteSessionServer = (testSuiteSessionServer setup) {
+       testSuiteServerStaticOpts = Just opts
+     }
   }
 
 withIncludes :: [FilePath] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
@@ -205,6 +216,8 @@ defaultServerConfig TestSuiteEnv{..} = TestSuiteServerConfig {
     , testSuiteServerRelativeIncludes = Nothing
     , testSuiteServerGenerateModInfo  = Nothing
     , testSuiteServerPackageDBStack   = Nothing
+    , testSuiteServerCabalMacros      = Nothing
+    , testSuiteServerStaticOpts       = Nothing
     }
 
 -- | Skip this test if the --no-haddocks flag is passed
@@ -224,16 +237,22 @@ skipTest = throwIO . SkipTest
   for skipping tests
 -------------------------------------------------------------------------------}
 
-newtype TestCase = TestCase Assertion
+data TestCase =
+    StdTest Assertion
+    -- Tests that report more than just "OK"
+  | WithOK (IO String)
   deriving Typeable
+
+runTestCase :: TestCase -> IO Result
+runTestCase (StdTest t) = registerTest t >> return (testPassed "")
+runTestCase (WithOK  t) = registerTest t >>= return . testPassed
 
 instance IsTest TestCase where
   -- TODO: Measure time and use for testPassed in normal case
-  run _ (TestCase assertion) _ = do
-    (registerTest assertion >> return (testPassed "")) `catches` [
-        Handler $ \(HUnitFailure msg) -> return (testFailed msg)
-      , Handler $ \(SkipTest msg)     -> return (testPassed ("Skipped (" ++ msg ++ ")"))
-      ]
+  run _ test _ = runTestCase test `catches` [
+      Handler $ \(HUnitFailure msg) -> return (testFailed msg)
+    , Handler $ \(SkipTest msg)     -> return (testPassed ("Skipped (" ++ msg ++ ")"))
+    ]
 
   -- TODO: Should this reflect testCaseEnabled?
   testOptions = return []
@@ -245,7 +264,11 @@ instance Exception SkipTest
 
 -- | Construct a standard test case
 stdTest :: TestSuiteEnv -> TestName -> (TestSuiteEnv -> Assertion) -> TestTree
-stdTest st name = singleTest name . TestCase . ($ st)
+stdTest st name = singleTest name . StdTest . ($ st)
+
+-- | Construct a test case that reports OK with a non-standard string
+withOK :: TestSuiteEnv -> TestName -> (TestSuiteEnv -> IO String) -> TestTree
+withOK st name = singleTest name . WithOK . ($ st)
 
 -- | Construct a test that relies on Haddocks being installed
 docTest :: TestSuiteEnv -> TestName -> (TestSuiteEnv -> Assertion) -> TestTree
@@ -267,13 +290,20 @@ data TestSuiteServerConfig = TestSuiteServerConfig {
   , testSuiteServerRelativeIncludes :: Maybe [FilePath]
   , testSuiteServerGenerateModInfo  :: Maybe Bool
   , testSuiteServerPackageDBStack   :: Maybe PackageDBStack
+  , testSuiteServerCabalMacros      :: Maybe L.ByteString
+  , testSuiteServerStaticOpts       :: Maybe [String]
   }
   deriving (Eq, Show)
 
 startNewSession :: TestSuiteServerConfig -> IO IdeSession
 startNewSession TestSuiteServerConfig{..} =
     initSession
-      defaultSessionInitParams
+      defaultSessionInitParams {
+          sessionInitCabalMacros =
+              testSuiteServerCabalMacros
+            `mplus`
+              sessionInitCabalMacros defaultSessionInitParams
+        }
       defaultSessionConfig {
           configDeleteTempFiles =
             not testSuiteConfigKeepTempFiles
@@ -297,6 +327,9 @@ startNewSession TestSuiteServerConfig{..} =
         , configGenerateModInfo =
             fromMaybe (configGenerateModInfo defaultSessionConfig) $
               testSuiteServerGenerateModInfo
+        , configStaticOpts =
+            fromMaybe (configStaticOpts defaultSessionConfig) $
+              testSuiteServerStaticOpts
         }
   where
     TestSuiteConfig{..} = testSuiteServerConfig

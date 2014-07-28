@@ -27,7 +27,7 @@ testGroupAutocompletion env = testGroup "Autocompletion" [
   ]
 
 test_PartialModule :: TestSuiteEnv -> Assertion
-test_PartialModule env = withAvailableSession' env (withOpts ["-XPackageImports"]) $ \session -> do
+test_PartialModule env = withAvailableSession' env (withDynOpts ["-XPackageImports"]) $ \session -> do
     updateSessionD session upd 1
     assertSourceErrors' session ["parse error"]
     imports <- getImports session
@@ -190,7 +190,7 @@ test_HomeModuleInfo env = withAvailableSession env $ \session -> do
 
 
 test_2518 :: TestSuiteEnv -> Assertion
-test_2518 env = withAvailableSession' env (withOpts ["-XPackageImports"]) $ \session -> do
+test_2518 env = withAvailableSession' env (withDynOpts ["-XPackageImports"]) $ \session -> do
     updateSessionD session upd 1
     assertSourceErrors' session ["Not in scope: `toC'"]
     autocomplete <- getAutocompletion session

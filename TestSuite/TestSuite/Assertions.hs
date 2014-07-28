@@ -16,6 +16,7 @@ module TestSuite.Assertions (
   , assertSourceErrors
   , assertSourceErrors'
   , assertErrorOneOf
+  , show3errors
     -- * Assertions about type information
   , assertIdInfo
   , assertIdInfo'
@@ -23,8 +24,12 @@ module TestSuite.Assertions (
   , ignoreVersions
   , allVersions
   , assertUseSites
+  , assertAlphaEquiv
+    -- * Known problems
+  , fixme
     -- * Auxiliary
   , isAsyncException
+  , mkSpan
   ) where
 
 import Prelude hiding (mod, span)
@@ -433,3 +438,43 @@ mkSpan mod (frLine, frCol, toLine, toCol) = (T.pack mod, span)
                       , spanToColumn   = toCol
                       }
 
+{------------------------------------------------------------------------------
+  Known problems
+------------------------------------------------------------------------------}
+
+-- | Which ghc versions are affected by these problems?
+-- ([] if the bug is unrelated to the GHC version)
+knownProblems :: [(String, [GhcVersion])]
+knownProblems = [
+    -- https://github.com/fpco/ide-backend/issues/32
+    -- TODO: In 7.8 the error message does not include a filepath at all,
+    -- so the error does not crop up. I don't know if this is true for _all_
+    -- errors or just for this particular one (I tried a few but didn't see
+    -- filepaths in any of them).
+    ("#32", [GHC742])
+  ]
+
+fixme :: IdeSession -> String -> IO () -> IO String
+fixme session bug io = do
+  version <- getGhcVersion session
+  let mAllAffected = lookup bug knownProblems
+      isAffected   = case mAllAffected of
+                       Nothing          -> False
+                       Just allAffected -> null allAffected
+                                        || version `elem` allAffected
+
+  mErr <- Ex.catch (io >> return Nothing) $ \e ->
+            case Ex.fromException e of
+              Just (HUnitFailure err) -> return (Just err)
+              Nothing -> return (Just $ show e)
+
+  case mErr of
+    Just err ->
+      if isAffected
+        then return "Expected failure"
+        else Ex.throwIO . userError $ "Unexpected failure: " ++ err
+    Nothing ->
+      if isAffected
+        then Ex.throwIO . userError $ "Unexpected success"
+                                   ++ " (expected " ++ bug ++ ")"
+        else return ""

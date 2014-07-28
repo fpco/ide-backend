@@ -32,10 +32,11 @@ testGroupPackages env = testGroup "Packages" [
   , stdTest env "Hiding and unhiding a package (#185-2)"                                          test_HideUnhide
   , stdTest env "Unhiding and hiding a package (#185-3; converse of #185-2)"                      test_UnhideHide
   , stdTest env "Trusting and distrusting packages (#185-4)"                                      test_TrustDistrust
+  , stdTest env "Using something from a different package (no \"Loading package\" msg)"           test_UseFromDifferentPackage
   ]
 
 test_PackageDependencies :: TestSuiteEnv -> Assertion
-test_PackageDependencies env = withAvailableSession' env (withOpts ["-hide-package monads-tf"]) $ \session -> do
+test_PackageDependencies env = withAvailableSession' env (withDynOpts ["-hide-package monads-tf"]) $ \session -> do
     updateSessionD session upd 3
     assertNoErrors session
 
@@ -59,7 +60,7 @@ test_PackageDependencies env = withAvailableSession' env (withOpts ["-hide-packa
 test_Register_NoRestart :: TestSuiteEnv -> Assertion
 test_Register_NoRestart env = do
   packageDelete env "test/simple-lib17"
-  withAvailableSession' env (withOpts ["-package simple-lib17"]) $ \session -> do
+  withAvailableSession' env (withDynOpts ["-package simple-lib17"]) $ \session -> do
     packageInstall env "test/simple-lib17"
     -- No restartSession yet, hence the exception at session init.
     let expected = "<command line>: cannot satisfy -package simple-lib17"
@@ -74,7 +75,7 @@ test_Register_NoRestart env = do
             ]
 
 test_Register_Restart :: TestSuiteEnv -> Assertion
-test_Register_Restart env = withAvailableSession' env (withOpts ["-XCPP"]) $ \session -> do
+test_Register_Restart env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
     packageDelete env "test/simple-lib17"
     restartSession session (Just defaultSessionInitParams)
     let upd = updateSourceFile "Main.hs" . L.unlines $
@@ -119,7 +120,7 @@ test_PackageDB_ModInfoFalse env = withAvailableSession' env setup $ \session -> 
     packageOpts = ["-package parallel"]
     setup       = withModInfo True
                 . withDBStack [GlobalPackageDB]
-                . withOpts packageOpts
+                . withDynOpts packageOpts
 
     upd = (updateSourceFile "A.hs" . L.unlines $
             [ "module A where"
@@ -142,7 +143,7 @@ test_PackageDB_ModInfoTrue env = withAvailableSession' env setup $ \session -> d
     packageOpts = ["-package parallel"]
     setup       = withModInfo True
                 . withDBStack [GlobalPackageDB]
-                . withOpts packageOpts
+                . withDynOpts packageOpts
 
     upd = (updateSourceFile "A.hs" . L.unlines $
             [ "module A where"
@@ -166,7 +167,7 @@ test_PackageDB_AfterRestart env = withAvailableSession' env setup $ \session -> 
     packageOpts = ["-package parallel"]
     setup       = withModInfo True
                 . withDBStack [GlobalPackageDB]
-                . withOpts packageOpts
+                . withDynOpts packageOpts
 
     upd = (updateSourceFile "A.hs" . L.unlines $
             [ "module A where"
@@ -282,7 +283,7 @@ test_Consistency_PackageImports env = withAvailableSession env $ \sess -> do
     assertIdInfo sess "Baz" (7, 7, 7, 10) "par" VarName "a1 -> b1 -> b1" "parallel-X.Y.Z:Control.Parallel" "<no location info>" "parallel-X.Y.Z:Control.Parallel" "imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35"
 
 test_ModuleIn2Pkgs_1 :: TestSuiteEnv -> Assertion
-test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withOpts packageOpts) $ \session -> do
+test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withDynOpts packageOpts) $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
@@ -338,7 +339,7 @@ test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withOpts packageOpts) $ \s
             ])
 
 test_ModuleIn2Pkgs_2 :: TestSuiteEnv -> Assertion
-test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withOpts packageOpts) $ \session -> do
+test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withDynOpts packageOpts) $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
@@ -486,7 +487,7 @@ test_UnhideHide env = withAvailableSession env $ \session -> do
        assertOneError session
 
 test_TrustDistrust :: TestSuiteEnv -> Assertion
-test_TrustDistrust env = withAvailableSession' env (withOpts ["-XSafe", "-fpackage-trust"]) $ \session -> do
+test_TrustDistrust env = withAvailableSession' env (withDynOpts ["-XSafe", "-fpackage-trust"]) $ \session -> do
     let runCode = do
           runActions <- runStmt session "A" "test"
           (output, result) <- runWaitAll runActions
@@ -525,3 +526,22 @@ test_TrustDistrust env = withAvailableSession' env (withOpts ["-XSafe", "-fpacka
     do let upd = updateDynamicOpts []
        updateSessionD session upd 1
        assertOneError session
+
+-- We pick something from the haskell platform but that doesn't come with ghc itself
+-- https://github.com/haskell/haskell-platform/blob/2012.4.0.0/haskell-platform.cabal
+test_UseFromDifferentPackage :: TestSuiteEnv -> Assertion
+test_UseFromDifferentPackage env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 1
+    assertNoErrors session
+    runActions <- runStmt session "M" "hello"
+    (output, result) <- runWaitAll runActions
+    assertEqual "" RunOk result
+    assertEqual "" "5\n" output
+  where
+    upd = (updateCodeGeneration True)
+       <> (updateSourceFile "M.hs" . L.unlines $
+            [ "module M where"
+            , "import Control.Monad.IO.Class" -- From transformers
+            , "hello :: IO ()"
+            , "hello = liftIO $ print 5"
+            ])

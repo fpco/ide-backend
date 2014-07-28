@@ -1,5 +1,6 @@
 module TestSuite.Tests.Compilation (testGroupCompilation) where
 
+import Control.Monad
 import Data.IORef
 import Data.Monoid
 import System.Exit
@@ -34,6 +35,9 @@ testGroupCompilation env = testGroup "Compilation" [
   , stdTest env "Support for hs-boot files from a subdirectory (#177) with dynamic include path change" test_HsBoot_SubDir_InclPathChange
   , stdTest env "Relative include paths (#156)"                                                         test_RelInclPath
   , stdTest env "Relative include paths (#156) with dynamic include path change"                        test_RelInclPath_InclPathChange
+  , stdTest env "Parse ghc 'Compiling' messages"                                                        test_ParseCompiling
+  , stdTest env "Parse ghc 'Compiling' messages (with TH)"                                              test_ParseCompiling_TH
+  , stdTest env "Reject a module with mangled header"                                                   test_RejectMangledHeader
   ]
 
 test_AdependsB_errorA :: TestSuiteEnv -> Assertion
@@ -108,7 +112,7 @@ test_dynamicIncludePathChange env = withAvailableSession env $ \session -> do
     assertEqual "after runExe" ExitSuccess statusExe
 
 test_CPP_ifdefModuleHeader :: TestSuiteEnv -> Assertion
-test_CPP_ifdefModuleHeader env = withAvailableSession' env (withOpts ["-XCPP"]) $ \session -> do
+test_CPP_ifdefModuleHeader env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
     updateSessionD session update 1
     assertNoErrors session
     assertIdInfo session "Good" (8,1,8,2) "x" VarName "[a]" "main:Good" "Good.hs@8:1-8:2" "" "binding occurrence"
@@ -125,7 +129,7 @@ test_CPP_ifdefModuleHeader env = withAvailableSession' env (withOpts ["-XCPP"]) 
       ]
 
 test_rejectWrongCPP :: TestSuiteEnv -> Assertion
-test_rejectWrongCPP env = withAvailableSession' env (withOpts ["-XCPP"]) $ \session -> do
+test_rejectWrongCPP env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
     updateSessionD session update 1
     msgs <- getSourceErrors session
     -- Due to a GHC bug there are now 2 errors. TODO; when it's fixed,
@@ -140,7 +144,7 @@ test_rejectWrongCPP env = withAvailableSession' env (withOpts ["-XCPP"]) $ \sess
 
 
 test_NamedFieldPuns :: TestSuiteEnv -> Assertion
-test_NamedFieldPuns env = withAvailableSession' env (withOpts ["-hide-package monads-tf"]) $ \session -> do
+test_NamedFieldPuns env = withAvailableSession' env (withDynOpts ["-hide-package monads-tf"]) $ \session -> do
     withCurrentDirectory "test/Puns" $ do
       loadModulesFrom session "."
       assertMoreErrors session
@@ -430,6 +434,104 @@ test_RelInclPath_InclPathChange env = withAvailableSession env $ \session -> do
     updateSessionD session updE2 2
     status2 <- getBuildExeStatus session
     assertEqual "after exe build" (Just ExitSuccess) status2
+
+test_ParseCompiling :: TestSuiteEnv -> Assertion
+test_ParseCompiling env = withAvailableSession env $ \session -> do
+    progressUpdatesRef <- newIORef []
+    updateSession session upd $ \p -> do
+      progressUpdates <- readIORef progressUpdatesRef
+      writeIORef progressUpdatesRef (progressUpdates ++ [p])
+    assertNoErrors session
+
+    progressUpdates <- readIORef progressUpdatesRef
+    assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling B")]
+                 (map abstract progressUpdates)
+  where
+    upd = (updateCodeGeneration True)
+       <> (updateSourceFile "A.hs" . L.unlines $
+            [ "module A where"
+            , "printA :: IO ()"
+            , "printA = putStr \"A\""
+            ])
+       <> (updateSourceFile "B.hs" . L.unlines $
+            [ "module B where"
+            , "import A"
+            , "printAB :: IO ()"
+            , "printAB = printA >> putStr \"B\""
+            ])
+
+    abstract (Progress {..}) = ( progressStep
+                               , progressNumSteps
+                               , T.unpack `liftM` progressParsedMsg
+                               )
+
+test_ParseCompiling_TH :: TestSuiteEnv -> Assertion
+test_ParseCompiling_TH env = withAvailableSession env $ \session -> do
+    progressUpdatesRef <- newIORef []
+    updateSession session upd $ \p -> do
+      progressUpdates <- readIORef progressUpdatesRef
+      writeIORef progressUpdatesRef (progressUpdates ++ [p])
+    assertNoErrors session
+
+    do progressUpdates <- readIORef progressUpdatesRef
+       assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling Main")]
+                      (map abstract progressUpdates)
+
+    -- Now we touch A, triggering recompilation of both A and B
+    -- This will cause ghc to report "[TH]" as part of the progress message
+    -- (at least on the command line). It doesn't seem to happen with the
+    -- API; but just in case, we check that we still get the right messages
+    -- (and not, for instance, '[TH]' as the module name).
+
+    writeIORef progressUpdatesRef []
+    updateSession session upd2 $ \p -> do
+      progressUpdates <- readIORef progressUpdatesRef
+      writeIORef progressUpdatesRef (progressUpdates ++ [p])
+    assertNoErrors session
+
+    do progressUpdates <- readIORef progressUpdatesRef
+       assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling Main")]
+                      (map abstract progressUpdates)
+  where
+    upd = (updateCodeGeneration True)
+       <> (updateSourceFile "A.hs" . L.unlines $
+            [ "{-# LANGUAGE TemplateHaskell #-}"
+            , "module A where"
+            , "import Language.Haskell.TH"
+            , "foo :: Q Exp"
+            , "foo = [| True |]"
+            ])
+       <> (updateSourceFile "Main.hs" . L.unlines $
+            [ "{-# LANGUAGE TemplateHaskell #-}"
+            , "module Main where"
+            , "import A"
+            , "main :: IO ()"
+            , "main = print $foo"
+            ])
+
+    upd2 = (updateSourceFile "A.hs" . L.unlines $
+            [ "{-# LANGUAGE TemplateHaskell #-}"
+            , "module A where"
+            , "import Language.Haskell.TH"
+            , "foo :: Q Exp"
+            , "foo = [| False |]"
+            ])
+
+    abstract (Progress {..}) = ( progressStep
+                               , progressNumSteps
+                               , T.unpack `liftM` progressParsedMsg
+                               )
+
+test_RejectMangledHeader :: TestSuiteEnv -> Assertion
+test_RejectMangledHeader env = withAvailableSession env $ \session -> do
+    updateSessionD session update 1
+    assertSourceErrors' session ["parse error on input `very'"]
+
+    updateSessionD session update2 1
+    assertSourceErrors' session ["parse error on input `.'"]
+  where
+    update  = updateSourceFile "M.hs" "module very-wrong where"
+    update2 = updateSourceFile "M.hs" "module M.1.2.3.8.T where"
 
 {-------------------------------------------------------------------------------
   Auxiliary: counter

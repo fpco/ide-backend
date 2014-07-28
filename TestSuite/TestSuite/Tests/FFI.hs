@@ -8,10 +8,10 @@ import System.FilePath
 import System.Process
 import Test.Tasty
 import Test.HUnit
-import qualified Data.ByteString.UTF8  as S
-import qualified Data.ByteString.Char8 as S (breakSubstring, append)
-import qualified Data.ByteString.Lazy  as L
-import qualified Data.Text             as T
+import qualified Data.ByteString      as S
+import qualified Data.ByteString.UTF8 as S
+import qualified Data.ByteString.Lazy as L
+import qualified Data.Text            as T
 
 import IdeSession
 import TestSuite.Assertions
