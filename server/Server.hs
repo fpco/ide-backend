@@ -451,7 +451,10 @@ ghcHandlePrint RpcConversation{..} var bind forceEval = do
 ghcHandleLoad :: RpcConversation -> FilePath -> Bool -> Ghc ()
 ghcHandleLoad RpcConversation{..} path unload = do
   liftIO $ if unload then Linker.unloadObj path
-                     else Linker.loadObj   path
+                     else do Linker.loadObj   path
+                             _success <- Linker.resolveObjs
+                             -- TODO: should we do something with success?
+                             return ()
   liftIO $ put ()
 
 -- | Handle a run request
