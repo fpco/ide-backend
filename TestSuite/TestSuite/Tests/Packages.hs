@@ -20,8 +20,8 @@ import TestSuite.Assertions
 testGroupPackages :: TestSuiteEnv -> TestTree
 testGroupPackages env = testGroup "Packages" [
     stdTest env "Package dependencies"                                                            test_PackageDependencies
-  , stdTest env "Register a package, don't restart session, don't see the package"                test_Register_NoRestart
-  , stdTest env "Register a package, restart session, see the package and check for cabal macros" test_Register_Restart
+  , stdTest env "Register a package, only then see the package"                                   test_Register_NoRestart
+  , stdTest env "Register a package, restart session, only then see the package cabal macros"     test_Register_Restart
   , stdTest env "Make sure package DB is passed to ghc (configGenerateModInfo False)"             test_PackageDB_ModInfoFalse
   , stdTest env "Make sure package DB is passed to ghc (configGenerateModInfo True)"              test_PackageDB_ModInfoTrue
   , stdTest env "Make sure package DB is passed to ghc after restartSession"                      test_PackageDB_AfterRestart
@@ -60,11 +60,12 @@ test_PackageDependencies env = withAvailableSession' env (withDynOpts ["-hide-pa
 test_Register_NoRestart :: TestSuiteEnv -> Assertion
 test_Register_NoRestart env = do
   withAvailableSession' env (withStaticOpts ["-package simple-lib17"]) $ \session -> do
+    let expected = "<command line>: cannot satisfy -package simple-lib17"
+    updateSessionD session upd 1
+    assertSourceErrors' session [expected]
     withInstalledPackage env "test/simple-lib17" $ do
-      -- No restartSession yet, hence the exception at session init.
-      let expected = "<command line>: cannot satisfy -package simple-lib17"
       updateSessionD session upd 1
-      assertSourceErrors' session [expected]
+      assertNoErrors session
   where
     upd = updateSourceFile "Main.hs" . L.unlines $
             [ "module Main where"
@@ -74,9 +75,12 @@ test_Register_NoRestart env = do
 
 test_Register_Restart :: TestSuiteEnv -> Assertion
 test_Register_Restart env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
-    restartSession session (Just defaultSessionInitParams)
     withInstalledPackage env "test/simple-lib17" $ do
-      restartSession session (Just defaultSessionInitParams) -- only now the package accessible
+      updateSessionD session upd 1
+      msgs <- getSourceErrors session
+      assertSomeErrors msgs
+      -- Session restart required to see the macros.
+      restartSession session (Just defaultSessionInitParams)
       updateSessionD session upd 1
       assertNoErrors session
       let m = "Main"
