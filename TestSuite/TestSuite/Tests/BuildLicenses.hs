@@ -99,9 +99,9 @@ test_Cabal env = withAvailableSession env $ \session -> do
 test_1000_noLicense :: TestSuiteEnv -> Assertion
 test_1000_noLicense env = withAvailableSession env $ \session -> do
     distDir <- getDistDir session
+    ideConfig <- getSessionConfig session
     let liStdoutLog = distDir </> "licenses.stdout"
         liStderrLog = distDir </> "licenses.stderr"
-        ideConfig   = defaultSessionConfig
         liArgs      =
           LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
                      , liExtraPathDirs  = configExtraPathDirs ideConfig
@@ -135,9 +135,9 @@ test_1000_noLicense env = withAvailableSession env $ \session -> do
 test_1000_noUsefulInfo :: TestSuiteEnv -> Assertion
 test_1000_noUsefulInfo env = withAvailableSession env $ \session -> do
     distDir <- getDistDir session
+    ideConfig <- getSessionConfig session
     let liStdoutLog = distDir </> "licenses.stdout"
         liStderrLog = distDir </> "licenses.stderr"
-        ideConfig   = defaultSessionConfig
         liArgs      =
           LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
                      , liExtraPathDirs  = configExtraPathDirs ideConfig
