@@ -31,6 +31,8 @@ testGroupFFI env = testGroup "Using the FFI" [
   , stdTest env "with withIncludes and TargetsExclude"                                            test_TargetsExclude
   , stdTest env "with dynamic include, TH and MIN_VERSION_base via buildExe"                      test_DynamicInclude
   , stdTest env "with dynamic include and TargetsInclude"                                         test_DynamicInclude_TargetsInclude
+-- fails:  , stdTest env "with setting SSE via GHC API #218"                                                    test_SSE_via_API
+-- fails:  , stdTest env "with setting SSE via buildExe #218"                                                   test_SSE_via_buildExe
   ]
 
 test_FFI_via_API :: TestSuiteEnv -> Assertion
@@ -415,6 +417,50 @@ test_DynamicInclude_TargetsInclude env = withAvailableSession env $ \session -> 
       , updateSourceFileFromFile "test/FFI/ffiles/life.h"
       , updateSourceFileFromFile "test/FFI/ffiles/local.h"
       ]
+
+test_SSE_via_API :: TestSuiteEnv -> Assertion
+test_SSE_via_API env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 3
+    assertNoErrors session
+    runActions <- runStmt session "Main" "main"
+    (output, result) <- runWaitAll runActions
+    case result of
+      RunOk -> assertEqual "" "42\n" output
+      _     -> assertFailure $ "Unexpected run result: " ++ show result
+  where
+    upd = mconcat [
+        updateCodeGeneration True
+      , updateSourceFile "test.c" "#include <smmintrin.h>\nint meaningOfLife() { return 42; }"  -- TODO: actually call any SSE op
+      , updateSourceFile "Main.hs" "{-# LANGUAGE ForeignFunctionInterface #-}\nforeign import ccall meaningOfLife :: IO Int\nmain :: IO ()\nmain = print =<< meaningOfLife"
+      , updateDynamicOpts ["-optc-msse4"]
+      ]
+
+test_SSE_via_buildExe :: TestSuiteEnv -> Assertion
+test_SSE_via_buildExe env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 3
+    assertNoErrors session
+    let m = "Main"
+        upd2 = buildExe [] [(T.pack m, "Main.hs")]
+    updateSessionD session upd2 2
+    distDir <- getDistDir session
+    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+    assertEqual "buildStderr empty" "" buildStderr
+    exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+    assertEqual "FFI exe output" "42\n" exeOut
+    runActionsExe <- runExe session m
+    (outExe, statusExe) <- runWaitAll runActionsExe
+    assertEqual "Output from runExe"
+                "42\n"
+                outExe
+    assertEqual "after runExe" ExitSuccess statusExe
+  where
+    upd = mconcat [
+        updateCodeGeneration True
+      , updateSourceFile "test.c" "#include <smmintrin.h>\nint meaningOfLife() { return 42; }"  -- TODO: actually call any SSE op
+      , updateSourceFile "Main.hs" "{-# LANGUAGE ForeignFunctionInterface #-}\nforeign import ccall meaningOfLife :: IO Int\nmain :: IO ()\nmain = print =<< meaningOfLife"
+      , updateDynamicOpts ["-optc-msse4"]
+      ]
+
 
 {-------------------------------------------------------------------------------
   Auxiliary
