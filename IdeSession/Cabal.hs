@@ -664,54 +664,55 @@ defaultProgramConfiguration configExtraPathDirs =
 localBuildInfo :: FilePath -> PackageDBStack -> [FilePath] -> LocalBuildInfo
 localBuildInfo buildDir withPackageDB configExtraPathDirs = LocalBuildInfo
   { withPackageDB
-  , withOptimization = Simple.Compiler.NormalOptimisation
-  , compiler = Simple.Compiler.Compiler
-      { compilerId = Compiler.CompilerId Compiler.GHC (Version [7, 4, 2] [])
+  , withOptimization    = Simple.Compiler.NormalOptimisation
+  , hostPlatform        = buildPlatform
+  , withPrograms        = defaultProgramConfiguration configExtraPathDirs
+  , withProfLib         = False
+  , withSharedLib       = False
+  , compiler            = Simple.Compiler.Compiler
+      { compilerId         = Compiler.CompilerId Compiler.GHC (Version [7, 4, 2] [])
       , compilerLanguages  = undefined
       , compilerExtensions = undefined
       }
-  , configFlags = undefined
-  , extraConfigArgs = undefined
-  , installDirTemplates = undefined
-  , hostPlatform = buildPlatform
   , buildDir
-  , scratchDir = undefined
-  , componentsConfigs = undefined
-  , installedPkgs = undefined
-  , pkgDescrFile = undefined
-  , localPkgDescr = undefined
-  , withPrograms = defaultProgramConfiguration configExtraPathDirs
-  , withVanillaLib = undefined
-  , withProfLib = False
-  , withSharedLib = False
-  , withDynExe = undefined
-  , withProfExe = undefined
-  , withGHCiLib = undefined
-  , splitObjs = undefined
-  , stripExes = undefined
-  , progPrefix = undefined
-  , progSuffix = undefined
+  , configFlags         = undefined
+  , extraConfigArgs     = undefined
+  , installDirTemplates = undefined
+  , scratchDir          = undefined
+  , componentsConfigs   = undefined
+  , installedPkgs       = undefined
+  , pkgDescrFile        = undefined
+  , localPkgDescr       = undefined
+  , withVanillaLib      = undefined
+  , withDynExe          = undefined
+  , withProfExe         = undefined
+  , withGHCiLib         = undefined
+  , splitObjs           = undefined
+  , stripExes           = undefined
+  , progPrefix          = undefined
+  , progSuffix          = undefined
   }
 
 -- | Run gcc via ghc, with correct parameters.
 -- Copied from bits and pieces of @Distribution.Simple.GHC@.
 runComponentCc :: RunCcArgs -> IO ExitCode
 runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
-                        , rcExtraPathDirs = configExtraPathDirs
-                        , rcDistDir = ideDistDir
-                        , rcAbsC = absC
-                        , rcAbsObj = absObj
-                        , rcPref = pref
-                        , rcIncludeDirs = includeDirs
-                        , .. } = do
+                        , rcExtraPathDirs  = configExtraPathDirs
+                        , rcDistDir        = ideDistDir
+                        , rcAbsC           = absC
+                        , rcAbsObj         = absObj
+                        , rcPref           = pref
+                        , rcIncludeDirs    = includeDirs
+                        , .. }             = do
   let verbosity = silent
       -- TODO: create dist.23412/build? see cabalMacrosLocation
       buildDir = ideDistDir
-      lbi = localBuildInfo buildDir configPackageDBStack configExtraPathDirs
-      libBi = emptyBuildInfo{includeDirs} -- TODO: set ccOptions?
-      clbi = LibComponentLocalBuildInfo [] []
-               -- a stub, this would be expensive (lookups in pkgIndex);
-               -- TODO: is it needed? e.g., for C calling into Haskell?
+      lbi      = localBuildInfo buildDir configPackageDBStack configExtraPathDirs
+      libBi    = emptyBuildInfo{includeDirs} -- TODO: set ccOptions?
+      odir     = Setup.fromFlag (ghcOptObjDir vanillaCcOpts)
+      clbi     = LibComponentLocalBuildInfo [] []
+                   -- a stub, this would be expensive (lookups in pkgIndex);
+                   -- TODO: is it needed? e.g., for C calling into Haskell?
       vanillaCcOpts = (componentCcGhcOptions verbosity lbi
                          libBi clbi pref absC)`mappend` mempty {
                         -- ghc ignores -odir for .o files coming from .c files
@@ -721,13 +722,12 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
                         ghcOptProfilingMode = Setup.toFlag True,
                         ghcOptObjSuffix     = Setup.toFlag "p_o"
                       }
-      sharedCcOpts   = vanillaCcOpts `mappend` mempty {
-                         ghcOptFPic        = Setup.toFlag True,
-                         ghcOptDynLinkMode = Setup.toFlag GhcDynamicOnly,
-                         ghcOptObjSuffix   = Setup.toFlag "dyn_o",
-                         ghcOptExtra = ["-o", replaceExtension absObj "dyn_o"]
-                       }
-      odir          = Setup.fromFlag (ghcOptObjDir vanillaCcOpts)
+      sharedCcOpts  = vanillaCcOpts `mappend` mempty {
+                        ghcOptFPic        = Setup.toFlag True,
+                        ghcOptDynLinkMode = Setup.toFlag GhcDynamicOnly,
+                        ghcOptObjSuffix   = Setup.toFlag "dyn_o",
+                        ghcOptExtra = ["-o", replaceExtension absObj "dyn_o"]
+                      }
 
   exitCode :: Either ExitCode () <- Ex.bracket
     (do  -- stdOutputBackup <- redirectStdOutput rcStdoutLog
@@ -755,43 +755,47 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
   return $! either id (const ExitSuccess) exitCode
 
 data BuildExeArgs = BuildExeArgs
-  { bePackageDBStack :: PackageDBStack
-  , beExtraPathDirs :: [FilePath]
-  , beSourcesDir :: FilePath
-  , beDistDir :: FilePath
-  , beStdoutLog :: FilePath
-  , beStderrLog :: FilePath
+  { bePackageDBStack   :: PackageDBStack
+  , beExtraPathDirs    :: [FilePath]
+  , beSourcesDir       :: FilePath
+  , beDistDir          :: FilePath
+  , beStdoutLog        :: FilePath
+  , beStderrLog        :: FilePath
   , beRelativeIncludes :: [FilePath]
-  , beGhcOpts :: [String]
-  , beLibDeps :: [Package.Dependency]
-  , beLoadedMs :: [ModuleName]
+  , beGhcOpts          :: [String]
+  , beLibDeps          :: [Package.Dependency]
+  , beLoadedMs         :: [ModuleName]
   }
 
 data RunCcArgs = RunCcArgs
   { rcPackageDBStack :: PackageDBStack
-  , rcExtraPathDirs :: [FilePath]
-  , rcDistDir :: FilePath
-  , rcStdoutLog :: FilePath
-  , rcStderrLog :: FilePath
-  , rcAbsC :: FilePath
-  , rcAbsObj :: FilePath
-  , rcPref :: FilePath
-  , rcIncludeDirs :: [FilePath]
+  , rcExtraPathDirs  :: [FilePath]
+  , rcDistDir        :: FilePath
+  , rcStdoutLog      :: FilePath
+  , rcStderrLog      :: FilePath
+  , rcAbsC           :: FilePath
+  , rcAbsObj         :: FilePath
+  , rcPref           :: FilePath
+  , rcIncludeDirs    :: [FilePath]
   }
 
 data LicenseArgs = LicenseArgs
-  { liPackageDBStack :: PackageDBStack  -- ^ 3 fields from session configuration
-  , liExtraPathDirs :: [FilePath]
-  , liLicenseExc :: [String]
-  , liDistDir :: FilePath    -- ^ the working directory;
-                             --   the resulting file is written there
-  , liStdoutLog :: FilePath
-  , liStderrLog :: FilePath
-  , licenseFixed :: [( String
-                     , (Maybe License, Maybe FilePath, Maybe String)
-                     )]       -- ^ see 'configLicenseFixed'
-  , liCabalsDir :: FilePath  -- ^ the directory with all the .cabal files
-  , liPkgs :: [PackageId]    -- ^ the list of packages to process
+  { -- | 3 fields from session configuration
+    liPackageDBStack :: PackageDBStack
+  , liExtraPathDirs  :: [FilePath]
+  , liLicenseExc     :: [String]
+    -- | the working directory; the resulting file is written there
+  , liDistDir        :: FilePath
+  , liStdoutLog      :: FilePath
+  , liStderrLog      :: FilePath
+    -- | see 'configLicenseFixed'
+  , licenseFixed     :: [( String
+                         , (Maybe License, Maybe FilePath, Maybe String)
+                         )]
+    -- | the directory with all the .cabal files
+  , liCabalsDir      :: FilePath
+    -- | the list of packages to process
+  , liPkgs           :: [PackageId]
   }
 
 data ExeCabalRequest =
@@ -808,17 +812,17 @@ data ExeCabalResponse =
 
 instance Binary ExeCabalRequest where
   put (ReqExeBuild buildArgs ms) = putWord8 0 >> put buildArgs >> put ms
-  put (ReqExeDoc buildArgs) = putWord8 1 >> put buildArgs
-  put (ReqExeCc ccArgs) = putWord8 2 >> put ccArgs
-  put (ReqExeLic licenseArgs) = putWord8 3 >> put licenseArgs
+  put (ReqExeDoc buildArgs)      = putWord8 1 >> put buildArgs
+  put (ReqExeCc ccArgs)          = putWord8 2 >> put ccArgs
+  put (ReqExeLic licenseArgs)    = putWord8 3 >> put licenseArgs
 
   get = do
     header <- getWord8
     case header of
       0 -> ReqExeBuild <$> get <*> get
-      1 -> ReqExeDoc <$> get
-      2 -> ReqExeCc <$> get
-      3 -> ReqExeLic <$> get
+      1 -> ReqExeDoc   <$> get
+      2 -> ReqExeCc    <$> get
+      3 -> ReqExeLic   <$> get
       _ -> fail "ExeCabalRequest.get: invalid header"
 
 instance Binary ExeCabalResponse where
