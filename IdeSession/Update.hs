@@ -620,9 +620,16 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
 
            -- Load and unload object files
            forM_ (pendingUnloads pendingChanges') $ \fp ->
-             rpcLoad (idleState ^. ideGhcServer) fp True
-           forM_ (pendingLoads pendingChanges') $ \fp ->
-             rpcLoad (idleState ^. ideGhcServer) fp False
+             rpcUnload (idleState ^. ideGhcServer) fp
+           objectErrors <- forM (pendingLoads pendingChanges') $ \(relObj, absObj) -> do
+             didLoad <- rpcLoad (idleState ^. ideGhcServer) absObj
+             return [ SourceError {
+                          errorKind = KindError
+                        , errorSpan = TextSpan (Text.pack "No location information")
+                        , errorMsg  = Text.pack $ "Failed to load " ++ relObj
+                        }
+                    | not didLoad
+                    ]
 
            -- Recompile
            computed <- if pendingUpdatedCode pendingChanges'
@@ -644,7 +651,10 @@ updateSession' session@IdeSession{ideStaticInfo, ideState} callback = \update ->
                    diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
 
                return $ Maybe.just Computed {
-                   computedErrors        = force cErrors List.++ ghcCompileErrors List.++ optionWarnings
+                   computedErrors        = force cErrors
+                                   List.++ ghcCompileErrors
+                                   List.++ optionWarnings
+                                   List.++ force (concat objectErrors)
                  , computedLoadedModules = ghcCompileLoaded
                  , computedImports       = ghcCompileImports  `applyDiff` computedImports
                  , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
@@ -744,7 +754,8 @@ recompileObjectFiles = do
 
       forM_ cFiles $ \(fp, ts) -> do
         let absC     = srcDir </> fp
-            absObj   = objDir </> replaceExtension fp ".o"
+            relObj   = replaceExtension fp ".o"
+            absObj   = objDir </> relObj
 
         mObjFile <- get (ideObjectFiles .> lookup' fp)
 
@@ -775,7 +786,7 @@ recompileObjectFiles = do
                 return errs
               if null errs
                 then do
-                  lift $ schedule $ (\r -> r { pendingLoads = absObj : pendingLoads r })
+                  lift $ schedule $ (\r -> r { pendingLoads = (relObj, absObj) : pendingLoads r })
                   tellSt ([fp], [])
                 else
                   tellSt ([], errs)

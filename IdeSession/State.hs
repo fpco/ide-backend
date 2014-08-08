@@ -126,9 +126,9 @@ data PendingRemoteChanges = PendingRemoteChanges {
 
     -- | Object files to be uploaded
   , pendingUnloads :: [FilePath]
- 
-    -- | Object files to be loaded
-  , pendingLoads :: [FilePath]
+
+    -- | Object files to be loaded (relative path, absolute path)
+  , pendingLoads :: [(FilePath, FilePath)]
   }
 
 noPendingRemoteChanges :: PendingRemoteChanges

@@ -21,6 +21,7 @@ module IdeSession.GHC.Client (
   , rpcBreakpoint
   , rpcPrint
   , rpcLoad
+  , rpcUnload
   , rpcSetGhcOpts
   ) where
 
@@ -304,8 +305,12 @@ rpcPrint :: GhcServer -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv
 rpcPrint server var bind forceEval = ghcRpc server (ReqPrint var bind forceEval)
 
 -- | Load an object file
-rpcLoad :: GhcServer -> FilePath -> Bool -> IO ()
-rpcLoad server path unload = ghcRpc server (ReqLoad path unload)
+rpcLoad :: GhcServer -> FilePath -> IO Bool
+rpcLoad server path = ghcRpc server (ReqLoad path False)
+
+-- | Unload an object file
+rpcUnload :: GhcServer -> FilePath -> IO ()
+rpcUnload server path = ghcRpc server (ReqLoad path True)
 
 -- | Crash the GHC server (for debugging purposes)
 rpcCrash :: GhcServer -> Maybe Int -> IO ()
