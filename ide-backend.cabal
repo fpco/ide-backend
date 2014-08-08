@@ -271,6 +271,23 @@ test-suite rpc-server
                       DeriveDataTypeable
   ghc-options:        -Wall -fno-warn-unused-do-bind
 
+test-suite NamedPipeTest
+  type:               exitcode-stdio-1.0
+  main-is:            NamedPipeTest.hs
+  hs-source-dirs:     test
+  build-depends:      base,
+                      process,
+                      directory,
+                      bytestring,
+                      unix,
+                      binary-ide-backend
+  default-language:   Haskell2010
+  default-extensions: RankNTypes 
+                      GADTs
+                      DeriveDataTypeable
+                      ScopedTypeVariables
+  ghc-options:        -Wall
+
 executable coc
   main-is:          coc.hs
   hs-source-dirs:   test

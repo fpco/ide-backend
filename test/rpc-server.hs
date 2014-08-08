@@ -1,29 +1,30 @@
 {-# LANGUAGE TemplateHaskell, ScopedTypeVariables, ExistentialQuantification, DeriveDataTypeable #-}
 module Main where
 
+import Control.Applicative ((<$>), (<*>))
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar
-import qualified Control.Exception as Ex
-import Control.Monad (forM_, forever, replicateM_)
-import Control.Applicative ((<$>), (<*>))
+import Control.Monad (forM_, forever, replicateM, replicateM_)
+import Data.Binary (Binary)
 import Data.Function (on)
 import Data.List (isInfixOf)
+import Data.Typeable (Typeable)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
-import System.Posix.Signals (sigKILL)
-import System.Posix.Files (createNamedPipe)
-import System.IO.Temp (withTempDirectory)
 import System.FilePath ((</>))
-import Data.Binary (Binary)
-import Data.Typeable (Typeable)
-import qualified Data.Binary as Binary
+import System.IO.Temp (withTempDirectory)
+import System.Posix.Files (createNamedPipe)
+import System.Posix.Signals (sigKILL)
+import qualified Control.Concurrent.Async as Async
+import qualified Control.Exception        as Ex
+import qualified Data.Binary              as Binary
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertEqual)
 
-import IdeSession.RPC.Server
 import IdeSession.RPC.Client
+import IdeSession.RPC.Server
 import TestTools
 
 --------------------------------------------------------------------------------
@@ -200,7 +201,7 @@ testConcurrentGetPutServer RpcConversation{..} = forever $ do
 -- Test generalized conversations                                             --
 --------------------------------------------------------------------------------
 
-data StartGame  = StartGame Int Int
+data StartGame  = StartGame Int Int | NoMoreGames
   deriving (Show, Typeable)
 data Guess = Guess Int | GiveUp | Yay
   deriving (Show, Typeable, Eq)
@@ -208,8 +209,17 @@ data GuessReply = GuessCorrect | GuessIncorrect
   deriving (Show, Typeable)
 
 instance Binary StartGame where
-  put (StartGame i j) = Binary.put i >> Binary.put j
-  get = StartGame <$> Binary.get <*> Binary.get
+  put (StartGame i j) = do Binary.putWord8 0
+                           Binary.put i
+                           Binary.put j
+  put NoMoreGames     = Binary.putWord8 1
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> StartGame <$> Binary.get <*> Binary.get
+      1 -> return NoMoreGames
+      _ -> fail "Binary.get: Invalid header"
 
 instance Binary Guess where
   put (Guess i) = Binary.putWord8 0 >> Binary.put i
@@ -265,18 +275,24 @@ testConversation server = do
     typeError ExternalException{externalStdErr} =
       "not enough bytes" `isInfixOf` externalStdErr
   -}
+  assertRpcEqual server NoMoreGames ()
 
 testConversationServer :: RpcConversation -> IO ()
-testConversationServer RpcConversation{..} = forever $ do
-    StartGame n m <- get
-    go n m
+testConversationServer RpcConversation{..} = outerLoop
   where
-    go n m | n > m     = put GiveUp
-           | otherwise = do put (Guess n)
-                            answer <- get
-                            case answer of
-                              GuessCorrect   -> put Yay
-                              GuessIncorrect -> go (n + 1) m
+    outerLoop = do
+      req <- labelExceptions "testConversationServer outerLoop: " $ get
+      case req of
+        StartGame n m -> innerLoop n m >> outerLoop
+        NoMoreGames   -> put () >> return ()
+
+    innerLoop n m
+      | n > m     = put GiveUp
+      | otherwise = do put (Guess n)
+                       answer <- labelExceptions "testConcurrentServer innerLoop: " $ get
+                       case answer of
+                         GuessCorrect   -> put Yay
+                         GuessIncorrect -> innerLoop (n + 1) m
 
 --------------------------------------------------------------------------------
 -- Error handling tests                                                       --
@@ -443,59 +459,90 @@ testInvalidRespType server =
 
 --------------------------------------------------------------------------------
 -- Concurrent conversations                                                   --
+--                                                                            --
+-- It is important that all servers involved with the concurrent conversations--
+-- have a proper shutdown sequence or else we will get runtime exceptions when--
+-- we close the pipes.                                                        --
 --------------------------------------------------------------------------------
 
--- Just to echo, Nothing to start a new conversation
-type EchoOrSpawn = Maybe String
+data ConcurrentServerRequest =
+    ConcurrentServerSanityCheck String
+  | ConcurrentServerSpawn
+  | ConcurrentServerTerminate
+  deriving (Typeable, Show)
+
+instance Binary ConcurrentServerRequest where
+  put (ConcurrentServerSanityCheck s) = Binary.putWord8 0 >> Binary.put s
+  put ConcurrentServerSpawn           = Binary.putWord8 1
+  put ConcurrentServerTerminate       = Binary.putWord8 2
+
+  get = do
+    header <- Binary.getWord8
+    case header of
+      0 -> ConcurrentServerSanityCheck <$> Binary.get
+      1 -> return ConcurrentServerSpawn
+      2 -> return ConcurrentServerTerminate
+      _ -> fail "ConcurrentServerRequest.get: invalid header"
 
 testConcurrentServer :: RpcConversation -> IO ()
-testConcurrentServer RpcConversation{..} = forever $ do
-  req <- get :: IO EchoOrSpawn
-  case req of
-    Just str ->
-      put str
-    Nothing  -> do
-      pipes <- newEmptyMVar :: IO (MVar (String, String, String))
-      forkIO $ do
-        withTempDirectory "." "rpc" $ \tempDir -> do
-          let stdin  = tempDir </> "stdin"
-              stdout = tempDir </> "stdout"
-              stderr = tempDir </> "stderr"
+testConcurrentServer RpcConversation{..} = go
+  where
+    go = do
+      req <- labelExceptions "testConcurrentServer: " $ get
+      case req of
+        ConcurrentServerSanityCheck str -> do
+          put str
+          go
+        ConcurrentServerSpawn -> do
+          pipes <- newEmptyMVar :: IO (MVar (String, String, String))
+          forkIO $ do
+            withTempDirectory "." "rpc" $ \tempDir -> do
+              let stdin  = tempDir </> "stdin"
+                  stdout = tempDir </> "stdout"
+                  stderr = tempDir </> "stderr"
 
-          createNamedPipe stdin  0o600
-          createNamedPipe stdout 0o600
-          createNamedPipe stderr 0o600
+              createNamedPipe stdin  0o600
+              createNamedPipe stdout 0o600
+              createNamedPipe stderr 0o600
 
-          -- Once we have created the pipes we can tell the client
-          putMVar pipes (stdin, stdout, stderr)
-          concurrentConversation stdin stdout stderr testConversationServer
+              -- Once we have created the pipes we can tell the client
+              putMVar pipes (stdin, stdout, stderr)
+              concurrentConversation stdin stdout stderr testConversationServer
 
-      (stdin, stdout, stderr) <- readMVar pipes
-      put (stdin, stdout, stderr)
+          (stdin, stdout, stderr) <- readMVar pipes
+          put (stdin, stdout, stderr)
+          go
+        ConcurrentServerTerminate -> do
+          put ()
+          return ()
 
 testConcurrent :: RpcServer -> Assertion
 testConcurrent server = do
   -- test sequentially: echo, spawn conversation, run that conversation, repeat
   replicateM_ 3 $ do
     -- test we can echo
-    assertRpcEqual server (Just "ping" :: EchoOrSpawn) "ping"
+    assertRpcEqual server (ConcurrentServerSanityCheck "ping") "ping"
 
-    (stdin, stdout, stderr) <- rpc server (Nothing :: EchoOrSpawn)
-    server' <- connectToRpcServer stdin stdout stderr
-    testConversation server'
+    (stdin, stdout, stderr) <- rpc server ConcurrentServerSpawn
+    connectToRpcServer stdin stdout stderr $ testConversation
 
   -- test concurrent execution: spawn a bunch of servers, have conversations
   -- with all of them concurrently, while still communicating on the original
   -- conversation, too (note that the calls to 'rpc' to start the concurrent
   -- conversations will be sequentialized)
-  replicateM_ 10 $ forkIO $ do
-    (stdin, stdout, stderr) <- rpc server (Nothing :: EchoOrSpawn)
-    server' <- connectToRpcServer stdin stdout stderr
-    testConversation server'
+  clientConvs <- replicateM 10 $ Async.async $ do
+    (stdin, stdout, stderr) <- rpc server ConcurrentServerSpawn
+    connectToRpcServer stdin stdout stderr $ testConversation
 
+  -- Echo on the original conversation while we have the other conversations
   replicateM_ 100 $
-    -- Echo on the original conversation while we have the other conversations
-    assertRpcEqual server (Just "ping" :: EchoOrSpawn) "ping"
+    assertRpcEqual server (ConcurrentServerSanityCheck "ping") "ping"
+
+  -- Wait for all client conversations to finish
+  forM_ clientConvs Async.wait
+
+  -- Shutdown the main server
+  assertRpcEqual server ConcurrentServerTerminate ()
 
 --------------------------------------------------------------------------------
 -- Driver                                                                     --
@@ -573,3 +620,13 @@ main = do
       "concurrent"       -> rpcServer testConcurrentServer args'
       _ -> error $ "Invalid server " ++ show test
     _ -> defaultMain tests
+
+{-------------------------------------------------------------------------------
+  Auxiliary
+-------------------------------------------------------------------------------}
+
+labelExceptions :: String -> IO a -> IO a
+labelExceptions label = Ex.handle aux
+  where
+    aux :: Ex.SomeException -> IO a
+    aux e = Ex.throwIO (userError (label ++ show e))

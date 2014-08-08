@@ -23,7 +23,7 @@ import Data.Typeable (Typeable)
 import Prelude hiding (take)
 import System.Directory (canonicalizePath, getPermissions, executable)
 import System.Exit (ExitCode)
-import System.IO (Handle)
+import System.IO (Handle, hClose)
 import System.Posix.IO (createPipe, closeFd, fdToHandle)
 import System.Posix.Signals (signalProcess, sigKILL)
 import System.Posix.Types (Fd)
@@ -150,22 +150,22 @@ forkRpcServer path args workingDir menv = do
 connectToRpcServer :: FilePath   -- ^ stdin named pipe
                    -> FilePath   -- ^ stdout named pipe
                    -> FilePath   -- ^ stderr named pipe
-                   -> IO RpcServer
-connectToRpcServer requestW responseR errorsR = do
-  -- TODO: here and in forkRpcServer, deal with exceptions
-  requestW'  <- openPipeForWriting requestW  timeout
-  responseR' <- openPipeForReading responseR timeout
-  errorsR'   <- openPipeForReading errorsR   timeout
-  st         <- newMVar RpcRunning
-  input      <- newStream responseR'
-  return RpcServer {
-      rpcRequestW  = requestW'
-    , rpcErrorsR   = errorsR'
-    , rpcProc      = Nothing
-    , rpcState     = st
-    , rpcResponseR = input
-    , rpcIdentity  = requestW 
-    }
+                   -> (RpcServer -> IO a)
+                   -> IO a
+connectToRpcServer requestW responseR errorsR act =
+  Ex.bracket (openPipeForWriting requestW  timeout) hClose $ \requestW'  ->
+  Ex.bracket (openPipeForReading responseR timeout) hClose $ \responseR' ->
+  Ex.bracket (openPipeForReading errorsR   timeout) hClose $ \errorsR'   -> do
+    st    <- newMVar RpcRunning
+    input <- newStream responseR'
+    act $ RpcServer {
+        rpcRequestW  = requestW'
+      , rpcErrorsR   = errorsR'
+      , rpcProc      = Nothing
+      , rpcState     = st
+      , rpcResponseR = input
+      , rpcIdentity  = requestW
+      }
   where
     timeout :: Int
     timeout = 1000000 -- 1sec

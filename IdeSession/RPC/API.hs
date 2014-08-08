@@ -119,7 +119,7 @@ instance Show IncBS where
 
 -- | Write a bytestring to a buffer and flush
 hPutFlush :: Handle -> BSL.ByteString -> IO ()
-hPutFlush h bs = BSL.hPut h bs >> hFlush h
+hPutFlush h bs = BSL.hPut h bs >> ignoreIOExceptions (hFlush h)
 
 -- | Ignore IO exceptions
 ignoreIOExceptions :: IO () -> IO ()
