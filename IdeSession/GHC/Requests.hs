@@ -69,7 +69,7 @@ data GhcRequest
   | ReqCrash {
         reqCrashDelay :: Maybe Int
       }
-  deriving (Typeable, Generic)
+  deriving (Typeable, Generic, Show)
 
 data RunCmd =
     RunStmt {
@@ -79,7 +79,7 @@ data RunCmd =
       , runCmdStderr   :: RunBufferMode
       }
   | Resume
-  deriving (Typeable, Generic)
+  deriving (Typeable, Generic, Show)
 
 instance PrettyVal GhcInitRequest
 instance PrettyVal GhcRequest

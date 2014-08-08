@@ -12,8 +12,8 @@ import System.Process
 import System.Timeout
 import Test.HUnit
 import Test.Tasty
-import qualified Data.ByteString.Lazy       as L
-import qualified Data.ByteString.Lazy.Char8 as L (unlines)
+import qualified Data.ByteString.Lazy       as L hiding (all)
+import qualified Data.ByteString.Lazy.Char8 as L (unlines, all)
 import qualified Data.ByteString.Lazy.UTF8  as L
 import qualified Data.Text                  as T
 
@@ -380,15 +380,26 @@ test214 :: TestSuiteEnv -> Assertion
 test214 env = withAvailableSession env $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
+    runActions <- runStmt session "Main" "print_zlib_version"
+    (output, result) <- runWaitAll runActions
+    assertEqual "" RunOk result
+    -- We're not really sure what version to expect; but it should probably look
+    -- like a version anyway :)
+    assertBool ("unexpected version " ++ show output) (isVersion output)
   where
     upd = updateCodeGeneration True
        <> updateDynamicOpts ["-lz"]
-       <> updateSourceFile "Main.hs" "import GHC.Prim"
+       <> updateSourceFile "Main.hs" "foreign import ccall \"print_zlib_version\" print_zlib_version :: IO ()"
        <> updateSourceFile "foo.c" (L.unlines
             [ "#include <zlib.h>"
-            , "int streaming_commons_inflate_init2(z_stream *stream, int window_bits) {"
-            , "return inflateInit2(stream, window_bits);}"
+            , "#include <stdio.h>"
+            , "void print_zlib_version(z_stream *stream, int window_bits) {"
+            , "  fputs(zlibVersion(), stderr);"
+            , "}"
             ])
+
+    isVersion :: L.ByteString -> Bool
+    isVersion = L.all (`elem` ('.' : ['0'..'9']))
 
 test219 :: TestSuiteEnv -> Assertion
 test219 env = withAvailableSession env $ \session -> do

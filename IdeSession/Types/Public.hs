@@ -244,7 +244,7 @@ type Value = Text
 type VariableEnv = [(Name, Type, Value)]
 
 data Targets = TargetsInclude [FilePath] | TargetsExclude [FilePath]
-  deriving (Typeable, Generic, Eq)
+  deriving (Typeable, Generic, Eq, Show)
 
 {------------------------------------------------------------------------------
   Show instances
