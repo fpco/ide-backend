@@ -716,7 +716,7 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
       vanillaCcOpts = (componentCcGhcOptions verbosity lbi
                          libBi clbi pref absC)`mappend` mempty {
                         -- ghc ignores -odir for .o files coming from .c files
-                        ghcOptExtra = ["-o", absObj]
+                        ghcOptExtra = ["-o", absObj] ++ rcOptions
                       }
       profCcOpts    = vanillaCcOpts `mappend` mempty {
                         ghcOptProfilingMode = Setup.toFlag True,
@@ -777,6 +777,7 @@ data RunCcArgs = RunCcArgs
   , rcAbsObj         :: FilePath
   , rcPref           :: FilePath
   , rcIncludeDirs    :: [FilePath]
+  , rcOptions        :: [String]
   }
 
 data LicenseArgs = LicenseArgs
@@ -864,10 +865,12 @@ instance Binary RunCcArgs where
     put rcAbsObj
     put rcPref
     put rcIncludeDirs
+    put rcOptions
 
   get = RunCcArgs <$> get <*> get <*> get
                   <*> get <*> get <*> get
                   <*> get <*> get <*> get
+                  <*> get
 
 instance Binary LicenseArgs where
   put LicenseArgs{..} = do

@@ -31,7 +31,7 @@ testGroupFFI env = testGroup "Using the FFI" [
   , stdTest env "with withIncludes and TargetsExclude"                                            test_TargetsExclude
   , stdTest env "with dynamic include, TH and MIN_VERSION_base via buildExe"                      test_DynamicInclude
   , stdTest env "with dynamic include and TargetsInclude"                                         test_DynamicInclude_TargetsInclude
--- fails:  , stdTest env "with setting SSE via GHC API #218"                                                    test_SSE_via_API
+  , stdTest env "with setting SSE via GHC API #218"                                               test_SSE_via_API
 -- fails:  , stdTest env "with setting SSE via buildExe #218"                                                   test_SSE_via_buildExe
   ]
 

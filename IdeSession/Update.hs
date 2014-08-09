@@ -1439,6 +1439,11 @@ runGcc absC absObj pref = do
     callback                        <- asks ideSessionUpdateCallback
     relIncl                         <- get ideRelativeIncludes
 
+    -- Pass both static options and dynamic options as arguments to gcc so that
+    -- it can pass the relevant options to gcc
+    let staticOpts = configStaticOpts ideConfig
+    dynOpts <- get ideDynamicOpts
+
     let ideDistDir   = ideSessionDistDir   ideSessionDir
         ideSourceDir = ideSessionSourceDir ideSessionDir
 
@@ -1456,6 +1461,7 @@ runGcc absC absObj pref = do
                                 , rcAbsObj         = absObj
                                 , rcPref           = pref
                                 , rcIncludeDirs    = includeDirs
+                                , rcOptions        = staticOpts ++ dynOpts
                                 }
      -- (_exitCode, _stdout, _stderr)
      --   <- readProcessWithExitCode _gcc _args _stdin
