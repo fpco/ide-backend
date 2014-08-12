@@ -207,7 +207,7 @@ test_errorsThenUpdate env = withAvailableSession env $ \session -> do
     assertEqual "" output "42\n"
 
     updateSessionD session (updateSourceFile "test.c" "invalid") 3
-    assertOneError session
+    assertSomeErrors session
 
     updateSessionD session (updateSourceFile "test.c" cLBS) 3
     assertNoErrors session
@@ -233,7 +233,7 @@ test_headersInSubdirs env = withAvailableSession' env (withIncludes ["include"])
             updateSessionD session upd 3
             assertNoErrors session
 
-    go $ updateDynamicOpts ["-Iinclude"]
+    go $ updateGhcOpts ["-Iinclude"]
       <> updateSourceFile "include/blankheader.h" hfile
       <> updateSourceFile "hello.c" cfile
       <> updateSourceFile "Main.hs" hsfile

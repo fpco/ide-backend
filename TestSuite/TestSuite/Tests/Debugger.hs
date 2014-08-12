@@ -106,7 +106,7 @@ testPrintingAndForcing env = withAvailableSession env $ \session -> do
   Auxiliary
 -------------------------------------------------------------------------------}
 
-qsort :: IdeSessionUpdate ()
+qsort :: IdeSessionUpdate
 qsort = (updateSourceFile "Main.hs" . L.unlines $ [
           --          1         2         3         4         5
           -- 12345678901234567890123456789012345678901234567890123456

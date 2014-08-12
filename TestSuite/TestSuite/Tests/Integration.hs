@@ -29,7 +29,7 @@ testGroupIntegration env = testGroup "Integration" [
   "Projects" setup
 -------------------------------------------------------------------------------}
 
-type IntegrationTest = IdeSession -> IdeSessionUpdate () -> [String] -> Assertion
+type IntegrationTest = IdeSession -> IdeSessionUpdate -> [String] -> Assertion
 
 integrationTest :: TestSuiteEnv -> String -> IntegrationTest -> TestTree
 integrationTest env name test = testGroup name $
@@ -42,7 +42,7 @@ testWithProject env test Project{..} = do
       withAvailableSession' env' cfg $ \session -> test session upd lm
   where
     cfg = withModInfo False
-        . withDynOpts projectOptions
+        . withGhcOpts projectOptions
 
 data Project = Project {
      projectName       :: String
@@ -174,14 +174,14 @@ test_dontLoseFilesInRestart session originalUpdate lm = do
     case mex of
       Right _runActions -> return ()  -- don't runWaitAll
       Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
-    restartSession session Nothing
+    restartSession session
     updateSessionD session mempty (length lm)  -- all compiled anew
     assertNoErrors session
     mex2 <- try $ runStmt session "Main" "main"
     case mex2 of
       Right runActions -> void $ runWaitAll runActions  -- now runWaitAll
       Left ex -> assertEqual "runStmt" (userError "Module \"Main\" not successfully loaded, when trying to run code.") ex
-    restartSession session Nothing
+    restartSession session
     updateSessionD session update2 0  -- if any file missing, would yell
     assertNoErrors session
     updateSessionD session update3 0  -- 0: nothing to generate code from

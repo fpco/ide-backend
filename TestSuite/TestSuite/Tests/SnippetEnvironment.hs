@@ -340,7 +340,7 @@ test_CmdLineArgsAfterRestart env = withAvailableSession env $ \session -> do
                    outExe
 
     -- Restart and update the session
-    restartSession session Nothing
+    restartSession session
     updateSessionD session upd 1
     assertNoErrors session
 

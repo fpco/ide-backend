@@ -47,9 +47,9 @@ test_NoDelay_FollowUpRequest env = withAvailableSession env $ \session -> do
 test_Delay_FollowUpRequest :: TestSuiteEnv -> Assertion
 test_Delay_FollowUpRequest env = withAvailableSession env $ \session -> do
     crashGhcServer session (Just 1000000)
-    updateSession session (updateEnv [("Foo", Nothing)]) (\_ -> return ())
+    updateSession session (updateEnv [("Foo", Just "1")]) (\_ -> return ())
     threadDelay 2000000
-    updateSession session (updateEnv [("Foo", Nothing)]) (\_ -> return ())
+    updateSession session (updateEnv [("Foo", Just "2")]) (\_ -> return ())
     assertSourceErrors' session ["Intentional crash"]
 
 test_SessionRestart :: TestSuiteEnv -> Assertion

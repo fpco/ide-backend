@@ -97,7 +97,7 @@ test125 env = withAvailableSession env $ \session -> do
     update $ updateCodeGeneration True
     update $ updateStdoutBufferMode (RunLineBuffering Nothing)
     update $ updateStderrBufferMode (RunLineBuffering Nothing)
-    update $ updateDynamicOpts ["-Wall", "-Werror"]
+    update $ updateGhcOpts ["-Wall", "-Werror"]
 
     update $ updateSourceFile "src/Main.hs" $ L.unlines [
         "module Main where"
@@ -226,13 +226,13 @@ test115 env = withAvailableSession env $ \session -> do
     when (any (== KindError) $ map errorKind errs2) $
       assertFailure $ "Expected only warnings in " ++ show3errors errs2
   where
-    upd1 = (updateDynamicOpts ["-Wall", "-Werror"])
+    upd1 = (updateGhcOpts ["-Wall", "-Werror"])
         <> (updateSourceFile "src/Main.hs" $ L.unlines [
                "module Main where"
              , "main = putStrLn \"Hello 1\""
              ])
 
-    upd2 = (updateDynamicOpts ["-Wall"])
+    upd2 = (updateGhcOpts ["-Wall"])
         <> (updateSourceFile "src/Main.hs" $ L.unlines [
                "module Main where"
              , "main = putStrLn \"Hello 2\""
@@ -245,7 +245,7 @@ test185 env = withAvailableSession env $ \session -> do
     -- We expect two warnings (one deprecated, one unrecognized)
     assertEqual "" 2 (length errs)
   where
-    upd = updateDynamicOpts ["-fglasgow-exts","-thisOptionDoesNotExist"]
+    upd = updateGhcOpts ["-fglasgow-exts","-thisOptionDoesNotExist"]
 
 test145 :: TestSuiteEnv -> Assertion
 test145 env = withAvailableSession env $ \session -> do
@@ -253,7 +253,7 @@ test145 env = withAvailableSession env $ \session -> do
     assertNoErrors session
   where
     upd1 = (updateCodeGeneration True)
-        <> (updateDynamicOpts ["-XScopedTypeVariables", "-O"])
+        <> (updateGhcOpts ["-XScopedTypeVariables", "-O"])
         <> (updateSourceFile "Main.hs" "main = let (x :: String) = \"hello\" in putStrLn x")
 
 test170_GHC :: TestSuiteEnv -> Assertion
@@ -388,7 +388,7 @@ test214 env = withAvailableSession env $ \session -> do
     assertBool ("unexpected version " ++ show output) (isVersion output)
   where
     upd = updateCodeGeneration True
-       <> updateDynamicOpts ["-lz"]
+       <> updateGhcOpts ["-lz"]
        <> updateSourceFile "Main.hs" "foreign import ccall \"print_zlib_version\" print_zlib_version :: IO ()"
        <> updateSourceFile "foo.c" (L.unlines
             [ "#include <zlib.h>"

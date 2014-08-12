@@ -66,13 +66,15 @@ check opts what configDir = do
   putStrLn $ "Copying files from: " ++ what ++ "\n"
           ++ "to a temporary directory at: " ++ configDir ++ "\n"
   -- Init session.
-  let sessionConfig = defaultSessionConfig{
-                          configDir
-                     -- , configInProcess  = True
-                        , configStaticOpts = opts
-                        }
+  let sessionInitParams = defaultSessionInitParams {
+                              sessionInitGhcOptions = opts
+                            }
+      sessionConfig     = defaultSessionConfig{
+                              configDir
+                         -- , configInProcess  = True
+                            }
 
-  bracket (initSession defaultSessionInitParams sessionConfig)
+  bracket (initSession sessionInitParams sessionConfig)
           shutdownSession $ \session -> do
     isFile      <- doesFileExist      what
     isDirectory <- doesDirectoryExist what

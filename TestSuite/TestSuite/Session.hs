@@ -22,7 +22,7 @@ import qualified Data.Text                 as T
 
 import IdeSession
 
-updateSessionD :: IdeSession -> IdeSessionUpdate () -> Int -> IO ()
+updateSessionD :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
 updateSessionD session update numProgressUpdates = do
   progressRef <- newIORef []
 
@@ -46,7 +46,7 @@ updateSessionD session update numProgressUpdates = do
   assertBool ("We expected " ++ show numProgressUpdates ++ " progress messages, but got " ++ show progressUpdates)
              (length progressUpdates <= numProgressUpdates)
 
-updateSessionP :: IdeSession -> IdeSessionUpdate () -> [(Int, Int, String)] -> IO ()
+updateSessionP :: IdeSession -> IdeSessionUpdate -> [(Int, Int, String)] -> IO ()
 updateSessionP session update expectedProgressUpdates = do
   progressRef <- newIORef []
 
@@ -67,7 +67,7 @@ updateSessionP session update expectedProgressUpdates = do
                   Just actualMsg -> msg `isInfixOf` T.unpack actualMsg
                   Nothing        -> False)
 
-loadModule :: FilePath -> String -> IdeSessionUpdate ()
+loadModule :: FilePath -> String -> IdeSessionUpdate
 loadModule file contents =
     let mod =  "module " ++ mname file ++ " where\n" ++ contents
     in updateSourceFile file (L.fromString mod)
@@ -104,11 +104,11 @@ loadModulesFrom' session originalSourcesDir targets = do
   (originalUpdate, lm) <- getModulesFrom originalSourcesDir
   updateSessionD session (originalUpdate <> updateTargets targets) (length lm)
 
-getModules :: IdeSession -> IO (IdeSessionUpdate (), [FilePath])
+getModules :: IdeSession -> IO (IdeSessionUpdate, [FilePath])
 getModules session = getModulesFrom =<< getSourcesDir session
 
 -- | Update the session with all modules of the given directory.
-getModulesFrom :: FilePath -> IO (IdeSessionUpdate (), [FilePath])
+getModulesFrom :: FilePath -> IO (IdeSessionUpdate, [FilePath])
 getModulesFrom originalSourcesDir = do
   -- Send the source files from 'originalSourcesDir' to 'configSourcesDir'
   -- using the IdeSession's update mechanism.

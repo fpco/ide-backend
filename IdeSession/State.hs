@@ -4,8 +4,6 @@
 module IdeSession.State
   ( -- * Types
     Computed(..)
-  , PendingRemoteChanges(..)
-  , noPendingRemoteChanges
   , IdeSession(..)
   , IdeStaticInfo(..)
   , IdeSessionState(..)
@@ -18,7 +16,7 @@ module IdeSession.State
     -- * Accessors
   , ideLogicalTimestamp
   , ideComputed
-  , ideDynamicOpts
+  , ideGhcOpts
   , ideRelativeIncludes
   , ideGenerateCode
   , ideManagedFiles
@@ -106,45 +104,8 @@ data IdeStaticInfo = IdeStaticInfo {
   , ideSessionDir :: FilePath
   }
 
-data PendingRemoteChanges = PendingRemoteChanges {
-    -- | Has the code diverged from what has been loaded into GHC on the last
-    -- call to 'updateSession'?
-    pendingUpdatedCode :: Bool
-
-    -- | Has the environment (as recorded in this state) diverged from the
-    -- environment on the server?
-  , pendingUpdatedEnv :: Maybe [(String, Maybe String)]
-
-    -- | Has the value of ideArgs diverged from what's recorded on the server?
-  , pendingUpdatedArgs :: Maybe [String]
-
-    -- | Has the value of ideDynamicOpts diverged from what's recorded on the server?
-  , pendingUpdatedOpts :: Maybe [String]
-
-    -- | Was the value of relative includes changed?
-  , pendingUpdatedIncl :: Maybe [FilePath]
-
-    -- | Object files to be uploaded
-  , pendingUnloads :: [FilePath]
-
-    -- | Object files to be loaded (relative path, absolute path)
-  , pendingLoads :: [(FilePath, FilePath)]
-  }
-
-noPendingRemoteChanges :: PendingRemoteChanges
-noPendingRemoteChanges = PendingRemoteChanges {
-    pendingUpdatedCode = False
-  , pendingUpdatedEnv  = Nothing
-  , pendingUpdatedArgs = Nothing
-  , pendingUpdatedOpts = Nothing
-  , pendingUpdatedIncl = Nothing
-  , pendingUnloads     = []
-  , pendingLoads       = []
-  }
-
 data IdeSessionState =
     IdeSessionIdle IdeIdleState
-  | IdeSessionPendingChanges PendingRemoteChanges IdeIdleState
   | IdeSessionShutdown
   | IdeSessionServerDied ExternalException IdeIdleState
 
@@ -161,8 +122,8 @@ data IdeIdleState = IdeIdleState {
     -- | The result computed by the GHC API typing/compilation invocation
     -- in the last call to 'updateSession' invocation.
   , _ideComputed         :: !(Strict Maybe Computed)
-    -- | Dynamic options for GHC
-  , _ideDynamicOpts          :: ![String]
+    -- | Current GHC options
+  , _ideGhcOpts          :: ![String]
     -- | Include paths (equivalent of GHC's @-i@ parameter) relative to the
     -- temporary directory where we store the session's source files.
     -- The initial value, used also for server startup, is taken from
@@ -247,7 +208,7 @@ data RunActions a = RunActions {
 
 ideLogicalTimestamp    :: Accessor IdeIdleState LogicalTimestamp
 ideComputed            :: Accessor IdeIdleState (Strict Maybe Computed)
-ideDynamicOpts         :: Accessor IdeIdleState [String]
+ideGhcOpts             :: Accessor IdeIdleState [String]
 ideRelativeIncludes    :: Accessor IdeIdleState [FilePath]
 ideGenerateCode        :: Accessor IdeIdleState Bool
 ideManagedFiles        :: Accessor IdeIdleState ManagedFilesInternal
@@ -266,7 +227,7 @@ ideTargets             :: Accessor IdeIdleState Public.Targets
 
 ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
-ideDynamicOpts      = accessor _ideDynamicOpts      $ \x s -> s { _ideDynamicOpts      = x }
+ideGhcOpts          = accessor _ideGhcOpts          $ \x s -> s { _ideGhcOpts          = x }
 ideRelativeIncludes = accessor _ideRelativeIncludes $ \x s -> s { _ideRelativeIncludes = x }
 ideGenerateCode     = accessor _ideGenerateCode     $ \x s -> s { _ideGenerateCode     = x }
 ideManagedFiles     = accessor _ideManagedFiles     $ \x s -> s { _ideManagedFiles     = x }

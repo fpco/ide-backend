@@ -112,7 +112,7 @@ test_dynamicIncludePathChange env = withAvailableSession env $ \session -> do
     assertEqual "after runExe" ExitSuccess statusExe
 
 test_CPP_ifdefModuleHeader :: TestSuiteEnv -> Assertion
-test_CPP_ifdefModuleHeader env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
+test_CPP_ifdefModuleHeader env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ \session -> do
     updateSessionD session update 1
     assertNoErrors session
     assertIdInfo session "Good" (8,1,8,2) "x" VarName "[a]" "main:Good" "Good.hs@8:1-8:2" "" "binding occurrence"
@@ -129,12 +129,11 @@ test_CPP_ifdefModuleHeader env = withAvailableSession' env (withDynOpts ["-XCPP"
       ]
 
 test_rejectWrongCPP :: TestSuiteEnv -> Assertion
-test_rejectWrongCPP env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
+test_rejectWrongCPP env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ \session -> do
     updateSessionD session update 1
-    msgs <- getSourceErrors session
     -- Due to a GHC bug there are now 2 errors. TODO; when it's fixed,
     -- assert a single specific error here.
-    assertSomeErrors msgs
+    assertSomeErrors session
     assertRaises "runStmt session Main main"
       (== userError "Module \"Main\" not successfully loaded, when trying to run code.")
       (runStmt session "Main" "main")
@@ -144,12 +143,12 @@ test_rejectWrongCPP env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \s
 
 
 test_NamedFieldPuns :: TestSuiteEnv -> Assertion
-test_NamedFieldPuns env = withAvailableSession' env (withDynOpts ["-hide-package monads-tf"]) $ \session -> do
+test_NamedFieldPuns env = withAvailableSession' env (withGhcOpts ["-hide-package monads-tf"]) $ \session -> do
     withCurrentDirectory "test/Puns" $ do
       loadModulesFrom session "."
       assertMoreErrors session
       let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
-          update2 = updateDynamicOpts punOpts
+          update2 = updateGhcOpts punOpts
       (_, lm) <- getModules session
       updateSessionD session update2 (length lm)
     assertNoErrors session

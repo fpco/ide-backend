@@ -119,7 +119,7 @@ module IdeSession (
   , updateSourceFile
   , updateSourceFileFromFile
   , updateSourceFileDelete
-  , updateDynamicOpts
+  , updateGhcOpts
   , updateRelativeIncludes
   , updateCodeGeneration
   , updateDataFile
@@ -213,43 +213,22 @@ module IdeSession (
   , PackageDB(..)
   -- * For internal/debugging use only
   , getGhcExitCode
-  , forceRecompile
   , dumpIdInfo
   , crashGhcServer
   , sourceExtensions
   , ideBackendApiVersion
   , buildLicsFromPkgs
   , LicenseArgs(..)
-  -- * DEPRECATED aliases
-  , updateModule
-  , updateModuleFromFile
-  , updateModuleDelete
 ) where
-
-import qualified Data.ByteString.Lazy.Char8 as BSL
-
-import IdeSession.Config
-import IdeSession.Update
-import IdeSession.Query
-import IdeSession.State (IdeSession)
-import IdeSession.Types.Public
-import IdeSession.Types.Progress
-import IdeSession.GHC.API
-import IdeSession.GHC.Client
-import IdeSession.RPC.Client (ExternalException (..))
 
 import Distribution.Simple (PackageDBStack, PackageDB(..))
 
--- * DEPRECATED aliases
-
-updateModule :: FilePath -> BSL.ByteString -> IdeSessionUpdate ()
-{-# DEPRECATED updateModule "alias for updateSourceFile" #-}
-updateModule = updateSourceFile
-
-updateModuleFromFile :: FilePath -> IdeSessionUpdate ()
-{-# DEPRECATED updateModuleFromFile "alias for updateSourceFileFromFile" #-}
-updateModuleFromFile = updateSourceFileFromFile
-
-updateModuleDelete :: FilePath -> IdeSessionUpdate ()
-{-# DEPRECATED updateModuleDelete "alias for updateSourceFileDelete" #-}
-updateModuleDelete = updateSourceFileDelete
+import IdeSession.Config
+import IdeSession.GHC.API
+import IdeSession.GHC.Client
+import IdeSession.Query
+import IdeSession.RPC.Client (ExternalException (..))
+import IdeSession.State (IdeSession)
+import IdeSession.Types.Progress
+import IdeSession.Types.Public
+import IdeSession.Update

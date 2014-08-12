@@ -57,7 +57,7 @@ test_failWithoutXNDI_buildExe env = withAvailableSession env $ \session -> do
           \        putStrLn \"hello\"\n\
           \    foo"
     upd = updateSourceFile "src/Main.hs" src
-       <> updateDynamicOpts ["-XHaskell98"]
+       <> updateGhcOpts ["-XHaskell98"]
 
 test_passWithXNDI :: TestSuiteEnv -> Assertion
 test_passWithXNDI env = withAvailableSession env $ \session -> do
@@ -77,10 +77,10 @@ test_passWithXNDI env = withAvailableSession env $ \session -> do
           \        putStrLn \"hello\"\n\
           \    foo"
     upd = updateSourceFile "src/Main.hs" src
-       <> updateDynamicOpts ["-XNondecreasingIndentation"]
+       <> updateGhcOpts ["-XNondecreasingIndentation"]
 
 test_passWithXNDI_asStaticOpt :: TestSuiteEnv -> Assertion
-test_passWithXNDI_asStaticOpt env = withAvailableSession' env (withStaticOpts ["-XNondecreasingIndentation"]) $ \session -> do
+test_passWithXNDI_asStaticOpt env = withAvailableSession' env (withGhcOpts ["-XNondecreasingIndentation"]) $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
@@ -116,11 +116,11 @@ test_passWithXH98 env = withAvailableSession env $ \session -> do
           \        putStrLn \"hello\"\n\
           \    foo"
     upd = updateSourceFile "src/Main.hs" src
-       <> updateDynamicOpts ["-XHaskell98"]
+       <> updateGhcOpts ["-XHaskell98"]
 
 
 test_passWithXH98_asStaticOpt :: TestSuiteEnv -> Assertion
-test_passWithXH98_asStaticOpt env = withAvailableSession' env (withStaticOpts ["-XHaskell98"]) $ \session -> do
+test_passWithXH98_asStaticOpt env = withAvailableSession' env (withGhcOpts ["-XHaskell98"]) $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 

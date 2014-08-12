@@ -10,6 +10,7 @@ module IdeSession.Util (
   , setupEnv
   , relInclToOpts
   , parseProgressMessage
+  , ignoreDoesNotExist
     -- * Simple diffs
   , Diff(..)
   , applyMapDiff
@@ -21,43 +22,44 @@ module IdeSession.Util (
   , restoreStdError
   ) where
 
+import Control.Applicative ((<$>))
 import Control.Monad (void, forM_, mplus)
-import Data.Typeable (typeOf)
-import qualified Control.Exception as Ex
+import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
+import Crypto.Types (BitLength)
 import Data.Accessor (Accessor, accessor)
-import qualified Data.ByteString      as BSS
-import qualified Data.ByteString.Lazy as BSL
-import Data.Tagged (Tagged, untag)
-import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
 import Data.Binary (Binary(..))
-import qualified Data.Binary                  as Bin
-import qualified Data.Binary.Get.Internal     as Bin (readNWith)
-import qualified Data.Binary.Put              as Bin (putBuilder)
-import qualified Data.Binary.Builder.Internal as Bin (writeN)
+import Data.Char (isSpace)
+import Data.Digest.Pure.MD5 (MD5Digest, MD5Context)
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
-import Foreign.Ptr (castPtr)
-import Control.Applicative ((<$>))
-import Crypto.Types (BitLength)
-import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
-import System.FilePath (splitFileName, (<.>), (</>))
-import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
-import System.IO (Handle, hClose, openBinaryTempFile, hFlush, stdout, stderr)
-import Data.Char (isSpace)
-import qualified Data.Attoparsec.Text as Att
+import Data.Tagged (Tagged, untag)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Foreign as Text
+import Data.Typeable (typeOf)
+import Foreign.Ptr (castPtr)
+import GHC.Generics (Generic)
+import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
 import System.Environment (getEnvironment)
+import System.FilePath (splitFileName, (<.>), (</>))
 import System.FilePath (splitSearchPath, searchPathSeparator)
+import System.IO
+import System.IO.Error (isDoesNotExistError)
 import System.Posix (Fd)
+import System.Posix.Env (setEnv, unsetEnv)
 import System.Posix.IO.ByteString
 import System.Posix.Types (CPid(..))
-import qualified System.Posix.Files as Files
-import qualified Data.ByteString.Char8 as BSSC (pack)
-import System.Posix.Env (setEnv, unsetEnv)
-import GHC.Generics (Generic)
 import Text.Show.Pretty
+import qualified Control.Exception            as Ex
+import qualified Data.Attoparsec.Text         as Att
+import qualified Data.Binary                  as Bin
+import qualified Data.Binary.Builder.Internal as Bin (writeN)
+import qualified Data.Binary.Get.Internal     as Bin (readNWith)
+import qualified Data.Binary.Put              as Bin (putBuilder)
+import qualified Data.ByteString              as BSS
+import qualified Data.ByteString.Char8        as BSSC (pack)
+import qualified Data.ByteString.Lazy         as BSL
+import qualified Data.Text                    as Text
+import qualified Data.Text.Foreign            as Text
+import qualified System.Posix.Files           as Files
 
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map as StrictMap
@@ -198,6 +200,12 @@ parseProgressMessage = Att.parseOnly parser
 
     parseTH :: Att.Parser ()
     parseTH = Att.option () $ void $ Att.string (Text.pack "[TH]")
+
+-- | Ignore "does not exist" exception
+ignoreDoesNotExist :: IO () -> IO ()
+ignoreDoesNotExist = Ex.handle $ \e ->
+  if isDoesNotExistError e then return ()
+                           else Ex.throwIO e
 
 {------------------------------------------------------------------------------
   Simple diffs

@@ -208,7 +208,7 @@ test_fromMain env = withAvailableSession env $ \session -> do
     assertEqual "after runExe" ExitSuccess statusExe
 
 test_explicitPackage :: TestSuiteEnv -> Assertion
-test_explicitPackage env = withAvailableSession' env (withDynOpts packageOpts) $ \session -> do
+test_explicitPackage env = withAvailableSession' env (withGhcOpts packageOpts) $ \session -> do
     withCurrentDirectory "test/MainModule" $ do
       loadModulesFrom session "."
       assertNoErrors session

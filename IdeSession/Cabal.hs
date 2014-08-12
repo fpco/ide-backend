@@ -431,14 +431,14 @@ buildLicsFromPkgs :: Bool -> LicenseArgs
                   -> IO ExitCode
 buildLicsFromPkgs logProgress
                   LicenseArgs{ liPackageDBStack = configPackageDBStack
-                             , liExtraPathDirs = configExtraPathDirs
-                             , liLicenseExc = configLicenseExc
-                             , liDistDir = ideDistDir
-                             , liStdoutLog = stdoutLogFN
-                             , liStderrLog = stderrLogFN
+                             , liExtraPathDirs  = configExtraPathDirs
+                             , liLicenseExc     = configLicenseExc
+                             , liDistDir        = ideDistDir
+                             , liStdoutLog      = stdoutLogFN
+                             , liStderrLog      = stderrLogFN
                              , licenseFixed
-                             , liCabalsDir = cabalsDir
-                             , liPkgs = pkgs
+                             , liCabalsDir      = cabalsDir
+                             , liPkgs           = pkgs
                              } = do
   -- The following computations are very expensive, so should be done once,
   -- instead of at each invocation of @findLicense@ that needs to perform

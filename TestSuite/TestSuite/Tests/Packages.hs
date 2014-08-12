@@ -20,8 +20,8 @@ import TestSuite.Assertions
 testGroupPackages :: TestSuiteEnv -> TestTree
 testGroupPackages env = testGroup "Packages" [
     stdTest env "Package dependencies"                                                            test_PackageDependencies
-  , stdTest env "Register a package, only then see the package"                                   test_Register_NoRestart
-  , stdTest env "Register a package, restart session, only then see the package cabal macros"     test_Register_Restart
+  , stdTest env "Register a package, don't restart session, don't see the package"                test_Register_NoRestart
+  , stdTest env "Register a package, restart session, see the package and check for cabal macros" test_Register_Restart
   , stdTest env "Make sure package DB is passed to ghc (configGenerateModInfo False)"             test_PackageDB_ModInfoFalse
   , stdTest env "Make sure package DB is passed to ghc (configGenerateModInfo True)"              test_PackageDB_ModInfoTrue
   , stdTest env "Make sure package DB is passed to ghc after restartSession"                      test_PackageDB_AfterRestart
@@ -36,7 +36,7 @@ testGroupPackages env = testGroup "Packages" [
   ]
 
 test_PackageDependencies :: TestSuiteEnv -> Assertion
-test_PackageDependencies env = withAvailableSession' env (withDynOpts ["-hide-package monads-tf"]) $ \session -> do
+test_PackageDependencies env = withAvailableSession' env (withGhcOpts ["-hide-package monads-tf"]) $ \session -> do
     updateSessionD session upd 3
     assertNoErrors session
 
@@ -59,13 +59,14 @@ test_PackageDependencies env = withAvailableSession' env (withDynOpts ["-hide-pa
 
 test_Register_NoRestart :: TestSuiteEnv -> Assertion
 test_Register_NoRestart env = do
-  withAvailableSession' env (withStaticOpts ["-package simple-lib17"]) $ \session -> do
-    let expected = "<command line>: cannot satisfy -package simple-lib17"
+  withAvailableSession' env (withGhcOpts ["-package simple-lib17"]) $ \session -> do
     updateSessionD session upd 1
-    assertSourceErrors' session [expected]
+    assertSomeErrors session
+
     withInstalledPackage env "test/simple-lib17" $ do
+      -- No restartSession yet, hence the exception at session init.
       updateSessionD session upd 1
-      assertNoErrors session
+      assertSomeErrors session
   where
     upd = updateSourceFile "Main.hs" . L.unlines $
             [ "module Main where"
@@ -74,13 +75,15 @@ test_Register_NoRestart env = do
             ]
 
 test_Register_Restart :: TestSuiteEnv -> Assertion
-test_Register_Restart env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
+test_Register_Restart env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ \session -> do
     withInstalledPackage env "test/simple-lib17" $ do
       updateSessionD session upd 1
-      msgs <- getSourceErrors session
-      assertSomeErrors msgs
-      -- Session restart required to see the macros.
-      restartSession session (Just defaultSessionInitParams)
+      assertSomeErrors session
+
+    withInstalledPackage env "test/simple-lib17" $ do
+      -- NOTE: We used to pass defaultSessionInitParams as argument here. Not
+      -- sure why. Removed it (because it's no longer supported).
+      restartSession session -- only now the package accessible
       updateSessionD session upd 1
       assertNoErrors session
       let m = "Main"
@@ -121,7 +124,7 @@ test_PackageDB_ModInfoFalse env = withAvailableSession' env setup $ \session -> 
     packageOpts = ["-package parallel"]
     setup       = withModInfo True
                 . withDBStack [GlobalPackageDB]
-                . withDynOpts packageOpts
+                . withGhcOpts packageOpts
 
     upd = (updateSourceFile "A.hs" . L.unlines $
             [ "module A where"
@@ -144,7 +147,7 @@ test_PackageDB_ModInfoTrue env = withAvailableSession' env setup $ \session -> d
     packageOpts = ["-package parallel"]
     setup       = withModInfo True
                 . withDBStack [GlobalPackageDB]
-                . withDynOpts packageOpts
+                . withGhcOpts packageOpts
 
     upd = (updateSourceFile "A.hs" . L.unlines $
             [ "module A where"
@@ -156,7 +159,7 @@ test_PackageDB_ModInfoTrue env = withAvailableSession' env setup $ \session -> d
 
 test_PackageDB_AfterRestart :: TestSuiteEnv -> Assertion
 test_PackageDB_AfterRestart env = withAvailableSession' env setup $ \session -> do
-    restartSession session Nothing
+    restartSession session
     -- We expect an error because 'ide-backend-rts' and/or 'parallel'
     -- are not (usually?) installed in the global package DB.
     updateSessionD session upd 1
@@ -168,7 +171,7 @@ test_PackageDB_AfterRestart env = withAvailableSession' env setup $ \session -> 
     packageOpts = ["-package parallel"]
     setup       = withModInfo True
                 . withDBStack [GlobalPackageDB]
-                . withDynOpts packageOpts
+                . withGhcOpts packageOpts
 
     upd = (updateSourceFile "A.hs" . L.unlines $
             [ "module A where"
@@ -284,7 +287,7 @@ test_Consistency_PackageImports env = withAvailableSession env $ \sess -> do
     assertIdInfo sess "Baz" (7, 7, 7, 10) "par" VarName "a1 -> b1 -> b1" "parallel-X.Y.Z:Control.Parallel" "<no location info>" "parallel-X.Y.Z:Control.Parallel" "imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35"
 
 test_ModuleIn2Pkgs_1 :: TestSuiteEnv -> Assertion
-test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withDynOpts packageOpts) $ \session -> do
+test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withGhcOpts packageOpts) $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
@@ -340,7 +343,7 @@ test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withDynOpts packageOpts) $
             ])
 
 test_ModuleIn2Pkgs_2 :: TestSuiteEnv -> Assertion
-test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withDynOpts packageOpts) $ \session -> do
+test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withGhcOpts packageOpts) $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
@@ -399,7 +402,7 @@ test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withDynOpts packageOpts) $
 --
 -- 1. The package flags work at all
 -- 2. Transitions
--- 3. Statelessness of updateDynamicOpts
+-- 3. Statelessness of updateGhcOpts
 test_HideUnhide :: TestSuiteEnv -> Assertion
 test_HideUnhide env = withAvailableSession env $ \session -> do
     let runCode = do
@@ -421,24 +424,24 @@ test_HideUnhide env = withAvailableSession env $ \session -> do
        runCode
 
     -- Hide the package
-    do let upd = updateDynamicOpts ["-hide-package unix"]
+    do let upd = updateGhcOpts ["-hide-package unix"]
        updateSessionD session upd 1
        assertOneError session
 
     -- Reveal the package again with an explicit flag
-    do let upd = updateDynamicOpts ["-package unix"]
+    do let upd = updateGhcOpts ["-package unix"]
        updateSessionD session upd 1
        assertNoErrors session
        runCode
 
     -- Hide once more
-    do let upd = updateDynamicOpts ["-hide-package unix"]
+    do let upd = updateGhcOpts ["-hide-package unix"]
        updateSessionD session upd 1
        assertOneError session
 
     -- Reveal it again by using the default package flags
-    -- (statelessness of updateDynamicOpts)
-    do let upd = updateDynamicOpts []
+    -- (statelessness of updateGhcOpts)
+    do let upd = updateGhcOpts []
        updateSessionD session upd 1
        assertNoErrors session
        runCode
@@ -465,30 +468,30 @@ test_UnhideHide env = withAvailableSession env $ \session -> do
        assertOneError session
 
     -- Reveal the package with an explicit flag
-    do let upd = updateDynamicOpts ["-package ghc"]
+    do let upd = updateGhcOpts ["-package ghc"]
        updateSessionD session upd 1
        assertNoErrors session
        runCode
 
     -- Hide the package
-    do let upd = updateDynamicOpts ["-hide-package ghc"]
+    do let upd = updateGhcOpts ["-hide-package ghc"]
        updateSessionD session upd 1
        assertOneError session
 
     -- Reveal once more
-    do let upd = updateDynamicOpts ["-package ghc"]
+    do let upd = updateGhcOpts ["-package ghc"]
        updateSessionD session upd 1
        assertNoErrors session
        runCode
 
     -- Hide it again by using the default package flags
-    -- (statelessness of updateDynamicOpts)
-    do let upd = updateDynamicOpts []
+    -- (statelessness of updateGhcOpts)
+    do let upd = updateGhcOpts []
        updateSessionD session upd 1
        assertOneError session
 
 test_TrustDistrust :: TestSuiteEnv -> Assertion
-test_TrustDistrust env = withAvailableSession' env (withStaticOpts ["-XSafe", "-fpackage-trust"]) $ \session -> do
+test_TrustDistrust env = withAvailableSession env $ \session -> do
     let runCode = do
           runActions <- runStmt session "A" "test"
           (output, result) <- runWaitAll runActions
@@ -496,7 +499,8 @@ test_TrustDistrust env = withAvailableSession' env (withStaticOpts ["-XSafe", "-
           assertEqual "" "Hello\n" output
 
     -- First, check that base is untrusted
-    do let upd = (updateSourceFile "A.hs" $ L.unlines [
+    do let upd = (updateGhcOpts ["-XSafe", "-fpackage-trust"])
+              <> (updateSourceFile "A.hs" $ L.unlines [
                      "module A (test) where"
                    , "test :: IO ()"
                    , "test = putStrLn \"Hello\""
@@ -506,25 +510,25 @@ test_TrustDistrust env = withAvailableSession' env (withStaticOpts ["-XSafe", "-
        assertOneError session
 
     -- Trust base
-    do let upd = updateDynamicOpts ["-trust base"]
+    do let upd = updateGhcOpts ["-XSafe", "-fpackage-trust", "-trust base"]
        updateSessionD session upd 1
        assertNoErrors session
        runCode
 
     -- Untrust it
-    do let upd = updateDynamicOpts ["-distrust base"]
+    do let upd = updateGhcOpts ["-XSafe", "-fpackage-trust", "-distrust base"]
        updateSessionD session upd 1
        assertOneError session
 
     -- Trust it once more
-    do let upd = updateDynamicOpts ["-trust base"]
+    do let upd = updateGhcOpts ["-XSafe", "-fpackage-trust", "-trust base"]
        updateSessionD session upd 1
        assertNoErrors session
        runCode
 
     -- Untrust it again by using the default package flags
-    -- (statelessness of updateDynamicOpts)
-    do let upd = updateDynamicOpts []
+    -- (statelessness of updateGhcOpts)
+    do let upd = updateGhcOpts ["-XSafe", "-fpackage-trust"]
        updateSessionD session upd 1
        assertOneError session
 

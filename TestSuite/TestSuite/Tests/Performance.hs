@@ -213,7 +213,7 @@ testPerfLimit = read $ unsafePerformIO $
   System.getEnv "IDE_BACKEND_testPerfLimit"
   `Ex.catch` (\(_ :: Ex.IOException) -> return "30")
 
-updKN :: Int -> Int -> IdeSessionUpdate ()
+updKN :: Int -> Int -> IdeSessionUpdate
 updKN k n =
   let moduleN = L.fromString $ unlines $
               [ "module M" ++ show n ++ " where"
@@ -223,7 +223,7 @@ updKN k n =
               ]
   in updateSourceFile ("M" ++ show n ++ ".hs") moduleN
 
-updDepKN :: Int -> Int -> IdeSessionUpdate ()
+updDepKN :: Int -> Int -> IdeSessionUpdate
 updDepKN k n =
   let depN | n <= 1 = ("System.IO", ".hFlush System.IO.stdout")
            | otherwise = ("M" ++ show (n - 1), ".m")

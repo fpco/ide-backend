@@ -14,8 +14,7 @@ module TestSuite.State (
   , startNewSession
   , defaultSessionSetup
   , defaultServerConfig
-  , withDynOpts
-  , withStaticOpts
+  , withGhcOpts
   , withIncludes
   , withModInfo
   , withDBStack
@@ -125,33 +124,26 @@ withAvailableSession env = withAvailableSession' env id
 
 data TestSuiteSessionSetup = TestSuiteSessionSetup {
     testSuiteSessionServer  :: TestSuiteServerConfig
-  , testSuiteSessionDynOpts :: [String]
+  , testSuiteSessionGhcOpts :: [String]
   , testSuiteSessionReuse   :: Bool
   }
 
 defaultSessionSetup :: TestSuiteEnv -> TestSuiteSessionSetup
 defaultSessionSetup env = TestSuiteSessionSetup {
     testSuiteSessionServer  = defaultServerConfig env
-  , testSuiteSessionDynOpts = []
+  , testSuiteSessionGhcOpts = []
   , testSuiteSessionReuse   = True
   }
 
-withDynOpts :: [String] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
-withDynOpts opts setup = setup {
-    testSuiteSessionDynOpts = opts
-  }
-
-withStaticOpts :: [String] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
-withStaticOpts opts setup = setup {
-    testSuiteSessionServer = (testSuiteSessionServer setup) {
-       testSuiteServerStaticOpts = Just opts
-     }
+withGhcOpts :: [String] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
+withGhcOpts opts setup = setup {
+    testSuiteSessionGhcOpts = opts
   }
 
 withIncludes :: [FilePath] -> TestSuiteSessionSetup -> TestSuiteSessionSetup
 withIncludes incls setup = setup {
     testSuiteSessionServer = (testSuiteSessionServer setup) {
-        testSuiteServerRelativeIncludes = Just (incls ++ configRelativeIncludes defaultSessionConfig)
+        testSuiteServerRelativeIncludes = Just (incls ++ sessionInitRelativeIncludes defaultSessionInitParams)
       }
   }
 
@@ -190,12 +182,12 @@ withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
 
     -- Reset session state
     updateSession session
-                  (    updateDynamicOpts testSuiteSessionDynOpts
+                  (    updateGhcOpts testSuiteSessionGhcOpts
                     <> updateDeleteManagedFiles
                     <> updateCodeGeneration False
                     <> updateEnv []
                     <> updateTargets (TargetsExclude [])
-                    <> updateRelativeIncludes (configRelativeIncludes (deriveSessionConfig testSuiteSessionServer))
+                    <> updateRelativeIncludes (sessionInitRelativeIncludes (deriveSessionInitParams testSuiteSessionServer))
                   )
                   (\_ -> return ())
 
@@ -223,7 +215,6 @@ defaultServerConfig TestSuiteEnv{..} = TestSuiteServerConfig {
     , testSuiteServerGenerateModInfo  = Nothing
     , testSuiteServerPackageDBStack   = Nothing
     , testSuiteServerCabalMacros      = Nothing
-    , testSuiteServerStaticOpts       = Nothing
     }
 
 -- | Skip this test if the --no-haddocks flag is passed
@@ -297,7 +288,6 @@ data TestSuiteServerConfig = TestSuiteServerConfig {
   , testSuiteServerGenerateModInfo  :: Maybe Bool
   , testSuiteServerPackageDBStack   :: Maybe PackageDBStack
   , testSuiteServerCabalMacros      :: Maybe L.ByteString
-  , testSuiteServerStaticOpts       :: Maybe [String]
   }
   deriving (Eq, Show)
 
@@ -311,6 +301,9 @@ deriveSessionInitParams TestSuiteServerConfig{..} = defaultSessionInitParams {
           testSuiteServerCabalMacros
         `mplus`
           sessionInitCabalMacros defaultSessionInitParams
+    , sessionInitRelativeIncludes =
+        fromMaybe (sessionInitRelativeIncludes defaultSessionInitParams) $
+          testSuiteServerRelativeIncludes
     }
   where
     TestSuiteConfig{..} = testSuiteServerConfig
@@ -333,15 +326,9 @@ deriveSessionConfig TestSuiteServerConfig{..} = defaultSessionConfig {
         splitSearchPath $ case testSuiteServerGhcVersion of
                             GHC742 -> testSuiteConfigExtraPaths74
                             GHC78  -> testSuiteConfigExtraPaths78
-    , configRelativeIncludes =
-        fromMaybe (configRelativeIncludes defaultSessionConfig) $
-          testSuiteServerRelativeIncludes
     , configGenerateModInfo =
         fromMaybe (configGenerateModInfo defaultSessionConfig) $
           testSuiteServerGenerateModInfo
-    , configStaticOpts =
-        fromMaybe (configStaticOpts defaultSessionConfig) $
-          testSuiteServerStaticOpts
     }
   where
     TestSuiteConfig{..} = testSuiteServerConfig

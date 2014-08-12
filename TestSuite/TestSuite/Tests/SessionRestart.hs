@@ -103,7 +103,7 @@ test_EnvRestored env = withAvailableSession env $ \session -> do
 
     -- Start a new server
     serverBefore <- getGhcServer session
-    restartSession session Nothing
+    restartSession session
 
     -- Compile the code on the new server
     updateSessionD session upd 1
@@ -159,7 +159,7 @@ restartRun env code exitCode = withAvailableSession env $ \session -> do
     -- Start a new server
     threadDelay 100000
     serverBefore <- getGhcServer session
-    restartSession session Nothing
+    restartSession session
 
     -- Compile the code on the new server
     updateSessionD session upd 1

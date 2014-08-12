@@ -305,7 +305,7 @@ test_runWait_AfterTermination_Restarted env = withAvailableSession env $ \sessio
     assertNoErrors session
     runActions <- runStmt session "M" "loop"
     threadDelay 1000000
-    restartSession session Nothing
+    restartSession session
     forceCancel runActions
     resOrEx2 <- runWait runActions
     case resOrEx2 of
@@ -323,7 +323,7 @@ test_runWait_AfterTermination_Restarted env = withAvailableSession env $ \sessio
     updateSessionD session updExe 2
     runActionsExe <- runExe session m
     threadDelay 1000000
-    restartSession session Nothing
+    restartSession session
     -- restartSession would not suffice, since session restart
     -- doesn't stop the exe, so we need to interrupt manually.
     interrupt runActionsExe

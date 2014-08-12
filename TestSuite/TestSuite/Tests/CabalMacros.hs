@@ -26,7 +26,7 @@ testGroupCabalMacros env = testGroup "Cabal macros" [
   ]
 
 test_MinVersionForDependency :: TestSuiteEnv -> Assertion
-test_MinVersionForDependency env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
+test_MinVersionForDependency env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ \session -> do
     macros <- getCabalMacros session
     assertBool "Main with cabal macro exe output" (not $ L.null macros)
     -- assertEqual "Main with cabal macro exe output" (BSLC.pack "") macros
@@ -60,7 +60,7 @@ test_MinVersionForDependency env = withAvailableSession' env (withDynOpts ["-XCP
       ]
 
 test_MinVersionForNonDependency :: TestSuiteEnv -> Assertion
-test_MinVersionForNonDependency env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
+test_MinVersionForNonDependency env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ \session -> do
     updateSessionD session update 1
     assertNoErrors session
     let update2 = updateCodeGeneration True
@@ -96,7 +96,7 @@ test_MinVersionForNonDependency env = withAvailableSession' env (withDynOpts ["-
       ]
 
 test_checkCabalMacroDefined :: TestSuiteEnv -> Assertion
-test_checkCabalMacroDefined env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
+test_checkCabalMacroDefined env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ \session -> do
     macros <- getCabalMacros session
     assertBool "M with cabal macro exe output" (not $ L.null macros)
     updateSessionD session (update <> updateCodeGeneration True) 1
@@ -133,7 +133,7 @@ test_checkCabalMacroDefined env = withAvailableSession' env (withDynOpts ["-XCPP
       ]
 
 test_includeExternalMacros :: TestSuiteEnv -> Assertion
-test_includeExternalMacros env = withAvailableSession' env (withDynOpts ["-XCPP"]) $ \session -> do
+test_includeExternalMacros env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ \session -> do
     macros <- getCabalMacros session
     assertBool "M with cabal macro exe output" (not $ L.null macros)
     updateSessionD session (update <> updateCodeGeneration True) 1
@@ -171,11 +171,11 @@ test_caching env = do
 
     -- Initialize new session with these macros
     do let cfg = (defaultServerConfig env) {
-            testSuiteServerStaticOpts  = Just ["-XCPP"]
-          , testSuiteServerCabalMacros = Just macros
-          }
+                     testSuiteServerCabalMacros = Just macros
+                   }
        withSession cfg $ \session -> do
          let update = (updateCodeGeneration True)
+                   <> (updateGhcOpts ["-XCPP"])
                    <> (updateSourceFile "Main.hs" $ L.unlines [
                            "#if !MIN_VERSION_base(999,0,0)"
                          , "main = print 5"
@@ -201,11 +201,11 @@ test_caching env = do
     -- Test custom macros
     do let customMacros = "#define HELLO 1"
            cfg = (defaultServerConfig env) {
-               testSuiteServerStaticOpts  = Just ["-XCPP"]
-             , testSuiteServerCabalMacros = Just customMacros
-             }
+                     testSuiteServerCabalMacros = Just customMacros
+                   }
        withSession cfg $ \session -> do
          let update = (updateCodeGeneration True)
+                   <> (updateGhcOpts ["-XCPP"])
                    <> (updateSourceFile "Main.hs" $ L.unlines [
                            "#if HELLO"
                          , "main = print 6"

@@ -208,7 +208,7 @@ data RunBufferMode =
   | RunBlockBuffering { runBufferBlockSize :: Maybe Int
                       , runBufferTimeout   :: Maybe Int
                       }
-  deriving (Typeable, Show, Generic)
+  deriving (Typeable, Show, Generic, Eq)
 
 -- | The outcome of running code
 data RunResult =

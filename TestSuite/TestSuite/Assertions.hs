@@ -95,13 +95,14 @@ assertNoErrors session = do
 
 assertOneError :: IdeSession -> Assertion
 assertOneError session = do
+  assertSomeErrors session
   msgs <- getSourceErrors session
-  assertSomeErrors msgs
   assertBool ("Too many type errors: " ++ show3errors msgs)
     $ length msgs <= 1
 
-assertSomeErrors :: [SourceError] -> Assertion
-assertSomeErrors msgs = do
+assertSomeErrors :: IdeSession -> Assertion
+assertSomeErrors session = do
+  msgs <- getSourceErrors session
   assertBool "An error was expected, but not found" $ length msgs >= 1
 
 assertMoreErrors :: IdeSession -> Assertion

@@ -31,8 +31,8 @@ testGroupFFI env = testGroup "Using the FFI" [
   , stdTest env "with withIncludes and TargetsExclude"                                            test_TargetsExclude
   , stdTest env "with dynamic include, TH and MIN_VERSION_base via buildExe"                      test_DynamicInclude
   , stdTest env "with dynamic include and TargetsInclude"                                         test_DynamicInclude_TargetsInclude
-  , stdTest env "with setting SSE via GHC API #218"                                               test_SSE_via_API
--- fails:  , stdTest env "with setting SSE via buildExe #218"                                                   test_SSE_via_buildExe
+  , stdTest env "with setting SSE via GHC API (#218)"                                             test_SSE_via_API
+  , stdTest env "with setting SSE via buildExe (#218)"                                            test_SSE_via_buildExe
   ]
 
 test_FFI_via_API :: TestSuiteEnv -> Assertion
@@ -57,7 +57,7 @@ test_FFI_via_API_restartSession env = withAvailableSession env $ \session -> do
     updateSessionD session upd 3
     assertNoErrors session
 
-    restartSession session Nothing
+    restartSession session
     updateSessionD session mempty 3
     assertNoErrors session
 
@@ -88,7 +88,7 @@ test_deleteReadd env = withAvailableSession env $ \session -> do
     updateSessionD session (updateSourceFileDelete "test/FFI/life.c") 0
     assertNoErrors session
 
-    restartSession session Nothing
+    restartSession session
     updateSessionD session mempty 1
     assertOneError session
 
@@ -224,7 +224,7 @@ test_MinVersion_restartSession env = withAvailableSession' env (withIncludes ["t
     updateSessionD session upd 4
     assertNoErrors session
 
-    restartSession session Nothing
+    restartSession session
     updateSessionD session mempty 4
     assertNoErrors session
 
@@ -233,7 +233,7 @@ test_MinVersion_restartSession env = withAvailableSession' env (withIncludes ["t
                             <> updateSourceFileDelete "test/FFI/ffiles/local.h") 0
     assertNoErrors session
 
-    restartSession session Nothing
+    restartSession session
     updateSessionD session mempty 4
     assertOneError session
 
@@ -272,7 +272,7 @@ test_TargetsExclude env = withAvailableSession' env (withIncludes ["test/FFI"]) 
     updateSessionD session (updateSourceFileDelete "test/FFI/ffiles/life.c") 0
     assertNoErrors session
 
-    restartSession session Nothing
+    restartSession session
     updateSessionD session mempty 1
     assertOneError session
 
@@ -432,7 +432,7 @@ test_SSE_via_API env = withAvailableSession env $ \session -> do
         updateCodeGeneration True
       , updateSourceFile "test.c" "#include <smmintrin.h>\nint meaningOfLife() { return 42; }"  -- TODO: actually call any SSE op
       , updateSourceFile "Main.hs" "{-# LANGUAGE ForeignFunctionInterface #-}\nforeign import ccall meaningOfLife :: IO Int\nmain :: IO ()\nmain = print =<< meaningOfLife"
-      , updateDynamicOpts ["-optc-msse4"]
+      , updateGhcOpts ["-optc-msse4"]
       ]
 
 test_SSE_via_buildExe :: TestSuiteEnv -> Assertion
@@ -458,7 +458,7 @@ test_SSE_via_buildExe env = withAvailableSession env $ \session -> do
         updateCodeGeneration True
       , updateSourceFile "test.c" "#include <smmintrin.h>\nint meaningOfLife() { return 42; }"  -- TODO: actually call any SSE op
       , updateSourceFile "Main.hs" "{-# LANGUAGE ForeignFunctionInterface #-}\nforeign import ccall meaningOfLife :: IO Int\nmain :: IO ()\nmain = print =<< meaningOfLife"
-      , updateDynamicOpts ["-optc-msse4"]
+      , updateGhcOpts ["-optc-msse4"]
       ]
 
 

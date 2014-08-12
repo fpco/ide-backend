@@ -29,6 +29,8 @@ library
                       IdeSession.Licenses,
                       IdeSession.Query,
                       IdeSession.Update,
+                      IdeSession.Update.IdeSessionUpdate,
+                      IdeSession.Update.ExecuteSessionUpdate,
                       IdeSession.RPC.Client,
                       IdeSession.RPC.API,
                       IdeSession.RPC.Stream,
@@ -81,6 +83,7 @@ library
                       transformers         >= 0.3     && < 0.4,
                       time                 >= 1.4     && < 1.5,
                       attoparsec           >= 0.10    && < 0.12,
+                      utf8-string          >= 0.3     && < 0.4,
                       template-haskell,
                       -- our own private fork:
                       Cabal-ide-backend    >= 1.18,
@@ -88,10 +91,19 @@ library
                       pretty-show
 
   default-language:   Haskell2010
-  default-extensions: MonoLocalBinds,
-                      BangPatterns, RecordWildCards, NamedFieldPuns
-  other-extensions:   CPP, TemplateHaskell, ScopedTypeVariables,
+  default-extensions: MonoLocalBinds
+                      BangPatterns
+                      RecordWildCards
+                      NamedFieldPuns
+                      RankNTypes
+                      MultiParamTypeClasses
+                      ExistentialQuantification
+                      FlexibleContexts
                       DeriveDataTypeable
+  other-extensions:   CPP
+                      TemplateHaskell
+                      ScopedTypeVariables,
+                      GeneralizedNewtypeDeriving
   ghc-options:        -Wall -fno-warn-unused-do-bind
 
 executable ide-backend-exe-cabal

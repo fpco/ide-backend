@@ -583,7 +583,7 @@ buildExeTargetHsFails session m = do
   status <- getBuildExeStatus session
   assertEqual "after exe build" (Just $ ExitFailure 1) status
 
-modAn, modBn, modCn :: String -> IdeSessionUpdate ()
+modAn, modBn, modCn :: String -> IdeSessionUpdate
 modAn n = updateSourceFile "A.hs" $ L.fromString $ unlines [
     "module A (foo, main) where"
   , "foo :: Int"

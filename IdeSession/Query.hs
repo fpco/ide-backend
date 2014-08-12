@@ -336,10 +336,8 @@ getDotCabal :: Query (String -> Version -> BSL.ByteString)
 getDotCabal session = withComputedState session
                       $ \idleState computed@Computed{..} -> do
   let sourcesDir       = ideSessionSourceDir . ideSessionDir $ ideStaticInfo session
-      dynamicOpts      = idleState ^. ideDynamicOpts
+      options          = idleState ^. ideGhcOpts
       relativeIncludes = idleState ^. ideRelativeIncludes
-      SessionConfig{configStaticOpts} = ideConfig $ ideStaticInfo session
-      options          = configStaticOpts ++ dynamicOpts
   buildDotCabal sourcesDir relativeIncludes options computed
 
 {------------------------------------------------------------------------------
@@ -366,10 +364,9 @@ withIdleState :: IdeSession -> (IdeIdleState -> IO a) -> IO a
 withIdleState IdeSession{ideState} f =
   $withStrictMVar ideState $ \st ->
     case st of
-      IdeSessionIdle             idleState -> f idleState
-      IdeSessionPendingChanges _ idleState -> f idleState
-      IdeSessionServerDied     e idleState -> f (reportExAsErr e idleState)
-      IdeSessionShutdown                   -> fail "Session already shut down."
+      IdeSessionIdle         idleState -> f idleState
+      IdeSessionServerDied e idleState -> f (reportExAsErr e idleState)
+      IdeSessionShutdown               -> fail "Session already shut down."
   where
     reportExAsErr :: ExternalException -> IdeIdleState -> IdeIdleState
     reportExAsErr e = ideComputed ^:

@@ -25,7 +25,7 @@ testGroupTH env = testGroup "TH" [
   ]
 
 test_codeGenOn :: TestSuiteEnv -> Assertion
-test_codeGenOn env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \session -> do
+test_codeGenOn env = withAvailableSession' env (withGhcOpts ["-XTemplateHaskell"]) $ \session -> do
     withCurrentDirectory "test" $ do
       (originalUpdate, lm) <- getModulesFrom "TH"
       let update = originalUpdate <> updateCodeGeneration True
@@ -37,7 +37,7 @@ test_codeGenOn env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"
     assertEqual "" output "(True,43)\n"
 
 test_buildExe :: TestSuiteEnv -> Assertion
-test_buildExe env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \session -> do
+test_buildExe env = withAvailableSession' env (withGhcOpts ["-XTemplateHaskell"]) $ \session -> do
     withCurrentDirectory "test" $ do
       (originalUpdate, lm) <- getModulesFrom "TH"
       let update = originalUpdate <> updateCodeGeneration True
@@ -60,7 +60,7 @@ test_buildExe env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]
     assertEqual "after runExe" ExitSuccess statusExe
 
 test_TH :: TestSuiteEnv -> Assertion
-test_TH env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \session -> do
+test_TH env = withAvailableSession' env (withGhcOpts ["-XTemplateHaskell"]) $ \session -> do
     withCurrentDirectory "test" $ do
       (originalUpdate, lm) <- getModulesFrom "TH"
       let update = originalUpdate <> updateCodeGeneration True
@@ -75,7 +75,7 @@ test_TH env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \s
     assertBool "TH.TH hoogle files" hoogleExists
 
 test_Cabal :: TestSuiteEnv -> Assertion
-test_Cabal env = withAvailableSession' env (withDynOpts ["-XTemplateHaskell"]) $ \session -> do
+test_Cabal env = withAvailableSession' env (withGhcOpts ["-XTemplateHaskell"]) $ \session -> do
     withCurrentDirectory "test" $ do
       (originalUpdate, lm) <- getModulesFrom "TH"
       let update = originalUpdate <> updateCodeGeneration True

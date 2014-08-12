@@ -62,8 +62,11 @@ import Distribution.Simple.Program.Find ( -- From our patched cabal
 ------------------------------------------------------------------------------}
 
 -- | Start the ghc server
-forkGhcServer :: IdeStaticInfo -> IO (Either ExternalException (GhcServer, GhcVersion))
-forkGhcServer IdeStaticInfo{ideConfig, ideSessionDir} = do
+forkGhcServer :: [String]      -- ^ Initial ghc options
+              -> [FilePath]    -- ^ Relative includes
+              -> IdeStaticInfo -- ^ Session setup info
+              -> IO (Either ExternalException (GhcServer, GhcVersion))
+forkGhcServer ghcOpts relIncls IdeStaticInfo{ideConfig, ideSessionDir} = do
   when configInProcess $
     fail "In-process ghc server not currently supported"
 
@@ -90,8 +93,8 @@ forkGhcServer IdeStaticInfo{ideConfig, ideSessionDir} = do
 
     opts :: [String]
     opts = "-XHaskell2010"  -- see #190
-           : configStaticOpts
-           ++ relInclToOpts (ideSessionSourceDir ideSessionDir) configRelativeIncludes
+         : ghcOpts
+        ++ relInclToOpts (ideSessionSourceDir ideSessionDir) relIncls
 
     searchPath :: ProgramSearchPath
     searchPath = map ProgramSearchPathDir configExtraPathDirs

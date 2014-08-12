@@ -205,7 +205,7 @@ testMultipleModules env = withAvailableSession env $ \session -> do
             ])
 
 testExternalPkgs :: TestSuiteEnv -> Assertion
-testExternalPkgs env = withAvailableSession' env (withDynOpts opts) $ \session -> do
+testExternalPkgs env = withAvailableSession' env (withGhcOpts opts) $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
     assertIdInfo session "A" (3,1,3,2) "e" VarName "Bool" "main:A" "A.hs@3:1-3:2" "" "binding occurrence"
@@ -277,7 +277,7 @@ testExternalPkgs env = withAvailableSession' env (withDynOpts opts) $ \session -
             ]
 
 testReusingTypeVariables :: TestSuiteEnv -> Assertion
-testReusingTypeVariables env = withAvailableSession' env (withDynOpts ["-XScopedTypeVariables"]) $ \session -> do
+testReusingTypeVariables env = withAvailableSession' env (withGhcOpts ["-XScopedTypeVariables"]) $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
     assertIdInfo session "A" (2,1,2,3) "f1" VarName "(t, t1) -> t" "main:A" "A.hs@2:1-2:3" "" "binding occurrence"
@@ -785,7 +785,7 @@ testSpanInfoVsExpTypes env = withAvailableSession env $ \session -> do
 -- TODO: Currently we mark this session as dont reuse because
 -- hiding all packages leaves the session unuseable (see #224)
 test_StateOfCacheThroughoutUpdates :: TestSuiteEnv -> Assertion
-test_StateOfCacheThroughoutUpdates env = withAvailableSession' env (dontReuse . withDynOpts packageOpts) $ \sess -> do
+test_StateOfCacheThroughoutUpdates env = withAvailableSession' env (dontReuse . withGhcOpts packageOpts) $ \sess -> do
     let cb     = \_ -> return ()
         update = flip (updateSession sess) cb
         updMod = \mod code -> updateSourceFile mod (L.fromString code)
@@ -855,7 +855,7 @@ test_StateOfCacheThroughoutUpdates env = withAvailableSession' env (dontReuse . 
                   ]
 
 test_SubExp_Simple :: TestSuiteEnv -> Assertion
-test_SubExp_Simple env = withAvailableSession' env (withDynOpts ["-XNoMonomorphismRestriction"]) $ \session -> do
+test_SubExp_Simple env = withAvailableSession' env (withGhcOpts ["-XNoMonomorphismRestriction"]) $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
@@ -1076,7 +1076,7 @@ test_SubExp_Simple env = withAvailableSession' env (withDynOpts ["-XNoMonomorphi
             ])
 
 test_SubExp_TH :: TestSuiteEnv -> Assertion
-test_SubExp_TH env = withAvailableSession' env (withDynOpts ["-XNoMonomorphismRestriction", "-XTemplateHaskell"]) $ \session -> do
+test_SubExp_TH env = withAvailableSession' env (withGhcOpts ["-XNoMonomorphismRestriction", "-XTemplateHaskell"]) $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
 
@@ -1123,7 +1123,7 @@ test_SubExp_TH env = withAvailableSession' env (withDynOpts ["-XNoMonomorphismRe
        <> (updateCodeGeneration True)
 
 test_SubExp_TypeFamilies :: TestSuiteEnv -> Assertion
-test_SubExp_TypeFamilies env = withAvailableSession' env (withDynOpts ["-XTypeFamilies"]) $ \session -> do
+test_SubExp_TypeFamilies env = withAvailableSession' env (withGhcOpts ["-XTypeFamilies"]) $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
@@ -1154,7 +1154,7 @@ test_SubExp_TypeFamilies env = withAvailableSession' env (withDynOpts ["-XTypeFa
              ])
 
 test_SubExp_HigherRank :: TestSuiteEnv -> Assertion
-test_SubExp_HigherRank env = withAvailableSession' env (withDynOpts ["-XRank2Types"]) $ \session -> do
+test_SubExp_HigherRank env = withAvailableSession' env (withGhcOpts ["-XRank2Types"]) $ \session -> do
     -- Note: intentionally using (==) in this test rather than (<=) so that
     -- the "definition type" is different from the "usage type"
     -- (forall a. Eq a => a -> a -> Bool) vs (forall a. Ord a => a -> a -> Bool)
@@ -1412,7 +1412,7 @@ test_UseSites_Types env = withAvailableSession env $ \session -> do
       ]
 
 test_UseSites_Local :: TestSuiteEnv -> Assertion
-test_UseSites_Local env = withAvailableSession' env (withDynOpts ["-XScopedTypeVariables"]) $ \session -> do
+test_UseSites_Local env = withAvailableSession' env (withGhcOpts ["-XScopedTypeVariables"]) $ \session -> do
     updateSessionD session upd1 2
     assertNoErrors session
     useSites <- getUseSites session
