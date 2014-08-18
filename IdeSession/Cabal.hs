@@ -92,6 +92,9 @@ import qualified IdeSession.Strict.List as StrictList
 import qualified IdeSession.Strict.Map  as StrictMap
 import IdeSession.Util
 
+import Control.Concurrent
+import System.Directory
+
 -- TODO: factor out common parts of exe building and haddock generation
 -- after Cabal and the code that calls it are improved not to require
 -- the configure step, etc.
@@ -252,15 +255,16 @@ mkConfFlags ideDistDir configPackageDBStack progPathExtra =
 configureAndBuild :: BuildExeArgs
                   -> [(ModuleName, FilePath)]
                   -> IO ExitCode
-configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
-                              , beExtraPathDirs = configExtraPathDirs
-                              , beSourcesDir = ideSourcesDir
-                              , beDistDir = ideDistDir
+configureAndBuild BuildExeArgs{ bePackageDBStack   = configPackageDBStack
+                              , beExtraPathDirs    = configExtraPathDirs
+                              , beSourcesDir       = ideSourcesDir
+                              , beDistDir          = ideDistDir
                               , beRelativeIncludes = relativeIncludes
-                              , beGhcOpts = ghcOpts
-                              , beLibDeps = libDeps
-                              , beLoadedMs = loadedMs
+                              , beGhcOpts          = ghcOpts
+                              , beLibDeps          = libDeps
+                              , beLoadedMs         = loadedMs
                               , .. } ms = do
+  appendFile "/tmp/ghc.log" ("configureAndBuild: " ++ show ghcOpts ++ "\n")
   let mainDep = Package.Dependency pkgNameMain anyVersion
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
@@ -302,6 +306,8 @@ configureAndBuild BuildExeArgs{ bePackageDBStack = configPackageDBStack
       preprocessors = []
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
   let confAndBuild = do
+        cwd <- getCurrentDirectory
+        appendFile "/tmp/ghc.log" ((show (cwd, gpDesc :: GenericPackageDescription, hookedBuildInfo :: HookedBuildInfo, confFlags :: Setup.ConfigFlags) ++ "\n") :: String)
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
         -- Setting @withPackageDB@ here is too late, @configure@ would fail
         -- already. Hence we set it in @mkConfFlags@ (can be reverted,
