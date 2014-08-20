@@ -59,8 +59,10 @@ data GhcRequest
       , reqPrintForce :: Bool
       }
   | ReqLoad {
-        reqLoadPath   :: FilePath
-      , reqLoadUnload :: Bool
+        reqLoad :: [FilePath]
+      }
+  | ReqUnload {
+        reqUnload :: [FilePath]
       }
   | ReqSetGhcOpts {
         reqSetGhcOpts :: [String]
@@ -135,10 +137,12 @@ instance Binary GhcRequest where
     put reqPrintForce
   put ReqLoad{..} = do
     putWord8 6
-    put reqLoadPath
-    put reqLoadUnload
-  put ReqSetGhcOpts{..} = do
+    put reqLoad
+  put ReqUnload{..} = do
     putWord8 7
+    put reqUnload
+  put ReqSetGhcOpts{..} = do
+    putWord8 8
     put reqSetGhcOpts
   put ReqCrash{..} = do
     putWord8 255
@@ -153,8 +157,9 @@ instance Binary GhcRequest where
       3   -> ReqSetArgs     <$> get
       4   -> ReqBreakpoint  <$> get <*> get <*> get
       5   -> ReqPrint       <$> get <*> get <*> get
-      6   -> ReqLoad        <$> get <*> get
-      7   -> ReqSetGhcOpts  <$> get
+      6   -> ReqLoad        <$> get
+      7   -> ReqUnload      <$> get
+      8   -> ReqSetGhcOpts  <$> get
       255 -> ReqCrash       <$> get
       _   -> fail "GhcRequest.get: invalid header"
 

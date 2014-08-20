@@ -153,8 +153,11 @@ ghcServerEngine conv@RpcConversation{..} = do
             ReqPrint vars bind forceEval -> do
               ghcHandlePrint conv vars bind forceEval
               return args
-            ReqLoad path unload -> do
-              ghcHandleLoad conv path unload
+            ReqLoad objects -> do
+              ghcHandleLoad conv objects
+              return args
+            ReqUnload objects -> do
+              ghcHandleUnload conv objects
               return args
             ReqSetGhcOpts opts -> do
               ghcHandleSetOpts conv opts
@@ -274,7 +277,7 @@ ghcHandleCompile RpcConversation{..}
                  pluginRef modsRef errsRef configSourcesDir
                  ideGenerateCode targets configGenerateModInfo = do
     (errs, loadedModules) <-
-      suppressGhcStdout $ compileInGhc configSourcesDir
+      suppressGhcOutput $ compileInGhc configSourcesDir
                                        ideGenerateCode
                                        targets
                                        errsRef
@@ -448,16 +451,27 @@ ghcHandlePrint RpcConversation{..} var bind forceEval = do
   liftIO $ put vals
 
 -- | Handle a load object request
-ghcHandleLoad :: RpcConversation -> FilePath -> Bool -> Ghc ()
-ghcHandleLoad RpcConversation{..} path True = liftIO $ do
-  Linker.unloadObj path
+ghcHandleLoad :: RpcConversation -> [FilePath] -> Ghc ()
+ghcHandleLoad RpcConversation{..} objects =
+  -- Missing objects get thrown as an exception in some auxiliary thread
+  -- without a top-level exception handler, so we cannot catch them and they
+  -- get printed to stdout. For now we just suppress the messages.
+  --
+  -- TODO: We should catch these messages and send them back as errors (the
+  -- resolveObjs step will still return Failed, so we detect the error -- we
+  -- just cannot give a very informative error message).
+  suppressGhcOutput $ liftIO $ do
+    mapM_ Linker.loadObj objects
+    success <- Linker.resolveObjs
+    case success of
+      GHC.Succeeded -> put True
+      GHC.Failed    -> put False
+
+-- | Handle an unload object request
+ghcHandleUnload :: RpcConversation -> [FilePath] -> Ghc ()
+ghcHandleUnload RpcConversation{..} objects = liftIO $ do
+  mapM_ Linker.unloadObj objects
   put ()
-ghcHandleLoad RpcConversation{..} path False = liftIO $ do
-  Linker.loadObj path
-  success <- Linker.resolveObjs
-  case success of
-    GHC.Succeeded -> put True
-    GHC.Failed    -> put False
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation -> RunCmd -> Ghc ()
@@ -612,10 +626,12 @@ ghcHandleCrash delay = liftIO $ do
 -- We suppress stdout during compilation to avoid stray messages, e.g. from
 -- the linker.
 -- TODO: send all suppressed messages to a debug log file.
-suppressGhcStdout :: Ghc a -> Ghc a
-suppressGhcStdout p = do
+suppressGhcOutput :: Ghc a -> Ghc a
+suppressGhcOutput p = do
   stdOutputBackup <- liftIO suppressStdOutput
+  stdErrorBackup  <- liftIO suppressStdError
   x <- p
+  liftIO $ restoreStdError  stdErrorBackup
   liftIO $ restoreStdOutput stdOutputBackup
   return x
 

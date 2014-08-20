@@ -24,7 +24,7 @@ testGroupC env = testGroup "Using C files" [
   , stdTest env "C header files in subdirectories (#212)"                         test_headersInSubdirs
   , stdTest env "C code writes to stdout (#210)"                                  test_stdout
   , testGroup "Two C files (no cyclic dependencies)"     $ test_2        env
---  , testGroup "Two C files (C files mutually dependent)" $ test_2_cyclic env
+  , testGroup "Two C files (C files mutually dependent)" $ test_2_cyclic env
   ]
 
 test_Basic :: TestSuiteEnv -> Assertion
@@ -282,6 +282,9 @@ test_stdout env = withAvailableSession env $ \session -> do
        <> updateSourceFile "hello.c" cfile
        <> updateSourceFile "Main.hs" hsfile
 
+{-------------------------------------------------------------------------------
+  Stress tests about the order of object loading
+-------------------------------------------------------------------------------}
 
 test_2 :: TestSuiteEnv -> [TestTree]
 test_2 = \env ->
@@ -289,29 +292,6 @@ test_2 = \env ->
     | s <- schedule updates
     ]
   where
-    describeSchedule :: Schedule (String, IdeSessionUpdate) -> String
-    describeSchedule = intercalate "; "
-                     . map (bracket . intercalate ", ")
-                     . map (map fst)
-
-    testSchedule :: Schedule (String, IdeSessionUpdate) -> TestSuiteEnv -> Assertion
-    testSchedule s env = withAvailableSession env $ \session -> do
-      -- Enable code generation
-      updateSessionD session (updateCodeGeneration True) 0
-
-      -- Execute each task in the schedule
-      -- (this may have errors until the very last one)
-      forM_ s $ \ts -> updateSessionD session (mconcat (map snd ts)) 3
-
-      -- But after the last one there should be no more errors
-      assertNoErrors session
-
-      -- Run the code
-      ra <- runStmt session "Main" "main"
-      (output, result) <- runWaitAll ra
-      assertEqual "" result RunOk
-      assertEqual "" output "In B\nIn A\n"
-
     updates :: [(String, IdeSessionUpdate)]
     updates = [
         ( "Load a.c", updateSourceFile "a.c"     cfileA)
@@ -334,6 +314,7 @@ test_2 = \env ->
         , "void defined_in_B() {"
         , "  printf(\"In B\\n\");"
         , "  defined_in_A();"
+        , "  printf(\"In B\\n\");"
         , "}"
         ]
     hsfile = L.unlines $
@@ -343,6 +324,75 @@ test_2 = \env ->
         , "foreign import ccall \"defined_in_B\" defined_in_B :: IO ()"
         , "main = defined_in_B"
         ]
+
+test_2_cyclic :: TestSuiteEnv -> [TestTree]
+test_2_cyclic = \env ->
+    [ stdTest env (describeSchedule s) (testSchedule s)
+    | s <- schedule updates
+    ]
+  where
+    updates :: [(String, IdeSessionUpdate)]
+    updates = [
+        ( "Load a.c", updateSourceFile "a.c"     cfileA)
+      , ( "Load b.c", updateSourceFile "b.c"     cfileB)
+      , ( "Load .hs", updateSourceFile "Main.hs" hsfile)
+      ]
+
+    cfileA, cfileB, hsfile :: L.ByteString
+    cfileA = L.unlines $
+        [ "#include <stdio.h>"
+        , ""
+        , "void also_defined_in_B();"
+        , ""
+        , "void defined_in_A() {"
+        , "  printf(\"In A\\n\");"
+        , "  also_defined_in_B();"
+        , "}"
+        ]
+    cfileB = L.unlines $
+        [ "#include <stdio.h>"
+        , ""
+        , "void defined_in_A();"
+        , ""
+        , "void defined_in_B() {"
+        , "  printf(\"In B\\n\");"
+        , "  defined_in_A();"
+        , "}"
+        , ""
+        , "void also_defined_in_B() {"
+        , "  printf(\"In B\\n\");"
+        , "}"
+        ]
+    hsfile = L.unlines $
+        [ "{-# LANGUAGE ForeignFunctionInterface #-}"
+        , "module Main where"
+        , "import System.IO"
+        , "foreign import ccall \"defined_in_B\" defined_in_B :: IO ()"
+        , "main = defined_in_B"
+        ]
+
+describeSchedule :: Schedule (String, IdeSessionUpdate) -> String
+describeSchedule = intercalate "; "
+                 . map (bracket . intercalate ", ")
+                 . map (map fst)
+
+testSchedule :: Schedule (String, IdeSessionUpdate) -> TestSuiteEnv -> Assertion
+testSchedule s env = withAvailableSession env $ \session -> do
+  -- Enable code generation
+  updateSessionD session (updateCodeGeneration True) 0
+
+  -- Execute each task in the schedule
+  -- (this may have errors until the very last one)
+  forM_ s $ \ts -> updateSessionD session (mconcat (map snd ts)) 3
+
+  -- But after the last one there should be no more errors
+  assertNoErrors session
+
+  -- Run the code
+  ra <- runStmt session "Main" "main"
+  (output, result) <- runWaitAll ra
+  assertEqual "" result RunOk
+  assertEqual "" output "In B\nIn A\nIn B\n"
 
 {-------------------------------------------------------------------------------
   Auxiliary

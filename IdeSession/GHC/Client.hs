@@ -308,12 +308,12 @@ rpcPrint :: GhcServer -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv
 rpcPrint server var bind forceEval = ghcRpc server (ReqPrint var bind forceEval)
 
 -- | Load an object file
-rpcLoad :: GhcServer -> FilePath -> IO Bool
-rpcLoad server path = ghcRpc server (ReqLoad path False)
+rpcLoad :: GhcServer -> [FilePath] -> IO Bool
+rpcLoad server objects = ghcRpc server (ReqLoad objects)
 
 -- | Unload an object file
-rpcUnload :: GhcServer -> FilePath -> IO ()
-rpcUnload server path = ghcRpc server (ReqLoad path True)
+rpcUnload :: GhcServer -> [FilePath] -> IO ()
+rpcUnload server objects = ghcRpc server (ReqUnload objects)
 
 -- | Crash the GHC server (for debugging purposes)
 rpcCrash :: GhcServer -> Maybe Int -> IO ()

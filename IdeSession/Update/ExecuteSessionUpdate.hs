@@ -18,7 +18,7 @@ import Data.Accessor (Accessor, (.>))
 import Data.Accessor.Monad.MTL.State (get, modify, set)
 import Data.Digest.Pure.MD5 (MD5Digest)
 import Data.Foldable (forM_)
-import Data.Maybe (isJust, maybeToList, catMaybes, fromMaybe)
+import Data.Maybe (isJust, catMaybes, fromMaybe)
 import Data.Monoid (Monoid(..))
 import System.Exit (ExitCode(..))
 import System.FilePath (makeRelative, (</>), takeExtension, replaceExtension, dropFileName)
@@ -107,7 +107,7 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
 
     -- Recompile C files; we do this after setting options because some ghc
     -- options are passed to the C compiler (#218)
-    (numActions, cErrors) <- recompileObjectFiles
+    (numActions, cErrors) <- updateObjectFiles
 
     let needsRecompile =
              -- We recompile both when source code and when data files change
@@ -272,95 +272,60 @@ executeUpdateGhcOpts opts = do
   Recompile object files
 -------------------------------------------------------------------------------}
 
--- | In 'recompileObjectFiles' we first collect a number of 'RecompileAction's,
--- before executing them. This makes it possible to generate better progress
--- messages.
-data RecompileAction = RecompileAction {
-    recompileActionUnload  :: Maybe FilePath
-  , recompileActionCompile :: FilePath
-  }
-
-data RecompileResult = RecompileResult {
-    recompileResultErrors :: [SourceError]
-  , recompileResultUnload :: [FilePath]
-  , recompileResultLoad   :: [(FilePath, FilePath)]
-  }
-
-instance Monoid RecompileResult where
-  mempty = RecompileResult {
-      recompileResultErrors = []
-    , recompileResultUnload = []
-    , recompileResultLoad   = []
-    }
-  a `mappend` b = RecompileResult {
-      recompileResultErrors = recompileResultErrors a ++ recompileResultErrors b
-    , recompileResultUnload = recompileResultUnload a ++ recompileResultUnload b
-    , recompileResultLoad   = recompileResultLoad   a ++ recompileResultLoad   b
-    }
-
--- | Recompile any C files that need recompiling; if any, also mark all Haskell
--- modules are requiring recompilation.
+-- | Recompile any C files that need recompiling and mark all Haskell modules
+-- that require recompilation.
 --
--- Returns the number of actions that were executed, so we can adjust
--- Progress messages returned by ghc
-recompileObjectFiles :: ExecuteSessionUpdate (Int, [SourceError])
-recompileObjectFiles = do
-    -- We first figure out what to do so that we can give better error messages
-    recompileActions <- collectRecompileActions
+-- Returns the number of actions that were executed, so we can adjust Progress
+-- messages returned by ghc.
+updateObjectFiles :: ExecuteSessionUpdate (Int, [SourceError])
+updateObjectFiles = do
+    -- We first figure out which files are updated so that we can number
+    -- progress messages
+    outdated <- outdatedObjectFiles
 
-    -- Execute the actions (calling gcc on each object file)
-    RecompileResult{..} <- executeRecompileActions recompileActions
-
-    -- Unload old object files
-    forM_ recompileResultUnload $ rpcUnload
-
-    -- load new object files
-    loadErrors <- forM recompileResultLoad $ \(relObj, absObj) -> do
-      didLoad <- rpcLoad absObj
-      return [ SourceError {
-                   errorKind = KindError
-                 , errorSpan = TextSpan (Text.pack "No location information")
-                 , errorMsg  = Text.pack $ "Failed to load " ++ relObj
-                 }
-             | not didLoad
-             ]
-
-    -- Mark all Haskell files as updated if any C files changed
-    markAsUpdated $ update (map recompileActionCompile recompileActions)
-
-    -- Return number of actions (so we can adjust further progressm messages)
-    -- as well as all errors that happened during compilation/object loading
-    return (length recompileActions, recompileResultErrors ++ concat loadErrors)
+    if not (null outdated)
+      then do
+        -- When C files change, the addresses of the symbols exported in the
+        -- corresponding object files may change. To make sure that these
+        -- changes are properly propagated, we unload and reload all object
+        -- files (so that we reapply symbol resolution, necessary in case the
+        -- object files refer to each other), and we mark all Haskell modules
+        -- as updated so that we will recompile them.
+        --
+        -- NOTE: When using HscInterpreted/LinkInMemory C symbols get resolved
+        -- during compilation, not during a separate linking step. To be
+        -- precise, they get resolved from deep inside the compiler. Example
+        -- callchain:
+        --
+        -- >            lookupStaticPtr   <-- does the resolution
+        -- > called by  generateCCall
+        -- > called by  schemeT
+        -- > called by  schemeE
+        -- > called by  doCase
+        -- > called by  schemeE
+        -- > called by  schemeER_wrk
+        -- > called by  schemeR_wrk
+        -- > called by  schemeR
+        -- > called by  schemeTopBind
+        -- > called by  byteCodeGen
+        -- > called by  hscInteractive
+        --
+        -- Hence, we really need to recompile, rather than just relink.
+        rpcUnloadObjectFiles
+        cErrors   <- recompileCFiles outdated
+        objErrors <- rpcLoadObjectFiles
+        markAsUpdated $ dependenciesOf outdated
+        return (length outdated, cErrors ++ objErrors)
+      else
+        return (0, [])
   where
-    -- NOTE: When using HscInterpreted/LinkInMemory, then C symbols get
-    -- resolved during compilation, not during a separate linking step. To be
-    -- precise, they get resolved from deep inside the compiler. Example
-    -- callchain:
-    --
-    -- >            lookupStaticPtr   <-- does the resolution
-    -- > called by  generateCCall
-    -- > called by  schemeT
-    -- > called by  schemeE
-    -- > called by  doCase
-    -- > called by  schemeE
-    -- > called by  schemeER_wrk
-    -- > called by  schemeR_wrk
-    -- > called by  schemeR
-    -- > called by  schemeTopBind
-    -- > called by  byteCodeGen
-    -- > called by  hscInteractive
-    --
-    -- Hence, we really need to recompile, rather than just relink.
-    --
-    -- TODO: If we knew which Haskell modules depended on which C files,
-    -- we should do better here. For now we recompile all Haskell modules
-    -- whenever any C file gets recompiled.
-    update :: [FilePath] -> FilePath -> Bool
-    update recompiled src = not (null recompiled)
-                         && takeExtension src == ".hs"
+    -- We don't know what the dependencies of the C files are, so we just
+    -- reload _all_ Haskell modules
+    dependenciesOf :: [FilePath] -> FilePath -> Bool
+    dependenciesOf _recompiled src = takeExtension src == ".hs"
 
-executeRecompileActions :: [RecompileAction] -> ExecuteSessionUpdate RecompileResult
-executeRecompileActions actions = do
+recompileCFiles :: [FilePath] -> ExecuteSessionUpdate [SourceError]
+recompileCFiles cFiles = do
   callback   <- asks ideUpdateCallback
   sessionDir <- asks $ ideSessionDir . ideUpdateStaticInfo
 
@@ -368,41 +333,36 @@ executeRecompileActions actions = do
       srcDir = ideSessionSourceDir sessionDir
       objDir = ideSessionObjDir    sessionDir
 
-  results <- forM (zip actions [1..]) $ \(RecompileAction{..}, i) -> do
-    let relC   = recompileActionCompile
-        relObj = replaceExtension relC ".o"
+  errorss <- forM (zip cFiles [1..]) $ \(relC, i) -> do
+    let relObj = replaceExtension relC ".o"
         absC   = srcDir </> relC
         absObj = objDir </> relObj
 
-    let msg = "Compiling " ++ recompileActionCompile
+    let msg = "Compiling " ++ relC
     callback $ Progress {
         progressStep      = i
-      , progressNumSteps  = length actions
+      , progressNumSteps  = length cFiles
       , progressParsedMsg = Just (Text.pack msg)
       , progressOrigMsg   = Just (Text.pack msg)
       }
 
     liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
 
-    recompileResultErrors <- runGcc absC absObj objDir
-    recompileResultLoad   <- if null recompileResultErrors
+    errors <- runGcc absC absObj objDir
+    if null errors
       then do
         ts' <- updateFileTimes absObj
         set (ideObjectFiles .> lookup' relC) (Just (absObj, ts'))
-        return [(relObj, absObj)]
       else do
         set (ideObjectFiles .> lookup' relC) Nothing
-        return []
 
-    return RecompileResult {
-        recompileResultUnload = maybeToList recompileActionUnload
-      , ..
-      }
+    return errors
 
-  return $ mconcat results
+  return $ concat errorss
 
-collectRecompileActions :: ExecuteSessionUpdate [RecompileAction]
-collectRecompileActions = do
+-- | Figure out which C files need to be recompiled
+outdatedObjectFiles :: ExecuteSessionUpdate [FilePath]
+outdatedObjectFiles = do
   IdeStaticInfo{..} <- asks ideUpdateStaticInfo
   managedFiles      <- get (ideManagedFiles .> managedSource)
 
@@ -411,26 +371,19 @@ collectRecompileActions = do
              $ map (\(fp, (_, ts)) -> (fp, ts))
              $ managedFiles
 
-  mActions <- forM cFiles $ \(c_fp, c_ts) -> do
+  mOutdated <- forM cFiles $ \(c_fp, c_ts) -> do
     -- ideObjectFiles is indexed by the names of the corresponding C files
     mObjFile <- get (ideObjectFiles .> lookup' c_fp)
     return $ case mObjFile of
-      -- No existing object file: need to recompile, nothing to unload
-      Nothing -> Just RecompileAction {
-          recompileActionUnload  = Nothing
-        , recompileActionCompile = c_fp
-        }
+      -- No existing object file yet
+      Nothing -> Just c_fp
       -- We _do_ have an existing object file, and it is older than
-      -- the C file. We need to unload the object file and recompile.
-      Just (obj_fp, obj_ts) | obj_ts < c_ts -> Just RecompileAction {
-          recompileActionUnload  = Just obj_fp
-        , recompileActionCompile = c_fp
-        }
-      -- Otherwise (existing object file is newer than C file) we don't
-      -- have to do anything
+      -- the C file. We need to recompile
+      Just (_, obj_ts) | obj_ts < c_ts -> Just c_fp
+      -- Otherwise we don't have to do anything
       _ -> Nothing
 
-  return $ catMaybes mActions
+  return $ catMaybes mOutdated
 
 -- | Call gcc via ghc, with the same parameters cabal uses.
 runGcc :: FilePath -> FilePath -> FilePath -> ExecuteSessionUpdate [SourceError]
@@ -745,15 +698,24 @@ rpcSetGhcOpts = do
     unrecognized :: String -> String
     unrecognized str = "Unrecognized option " ++ show str
 
-rpcLoad :: FilePath -> ExecuteSessionUpdate Bool
-rpcLoad fp = do
-    IdeIdleState{..} <- get id
-    liftIO $ GHC.rpcLoad _ideGhcServer fp
+-- | Unload all current object files
+rpcUnloadObjectFiles :: ExecuteSessionUpdate ()
+rpcUnloadObjectFiles = do
+  IdeIdleState{..} <- get id
+  liftIO $ GHC.rpcUnload _ideGhcServer $ map (fst . snd) _ideObjectFiles
 
-rpcUnload :: FilePath -> ExecuteSessionUpdate ()
-rpcUnload fp = do
-    IdeIdleState{..} <- get id
-    liftIO $ GHC.rpcUnload _ideGhcServer fp
+-- | Reload all current object files
+rpcLoadObjectFiles :: ExecuteSessionUpdate [SourceError]
+rpcLoadObjectFiles = do
+  IdeIdleState{..} <- get id
+  didLoad <- liftIO $ GHC.rpcLoad _ideGhcServer $ map (fst . snd) _ideObjectFiles
+  return [ SourceError {
+               errorKind = KindError
+             , errorSpan = TextSpan (Text.pack "No location information")
+             , errorMsg  = Text.pack "Failure during object loading"
+             }
+         | not didLoad
+         ]
 
 {-------------------------------------------------------------------------------
   Auxiliary (generic)
@@ -765,4 +727,3 @@ maybeSet acc (Just new) = do
   old <- get acc
   if old /= new then set acc new >> return True
                 else return False
-
