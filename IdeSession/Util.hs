@@ -14,6 +14,7 @@ module IdeSession.Util (
     -- * Simple diffs
   , Diff(..)
   , applyMapDiff
+    -- * Manipulating stdout and stderr
   , suppressStdOutput
   , redirectStdOutput
   , restoreStdOutput
@@ -239,7 +240,9 @@ applyMapDiff diff = foldr (.) id (map aux $ StrictMap.toList diff)
     aux (k, Remove)   = StrictMap.delete k
     aux (k, Insert x) = StrictMap.insert k x
 
--- Manipulations with stdout and stderr.
+{-------------------------------------------------------------------------------
+  Manipulations with stdout and stderr.
+-------------------------------------------------------------------------------}
 
 type FdBackup = Fd
 

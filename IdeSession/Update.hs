@@ -48,8 +48,8 @@ import Prelude hiding (mod, span)
 import Control.Concurrent (threadDelay)
 import Control.Monad (when, unless)
 import Control.Monad.IO.Class (liftIO)
-import Data.Accessor ((^.))
-import Data.List (elemIndices)
+import Data.Accessor (Accessor, (^.))
+import Data.List (elemIndices, isPrefixOf)
 import Data.Maybe (fromMaybe)
 import Data.Monoid (Monoid(..), (<>))
 import Distribution.Simple (PackageDBStack, PackageDB(..))
@@ -63,6 +63,7 @@ import qualified Control.Exception         as Ex
 import qualified Data.ByteString           as BSS
 import qualified Data.ByteString.Lazy      as BSL
 import qualified Data.ByteString.Lazy.UTF8 as BSL.UTF8
+import qualified Data.Set                  as Set
 import qualified Data.Text                 as Text
 import qualified System.Directory          as Dir
 import qualified System.IO                 as IO
@@ -410,8 +411,6 @@ updateSession' IdeSession{ideStaticInfo, ideState} callback = \update ->
 -- | @needsSessionRestart st upd@ returns true if update @upd@ requires a
 -- session restart given current state @st@. If a session restart is requried
 -- we return how the new session should be initialized.
---
--- TODO: We need to restart the session when certain options change (#214).
 requiresSessionRestart :: IdeIdleState -> IdeSessionUpdate -> Maybe SessionInitParams
 requiresSessionRestart st IdeSessionUpdate{..} =
     if requiresRestart
@@ -424,12 +423,35 @@ requiresSessionRestart st IdeSessionUpdate{..} =
       else Nothing
   where
     requiresRestart :: Bool
-    requiresRestart = (ideUpdateRelIncls `changes` (st ^. ideRelativeIncludes))
-                   || (ideUpdateTargets  `changes` (st ^. ideTargets))
+    requiresRestart =
+         (ideUpdateRelIncls `changes` ideRelativeIncludes)
+      || (ideUpdateTargets  `changes` ideTargets)
+      || (any optRequiresRestart (listChanges' ideUpdateGhcOpts ideGhcOpts))
 
-    changes :: Eq a => Maybe a -> a -> Bool
+    optRequiresRestart :: String -> Bool
+    optRequiresRestart str =
+         -- Library flags cannot be changed dynamically (#214)
+         "-l" `isPrefixOf` str
+
+    changes :: Eq a => Maybe a -> Accessor IdeIdleState a -> Bool
     changes Nothing  _ = False
-    changes (Just x) y = x /= y
+    changes (Just x) y = x /= st ^. y
+
+    listChanges' :: Ord a => Maybe [a] -> Accessor IdeIdleState [a] -> [a]
+    listChanges' Nothing   _  = []
+    listChanges' (Just xs) ys = listChanges xs (st ^. ys)
+
+-- | @listChanges xs ys@ is the list of elements that appear in @xs@ but not
+-- in @ys@ and the set of elements that appear in @ys@ but not in @xs@.
+--
+-- Considering the lists as sets, it is the complement of the intersection
+-- between the two sets.
+listChanges :: Ord a => [a] -> [a] -> [a]
+listChanges xs ys =
+    Set.toList $ (a `Set.union` b) `Set.difference` (a `Set.intersection` b)
+  where
+    a = Set.fromList xs
+    b = Set.fromList ys
 
 {-------------------------------------------------------------------------------
   Running code
