@@ -378,8 +378,17 @@ test213 env = withAvailableSession env $ \session -> do
 
 test214 :: TestSuiteEnv -> Assertion
 test214 env = withAvailableSession env $ \session -> do
-    updateSessionD session upd 2
+    updateSessionD session setup 0
+
+    -- Try to load without enabling -lz. Will fail
+    updateSessionD session source 2
+    print =<< getSourceErrors session
+
+    -- Now set the -lz option, and try again. Should succeed now.
+    updateSessionD session linkLz 2
     assertNoErrors session
+
+    -- Actually run the code, just to be sure linking worked properly
     runActions <- runStmt session "Main" "print_zlib_version"
     (output, result) <- runWaitAll runActions
     assertEqual "" RunOk result
@@ -387,16 +396,17 @@ test214 env = withAvailableSession env $ \session -> do
     -- like a version anyway :)
     assertBool ("unexpected version " ++ show output) (isVersion output)
   where
-    upd = updateCodeGeneration True
-       <> updateGhcOpts ["-lz"]
-       <> updateSourceFile "Main.hs" "foreign import ccall \"print_zlib_version\" print_zlib_version :: IO ()"
-       <> updateSourceFile "foo.c" (L.unlines
-            [ "#include <zlib.h>"
-            , "#include <stdio.h>"
-            , "void print_zlib_version(z_stream *stream, int window_bits) {"
-            , "  fputs(zlibVersion(), stderr);"
-            , "}"
-            ])
+    setup, source, linkLz :: IdeSessionUpdate
+    setup  = updateCodeGeneration True
+    linkLz = updateGhcOpts ["-lz"]
+    source = updateSourceFile "Main.hs" "foreign import ccall \"print_zlib_version\" print_zlib_version :: IO ()"
+          <> updateSourceFile "foo.c" (L.unlines
+               [ "#include <zlib.h>"
+               , "#include <stdio.h>"
+               , "void print_zlib_version(z_stream *stream, int window_bits) {"
+               , "  fputs(zlibVersion(), stderr);"
+               , "}"
+               ])
 
     isVersion :: L.ByteString -> Bool
     isVersion = L.all (`elem` ('.' : ['0'..'9']))

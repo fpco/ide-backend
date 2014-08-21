@@ -10,7 +10,7 @@ module IdeSession.Update.ExecuteSessionUpdate (runSessionUpdate) where
 import Prelude hiding (id, mod, span)
 import Control.Applicative (Applicative, (<$>))
 import Control.Category (id)
-import Control.Monad (when, void, forM)
+import Control.Monad (when, void, forM, liftM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader(..), ReaderT, runReaderT, asks)
 import Control.Monad.State (MonadState, StateT, execStateT)
@@ -105,9 +105,21 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
     enabledCodeGen <- executeUpdateCodeGen ideUpdateCodeGen
     optionWarnings <- executeUpdateGhcOpts ideUpdateGhcOpts
 
-    -- Recompile C files; we do this after setting options because some ghc
-    -- options are passed to the C compiler (#218)
-    (numActions, cErrors) <- updateObjectFiles
+    let ghcOptionsChanged :: Bool
+        ghcOptionsChanged = isJust optionWarnings
+
+    -- Recompile C files. Notes:
+    --
+    -- * Unless ghc options have changed, we recompile C files only when they
+    --   have been modified (by comparing the timestamp on the C file to the
+    --   timestamp on the correponding object file).
+    -- * We do this _after_ setting ghc because because some ghc options are
+    --   passed to the C compiler (#218)
+    -- * Similarly, when the ghc options have changed, we conversatively
+    --   recompile (and, importantly, relink -- #218) _all_ C files.
+    (numActions, cErrors) <- updateObjectFiles ghcOptionsChanged
+    let cFilesChanged :: Bool
+        cFilesChanged = numActions > 0
 
     let needsRecompile =
              -- We recompile both when source code and when data files change
@@ -116,9 +128,9 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
           || -- We need to (re)compile if codegen was just enabled
              enabledCodeGen
           || -- Changing ghc options might require a recompile
-             (isJust optionWarnings)
+             ghcOptionsChanged
              -- If any C files changed we may have to recompile Haskell files
-          || (numActions > 0)
+          || cFilesChanged
              -- If we just restarted we have to recompile even if the files
              -- didn't change
           || justRestarted
@@ -277,11 +289,11 @@ executeUpdateGhcOpts opts = do
 --
 -- Returns the number of actions that were executed, so we can adjust Progress
 -- messages returned by ghc.
-updateObjectFiles :: ExecuteSessionUpdate (Int, [SourceError])
-updateObjectFiles = do
+updateObjectFiles :: Bool -> ExecuteSessionUpdate (Int, [SourceError])
+updateObjectFiles ghcOptionsChanged = do
     -- We first figure out which files are updated so that we can number
     -- progress messages
-    outdated <- outdatedObjectFiles
+    outdated <- outdatedObjectFiles ghcOptionsChanged
 
     if not (null outdated)
       then do
@@ -361,8 +373,8 @@ recompileCFiles cFiles = do
   return $ concat errorss
 
 -- | Figure out which C files need to be recompiled
-outdatedObjectFiles :: ExecuteSessionUpdate [FilePath]
-outdatedObjectFiles = do
+outdatedObjectFiles :: Bool -> ExecuteSessionUpdate [FilePath]
+outdatedObjectFiles ghcOptionsChanged = do
   IdeStaticInfo{..} <- asks ideUpdateStaticInfo
   managedFiles      <- get (ideManagedFiles .> managedSource)
 
@@ -371,19 +383,22 @@ outdatedObjectFiles = do
              $ map (\(fp, (_, ts)) -> (fp, ts))
              $ managedFiles
 
-  mOutdated <- forM cFiles $ \(c_fp, c_ts) -> do
-    -- ideObjectFiles is indexed by the names of the corresponding C files
-    mObjFile <- get (ideObjectFiles .> lookup' c_fp)
-    return $ case mObjFile of
-      -- No existing object file yet
-      Nothing -> Just c_fp
-      -- We _do_ have an existing object file, and it is older than
-      -- the C file. We need to recompile
-      Just (_, obj_ts) | obj_ts < c_ts -> Just c_fp
-      -- Otherwise we don't have to do anything
-      _ -> Nothing
-
-  return $ catMaybes mOutdated
+  -- If ghc options have changed we consider _all_ C files to be outdated; see
+  -- comments in executeSessionUpdate.
+  if ghcOptionsChanged
+    then return $ map fst cFiles
+    else liftM catMaybes $ do
+      forM cFiles $ \(c_fp, c_ts) -> do
+        -- ideObjectFiles is indexed by the names of the corresponding C files
+        mObjFile <- get (ideObjectFiles .> lookup' c_fp)
+        return $ case mObjFile of
+          -- No existing object file yet
+          Nothing -> Just c_fp
+          -- We _do_ have an existing object file, and it is older than
+          -- the C file. We need to recompile
+          Just (_, obj_ts) | obj_ts < c_ts -> Just c_fp
+          -- Otherwise we don't have to do anything
+          _ -> Nothing
 
 -- | Call gcc via ghc, with the same parameters cabal uses.
 runGcc :: FilePath -> FilePath -> FilePath -> ExecuteSessionUpdate [SourceError]
