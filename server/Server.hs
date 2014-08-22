@@ -44,7 +44,8 @@ import qualified IdeSession.Types.Public as Public
 
 import qualified GHC
 import GhcMonad(Ghc(..))
-import qualified ObjLink as Linker
+import qualified ObjLink as ObjLink
+import qualified Linker  as Linker
 import Hooks
 
 import Run
@@ -80,6 +81,7 @@ ghcServerEngine conv@RpcConversation{..} = do
   pluginRef  <- newIORef StrictMap.empty
   importsRef <- newIORef StrictMap.empty
   stRef      <- newIORef initExtractIdsSuspendedState
+  errsRef    <- liftIO $ newIORef StrictList.nil
 
   -- Get environment on server startup so that we can restore it
   initEnv <- getEnvironment
@@ -87,45 +89,19 @@ ghcServerEngine conv@RpcConversation{..} = do
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
     -- Register startup options and perhaps our plugin in dynamic flags.
-    -- This is the only place where the @packageDbArgs@ options are used
-    -- and indeed, as the first invocation of @setSessionDynFlags@,
-    -- this is the only place they could take any effect.
-    -- This also implies that any options specifying package DBs
-    -- passed via @updateGhcOptions@ won't have any effect in GHC API
-    flags0 <- getSessionDynFlags
-    let dynOpts :: DynamicOpts
-        dynOpts =
-          let -- Just in case the user specified -hide-all-packages.
-              rtsOpts = ["-package ide-backend-rts"]
-              -- Include cabal_macros.h.
-              cppOpts = [ "-optP-include"
-                        , "-optP" ++ cabalMacrosLocation distDir
-                        ]
-          in optsToDynFlags (rtsOpts ++ cppOpts)
-    (flags05, _, _) <- parseDynamicFlags flags0 $ dOpts ++ dynOpts
-    errsRef <- liftIO $ newIORef StrictList.nil
-    let flags1 | configGenerateModInfo = flags05 {
-          hooks = (hooks flags05) {
-              hscFrontendHook   = Just $ runHscPlugin pluginRef stRef
-            , runQuasiQuoteHook = Just $ runHscQQ stRef
-            , runRnSpliceHook   = Just $ runRnSplice stRef
-            }
-        }
-                 | otherwise = flags05
-        dynFlags = flags1
-                       {
-                         GHC.ghcMode    = GHC.CompManager,
-#if __GLASGOW_HASKELL__ >= 706
-                         GHC.log_action = collectSrcError errsRef progressCallback (\_ -> return ()) -- TODO: log?
-#else
-                         GHC.log_action = collectSrcError errsRef progressCallback (\_ -> return ()) dynFlags
-#endif
-                       }
-    void $ setSessionDynFlags dynFlags
+    initSession distDir configGenerateModInfo dOpts errsRef stRef pluginRef progressCallback
 
     -- We store the DynFlags _after_ setting the "static" options, so that
     -- we restore to this state before every call to updateDynamicOpts
     storeDynFlags
+
+    -- Make sure that the dynamic linker has been initialized. This is done
+    -- implicitly deep in the bowels of GhcMake.load, but if we attempt to load
+    -- C object files before calling GhcMake.load (i.e., before attempting to
+    -- compile any Haskell code) then loading the object files will fail if
+    -- they rely on linker flags such as @-lz@ (#214).
+    do dflags <- getSessionDynFlags
+       liftIO $ Linker.initDynLinker dflags
 
     -- Start handling RPC calls
     let go args = do
@@ -184,6 +160,59 @@ ghcServerEngine conv@RpcConversation{..} = do
         _ ->
           -- Ignore messages we cannot parse
           return ()
+
+-- Register startup options and perhaps our plugin in dynamic flags.
+--
+-- This is the only place where the @packageDbArgs@ options are used
+-- and indeed, as the first invocation of @setSessionDynFlags@,
+-- this is the only place they could take any effect.
+-- This also implies that any options specifying package DBs
+-- passed via @updateGhcOptions@ won't have any effect in GHC API
+initSession :: FilePath
+            -> Bool
+            -> DynamicOpts
+            -> StrictIORef (Strict [] SourceError)
+            -> StrictIORef ExtractIdsSuspendedState
+            -> StrictIORef (Strict (Map ModuleName) PluginResult)
+            -> (String -> IO ())
+            -> Ghc ()
+initSession distDir modInfo dOpts errsRef stRef pluginRef callback = do
+    flags          <- getSessionDynFlags
+    (flags', _, _) <- parseDynamicFlags flags $ dOpts ++ dynOpts
+
+    let flags'' = (if modInfo then installHooks else id)
+                . installErrorLoggers
+                $ flags'
+
+    void $ setSessionDynFlags flags''
+  where
+    dynOpts :: DynamicOpts
+    dynOpts = optsToDynFlags [
+        -- Just in case the user specified -hide-all-packages.
+        "-package ide-backend-rts"
+
+        -- Include cabal_macros.h
+      , "-optP-include"
+      , "-optP" ++ cabalMacrosLocation distDir
+      ]
+
+    installHooks :: DynFlags -> DynFlags
+    installHooks dflags = dflags {
+        hooks = (hooks dflags) {
+            hscFrontendHook   = Just $ runHscPlugin pluginRef stRef
+          , runQuasiQuoteHook = Just $ runHscQQ stRef
+          , runRnSpliceHook   = Just $ runRnSplice stRef
+          }
+      }
+
+    installErrorLoggers :: DynFlags -> DynFlags
+    installErrorLoggers dflags = dflags {
+#if __GLASGOW_HASKELL__ >= 706
+        GHC.log_action = collectSrcError errsRef callback (\_ -> return ()) -- TODO: log?
+#else
+        GHC.log_action = collectSrcError errsRef callback (\_ -> return ()) dflags
+#endif
+      }
 
 startConcurrentConversation :: FilePath -> (RpcConversation -> Ghc ()) -> Ghc (ProcessID, FilePath, FilePath, FilePath)
 startConcurrentConversation sessionDir server = do
@@ -461,8 +490,8 @@ ghcHandleLoad RpcConversation{..} objects =
   -- resolveObjs step will still return Failed, so we detect the error -- we
   -- just cannot give a very informative error message).
   suppressGhcOutput $ liftIO $ do
-    mapM_ Linker.loadObj objects
-    success <- Linker.resolveObjs
+    mapM_ ObjLink.loadObj objects
+    success <- ObjLink.resolveObjs
     case success of
       GHC.Succeeded -> put True
       GHC.Failed    -> put False
@@ -470,7 +499,7 @@ ghcHandleLoad RpcConversation{..} objects =
 -- | Handle an unload object request
 ghcHandleUnload :: RpcConversation -> [FilePath] -> Ghc ()
 ghcHandleUnload RpcConversation{..} objects = liftIO $ do
-  mapM_ Linker.unloadObj objects
+  mapM_ ObjLink.unloadObj objects
   put ()
 
 -- | Handle a run request

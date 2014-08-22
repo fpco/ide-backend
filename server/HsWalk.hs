@@ -18,6 +18,7 @@ module HsWalk
   , PluginResult(..)
   , IsBinder(..)
   , initExtractIdsSuspendedState
+  , ExtractIdsSuspendedState -- opaque
   ) where
 
 #define DEBUG 0

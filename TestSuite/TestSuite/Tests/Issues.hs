@@ -382,7 +382,7 @@ test214 env = withAvailableSession env $ \session -> do
 
     -- Try to load without enabling -lz. Will fail
     updateSessionD session source 2
-    print =<< getSourceErrors session
+    assertSomeErrors session
 
     -- Now set the -lz option, and try again. Should succeed now.
     updateSessionD session linkLz 2
