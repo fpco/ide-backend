@@ -532,5 +532,5 @@ test_UTF8 env = withAvailableSession env $ \session -> do
        <> (updateSourceFile "M.hs" . L.unlines $
             [ "module M where"
             , "main :: IO ()"
-            , "main = putStrLn \"你好\""
+            , "main = putStrLn \"你好. 怎么样?\""
             ])
