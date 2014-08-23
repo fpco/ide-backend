@@ -513,7 +513,7 @@ test_UTF8 env = withAvailableSession env $ \session -> do
     runActions <- runStmt session "M" "main"
     (output, result) <- runWaitAll runActions
     assertEqual "" RunOk result
-    assertEqual "" "你好\n" output
+    assertEqual "" "你好. 怎么样?\n" output
 
     {- This is probably not fixable, because the code itself would need
     -- to specify IO.utf8, and we don't want to modify it.
