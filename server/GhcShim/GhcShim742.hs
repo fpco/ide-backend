@@ -159,6 +159,345 @@ setupLinkerState newPackages = do
 
 {------------------------------------------------------------------------------
   Backup DynFlags
+
+  Sadly, this hardcodes quite a bit of version-specific information about ghc's
+  inner workings. Unfortunately, there is no easy way to know which parts of
+  DynFlags should and should not be restored to restore flags. The flag
+  specification is given by (see packageDynamicFlags in compiler/main/GHC.hs)
+
+  > package_flags ++ dynamic_flags
+
+  both of which are defined in DynFlags.hs. They are not exported, but this
+  would not be particularly useful anyway, as the action associated with a
+  flag is given by a shallow embedding, so we cannot walk over them and extract
+  the necessary info about DynFlags. At least, we cannot do that in code -- we
+  can do it manually, and that is precisely what I've done to obtain the list
+  below. Of course, this means it's somewhat error prone.
+
+  In order so that this code can be audited and cross-checked against the
+  actual ghc version, and so that it can be modified for future ghc versions,
+  we don't just list the end result if this manual traversal, but document the
+  process.
+
+  Each of the command line options are defined in terms of a auxiliary
+  functions that specify their effect on DynFlags. These auxiliary functions
+  are listed below, along with which parts of DynFlags they modify:
+
+  > FUNCTION                   MODIFIES FIELD(s) OF DYNFLAGS
+  > ----------------------------------------------------------------------------
+  > addCmdlineFramework        cmdlineFrameworks
+  > addCmdlineHCInclude        cmdlineHcIncludes
+  > addDepExcludeMod           depExcludeMods
+  > addDepSuffix               depSuffixes
+  > addFrameworkPath           frameworkPaths
+  > addHaddockOpts             haddockOptions
+  > addImportPath              importPaths
+  > addIncludePath             includePaths
+  > addLibraryPath             libraryPaths
+  > addOptP                    settings
+  > addOptl                    settings
+  > addPluginModuleName        pluginModNames
+  > addPluginModuleNameOption  pluginModNameOpts
+  > alterSettings              settings
+  > disableGlasgowExts         flags, extensions, extensionFlags
+  > enableGlasgowExts          flags, extensions, extensionFlags
+  > exposePackage              packageFlags
+  > exposePackageId            packageFlags
+  > extraPkgConf_              extraPkgConfs
+  > forceRecompile             flags
+  > hidePackage                packageFlags
+  > ignorePackage              packageFlags
+  > parseDynLibLoaderMode      dynLibLoader
+  > setDPHOpt                  optLevel, flags, maxSimplIterations, simplPhases
+  > setDepIncludePkgDeps       depIncludePkgDeps
+  > setDepMakefile             depMakefile
+  > setDumpDir                 dumpDir
+  > setDumpFlag                flags
+  > setDumpFlag'               flags
+  > setDumpPrefixForce         dumpPrefixForce
+  > setDumpSimplPhases         flags, shouldDumpSimplPhase
+  > setDylibInstallName        dylibInstallName
+  > setDynFlag                 flags
+  > setExtensionFlag           extensions, extensionFlags
+  > setHcSuf                   hcSuf
+  > setHiDir                   hiDir
+  > setHiSuf                   hiSuf
+  > setLanguage                language, extensionFlags
+  > setMainIs                  mainFunIs, mainModIs
+  > setObjTarget               hscTarget
+  > setObjectDir               objectDir
+  > setObjectSuf               objectSuf
+  > setOptHpcDir               hpcDir
+  > setOptLevel                optLevel, flags
+  > setOutputDir               objectDir, hiDir, stubDir, includePaths, dumpDir
+  > setOutputFile              outputFile
+  > setOutputHi                outputHi
+  > setPackageName             thisPackage
+  > setPackageTrust            flags, pkgTrustOnLoc
+  > setPgmP                    settings
+  > setRtsOpts                 rtsOpts
+  > setRtsOptsEnabled          rtsOptsEnabled
+  > setSafeHaskell             safeHaskell
+  > setStubDir                 stubDir
+  > setTarget                  hscTarget
+  > setTmpDir                  settings
+  > setVerboseCore2Core        flags, shouldDumpSimplPhase
+  > setVerbosity               verbosity
+  > setWarningFlag             warningFlags
+  > trustPackage               packageFlags
+  > unSetDynFlag               flags
+  > unSetExtensionFlag         extensions, extensionFlags
+  > unSetWarningFlag           warningFlags
+
+  Below is a list of the dynamic_flags in alphabetical order along with the
+  auxiliary function that they use. A handful of these flags define their
+  effect on DynFlags directly; these are marked (**).
+
+  > FLAG                           DEFINED IN TERMS OF
+  > ----------------------------------------------------------------------------
+  > "#include"                     addCmdlineHCInclude
+  > "D"                            addOptP
+  > "F"                            setDynFlag
+  > "I"                            addIncludePath
+  > "L"                            addLibraryPath
+  > "O"                            setOptLevel
+  > "Odph"                         setDPHOpt
+  > "Onot"                         setOptLevel
+  > "U"                            addOptP
+  > "W"                            setWarningFlag
+  > "Wall"                         setWarningFlag
+  > "Werror"                       setDynFlag
+  > "Wnot"                         ** sets warningFlags
+  > "Wwarn"                        unSetDynFlag
+  > "auto"                         ** sets profAuto
+  > "auto-all"                     ** sets profAuto
+  > "caf-all"                      setDynFlag
+  > "cpp"                          setExtensionFlag
+  > "dasm-lint"                    setDynFlag
+  > "dcmm-lint"                    setDynFlag
+  > "dcore-lint"                   setDynFlag
+  > "ddump-asm"                    setDumpFlag
+  > "ddump-asm-coalesce"           setDumpFlag
+  > "ddump-asm-conflicts"          setDumpFlag
+  > "ddump-asm-expanded"           setDumpFlag
+  > "ddump-asm-liveness"           setDumpFlag
+  > "ddump-asm-native"             setDumpFlag
+  > "ddump-asm-regalloc"           setDumpFlag
+  > "ddump-asm-regalloc-stages"    setDumpFlag
+  > "ddump-asm-stats"              setDumpFlag
+  > "ddump-bcos"                   setDumpFlag
+  > "ddump-cmm"                    setDumpFlag
+  > "ddump-cmmz"                   setDumpFlag
+  > "ddump-cmmz-cafs"              setDumpFlag
+  > "ddump-cmmz-cbe"               setDumpFlag
+  > "ddump-cmmz-dead"              setDumpFlag
+  > "ddump-cmmz-info"              setDumpFlag
+  > "ddump-cmmz-lower"             setDumpFlag
+  > "ddump-cmmz-pretty"            setDumpFlag
+  > "ddump-cmmz-proc"              setDumpFlag
+  > "ddump-cmmz-procmap"           setDumpFlag
+  > "ddump-cmmz-rewrite"           setDumpFlag
+  > "ddump-cmmz-sp"                setDumpFlag
+  > "ddump-cmmz-spills"            setDumpFlag
+  > "ddump-cmmz-split"             setDumpFlag
+  > "ddump-cmmz-stub"              setDumpFlag
+  > "ddump-core-pipeline"          setDumpFlag
+  > "ddump-core-stats"             setDumpFlag
+  > "ddump-cpranal"                setDumpFlag
+  > "ddump-cps-cmm"                setDumpFlag
+  > "ddump-cs-trace"               setDumpFlag
+  > "ddump-cse"                    setDumpFlag
+  > "ddump-cvt-cmm"                setDumpFlag
+  > "ddump-deriv"                  setDumpFlag
+  > "ddump-ds"                     setDumpFlag
+  > "ddump-file-prefix"            setDumpPrefixForce
+  > "ddump-flatC"                  setDumpFlag
+  > "ddump-foreign"                setDumpFlag
+  > "ddump-hi"                     setDumpFlag
+  > "ddump-hi-diffs"               setDumpFlag
+  > "ddump-hpc"                    setDumpFlag
+  > "ddump-if-trace"               setDumpFlag
+  > "ddump-inlinings"              setDumpFlag
+  > "ddump-llvm"                   setObjTarget, setDumpFlag'
+  > "ddump-minimal-imports"        setDumpFlag
+  > "ddump-mod-cycles"             setDumpFlag
+  > "ddump-occur-anal"             setDumpFlag
+  > "ddump-opt-cmm"                setDumpFlag
+  > "ddump-parsed"                 setDumpFlag
+  > "ddump-prep"                   setDumpFlag
+  > "ddump-raw-cmm"                setDumpFlag
+  > "ddump-rn"                     setDumpFlag
+  > "ddump-rn-stats"               setDumpFlag
+  > "ddump-rn-trace"               setDumpFlag
+  > "ddump-rtti"                   setDumpFlag
+  > "ddump-rule-firings"           setDumpFlag
+  > "ddump-rule-rewrites"          setDumpFlag
+  > "ddump-rules"                  setDumpFlag
+  > "ddump-simpl"                  setDumpFlag
+  > "ddump-simpl-iterations"       setDumpFlag
+  > "ddump-simpl-phases"           setDumpSimplPhases
+  > "ddump-simpl-stats"            setDumpFlag
+  > "ddump-spec"                   setDumpFlag
+  > "ddump-splices"                setDumpFlag
+  > "ddump-stg"                    setDumpFlag
+  > "ddump-stranal"                setDumpFlag
+  > "ddump-tc"                     setDumpFlag
+  > "ddump-tc-trace"               setDumpFlag
+  > "ddump-ticked"                 setDumpFlag
+  > "ddump-to-file"                setDumpFlag
+  > "ddump-types"                  setDumpFlag
+  > "ddump-vect"                   setDumpFlag
+  > "ddump-view-pattern-commoning" setDumpFlag
+  > "ddump-vt-trace"               setDumpFlag
+  > "ddump-worker-wrapper"         setDumpFlag
+  > "dep-makefile"                 setDepMakefile
+  > "dep-suffix"                   addDepSuffix
+  > "dfaststring-stats"            setDynFlag
+  > "dno-llvm-mangler"             setDynFlag
+  > "dshow-passes"                 forceRecompile, setVerbosity
+  > "dsource-stats"                setDumpFlag
+  > "dstg-lint"                    setDynFlag
+  > "dstg-stats"                   setDynFlag
+  > "dumpdir"                      setDumpDir
+  > "dverbose-core2core"           setVerbosity, setVerboseCore2Core
+  > "dverbose-stg2stg"             setDumpFlag
+  > "dylib-install-name"           setDylibInstallName
+  > "dynload"                      parseDynLibLoaderMode
+  > "exclude-module"               addDepExcludeMod
+  > "fasm"                         setObjTarget
+  > "fbyte-code"                   setTarget
+  > "fcontext-stack"               ** sets ctxtStkDepth
+  > "ffloat-all-lams"              ** sets floatLamArgs
+  > "ffloat-lam-args"              ** sets floatLamArgs
+  > "fglasgow-exts"                enableGlasgowExts
+  > "fliberate-case-threshold"     ** sets liberateCaseThreshold
+  > "fllvm"                        setObjTarget
+  > "fmax-simplifier-iterations"   ** sets maxSimplIterations
+  > "fno-code"                     setTarget, ** sets ghcLink
+  > "fno-glasgow-exts"             disableGlasgowExts
+  > "fno-liberate-case-threshold"  ** sets liberateCaseThreshold
+  > "fno-prof-auto"                ** sets profAuto
+  > "fno-safe-infer"               setSafeHaskell
+  > "fno-spec-constr-count"        ** sets specConstrCount
+  > "fno-spec-constr-threshold"    ** sets specConstrThreshold
+  > "fobject-code"                 setTarget
+  > "fpackage-trust"               setPackageTrust
+  > "fplugin"                      addPluginModuleName
+  > "fplugin-opt"                  addPluginModuleNameOption
+  > "fprof-auto"                   ** sets profAuto
+  > "fprof-auto-calls"             ** sets profAuto
+  > "fprof-auto-exported"          ** sets profAuto
+  > "fprof-auto-top"               ** sets profAuto
+  > "framework"                    addCmdlineFramework
+  > "framework-path"               addFrameworkPath
+  > "frule-check"                  ** sets ruleCheck
+  > "fsimpl-tick-factor"           ** sets simplTickFactor
+  > "fsimplifier-phases"           ** sets simplPhases
+  > "fspec-constr-count"           ** sets specConstrCount
+  > "fspec-constr-threshold"       ** sets specConstrThreshold
+  > "fstrictness-before"           ** sets strictnessBefore
+  > "fvia-C"                       <<warning only>>
+  > "fvia-c"                       <<warning only>>
+  > "haddock"                      setDynFlag
+  > "haddock-opts"                 addHaddockOpts
+  > "hcsuf"                        setHcSuf
+  > "hidir"                        setHiDir
+  > "hisuf"                        setHiSuf
+  > "hpcdir"                       setOptHpcDir
+  > "i"                            addImportPath
+  > "include-pkg-deps"             setDepIncludePkgDeps
+  > "keep-hc-file"                 setDynFlag
+  > "keep-hc-files"                setDynFlag
+  > "keep-llvm-file"               setObjTarget, setDynFlag
+  > "keep-llvm-files"              setObjTarget, setDynFlag
+  > "keep-raw-s-file"              <<warning only>>
+  > "keep-raw-s-files"             <<warning only>>
+  > "keep-s-file"                  setDynFlag
+  > "keep-s-files"                 setDynFlag
+  > "keep-tmp-files"               setDynFlag
+  > "l"                            addOptl
+  > "main-is"                      setMainIs
+  > "monly-2-regs"                 <<warning only>>
+  > "monly-3-regs"                 <<warning only>>
+  > "monly-4-regs"                 <<warning only>>
+  > "msse2"                        setDynFlag
+  > "msse4.2"                      setDynFlag
+  > "n"                            <<warning only>>
+  > "no-auto"                      ** sets profAuto
+  > "no-auto-all"                  ** sets profAuto
+  > "no-auto-link-packages"        unSetDynFlag
+  > "no-caf-all"                   unSetDynFlag
+  > "no-hs-main"                   setDynFlag
+  > "no-link"                      ** sets ghcLink
+  > "no-recomp"                    setDynFlag
+  > "no-rtsopts"                   setRtsOptsEnabled
+  > "o"                            setOutputFile
+  > "odir"                         setObjectDir
+  > "ohi"                          setOutputHi
+  > "optF"                         alterSettings
+  > "optL"                         alterSettings
+  > "optP"                         addOptP
+  > "opta"                         alterSettings
+  > "optc"                         alterSettings
+  > "optdep--exclude-module"       addDepExcludeMod
+  > "optdep--include-pkg-deps"     setDepIncludePkgDeps
+  > "optdep--include-prelude"      setDepIncludePkgDeps
+  > "optdep-f"                     setDepMakefile
+  > "optdep-s"                     addDepSuffix
+  > "optdep-w"                     <<warning only>>
+  > "optdep-x"                     addDepExcludeMod
+  > "optl"                         addOptl
+  > "optlc"                        alterSettings
+  > "optlo"                        alterSettings
+  > "optm"                         <<warning only>>
+  > "optwindres"                   alterSettings
+  > "osuf"                         setObjectSuf
+  > "outputdir"                    setOutputDir
+  > "pgmF"                         alterSettings
+  > "pgmL"                         alterSettings
+  > "pgmP"                         setPgmP
+  > "pgma"                         alterSettings
+  > "pgmc"                         alterSettings
+  > "pgmdll"                       alterSettings
+  > "pgml"                         alterSettings
+  > "pgmlc"                        alterSettings
+  > "pgmlo"                        alterSettings
+  > "pgmm"                         <<warning only>>
+  > "pgms"                         alterSettings
+  > "pgmwindres"                   alterSettings
+  > "recomp"                       unSetDynFlag
+  > "rtsopts"                      setRtsOptsEnabled
+  > "rtsopts=all"                  setRtsOptsEnabled
+  > "rtsopts=none"                 setRtsOptsEnabled
+  > "rtsopts=some"                 setRtsOptsEnabled
+  > "shared"                       ** sets ghcLink
+  > "split-objs"                   setDynFlag
+  > "stubdir"                      setStubDir
+  > "tmpdir"                       setTmpDir
+  > "v"                            setVerbosity
+  > "w"                            ** sets warningFlags
+  > "with-rtsopts"                 setRtsOpts
+
+  Finally, there is a bunch flags defined in terms of setDynFlag, unSetDynFlag,
+  setWarningFlag, unSetWarningFlag, setExtensionFlag, unSetExtensionFlag,
+  setLanguage and setSafeHaskell.
+
+  The same list for package_flags:
+
+  > FLAG                           DEFINED IN TERMS OF
+  > ----------------------------------------------------------------------------
+  > "package-conf"           extraPkgConf_
+  > "no-user-package-conf"   unSetDynFlag
+  > "package-name"           setPackageName
+  > "package-id"             exposePackageId
+  > "package"                exposePackage
+  > "hide-package"           hidePackage
+  > "hide-all-packages"      setDynFlag
+  > "ignore-package"         ignorePackage
+  > "syslib"                 exposePackage
+  > "trust"                  trustPackage
+  > "distrust"               distrustPackage
+  > "distrust-all-packages"  setDynFlag
 ------------------------------------------------------------------------------}
 
 dynFlagsRef :: IORef DynFlags
@@ -179,8 +518,7 @@ restoreDynFlags = do
 -- | Copy over all fields of DynFlags that are affected by dynamic_flags
 -- (and only those)
 --
--- This was obtained by looking at dynamic_flags in the ghc sources and
--- inspecting the effect of each option.
+-- See detailed description above.
 restoreDynFlagsFrom :: DynFlags -> DynFlags -> DynFlags
 restoreDynFlagsFrom new old = new {
     cmdlineFrameworks     = cmdlineFrameworks     old
@@ -196,6 +534,7 @@ restoreDynFlagsFrom new old = new {
   , dynLibLoader          = dynLibLoader          old
   , extensionFlags        = extensionFlags        old
   , extensions            = extensions            old
+  , extraPkgConfs         = extraPkgConfs         old
   , flags                 = flags                 old
   , floatLamArgs          = floatLamArgs          old
   , frameworkPaths        = frameworkPaths        old
@@ -236,6 +575,7 @@ restoreDynFlagsFrom new old = new {
   , specConstrThreshold   = specConstrThreshold   old
   , strictnessBefore      = strictnessBefore      old
   , stubDir               = stubDir               old
+  , thisPackage           = thisPackage           old
   , verbosity             = verbosity             old
   , warningFlags          = warningFlags          old
   }
