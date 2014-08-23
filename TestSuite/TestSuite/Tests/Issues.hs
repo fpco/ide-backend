@@ -46,6 +46,7 @@ testGroupIssues env = testGroup "Issues" [
   , stdTest env "#214: Changing linker flags"                                                     test214
   , stdTest env "#219: runStmt gets corrupted by async exceptions"                                test219
   , stdTest env "#220: Calling forceCancel can have detrimental side-effects"                     test220
+  , stdTest env "#224: Package flags are not reset correctly"                                     test224
   ]
 
 test119 :: TestSuiteEnv -> Assertion
@@ -505,3 +506,27 @@ test94_missingFile env = withAvailableSession env $ \session -> do
             ])
 
     upd2 = updateDataFile "A.foo" "fooString"
+
+test224 :: TestSuiteEnv -> Assertion
+test224 env = withAvailableSession env $ \session -> do
+    do updateSessionD session upd1 1
+       assertNoErrors session
+
+       runActions <- runStmt session "Main" "main"
+       result <- runWaitAll runActions
+       assertEqual "" ("Hi 1\n", RunOk) result
+
+    do updateSessionD session upd2 1
+       assertNoErrors session
+
+       runActions <- runStmt session "Main" "main"
+       result <- runWaitAll runActions
+       assertEqual "" ("Hi 2\n", RunOk) result
+  where
+    upd1 = updateGhcOpts ["-hide-all-packages", "-package base"]
+        <> updateCodeGeneration True
+        <> updateSourceFile "Main.hs" "main = putStrLn \"Hi 1\""
+
+    upd2 = updateGhcOpts []
+        <> updateCodeGeneration True
+        <> updateSourceFile "Main.hs" "main = putStrLn \"Hi 2\""
