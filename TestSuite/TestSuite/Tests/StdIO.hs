@@ -9,7 +9,7 @@ import Test.Tasty
 import Test.HUnit
 import qualified Data.ByteString.UTF8       as S
 import qualified Data.ByteString.Lazy       as L
-import qualified Data.ByteString.Lazy.Char8 as L (unlines)
+import qualified Data.ByteString.Lazy.UTF8  as L
 import qualified Data.Text                  as T
 
 import IdeSession
@@ -49,7 +49,7 @@ test_CaptureStdout_SinglePutStrLn env = withAvailableSession env $ \session -> d
     assertEqual "" "Hello World\n" output
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "hello :: IO ()"
             , "hello = putStrLn \"Hello World\""
@@ -65,7 +65,7 @@ test_CaptureStdout_SinglePutStr env = withAvailableSession env $ \session -> do
     assertEqual "" "Hello World" output
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "hello :: IO ()"
             , "hello = putStr \"Hello World\""
@@ -81,7 +81,7 @@ test_CaptureStdout_SinglePutStr_Delay env = withAvailableSession env $ \session 
     assertEqual "" "hellohi" output
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "import Control.Concurrent (threadDelay)"
             , "import System.IO"
@@ -99,7 +99,7 @@ test_CaptureStdout_MultiplePutStrLn env = withAvailableSession env $ \session ->
     assertEqual "" "Hello World 1\nHello World 2\nHello World 3\n" output
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "hello :: IO ()"
             , "hello = do putStrLn \"Hello World 1\""
@@ -117,7 +117,7 @@ test_CaptureStdout_Mixed env = withAvailableSession env $ \session -> do
     assertEqual "" "Hello World 1\nHello World 2Hello World 3\n" output
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "hello :: IO ()"
             , "hello = do putStrLn \"Hello World 1\""
@@ -146,7 +146,7 @@ test_CaptureStdin_SimpleEcho env = withAvailableSession env $ \session -> do
     assertEqual "after runExe" ExitSuccess statusExe
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "echo :: IO ()"
             , "echo = getLine >>= putStrLn"
@@ -175,7 +175,7 @@ test_CaptureStdin_InfiniteEcho env = withAvailableSession env $ \session -> do
          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "import System.IO"
             , "import Control.Monad"
@@ -231,7 +231,7 @@ test_Interleaved env = withAvailableSession env $ \session -> do
          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "import System.IO"
             , "import Control.Monad"
@@ -252,7 +252,7 @@ test_Stderr env = withAvailableSession env $ \session -> do
     assertEqual "" "Hello World\n" output
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "import System.IO"
             , "hello :: IO ()"
@@ -281,7 +281,7 @@ test_Merge env = withAvailableSession env $ \session -> do
     assertEqual "" expectedOutput output
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "import System.IO"
             , "hello :: IO ()"
@@ -322,7 +322,7 @@ test_Merge_runExe env = withAvailableSession env $ \session -> do
     -- Note that we have to set buffering here, to match the default
     -- buffering for snippets.
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "import System.IO"
             , "main :: IO ()"
@@ -340,11 +340,11 @@ test_Merge_runExe env = withAvailableSession env $ \session -> do
 test_Interrupt_CaptureStdout :: TestSuiteEnv -> Assertion
 test_Interrupt_CaptureStdout env = withAvailableSession env $ \session -> do
     updateSession session (updateCodeGeneration True) (\_ -> return ())
-    let upd1 = updateSourceFile "Main.hs" . L.unlines $
+    let upd1 = updateSourceFile "Main.hs" . unlinesUtf8 $
                  [ "import Control.Monad"
                  , "main = forever $ print 1"
                  ]
-        upd2 = updateSourceFile "Main.hs" . L.unlines $
+        upd2 = updateSourceFile "Main.hs" . unlinesUtf8 $
                  [ "main = print 1234" ]
 
     do updateSessionD session upd1 1
@@ -493,7 +493,7 @@ test_ClosesStderr_Timeout env = withAvailableSession env $ \session -> do
               updateCodeGeneration True
             , updateStdoutBufferMode $ RunLineBuffering Nothing
             , updateStderrBufferMode $ RunBlockBuffering (Just 4096) (Just 250000)
-            , updateSourceFile "Main.hs" . L.unlines $ [
+            , updateSourceFile "Main.hs" . unlinesUtf8 $ [
                   "import Control.Concurrent"
                 , "import Control.Monad"
                 , "import System.IO"
@@ -513,7 +513,7 @@ test_UTF8 env = withAvailableSession env $ \session -> do
     runActions <- runStmt session "M" "main"
     (output, result) <- runWaitAll runActions
     assertEqual "" RunOk result
-    assertEqual "" "你好. 怎么样?\n" output
+    assertEqual "" "你好. 怎么样?\n" (L.toString output)
 
     {- This is probably not fixable, because the code itself would need
     -- to specify IO.utf8, and we don't want to modify it.
@@ -529,8 +529,11 @@ test_UTF8 env = withAvailableSession env $ \session -> do
     -}
   where
     upd = (updateCodeGeneration True)
-       <> (updateSourceFile "M.hs" . L.unlines $
+       <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "main :: IO ()"
             , "main = putStrLn \"你好. 怎么样?\""
             ])
+
+unlinesUtf8 :: [String] -> L.ByteString
+unlinesUtf8 = L.fromString . unlines
