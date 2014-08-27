@@ -570,6 +570,15 @@ setupLinkerState newPackages = do
   > "syslib"                exposePackage
   > "trust"                 trustPackage
   > "user-package-db"       addPkgConfRef
+
+  In addition to the above, we also reset one more field: pkgDatabase. The
+  pkgDatabase is initialized on the first call to initPackages (and hence the
+  first call to setSessionDynFlags), which happens at server startup.  After
+  that, subsequent calls to setSessionDynFlags take the _existing_ pkgDatabase,
+  but applies the "batch package flags" to it (hide-all-packages,
+  distrust-all-packages). However, it doesn't "unapply" these batch flags. By
+  restoring the pkgDatabase to the value it gets at server startup, we
+  effectively restore these batch flags whenever we apply user settings.
 ------------------------------------------------------------------------------}
 
 dynFlagsRef :: IORef DynFlags
@@ -588,7 +597,7 @@ restoreDynFlags = do
   return (currentDynFlags `restoreDynFlagsFrom` storedDynFlags)
 
 -- | Copy over all fields of DynFlags that are affected by dynamic_flags
--- (and only those)
+-- and package_flags (and only those)
 --
 -- See detailed description above.
 restoreDynFlagsFrom :: DynFlags -> DynFlags -> DynFlags
@@ -653,6 +662,7 @@ restoreDynFlagsFrom new old = new {
   , outputHi              = outputHi              old
   , packageFlags          = packageFlags          old
   , parMakeCount          = parMakeCount          old
+  , pkgDatabase           = pkgDatabase           old
   , pkgTrustOnLoc         = pkgTrustOnLoc         old
   , pluginModNameOpts     = pluginModNameOpts     old
   , pluginModNames        = pluginModNames        old

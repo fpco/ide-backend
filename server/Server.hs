@@ -93,6 +93,8 @@ ghcServerEngine conv@RpcConversation{..} = do
 
     -- We store the DynFlags _after_ setting the "static" options, so that
     -- we restore to this state before every call to updateDynamicOpts
+    -- Note that this happens _after_ we have called setSessionDynFlags
+    -- and hence after the package DB has been initialized.
     storeDynFlags
 
     -- Make sure that the dynamic linker has been initialized. This is done
