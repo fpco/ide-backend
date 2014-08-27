@@ -3,6 +3,7 @@ module TestSuite.Tests.Issues (testGroupIssues) where
 
 import Prelude hiding (span, mod)
 import Control.Concurrent
+import Control.Exception (bracket)
 import Control.Monad
 import Data.List (isInfixOf)
 import Data.Monoid
@@ -417,7 +418,10 @@ test219 env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
-    _ <- timeout 1 $ runStmt session "Main" "main"
+    _ <- timeout 1 $
+           bracket (runStmt session "Main" "main")
+                   (forceCancel)
+                   (\_ -> return ())
 
     runActions <- runStmt session "Main" "main"
     (_output, result) <- runWaitAll runActions

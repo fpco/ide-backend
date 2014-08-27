@@ -150,11 +150,12 @@ testTwiceRunExe env = withAvailableSession env $ \session -> do
             ])
 
 test_Terminate_CodeRunning :: TestSuiteEnv -> Assertion
-test_Terminate_CodeRunning env = withAvailableSession env $ \session -> do
-    updateSessionD session upd 1
-    assertNoErrors session
-    _runActions <- runStmt session "M" "echo"
-    return ()
+test_Terminate_CodeRunning env = do
+    runActions <- withAvailableSession' env dontReuse $ \session -> do
+      updateSessionD session upd 1
+      assertNoErrors session
+      runStmt session "M" "echo"
+    forceCancel runActions
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $
@@ -164,16 +165,17 @@ test_Terminate_CodeRunning env = withAvailableSession env $ \session -> do
             ])
 
 test_Terminate_ExeRunning :: TestSuiteEnv -> Assertion
-test_Terminate_ExeRunning env = withAvailableSession env $ \session -> do
-    updateSessionD session upd 1
+test_Terminate_ExeRunning env = do
+    runActions <- withAvailableSession' env dontReuse $ \session -> do
+      updateSessionD session upd 1
 
-    let m      = "M"
-        updExe = buildExe [] [(T.pack m, "M.hs")]
-    updateSessionD session updExe 2
+      let m      = "M"
+          updExe = buildExe [] [(T.pack m, "M.hs")]
+      updateSessionD session updExe 2
 
-    assertNoErrors session
-    _runActions <- runExe session "M"
-    return ()
+      assertNoErrors session
+      runExe session "M"
+    forceCancel runActions
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $
@@ -186,20 +188,25 @@ test_getSourceErrors_CodeRunning :: TestSuiteEnv -> Assertion
 test_getSourceErrors_CodeRunning env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     assertSourceErrors' session ["Top-level binding with no type signature"]
+    errs <- getSourceErrors session
 
-    let m      = "M"
-        updExe = buildExe [] [(T.pack m, "M.hs")]
-    updateSessionD session updExe 2
+    do runActions <- runStmt session "M" "loop"
+       errs'      <- getSourceErrors session
+       assertEqual "Running code does not affect getSourceErrors" errs errs'
+       forceCancel runActions
 
-    msgs1 <- getSourceErrors session
-    _ract <- runStmt session "M" "loop"
-    msgs2 <- getSourceErrors session
-    assertEqual "Running code does not affect getSourceErrors" msgs1 msgs2
+    do let m      = "M"
+           updExe = buildExe [] [(T.pack m, "M.hs")]
 
-    _runActionsExe <- runExe session m
+       updateSessionD session updExe 2
+       errs' <- getSourceErrors session
+       assertEqual "" errs errs'
 
-    msgs3 <- getSourceErrors session
-    assertEqual "Running exes does not affect getSourceErrors" msgs1 msgs3
+       runActions <- runExe session m
+       errs''    <- getSourceErrors session
+       assertEqual "Running exes does not affect getSourceErrors" errs errs''
+
+       forceCancel runActions
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $
@@ -215,9 +222,11 @@ test_getLoadedModules_CodeRunning env = withAvailableSession env $ \session -> d
     updateSessionD session upd 1
     mods <- getLoadedModules session
     assertEqual "" [T.pack "M"] mods
-    _runActions <- runStmt session "M" "loop"
-    mods' <- getLoadedModules session
+
+    runActions <- runStmt session "M" "loop"
+    mods'      <- getLoadedModules session
     assertEqual "Running code does not affect getLoadedModules" mods mods'
+    forceCancel runActions
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $

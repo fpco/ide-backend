@@ -34,7 +34,7 @@ import Control.Monad (when, forever)
 import Data.Typeable (Typeable)
 import Data.Binary (Binary)
 import System.Exit (ExitCode)
-import System.Posix.Signals (sigKILL, signalProcess)
+import System.Posix (ProcessID, sigKILL, signalProcess)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Char8      as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -215,83 +215,93 @@ data SnippetAction =
      | SnippetForceTerminated
 
 -- | Run code
+--
+-- NOTE: This is an interruptible operation
 rpcRun :: forall a.
           GhcServer                 -- ^ GHC server
        -> RunCmd                    -- ^ Run command
        -> (Maybe RunResult -> IO a) -- ^ Translate run results
                                     -- @Nothing@ indicates force cancellation
        -> IO (RunActions a)
-rpcRun server cmd translateResult = do
-  runWaitChan <- newChan :: IO (Chan SnippetAction)
-  reqChan     <- newChan :: IO (Chan GhcRunRequest)
+rpcRun server cmd translateResult =
+    Ex.mask_ $ do
+      -- Communicate with the snippet using an independent, concurrent, conversation
+      --
+      -- We mask exceptions _completely_ while connecting to the server because
+      -- we don't want an asynchronous exception against rpcRun to interrupt
+      -- communication with the main server, because that would make the whole
+      -- session unuseable.
+      --
+      -- TODO: This is of course a tad dangerous, because if for whatever reason
+      -- the communication with the main server stalls we cannot interrupt it.
+      -- Perhaps we should introduce a separate timeout for that?
+      (pid, stdin, stdout, stderr) <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
 
-  -- Communicate with the snippet using an independent, concurrent, conversation
-  --
-  -- We mask exceptions while connecting to the server because we don't want an
-  -- asynchronous exception against rpcRun to interrupt communication with the
-  -- main server, because that would make the whole session unuseable.
-  --
-  -- TODO: This is of course a tad dangerous, because if for whatever reason
-  -- the communication with the main server stalls we cannot interrupt it.
-  -- Perhaps we should introduce a separate timeout for that?
-  (pid, stdin, stdout, stderr) <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
-
-  respThread <- async . Ex.handle (handleExternalException runWaitChan) $ do
-    connectToRpcServer stdin stdout stderr $ \server' ->
-      ghcConversation (OutProcess server') $ \RpcConversation{..} -> do
-        -- This "respThread" is responsible for reading responses from the RPC
-        -- conversation, and writing them to the runWaitChan channel. This thread
-        -- terminates when the server replies with GhcRunDone.
-        --
-        -- In addition, we spawns a second "reqThread" which is responsible for
-        -- reading requests from the reqChan and sending them to to server. We
-        -- use withAsync so that when then we (the respThread) terminate the
-        -- reqThread automatically gets cancelled.
-        --
-        -- If an exception happens in the respThread it will be written to the
-        -- runWaitChan and the snippet will be considered terminated.
-        --
-        -- (TODO: What happens when an exception happens in the reqThread?)
-        withAsync (sendRequests put reqChan) $ \_reqThread -> do
-          let go = do resp <- get
-                      case resp of
-                        GhcRunDone result ->
-                          writeChan runWaitChan (SnippetTerminated result)
-                        GhcRunOutp bs -> do
-                          writeChan runWaitChan (SnippetOutput bs)
-                          go
-          go
-
-  -- runActionsState is used to make sure that once a snippet has terminated,
-  -- any subsequent calls to runWait simply return the final result.
-  -- This also makes sure that we call translateResult at most once.
-  runActionsState <- newMVar Nothing
-
-  return RunActions {
-      runWait =
-        $modifyMVar runActionsState $ \st ->
-          case st of
-            Just outcome ->
-              return (Just outcome, Right outcome)
-            Nothing -> do
-              outcome <- $readChan runWaitChan
-              case outcome of
-                SnippetOutput bs ->
-                  return (Nothing, Left bs)
-                SnippetForceTerminated -> do
-                  res <- translateResult Nothing
-                  return (Just res, Right res)
-                SnippetTerminated res' -> do
-                  res <- translateResult (Just res')
-                  return (Just res, Right res)
-    , interrupt   = writeChan reqChan GhcRunInterrupt
-    , supplyStdin = writeChan reqChan . GhcRunInput
-    , forceCancel = do
-        ignoreIOExceptions $ signalProcess sigKILL pid
-        writeChan runWaitChan SnippetForceTerminated
-        cancel respThread
-    }
+      -- Unmask exceptions only once we've installed an exception handler to
+      -- cleanup the process again
+      interruptible (aux pid stdin stdout stderr) `Ex.onException` signalProcess sigKILL pid
   where
+    aux :: ProcessID -> FilePath -> FilePath -> FilePath -> IO (RunActions a)
+    aux pid stdin stdout stderr = do
+      runWaitChan <- newChan :: IO (Chan SnippetAction)
+      reqChan     <- newChan :: IO (Chan GhcRunRequest)
+
+      respThread <- async . Ex.handle (handleExternalException runWaitChan) $ do
+        connectToRpcServer stdin stdout stderr $ \server' ->
+          ghcConversation (OutProcess server') $ \RpcConversation{..} -> do
+            -- This "respThread" is responsible for reading responses from the RPC
+            -- conversation, and writing them to the runWaitChan channel. This thread
+            -- terminates when the server replies with GhcRunDone.
+            --
+            -- In addition, we spawns a second "reqThread" which is responsible for
+            -- reading requests from the reqChan and sending them to to server. We
+            -- use withAsync so that when then we (the respThread) terminate the
+            -- reqThread automatically gets cancelled.
+            --
+            -- If an exception happens in the respThread it will be written to the
+            -- runWaitChan and the snippet will be considered terminated.
+            --
+            -- (TODO: What happens when an exception happens in the reqThread?)
+            withAsync (sendRequests put reqChan) $ \_reqThread -> do
+              let go = do resp <- get
+                          case resp of
+                            GhcRunDone result ->
+                              writeChan runWaitChan (SnippetTerminated result)
+                            GhcRunOutp bs -> do
+                              writeChan runWaitChan (SnippetOutput bs)
+                              go
+              go
+
+      -- runActionsState is used to make sure that once a snippet has terminated,
+      -- any subsequent calls to runWait simply return the final result.
+      -- This also makes sure that we call translateResult at most once.
+      runActionsState <- newMVar Nothing
+
+      return RunActions {
+          runWait =
+            $modifyMVar runActionsState $ \st ->
+              case st of
+                Just outcome ->
+                  return (Just outcome, Right outcome)
+                Nothing -> do
+                  outcome <- $readChan runWaitChan
+                  case outcome of
+                    SnippetOutput bs ->
+                      return (Nothing, Left bs)
+                    SnippetForceTerminated -> do
+                      res <- translateResult Nothing
+                      return (Just res, Right res)
+                    SnippetTerminated res' -> do
+                      res <- translateResult (Just res')
+                      return (Just res, Right res)
+        , interrupt   = writeChan reqChan GhcRunInterrupt
+        , supplyStdin = writeChan reqChan . GhcRunInput
+        , forceCancel = do
+            ignoreIOExceptions $ signalProcess sigKILL pid
+            writeChan runWaitChan SnippetForceTerminated
+            cancel respThread
+        }
+
     sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> IO ()
     sendRequests put reqChan = forever $ put =<< $readChan reqChan
 

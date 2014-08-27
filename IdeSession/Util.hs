@@ -11,6 +11,7 @@ module IdeSession.Util (
   , relInclToOpts
   , parseProgressMessage
   , ignoreDoesNotExist
+  , interruptible
     -- * Simple diffs
   , Diff(..)
   , applyMapDiff
@@ -38,6 +39,7 @@ import Data.Text (Text)
 import Data.Typeable (typeOf)
 import Foreign.Ptr (castPtr)
 import GHC.Generics (Generic)
+import GHC.IO (unsafeUnmask)
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
 import System.Environment (getEnvironment)
 import System.FilePath (splitFileName, (<.>), (</>))
@@ -207,6 +209,17 @@ ignoreDoesNotExist :: IO () -> IO ()
 ignoreDoesNotExist = Ex.handle $ \e ->
   if isDoesNotExistError e then return ()
                            else Ex.throwIO e
+
+-- | Define interruptiple operations
+--
+-- (TODO: Stick in reference to blog post)
+interruptible :: IO a -> IO a
+interruptible act = do
+  st <- Ex.getMaskingState
+  case st of
+    Ex.Unmasked              -> act
+    Ex.MaskedInterruptible   -> unsafeUnmask act
+    Ex.MaskedUninterruptible -> act
 
 {------------------------------------------------------------------------------
   Simple diffs
