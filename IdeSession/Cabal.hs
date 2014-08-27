@@ -19,7 +19,7 @@ import Data.Binary
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSL8
 import Data.Function (on)
-import Data.List (delete, sort, groupBy, nub, intersperse, intercalate)
+import Data.List (delete, sort, groupBy, nub, intersperse, intercalate, isPrefixOf, partition)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Monoid (Monoid(..))
 import Data.Time
@@ -145,14 +145,29 @@ pkgDesc = pkgDescFromName "main" pkgVersionMain
 bInfo :: [FilePath] -> [String] -> [FilePath] -> [FilePath] -> BuildInfo
 bInfo hsSourceDirs ghcOpts cSources installIncludes =
   emptyBuildInfo
-    { buildable = True
-    , hsSourceDirs
+    { buildable       = True
     , defaultLanguage = Just Haskell2010
-    , options = [(Simple.Compiler.GHC, ghcOpts)]
+    , options         = [(Simple.Compiler.GHC, realGhcOptions)]
+    , ccOptions       = actuallyCcOptions
+    , otherExtensions = [EnableExtension TemplateHaskell]  -- TODO: specify in SessionConfig?
+    , hsSourceDirs
     , cSources
     , installIncludes
-    , otherExtensions = [EnableExtension TemplateHaskell]  -- TODO: specify in SessionConfig?
     }
+  where
+    -- Cabal does not pass ghc-options to ghc when compiling C code, so we
+    -- must split these options out and explicitly pass them as options for the
+    -- C compiler.
+    --
+    -- See https://github.com/fpco/ide-backend/issues/218 and
+    -- https://github.com/haskell/cabal/pull/2043
+    actuallyCcOptions, realGhcOptions :: [String]
+    (actuallyCcOptions, realGhcOptions) =
+      let (cOpts, hsOpts) = partition isCcOpt ghcOpts
+      in (map (drop 5) cOpts, hsOpts)
+
+    isCcOpt :: String -> Bool
+    isCcOpt = isPrefixOf "-optc"
 
 -- @relative@ is a hack, because when building, we need an absolute path
 -- (so that ghc sees the .c files), but .cabal files need a relative path
@@ -261,7 +276,6 @@ configureAndBuild BuildExeArgs{ bePackageDBStack   = configPackageDBStack
                               , beLibDeps          = libDeps
                               , beLoadedMs         = loadedMs
                               , .. } ms = do
-  appendFile "/tmp/ghc.log" ("configureAndBuild: " ++ show ghcOpts ++ "\n")
   let mainDep = Package.Dependency pkgNameMain anyVersion
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
