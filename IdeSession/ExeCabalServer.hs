@@ -5,18 +5,22 @@ module IdeSession.ExeCabalServer (
   ) where
 
 import Control.Concurrent.Async (async, wait)
-import qualified Control.Exception as Ex
-import qualified Data.ByteString as BSS
-import Data.Text.Encoding as E
+import Foreign.C.Types (CFile)
+import Foreign.Ptr (Ptr, nullPtr)
 import System.Exit (ExitCode)
-import qualified System.IO as IO
 import System.IO.Error (isEOFError)
 import System.Posix.IO.ByteString
+import qualified Control.Exception  as Ex
+import qualified Data.ByteString    as BSS
+import qualified Data.Text.Encoding as E
+import qualified System.IO          as IO
 
 import IdeSession.Cabal
 import IdeSession.RPC.Server
-import IdeSession.Util
 import IdeSession.Types.Progress
+import IdeSession.Util
+
+foreign import ccall "fflush" fflush :: Ptr CFile -> IO ()
 
 -- | Handle RPC requests by calling Cabal functions, keeping track
 -- of progress and passing the results.
@@ -38,7 +42,7 @@ runExeCabal conv req = do
   (stdOutputRd, stdOutputWr) <- createPipe
 
   -- Backup stdout, then replace stdout with the pipe's write end
-  IO.hFlush IO.stdout
+  fflush nullPtr
   stdOutputBackup <- dup stdOutput
   _ <- dupTo stdOutputWr stdOutput
   closeFd stdOutputWr
@@ -49,9 +53,9 @@ runExeCabal conv req = do
 
   let stdoutLog = case req of
         ReqExeBuild buildExeArgs _ -> beStdoutLog buildExeArgs
-        ReqExeDoc buildExeArgs -> beStdoutLog buildExeArgs
-        ReqExeCc runCcArgs -> rcStdoutLog runCcArgs
-        ReqExeLic licenseArgs -> liStdoutLog licenseArgs
+        ReqExeDoc   buildExeArgs   -> beStdoutLog buildExeArgs
+        ReqExeCc    runCcArgs      -> rcStdoutLog runCcArgs
+        ReqExeLic   licenseArgs    -> liStdoutLog licenseArgs
   stdoutThread <- async $ readStdout conv stdOutputRdHandle stdoutLog
 
   exitCode <- case req of
@@ -65,7 +69,7 @@ runExeCabal conv req = do
       buildLicsFromPkgs True licenseArgs
 
   -- Restore stdout
-  IO.hFlush IO.stdout
+  fflush nullPtr
   dupTo stdOutputBackup stdOutput >> closeFd stdOutputBackup
 
   -- Closing the write end of the stdout pipe will cause the stdout
