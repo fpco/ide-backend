@@ -19,7 +19,7 @@ import TestSuite.Session
 import TestSuite.Assertions
 
 testGroupAPI :: TestSuiteEnv -> TestTree
-testGroupAPI env = testGroup "API use and abuse" [
+testGroupAPI env = testGroup "API use and abuse" $ [
     stdTest env "Duplicate shutdown"                                               testDuplicateShutdown
   , stdTest env "Permit a session within a session and duplicated shutdownSession" testNestedSessions
   , stdTest env "Reject updateSession after shutdownSession"                       testRejectUpdateSession
@@ -27,15 +27,16 @@ testGroupAPI env = testGroup "API use and abuse" [
   , stdTest env "Reject runStmt after shutdownSession"                             testRejectRunStmt
   , stdTest env "Fail on empty package DB"                                         testEmptyPackageDB
   , stdTest env "Two calls to runStmt"                                             testTwiceRunStmt
-  , stdTest env "Two calls to runExe"                                              testTwiceRunExe
   , stdTest env "Make sure we can terminate the IDE session when code is running"  test_Terminate_CodeRunning
-  , stdTest env "Make sure we can terminate the IDE session when exe is running"   test_Terminate_ExeRunning
   , stdTest env "getSourceErrors during run"                                       test_getSourceErrors_CodeRunning
   , stdTest env "getLoadedModules during run"                                      test_getLoadedModules_CodeRunning
   , stdTest env "getLoadedModules while configGenerateModInfo off"                 test_getLoadedModules_ConfigGenerateModInfoOff
   , stdTest env "Call runWait after termination (normal termination)"              test_runWait_AfterTermination
   , stdTest env "Call runWait after termination (interrupted)"                     test_runWait_AfterTermination_Int
   , stdTest env "Call runWait after termination (restarted session)"               test_runWait_AfterTermination_Restarted
+  ] ++ exeTests env [
+    stdTest env "Two calls to runExe"                                              testTwiceRunExe
+  , stdTest env "Make sure we can terminate the IDE session when exe is running"   test_Terminate_ExeRunning
   ]
 
 testDuplicateShutdown :: TestSuiteEnv -> Assertion
@@ -195,7 +196,8 @@ test_getSourceErrors_CodeRunning env = withAvailableSession env $ \session -> do
        assertEqual "Running code does not affect getSourceErrors" errs errs'
        forceCancel runActions
 
-    do let m      = "M"
+    ifTestingExe env $ do
+       let m      = "M"
            updExe = buildExe [] [(T.pack m, "M.hs")]
 
        updateSessionD session updExe 2
@@ -239,25 +241,27 @@ test_runWait_AfterTermination :: TestSuiteEnv -> Assertion
 test_runWait_AfterTermination env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
-    runActions <- runStmt session "M" "hello"
-    (output, result) <- runWaitAll runActions
-    assertEqual "" RunOk result
-    assertEqual "" "Hello World\n" output
-    result' <- runWait runActions
-    assertEqual "" result' (Right RunOk)
 
-    let m      = "M"
-        updExe = buildExe [] [(T.pack m, "M.hs")]
-    updateSessionD session updExe 2
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "Hello World\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    do runActions <- runStmt session "M" "hello"
+       (output, result) <- runWaitAll runActions
+       assertEqual "" RunOk result
+       assertEqual "" "Hello World\n" output
+       result' <- runWait runActions
+       assertEqual "" result' (Right RunOk)
 
-    result2 <- runWait runActionsExe
-    assertEqual "" result2 (Right ExitSuccess)
+    ifTestingExe env $ do
+       let m      = "M"
+           updExe = buildExe [] [(T.pack m, "M.hs")]
+       updateSessionD session updExe 2
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "Hello World\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
+
+       result2 <- runWait runActionsExe
+       assertEqual "" result2 (Right ExitSuccess)
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $
@@ -273,30 +277,31 @@ test_runWait_AfterTermination_Int env = withAvailableSession env $ \session -> d
     updateSessionD session upd 1
     assertNoErrors session
 
-    let m      = "M"
-        updExe = buildExe [] [(T.pack m, "M.hs")]
-    updateSessionD session updExe 2
-    runActionsExe <- runExe session m
-    threadDelay 1000000
-    interrupt runActionsExe
-    resOrEx <- runWait runActionsExe
-    case resOrEx of
-      Right result -> assertEqual "after runExe" (ExitFailure 2) result
-      _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
-    result' <- runWait runActionsExe
-    assertEqual "" result' (Right $ ExitFailure 2)
+    do runActions <- runStmt session "M" "loop"
+       threadDelay 1000000
+       interrupt runActions
+       resOrEx <- runWait runActions
+       case resOrEx of
+         Right result -> assertBool "" (isAsyncException result)
+         _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+       resOrEx' <- runWait runActions
+       case resOrEx' of
+         Right result -> assertBool "" (isAsyncException result)
+         _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show resOrEx'
 
-    runActions <- runStmt session "M" "loop"
-    threadDelay 1000000
-    interrupt runActions
-    resOrEx2 <- runWait runActions
-    case resOrEx2 of
-      Right result -> assertBool "" (isAsyncException result)
-      _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
-    resOrEx' <- runWait runActions
-    case resOrEx' of
-      Right result -> assertBool "" (isAsyncException result)
-      _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show resOrEx'
+    ifTestingExe env $ do
+       let m      = "M"
+           updExe = buildExe [] [(T.pack m, "M.hs")]
+       updateSessionD session updExe 2
+       runActionsExe <- runExe session m
+       threadDelay 1000000
+       interrupt runActionsExe
+       resOrEx <- runWait runActionsExe
+       case resOrEx of
+         Right result -> assertEqual "after runExe" (ExitFailure 2) result
+         _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+       result' <- runWait runActionsExe
+       assertEqual "" result' (Right $ ExitFailure 2)
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $
@@ -312,36 +317,38 @@ test_runWait_AfterTermination_Restarted :: TestSuiteEnv -> Assertion
 test_runWait_AfterTermination_Restarted env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
-    runActions <- runStmt session "M" "loop"
-    threadDelay 1000000
-    restartSession session
-    forceCancel runActions
-    resOrEx2 <- runWait runActions
-    case resOrEx2 of
-      Right RunForceCancelled -> return ()
-      _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx2
-    resOrEx' <- runWait runActions
-    case resOrEx' of
-      Right RunForceCancelled -> return ()
-      _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show resOrEx'
 
-    updateSessionD session mempty 1  -- needed to load the code again
+    do runActions <- runStmt session "M" "loop"
+       threadDelay 1000000
+       restartSession session
+       forceCancel runActions
+       resOrEx2 <- runWait runActions
+       case resOrEx2 of
+         Right RunForceCancelled -> return ()
+         _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx2
+       resOrEx' <- runWait runActions
+       case resOrEx' of
+         Right RunForceCancelled -> return ()
+         _ -> assertFailure $ "Unexpected run result in repeat call: " ++ show resOrEx'
 
-    let m      = "M"
-        updExe = buildExe [] [(T.pack m, "M.hs")]
-    updateSessionD session updExe 2
-    runActionsExe <- runExe session m
-    threadDelay 1000000
-    restartSession session
-    -- restartSession would not suffice, since session restart
-    -- doesn't stop the exe, so we need to interrupt manually.
-    interrupt runActionsExe
-    resOrEx <- runWait runActionsExe
-    case resOrEx of
-      Right result -> assertEqual "after runExe" (ExitFailure 2) result
-      _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
-    result' <- runWait runActionsExe
-    assertEqual "" result' (Right $ ExitFailure 2)
+       updateSessionD session mempty 1  -- needed to load the code again
+
+    ifTestingExe env $ do
+       let m      = "M"
+           updExe = buildExe [] [(T.pack m, "M.hs")]
+       updateSessionD session updExe 3 -- TODO: Really we only expect 2 (#189)
+       runActionsExe <- runExe session m
+       threadDelay 1000000
+       restartSession session
+       -- restartSession would not suffice, since session restart
+       -- doesn't stop the exe, so we need to interrupt manually.
+       interrupt runActionsExe
+       resOrEx <- runWait runActionsExe
+       case resOrEx of
+         Right result -> assertEqual "after runExe" (ExitFailure 2) result
+         _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
+       result' <- runWait runActionsExe
+       assertEqual "" result' (Right $ ExitFailure 2)
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $

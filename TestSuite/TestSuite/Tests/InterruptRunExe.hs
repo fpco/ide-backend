@@ -15,7 +15,7 @@ import TestSuite.Session
 import TestSuite.State
 
 testGroupInterruptRunExe :: TestSuiteEnv -> TestTree
-testGroupInterruptRunExe env = testGroup "Interrupt runExe" [
+testGroupInterruptRunExe env = testGroup "Interrupt runExe" $ exeTests env [
     stdTest env "After 1 sec"                                   testAfter1sec
   , stdTest env "Immediately"                                   testImmediately
   , stdTest env "Black hole, after 1 sec)"                      testBlackHole

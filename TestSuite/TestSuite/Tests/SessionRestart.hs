@@ -91,7 +91,8 @@ test_EnvRestored env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "Value1" output
 
-    do let m = "M"
+    ifTestingExe env $ do
+       let m = "M"
            updExe = buildExe [] [(T.pack m, "M.hs")]
        updateSessionD session updExe 2
        runActionsExe <- runExe session m
@@ -124,7 +125,8 @@ test_EnvRestored env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "Value1" output
 
-    do let m = "M"
+    ifTestingExe env $ do
+       let m = "M"
            updExe = buildExe [] [(T.pack m, "M.hs")]
        updateSessionD session updExe 2
        runActionsExe <- runExe session m

@@ -13,13 +13,14 @@ import TestSuite.Assertions
 
 testGroupCompliance :: TestSuiteEnv -> TestTree
 testGroupCompliance env = testGroup "Standards compliance" [
-    testGroup "NondecreasingIndentation" [
+    testGroup "NondecreasingIndentation" $ [
         stdTest env "GHC API should fail without -XNondecreasingIndentation"            test_failWithoutXNDI_GHC
-      , stdTest env "buildExe should fail without -XNondecreasingIndentation"           test_failWithoutXNDI_buildExe
       , stdTest env "both should pass with -XNondecreasingIndentation"                  test_passWithXNDI
       , stdTest env "both should pass with -XNondecreasingIndentation in SessionConfig" test_passWithXNDI_asStaticOpt
       , stdTest env "both should pass with -XHaskell98"                                 test_passWithXH98
       , stdTest env "both should pass with -XHaskell98 in SessionConfig"                test_passWithXH98_asStaticOpt
+      ] ++ exeTests env [
+        stdTest env "buildExe should fail without -XNondecreasingIndentation"           test_failWithoutXNDI_buildExe
       ]
   ]
 
@@ -64,12 +65,13 @@ test_passWithXNDI env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
-    let m    = "Main"
-        updE = buildExe [] [(m, "src/Main.hs")]
-    updateSessionD session updE 1
-    distDir     <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" True (null buildStderr)
+    ifTestingExe env $ do
+       let m    = "Main"
+           updE = buildExe [] [(m, "src/Main.hs")]
+       updateSessionD session updE 1
+       distDir     <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" True (null buildStderr)
   where
     src = "module Main where\n\
           \main = do\n\
@@ -84,12 +86,13 @@ test_passWithXNDI_asStaticOpt env = withAvailableSession' env (withGhcOpts ["-XN
     updateSessionD session upd 1
     assertNoErrors session
 
-    let m    = "Main"
-        updE = buildExe [] [(m, "src/Main.hs")]
-    updateSessionD session updE 1
-    distDir     <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" True (null buildStderr)
+    ifTestingExe env $ do
+       let m    = "Main"
+           updE = buildExe [] [(m, "src/Main.hs")]
+       updateSessionD session updE 1
+       distDir     <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" True (null buildStderr)
   where
     src = "module Main where\n\
           \main = do\n\
@@ -103,12 +106,13 @@ test_passWithXH98 env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
-    let m    = "Main"
-        updE = buildExe [] [(m, "src/Main.hs")]
-    updateSessionD session updE 1
-    distDir     <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" True (null buildStderr)
+    ifTestingExe env $ do
+       let m    = "Main"
+           updE = buildExe [] [(m, "src/Main.hs")]
+       updateSessionD session updE 1
+       distDir     <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" True (null buildStderr)
   where
     src = "module Main where\n\
           \main = do\n\
@@ -124,12 +128,13 @@ test_passWithXH98_asStaticOpt env = withAvailableSession' env (withGhcOpts ["-XH
     updateSessionD session upd 1
     assertNoErrors session
 
-    let m    = "Main"
-        updE = buildExe [] [(m, "src/Main.hs")]
-    updateSessionD session updE 1
-    distDir     <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" True (null buildStderr)
+    ifTestingExe env $ do
+       let m    = "Main"
+           updE = buildExe [] [(m, "src/Main.hs")]
+       updateSessionD session updE 1
+       distDir     <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" True (null buildStderr)
   where
     src = "module Main where\n\
           \main = do\n\

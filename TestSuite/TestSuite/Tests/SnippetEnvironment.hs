@@ -17,13 +17,14 @@ import TestSuite.Assertions
 import TestSuite.State
 
 testGroupSnippetEnvironment :: TestSuiteEnv -> TestTree
-testGroupSnippetEnvironment env = testGroup "Snippet environment" [
+testGroupSnippetEnvironment env = testGroup "Snippet environment" $ [
     stdTest env "Set environment variables"                                test_SetEnvVars
-  , stdTest env "Set environment variables in runExe"                      test_SetEnvVars_runExe
   , stdTest env "Test CWD by reading a data file"                          test_readDataFile
   , stdTest env "Test CWD in executable building"                          test_CwdInExeBuilding
   , stdTest env "Set command line arguments"                               test_SetCmdLineArgs
   , stdTest env "Check that command line arguments survive restartSession" test_CmdLineArgsAfterRestart
+  ] ++ exeTests env [
+    stdTest env "Set environment variables in runExe"                      test_SetEnvVars_runExe
   ]
 
 test_SetEnvVars :: TestSuiteEnv -> Assertion
@@ -187,32 +188,39 @@ test_readDataFile env = withAvailableSession env $ \session -> do
     assertNoErrors session
     let update3 = updateCodeGeneration True
     updateSessionD session update3 1
-    runActions <- runStmt session "Main" "main"
-    (output, _) <- runWaitAll runActions
-    assertEqual "compare test data content" "test data content\n" output
+
+    do runActions <- runStmt session "Main" "main"
+       (output, _) <- runWaitAll runActions
+       assertEqual "compare test data content" "test data content\n" output
+
     let m = "Main"
-        updExe = buildExe [] [(T.pack m, "Main.hs")]
-    updateSessionD session updExe 2
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "test data content\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let updExe = buildExe [] [(T.pack m, "Main.hs")]
+       updateSessionD session updExe 2
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "test data content\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
+
     let update4 = updateDataFile "datafile.dat" "new content"
                   <> update2
     updateSessionD session update4 1
-    runActions2 <- runStmt session "Main" "main"
-    (output2, _) <- runWaitAll runActions2
-    assertEqual "compare new content" "new content\n" output2
-    let updExe2 = buildExe [] [(T.pack m, "Main.hs")]
-    updateSessionD session updExe2 2
-    runActionsExe2 <- runExe session m
-    (outExe2, statusExe2) <- runWaitAll runActionsExe2
-    assertEqual "Output from runExe"
-                "new content\n"
-                outExe2
-    assertEqual "after runExe" ExitSuccess statusExe2
+
+    do runActions2 <- runStmt session "Main" "main"
+       (output2, _) <- runWaitAll runActions2
+       assertEqual "compare new content" "new content\n" output2
+
+    ifTestingExe env $ do
+       let updExe2 = buildExe [] [(T.pack m, "Main.hs")]
+       updateSessionD session updExe2 2
+       runActionsExe2 <- runExe session m
+       (outExe2, statusExe2) <- runWaitAll runActionsExe2
+       assertEqual "Output from runExe"
+                   "new content\n"
+                   outExe2
+       assertEqual "after runExe" ExitSuccess statusExe2
 
 test_CwdInExeBuilding :: TestSuiteEnv -> Assertion
 test_CwdInExeBuilding env = withAvailableSession env $ \session -> do
@@ -226,30 +234,31 @@ test_CwdInExeBuilding env = withAvailableSession env $ \session -> do
           ]
     updateSessionD session (update <> update2) 1
     assertNoErrors session
-    runActions <- runStmt session "Main" "main"
-    (output, _) <- runWaitAll runActions
-    assertEqual "compare test data" "test data\n" output
+
+    output <- do
+       runActions <- runStmt session "Main" "main"
+       (output, _) <- runWaitAll runActions
+       assertEqual "compare test data" "test data\n" output
+       return output
+
     let m = "Main"
-        upd = buildExe [] [(T.pack m, "Main.hs")]
-    updateSessionD session upd 2
-    distDir <- getDistDir session
-    out <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "CWD exe output" (L.toString output) out
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                output
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let upd = buildExe [] [(T.pack m, "Main.hs")]
+       updateSessionD session upd 2
+       distDir <- getDistDir session
+       out <- readProcess (distDir </> "build" </> m </> m) [] []
+       assertEqual "CWD exe output" (L.toString output) out
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   output
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
 
 test_SetCmdLineArgs :: TestSuiteEnv -> Assertion
 test_SetCmdLineArgs env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
-
-    let m = "M"
-        updExe = buildExe [] [(T.pack m, "M.hs")]
-    updateSessionD session updExe 2
 
     -- Check that default is []
     do runActions <- runStmt session "M" "printArgs"
@@ -257,7 +266,12 @@ test_SetCmdLineArgs env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "[]\n" output
 
-    do runActionsExe <- runExe session m
+    let m = "M"
+    ifTestingExe env $ do
+       let updExe = buildExe [] [(T.pack m, "M.hs")]
+       updateSessionD session updExe 2
+
+       runActionsExe <- runExe session m
        (outExe, statusExe) <- runWaitAll runActionsExe
        assertEqual "after runExe" ExitSuccess statusExe
        assertEqual "Output from runExe"
@@ -271,7 +285,8 @@ test_SetCmdLineArgs env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "[\"A\",\"B\",\"C\"]\n" output
 
-    do runActionsExe <- runExe session m
+    ifTestingExe env $ do
+       runActionsExe <- runExe session m
        (outExe, statusExe) <- runWaitAll runActionsExe
        assertEqual "after runExe" ExitSuccess statusExe
        assertEqual "Output from runExe"
@@ -285,7 +300,8 @@ test_SetCmdLineArgs env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "[\"D\",\"E\"]\n" output
 
-    do runActionsExe <- runExe session m
+    ifTestingExe env $ do
+       runActionsExe <- runExe session m
        (outExe, statusExe) <- runWaitAll runActionsExe
        assertEqual "after runExe" ExitSuccess statusExe
        assertEqual "Output from runExe"
@@ -299,7 +315,8 @@ test_SetCmdLineArgs env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "[]\n" output
 
-    do runActionsExe <- runExe session m
+    ifTestingExe env $ do
+       runActionsExe <- runExe session m
        (outExe, statusExe) <- runWaitAll runActionsExe
        assertEqual "after runExe" ExitSuccess statusExe
        assertEqual "Output from runExe"
@@ -321,10 +338,6 @@ test_CmdLineArgsAfterRestart env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
 
-    let m = "M"
-        updExe = buildExe [] [(T.pack m, "M.hs")]
-    updateSessionD session updExe 2
-
     -- Sanity check: check before restart session
     updateSession session (updateArgs ["A", "B", "C"]) (\_ -> return ())
     do runActions <- runStmt session "M" "printArgs"
@@ -332,7 +345,12 @@ test_CmdLineArgsAfterRestart env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "[\"A\",\"B\",\"C\"]\n" output
 
-    do runActionsExe <- runExe session m
+    let m = "M"
+    ifTestingExe env $ do
+       let updExe = buildExe [] [(T.pack m, "M.hs")]
+       updateSessionD session updExe 2
+
+       runActionsExe <- runExe session m
        (outExe, statusExe) <- runWaitAll runActionsExe
        assertEqual "after runExe" ExitSuccess statusExe
        assertEqual "Output from runExe"
@@ -350,7 +368,8 @@ test_CmdLineArgsAfterRestart env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "[\"A\",\"B\",\"C\"]\n" output
 
-    do runActionsExe <- runExe session m
+    ifTestingExe env $ do
+       runActionsExe <- runExe session m
        (outExe, statusExe) <- runWaitAll runActionsExe
        assertEqual "after runExe" ExitSuccess statusExe
        assertEqual "Output from runExe"

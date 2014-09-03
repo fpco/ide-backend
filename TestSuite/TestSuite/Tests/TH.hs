@@ -17,11 +17,12 @@ import TestSuite.State
 import TestSuite.Session
 
 testGroupTH :: TestSuiteEnv -> TestTree
-testGroupTH env = testGroup "TH" [
+testGroupTH env = testGroup "TH" $ [
     stdTest env "Code generation on"                                       test_codeGenOn
-  , stdTest env "Build executable from TH"                                 test_buildExe
   , stdTest env "Build haddocks from TH"                                   test_TH
   , stdTest env "Build .cabal from TH with a wrong libname and don't fail" test_Cabal
+  ] ++ exeTests env [
+    stdTest env "Build executable from TH"                                 test_buildExe
   ]
 
 test_codeGenOn :: TestSuiteEnv -> Assertion

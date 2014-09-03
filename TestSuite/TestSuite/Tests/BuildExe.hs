@@ -15,7 +15,7 @@ import TestSuite.Session
 import TestSuite.Assertions
 
 testGroupBuildExe :: TestSuiteEnv -> TestTree
-testGroupBuildExe env = testGroup "Build executable" [
+testGroupBuildExe env = testGroup "Build executable" $ exeTests env [
     stdTest env "From some .lhs files"                                  test_fromLhsFiles
   , stdTest env "From some .lhs files with dynamic include path change" test_fromLhsFiles_DynamicIncludePathChange
   , stdTest env "Build executable from 2 TH files"                      test_2TH

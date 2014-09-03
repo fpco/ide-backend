@@ -24,9 +24,8 @@ import TestSuite.Session
 import TestSuite.Assertions
 
 testGroupIssues :: TestSuiteEnv -> TestTree
-testGroupIssues env = testGroup "Issues" [
+testGroupIssues env = testGroup "Issues" $ [
     withOK  env " #32: Paths in type errors"                                                      test32
-  , stdTest env "#119: Re-building an executable after a code change does not rebuild"            test119
   , stdTest env " #94: Quickfix for Updating static files never triggers --- illegal var name"    test94_illegalVarName
   , stdTest env " #94: Quickfix for Updating static files never triggers --- missing file"        test94_missingFile
   , stdTest env " #94: Quickfix for Updating static files never triggers recompilation"           test94
@@ -35,12 +34,8 @@ testGroupIssues env = testGroup "Issues" [
   , stdTest env "#125: Hang when snippet calls createProcess with close_fds set to True"          test125
   , stdTest env "#134: Updating dependent data files multiple times per second"                   test134
   , stdTest env "#145: GHC bug #8333"                                                             test145
-  , stdTest env "#169: Data files should not leak in exe building"                                test169_buildExe
-  , stdTest env "#169: Data files should not leak in exe building, with a extra modules"          test169_buildExe_extraModules
-  , stdTest env "#169: Data files should not leak in exe building, with a non-'Main' main module" test169_buildExe_nonMain
   , stdTest env "#169: Data files should not leak into compilation if referenced"                 test169
   , stdTest env "#170: GHC API expects 'main' to be present in 'Main'"                            test170_GHC
-  , stdTest env "#170: buildExe doesn't expect 'Main.main' to be present nor to be in IO"         test170_buildExe
   , stdTest env "#185: Invalid GHC option and option warnings"                                    test185
   , withOK  env "#194: Start server without bracket (need MANUAL check that server will die)"     test194
   , stdTest env "#213: Missing location information"                                              test213
@@ -48,6 +43,12 @@ testGroupIssues env = testGroup "Issues" [
   , stdTest env "#219: runStmt gets corrupted by async exceptions"                                test219
   , stdTest env "#220: Calling forceCancel can have detrimental side-effects"                     test220
   , stdTest env "#224: Package flags are not reset correctly"                                     test224
+  ] ++ exeTests env [
+    stdTest env "#119: Re-building an executable after a code change does not rebuild"            test119
+  , stdTest env "#169: Data files should not leak in exe building"                                test169_buildExe
+  , stdTest env "#169: Data files should not leak in exe building, with a extra modules"          test169_buildExe_extraModules
+  , stdTest env "#169: Data files should not leak in exe building, with a non-'Main' main module" test169_buildExe_nonMain
+  , stdTest env "#170: buildExe doesn't expect 'Main.main' to be present nor to be in IO"         test170_buildExe
   ]
 
 test119 :: TestSuiteEnv -> Assertion

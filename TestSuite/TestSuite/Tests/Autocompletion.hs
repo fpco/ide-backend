@@ -19,11 +19,12 @@ import TestSuite.Assertions
 -- * Explicitly hiding something that wasn't exported
 -- * Use of PackageImports without the flag
 testGroupAutocompletion :: TestSuiteEnv -> TestTree
-testGroupAutocompletion env = testGroup "Autocompletion" [
-    stdTest env "Autocomplete 1: Imports for partial module"                          test_PartialModule
-  , stdTest env "Autocomplete 2: Recompute after recompilation"                       test_Recompute
-  , docTest env "Autocomplete 3: Autocompletion entries should have home module info" test_HomeModuleInfo
-  , stdTest env "Autocomplete 4: fpco issue #2518"                                    test_2518
+testGroupAutocompletion env = testGroup "Autocompletion" $ [
+    stdTest env "Imports for partial module"                          test_PartialModule
+  , stdTest env "Recompute after recompilation"                       test_Recompute
+  , stdTest env "fpco issue #2518"                                    test_2518
+  ] ++ docTests env [
+    stdTest env "Autocompletion entries should have home module info" test_HomeModuleInfo
   ]
 
 test_PartialModule :: TestSuiteEnv -> Assertion

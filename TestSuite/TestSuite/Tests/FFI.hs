@@ -19,19 +19,20 @@ import TestSuite.Session
 import TestSuite.State
 
 testGroupFFI :: TestSuiteEnv -> TestTree
-testGroupFFI env = testGroup "Using the FFI" [
+testGroupFFI env = testGroup "Using the FFI" $ [
     stdTest env "via GHC API"                                                                     test_FFI_via_API
   , stdTest env "via GHC API with restartSession"                                                 test_FFI_via_API_restartSession
   , stdTest env "via GHC API with deleting and re-adding the .c file"                             test_deleteReadd
   , stdTest env "via GHC API with deleting and adding a different .c file"                        test_deleteAddDifferent
-  , stdTest env "from a subdir and compiled via buildExe"                                         test_fromSubdir_buildExe
-  , stdTest env "with TH and MIN_VERSION_base via buildExe"                                       test_MinVersion
-  , stdTest env "with withIncludes, TH and MIN_VERSION_base via buildExe"                         test_MinVersion_withIncludes
   , stdTest env "with withIncludes, TH and MIN_VERSION_base via buildExe and with restartSession" test_MinVersion_restartSession
   , stdTest env "with withIncludes and TargetsExclude"                                            test_TargetsExclude
   , stdTest env "with dynamic include, TH and MIN_VERSION_base via buildExe"                      test_DynamicInclude
   , stdTest env "with dynamic include and TargetsInclude"                                         test_DynamicInclude_TargetsInclude
   , stdTest env "with setting SSE via GHC API (#218)"                                             test_SSE_via_API
+  ] ++ exeTests env [
+    stdTest env "from a subdir and compiled via buildExe"                                         test_fromSubdir_buildExe
+  , stdTest env "with TH and MIN_VERSION_base via buildExe"                                       test_MinVersion
+  , stdTest env "with withIncludes, TH and MIN_VERSION_base via buildExe"                         test_MinVersion_withIncludes
   , stdTest env "with setting SSE via buildExe (#218)"                                            test_SSE_via_buildExe
   ]
 
@@ -241,20 +242,21 @@ test_MinVersion_restartSession env = withAvailableSession' env (withIncludes ["t
                             <> updateSourceFileFromFile "test/FFI/life.c") 4
     assertNoErrors session
 
-    let m = "Main"
-        upd2 = buildExe [] [(T.pack m, "Main3.hs")]
-    updateSessionD session upd2 3
-    distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
-    exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "FFI exe output" "84\n" exeOut
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "84\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let m = "Main"
+           upd2 = buildExe [] [(T.pack m, "Main3.hs")]
+       updateSessionD session upd2 3
+       distDir <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" "" buildStderr
+       exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+       assertEqual "FFI exe output" "84\n" exeOut
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "84\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
   where
     upd = mconcat [
         updateCodeGeneration True
@@ -296,20 +298,21 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
                             <> updateSourceFileFromFile "test/FFI/life.h") 5
     assertNoErrors session
 
-    let m = "Main"
-        upd2 = buildExe [] [(T.pack m, "Main3.hs")]
-    updateSessionD session upd2 3
     distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
-    exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "FFI exe output" "84\n" exeOut
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "84\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let m = "Main"
+           upd2 = buildExe [] [(T.pack m, "Main3.hs")]
+       updateSessionD session upd2 3
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" "" buildStderr
+       exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+       assertEqual "FFI exe output" "84\n" exeOut
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "84\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
 
     -- This is the one test where test the .cabal file; doing this
     -- consistently in other tests is painful because the precise format of
@@ -351,20 +354,21 @@ test_DynamicInclude env = withAvailableSession env $ \session -> do
                    4
     assertNoErrors session
 
-    let m = "Main"
-        upd2 = buildExe [] [(T.pack m, "Main3.hs")]
-    updateSessionD session upd2 3
-    distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
-    exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "FFI exe output" "84\n" exeOut
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "84\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let m = "Main"
+           upd2 = buildExe [] [(T.pack m, "Main3.hs")]
+       updateSessionD session upd2 3
+       distDir <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" "" buildStderr
+       exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+       assertEqual "FFI exe output" "84\n" exeOut
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "84\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
   where
     upd = mconcat [
         updateCodeGeneration True
@@ -391,20 +395,21 @@ test_DynamicInclude_TargetsInclude env = withAvailableSession env $ \session -> 
     updateSessionD session (updateTargets (TargetsInclude ["test/FFI/Main3.hs"])) 4
     assertNoErrors session
 
-    let m = "Main"
-        upd2 = buildExe [] [(T.pack m, "Main3.hs")]
-    updateSessionD session upd2 3
-    distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
-    exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "FFI exe output" "84\n" exeOut
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "84\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let m = "Main"
+           upd2 = buildExe [] [(T.pack m, "Main3.hs")]
+       updateSessionD session upd2 3
+       distDir <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" "" buildStderr
+       exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
+       assertEqual "FFI exe output" "84\n" exeOut
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "84\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
   where
     upd = mconcat [
         updateCodeGeneration True

@@ -18,7 +18,7 @@ import TestSuite.Session
 import TestSuite.State
 
 testGroupStdIO :: TestSuiteEnv -> TestTree
-testGroupStdIO env = testGroup "Standard I/O" [
+testGroupStdIO env = testGroup "Standard I/O" $ [
     stdTest env "Capture stdout (single putStrLn)"               test_CaptureStdout_SinglePutStrLn
   , stdTest env "Capture stdout (single putStr)"                 test_CaptureStdout_SinglePutStr
   , stdTest env "Capture stdout (single putStr with delay)"      test_CaptureStdout_SinglePutStr_Delay
@@ -26,10 +26,8 @@ testGroupStdIO env = testGroup "Standard I/O" [
   , stdTest env "Capture stdout (mixed putStr and putStrLn)"     test_CaptureStdout_Mixed
   , stdTest env "Capture stdin (simple echo process)"            test_CaptureStdin_SimpleEcho
   , stdTest env "Capture stdin (infinite echo process)"          test_CaptureStdin_InfiniteEcho
-  , stdTest env "Capture stdin (interleave runStmt and runExe)"  test_Interleaved
   , stdTest env "Capture stderr"                                 test_Stderr
   , stdTest env "Merge stdout and stderr"                        test_Merge
-  , stdTest env "Merge stdout and stderr (in runExe)"            test_Merge_runExe
   , stdTest env "Interrupt, then capture stdout"                 test_Interrupt_CaptureStdout
   , stdTest env "Snippet closes stdin; next snippet unaffected"  test_ClosesStdin
   , stdTest env "Snippet closes stdin (interrupted 'interact'); next snippet unaffected" test_ClosesStdin_Interact
@@ -37,6 +35,9 @@ testGroupStdIO env = testGroup "Standard I/O" [
   , stdTest env "Snippet closes stderr; next snippet unaffected" test_ClosesStderr
   , stdTest env "Snippet closes stderr, using timeout buffering" test_ClosesStderr_Timeout
   , stdTest env "Make sure encoding is UTF8"                     test_UTF8
+  ] ++ exeTests env [
+    stdTest env "Capture stdin (interleave runStmt and runExe)"  test_Interleaved
+  , stdTest env "Merge stdout and stderr (in runExe)"            test_Merge_runExe
   ]
 
 test_CaptureStdout_SinglePutStrLn :: TestSuiteEnv -> Assertion
@@ -129,21 +130,24 @@ test_CaptureStdin_SimpleEcho :: TestSuiteEnv -> Assertion
 test_CaptureStdin_SimpleEcho env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     assertNoErrors session
-    runActions <- runStmt session "M" "echo"
-    supplyStdin runActions "ECHO!\n"
-    (output, result) <- runWaitAll runActions
-    assertEqual "" RunOk result
-    assertEqual "" "ECHO!\n" output
-    let m = "M"
-        updExe = buildExe [] [(T.pack m, "M.hs")]
-    updateSessionD session updExe 2
-    runActionsExe <- runExe session m
-    supplyStdin runActionsExe "ECHO!\n"
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "ECHO!\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+
+    do runActions <- runStmt session "M" "echo"
+       supplyStdin runActions "ECHO!\n"
+       (output, result) <- runWaitAll runActions
+       assertEqual "" RunOk result
+       assertEqual "" "ECHO!\n" output
+
+    ifTestingExe env $ do
+       let m = "M"
+           updExe = buildExe [] [(T.pack m, "M.hs")]
+       updateSessionD session updExe 2
+       runActionsExe <- runExe session m
+       supplyStdin runActionsExe "ECHO!\n"
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "ECHO!\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . unlinesUtf8 $
@@ -355,7 +359,8 @@ test_Interrupt_CaptureStdout env = withAvailableSession env $ \session -> do
        randomRIO (0, 1000000) >>= threadDelay -- Wait between 0 and 1sec
        void $ runWaitAll runActions
 
-    do let m = "Main"
+    ifTestingExe env $ do
+       let m = "Main"
            updExe = buildExe [] [(T.pack m, "Main.hs")]
        updateSessionD session updExe 2
        runActionsExe <- runExe session m
@@ -369,7 +374,8 @@ test_Interrupt_CaptureStdout env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "1234\n" output
 
-    do let m = "Main"
+    ifTestingExe env $ do
+       let m = "Main"
            updExe = buildExe [] [(T.pack m, "Main.hs")]
        updateSessionD session updExe 2
        runActionsExe <- runExe session m

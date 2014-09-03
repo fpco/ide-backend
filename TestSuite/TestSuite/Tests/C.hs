@@ -41,7 +41,8 @@ test_Basic env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "12345\n" output
 
-    do let m = "M"
+    ifTestingExe env $ do
+       let m = "M"
            updExe = buildExe [] [(T.pack m, "M.hs")]
        updateSessionD session updExe 2
        runActionsExe <- runExe session m
@@ -61,7 +62,8 @@ test_Basic env = withAvailableSession env $ \session -> do
        assertEqual "" RunOk result
        assertEqual "" "12346\n" output
 
-    do let m = "M"
+    ifTestingExe env $ do
+       let m = "M"
            updExe = buildExe [] [(T.pack m, "M.hs")]
        updateSessionD session updExe 2
        runActionsExe <- runExe session m
@@ -81,15 +83,17 @@ test_Basic env = withAvailableSession env $ \session -> do
        (output, result) <- runWaitAll runActions
        assertEqual "" RunOk result
        assertEqual "" "54322\n" output
-    let m = "M"
-        updExe = buildExe [] [(T.pack m, "M.hs")]
-    updateSessionD session updExe 3
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "54322\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+
+    ifTestingExe env $ do
+       let m = "M"
+           updExe = buildExe [] [(T.pack m, "M.hs")]
+       updateSessionD session updExe 3
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "54322\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $
@@ -135,15 +139,17 @@ test_subdirs env = withAvailableSession env $ \session -> do
        (output, result) <- runWaitAll runActions
        assertEqual "" RunOk result
        assertEqual "" "79\n" output
-    let m = "M"
-        updExe = buildExe [] [(T.pack m, "M.hs")]
-    updateSessionD session updExe 2
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "79\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+
+    ifTestingExe env $ do
+       let m = "M"
+           updExe = buildExe [] [(T.pack m, "M.hs")]
+       updateSessionD session updExe 2
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "79\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $

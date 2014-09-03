@@ -67,22 +67,23 @@ test_recursiveModules env = withAvailableSession' env (withIncludes ["test/bootM
     loadModulesFrom session "test/bootMods"
     assertNoErrors session
 
-    let m = "Main"
-        upd = buildExe [] [(T.pack m, "C" <.> "hs")]
-    updateSessionD session upd 7
-    distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
-    status <- getBuildExeStatus session
-    assertEqual "after exe build" (Just ExitSuccess) status
-    out <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "" "C\n" out
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "C\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let m = "Main"
+           upd = buildExe [] [(T.pack m, "C" <.> "hs")]
+       updateSessionD session upd 7
+       distDir <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" "" buildStderr
+       status <- getBuildExeStatus session
+       assertEqual "after exe build" (Just ExitSuccess) status
+       out <- readProcess (distDir </> "build" </> m </> m) [] []
+       assertEqual "" "C\n" out
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "C\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
 
 test_dynamicIncludePathChange :: TestSuiteEnv -> Assertion
 test_dynamicIncludePathChange env = withAvailableSession env $ \session -> do
@@ -94,22 +95,23 @@ test_dynamicIncludePathChange env = withAvailableSession env $ \session -> do
                    4
     assertNoErrors session
 
-    let m = "Main"
-        upd = buildExe [] [(T.pack m, "C" <.> "hs")]
-    updateSessionD session upd 7
-    distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
-    status <- getBuildExeStatus session
-    assertEqual "after exe build" (Just ExitSuccess) status
-    out <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "" "C\n" out
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "C\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let m = "Main"
+           upd = buildExe [] [(T.pack m, "C" <.> "hs")]
+       updateSessionD session upd 7
+       distDir <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" "" buildStderr
+       status <- getBuildExeStatus session
+       assertEqual "after exe build" (Just ExitSuccess) status
+       out <- readProcess (distDir </> "build" </> m </> m) [] []
+       assertEqual "" "C\n" out
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "C\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
 
 test_CPP_ifdefModuleHeader :: TestSuiteEnv -> Assertion
 test_CPP_ifdefModuleHeader env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ \session -> do
@@ -152,12 +154,14 @@ test_NamedFieldPuns env = withAvailableSession' env (withGhcOpts ["-hide-package
       (_, lm) <- getModules session
       updateSessionD session update2 (length lm)
     assertNoErrors session
-    let m = "GHC.RTS.Events"
-        upd2 = buildExe [] [(T.pack m, "GHC/RTS/Events.hs")]
-    updateSessionD session upd2 4
-    distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
+
+    ifTestingExe env $ do
+       let m = "GHC.RTS.Events"
+           upd2 = buildExe [] [(T.pack m, "GHC/RTS/Events.hs")]
+       updateSessionD session upd2 4
+       distDir <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" "" buildStderr
 
 test_DontRecompile_SingleModule :: TestSuiteEnv -> Assertion
 test_DontRecompile_SingleModule env = withAvailableSession env $ \session -> do
@@ -229,23 +233,24 @@ test_HsBoot env = withAvailableSession env $ \session -> do
     updateSessionD session upd 3
     assertNoErrors session
 
-    let m = "A"
-        updE = buildExe ["-rtsopts", "-O1"] [(T.pack m, m <.> "hs")]
-    updateSessionD session updE 4
-    distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
-    status <- getBuildExeStatus session
-    assertEqual "after exe build" (Just ExitSuccess) status
-    out <- readProcess (distDir </> "build" </> m </> m)
-                       ["+RTS", "-C0.005", "-RTS"] []
-    assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "[1,1,2,3,5,8,13,21,34,55]\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let m = "A"
+           updE = buildExe ["-rtsopts", "-O1"] [(T.pack m, m <.> "hs")]
+       updateSessionD session updE 4
+       distDir <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" "" buildStderr
+       status <- getBuildExeStatus session
+       assertEqual "after exe build" (Just ExitSuccess) status
+       out <- readProcess (distDir </> "build" </> m </> m)
+                          ["+RTS", "-C0.005", "-RTS"] []
+       assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "[1,1,2,3,5,8,13,21,34,55]\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "A.hs" $ L.unlines [
@@ -280,22 +285,23 @@ test_LhsBoot env = withAvailableSession env $ \session -> do
     updateSessionD session upd 3
     assertNoErrors session
 
-    let m = "A"
-        updE = buildExe [] [(T.pack m, m <.> "lhs")]
-    updateSessionD session updE 4
-    distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
-    status <- getBuildExeStatus session
-    assertEqual "after exe build" (Just ExitSuccess) status
-    out <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "[1,1,2,3,5,8,13,21,34,55]\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+        let m = "A"
+            updE = buildExe [] [(T.pack m, m <.> "lhs")]
+        updateSessionD session updE 4
+        distDir <- getDistDir session
+        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+        assertEqual "buildStderr empty" "" buildStderr
+        status <- getBuildExeStatus session
+        assertEqual "after exe build" (Just ExitSuccess) status
+        out <- readProcess (distDir </> "build" </> m </> m) [] []
+        assertEqual "" "[1,1,2,3,5,8,13,21,34,55]\n" out
+        runActionsExe <- runExe session m
+        (outExe, statusExe) <- runWaitAll runActionsExe
+        assertEqual "Output from runExe"
+                    "[1,1,2,3,5,8,13,21,34,55]\n"
+                    outExe
+        assertEqual "after runExe" ExitSuccess statusExe
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "A.lhs" $ L.unlines [
@@ -330,22 +336,23 @@ test_HsBoot_SubDir env = withAvailableSession' env (withIncludes ["src"]) $ \ses
     updateSessionD session update 3
     assertNoErrors session
 
-    let m = "B"
-        updE = buildExe [] [(T.pack m, m <.> "hs")]
-    updateSessionD session updE 4
-    distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
-    status <- getBuildExeStatus session
-    assertEqual "after exe build" (Just ExitSuccess) status
-    out <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "" "42\n" out
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "42\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let m = "B"
+           updE = buildExe [] [(T.pack m, m <.> "hs")]
+       updateSessionD session updE 4
+       distDir <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" "" buildStderr
+       status <- getBuildExeStatus session
+       assertEqual "after exe build" (Just ExitSuccess) status
+       out <- readProcess (distDir </> "build" </> m </> m) [] []
+       assertEqual "" "42\n" out
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "42\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
   where
     ahs     = "module A where\nimport B( TB(..) )\nnewtype TA = MkTA Int\nf :: TB -> TA\nf (MkTB x) = MkTA x"
     ahsboot = "module A where\nnewtype TA = MkTA Int"
@@ -366,22 +373,23 @@ test_HsBoot_SubDir_InclPathChange env = withAvailableSession env $ \session -> d
                    3
     assertNoErrors session
 
-    let m = "B"
-        updE = buildExe [] [(T.pack m, m <.> "hs")]
-    updateSessionD session updE 4
-    distDir <- getDistDir session
-    buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "buildStderr empty" "" buildStderr
-    status <- getBuildExeStatus session
-    assertEqual "after exe build" (Just ExitSuccess) status
-    out <- readProcess (distDir </> "build" </> m </> m) [] []
-    assertEqual "" "42\n" out
-    runActionsExe <- runExe session m
-    (outExe, statusExe) <- runWaitAll runActionsExe
-    assertEqual "Output from runExe"
-                "42\n"
-                outExe
-    assertEqual "after runExe" ExitSuccess statusExe
+    ifTestingExe env $ do
+       let m = "B"
+           updE = buildExe [] [(T.pack m, m <.> "hs")]
+       updateSessionD session updE 4
+       distDir <- getDistDir session
+       buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
+       assertEqual "buildStderr empty" "" buildStderr
+       status <- getBuildExeStatus session
+       assertEqual "after exe build" (Just ExitSuccess) status
+       out <- readProcess (distDir </> "build" </> m </> m) [] []
+       assertEqual "" "42\n" out
+       runActionsExe <- runExe session m
+       (outExe, statusExe) <- runWaitAll runActionsExe
+       assertEqual "Output from runExe"
+                   "42\n"
+                   outExe
+       assertEqual "after runExe" ExitSuccess statusExe
   where
     ahs     = "module A where\nimport B( TB(..) )\nnewtype TA = MkTA Int\nf :: TB -> TA\nf (MkTB x) = MkTA x"
     ahsboot = "module A where\nnewtype TA = MkTA Int"
@@ -400,15 +408,16 @@ test_RelInclPath env = withAvailableSession' env (withIncludes ["test/ABnoError"
     loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
     assertNoErrors session
 
-    let updE = buildExe [] [(T.pack "Main", "test/ABnoError/A.hs")]
-    updateSessionD session updE 3
-    status <- getBuildExeStatus session
-    assertEqual "after exe build" (Just ExitSuccess) status
+    ifTestingExe env $ do
+       let updE = buildExe [] [(T.pack "Main", "test/ABnoError/A.hs")]
+       updateSessionD session updE 3
+       status <- getBuildExeStatus session
+       assertEqual "after exe build" (Just ExitSuccess) status
 
-    let updE2 = buildExe [] [(T.pack "Main", "A.hs")]
-    updateSessionD session updE2 0
-    status2 <- getBuildExeStatus session
-    assertEqual "after exe build" (Just ExitSuccess) status2
+       let updE2 = buildExe [] [(T.pack "Main", "A.hs")]
+       updateSessionD session updE2 0
+       status2 <- getBuildExeStatus session
+       assertEqual "after exe build" (Just ExitSuccess) status2
 
 test_RelInclPath_InclPathChange :: TestSuiteEnv -> Assertion
 test_RelInclPath_InclPathChange env = withAvailableSession env $ \session -> do
@@ -423,16 +432,17 @@ test_RelInclPath_InclPathChange env = withAvailableSession env $ \session -> do
                    2  -- note the recompilation
     assertNoErrors session
 
-    let updE = buildExe [] [(T.pack "Main", "test/ABnoError/A.hs")]
-    updateSessionD session updE 1
-    status <- getBuildExeStatus session
-    -- Path "" no longer in include paths here!
-    assertEqual "after exe build" (Just $ ExitFailure 1) status
+    ifTestingExe env $ do
+       let updE = buildExe [] [(T.pack "Main", "test/ABnoError/A.hs")]
+       updateSessionD session updE 1
+       status <- getBuildExeStatus session
+       -- Path "" no longer in include paths here!
+       assertEqual "after exe build" (Just $ ExitFailure 1) status
 
-    let updE2 = buildExe [] [(T.pack "Main", "A.hs")]
-    updateSessionD session updE2 2
-    status2 <- getBuildExeStatus session
-    assertEqual "after exe build" (Just ExitSuccess) status2
+       let updE2 = buildExe [] [(T.pack "Main", "A.hs")]
+       updateSessionD session updE2 2
+       status2 <- getBuildExeStatus session
+       assertEqual "after exe build" (Just ExitSuccess) status2
 
 test_ParseCompiling :: TestSuiteEnv -> Assertion
 test_ParseCompiling env = withAvailableSession env $ \session -> do

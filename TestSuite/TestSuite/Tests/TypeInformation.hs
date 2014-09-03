@@ -13,33 +13,10 @@ import TestSuite.Session
 import TestSuite.Assertions
 
 testGroupTypeInformation :: TestSuiteEnv -> TestTree
-testGroupTypeInformation env = testGroup "Type Information" [
+testGroupTypeInformation env = testGroup "Type Information" $ [
     stdTest env "Test internal consistency of local id markers"                              test_Consistency_Local
   , stdTest env "Test internal consistency of imported id markers"                           test_Consistency_Imported
-  , docTest env "Local identifiers and Prelude"                                              testLocalIdentifiersAndPrelude
-  , docTest env "Simple ADTs"                                                                testSimpleADTs
-  , docTest env "Polymorphism"                                                               testPolymorphism
-  , docTest env "Multiple modules"                                                           testMultipleModules
-  , docTest env "External packages, type sigs, scoped type vars, kind sigs"                  testExternalPkgs
-  , docTest env "Reusing type variables"                                                     testReusingTypeVariables
-  , docTest env "Qualified imports"                                                          testQualifiedImports
-  , docTest env "Imprecise source spans"                                                     testImpreciseSourceSpans
-  , docTest env "Quasi-quotation (QQ in own package)"                                        testQuasiOwnPackage
-  , docTest env "Quasi-quotation (QQ in separate package, check home module info)"           testQuasiSeperatePackage
-  , docTest env "Template Haskell"                                                           testTemplateHaskell
-  , docTest env "Take advantage of scope (1)"                                                testScope1
-  , docTest env "Take advantage of scope (2)"                                                testScope2
-  , docTest env "Take advantage of scope (3)"                                                testScope3
-  , docTest env "Take advantage of scope (4)"                                                testScope4
-  , docTest env "Other constructs"                                                           testOtherConstructs
-  , docTest env "FFI"                                                                        testFFI
-  , docTest env "GADTs"                                                                      testGADTs
-  , docTest env "Other types"                                                                testOtherTypes
-  , docTest env "Default methods"                                                            testDefaultMethods
-  , docTest env "Updated session (#142)"                                                     testUpdatedSession
-  , docTest env "spanInfo vs expTypes (#3043)"                                               testSpanInfoVsExpTypes
-  , docTest env "Consistency of IdMap/explicit sharing cache through multiple updates (#88)" test_StateOfCacheThroughoutUpdates
-    -- TODO: Should these be docTest instead?
+    -- TODO: Should these be docTests?
   , stdTest env "Subexpression types 1: Simple expressions"                                  test_SubExp_Simple
   , stdTest env "Subexpression types 2: TH and QQ"                                           test_SubExp_TH
   , stdTest env "Subexpression types 3: Type families (fpco #2609)"                          test_SubExp_TypeFamilies
@@ -48,6 +25,30 @@ testGroupTypeInformation env = testGroup "Type Information" [
   , stdTest env "Use sites 1: Global values"                                                 test_UseSites_GlobalValues
   , stdTest env "Use sites 2: Types"                                                         test_UseSites_Types
   , stdTest env "Use sites 3: Local identifiers"                                             test_UseSites_Local
+  ] ++ docTests env [
+    stdTest env "Local identifiers and Prelude"                                              testLocalIdentifiersAndPrelude
+  , stdTest env "Simple ADTs"                                                                testSimpleADTs
+  , stdTest env "Polymorphism"                                                               testPolymorphism
+  , stdTest env "Multiple modules"                                                           testMultipleModules
+  , stdTest env "External packages, type sigs, scoped type vars, kind sigs"                  testExternalPkgs
+  , stdTest env "Reusing type variables"                                                     testReusingTypeVariables
+  , stdTest env "Qualified imports"                                                          testQualifiedImports
+  , stdTest env "Imprecise source spans"                                                     testImpreciseSourceSpans
+  , stdTest env "Quasi-quotation (QQ in own package)"                                        testQuasiOwnPackage
+  , stdTest env "Quasi-quotation (QQ in separate package, check home module info)"           testQuasiSeperatePackage
+  , stdTest env "Template Haskell"                                                           testTemplateHaskell
+  , stdTest env "Take advantage of scope (1)"                                                testScope1
+  , stdTest env "Take advantage of scope (2)"                                                testScope2
+  , stdTest env "Take advantage of scope (3)"                                                testScope3
+  , stdTest env "Take advantage of scope (4)"                                                testScope4
+  , stdTest env "Other constructs"                                                           testOtherConstructs
+  , stdTest env "FFI"                                                                        testFFI
+  , stdTest env "GADTs"                                                                      testGADTs
+  , stdTest env "Other types"                                                                testOtherTypes
+  , stdTest env "Default methods"                                                            testDefaultMethods
+  , stdTest env "Updated session (#142)"                                                     testUpdatedSession
+  , stdTest env "spanInfo vs expTypes (#3043)"                                               testSpanInfoVsExpTypes
+  , stdTest env "Consistency of IdMap/explicit sharing cache through multiple updates (#88)" test_StateOfCacheThroughoutUpdates
   ]
 
 test_Consistency_Local :: TestSuiteEnv -> Assertion

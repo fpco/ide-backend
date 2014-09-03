@@ -18,21 +18,22 @@ import TestSuite.Session
 import TestSuite.Assertions
 
 testGroupPackages :: TestSuiteEnv -> TestTree
-testGroupPackages env = testGroup "Packages" [
+testGroupPackages env = testGroup "Packages" $ [
     stdTest env "Package dependencies"                                                            test_PackageDependencies
   , stdTest env "Register a package, don't restart session, don't see the package"                test_Register_NoRestart
   , stdTest env "Register a package, restart session, see the package and check for cabal macros" test_Register_Restart
   , stdTest env "Make sure package DB is passed to ghc (configGenerateModInfo False)"             test_PackageDB_ModInfoFalse
   , stdTest env "Make sure package DB is passed to ghc (configGenerateModInfo True)"              test_PackageDB_ModInfoTrue
   , stdTest env "Make sure package DB is passed to ghc after restartSession"                      test_PackageDB_AfterRestart
-  , docTest env "Consistency of multiple modules of the same name"                                test_Consistency
-  , docTest env "Consistency of multiple modules of the same name: PackageImports"                test_Consistency_PackageImports
-  , docTest env "Module name visible from 2 packages --- picked from monads-tf"                   test_ModuleIn2Pkgs_1
   , stdTest env "Module name visible from 2 packages --- picked from mtl (expected failure)"      test_ModuleIn2Pkgs_2
   , stdTest env "Hiding and unhiding a package (#185-2)"                                          test_HideUnhide
   , stdTest env "Unhiding and hiding a package (#185-3; converse of #185-2)"                      test_UnhideHide
   , stdTest env "Trusting and distrusting packages (#185-4)"                                      test_TrustDistrust
   , stdTest env "Using something from a different package (no \"Loading package\" msg)"           test_UseFromDifferentPackage
+  ] ++ docTests env [
+    stdTest env "Consistency of multiple modules of the same name"                                test_Consistency
+  , stdTest env "Consistency of multiple modules of the same name: PackageImports"                test_Consistency_PackageImports
+  , stdTest env "Module name visible from 2 packages --- picked from monads-tf"                   test_ModuleIn2Pkgs_1
   ]
 
 test_PackageDependencies :: TestSuiteEnv -> Assertion
@@ -86,20 +87,22 @@ test_Register_Restart env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ 
       restartSession session -- only now the package accessible
       updateSessionD session upd 1
       assertNoErrors session
-      let m = "Main"
-          upd2 = buildExe [] [(T.pack m, "Main.hs")]
-      updateSessionD session upd2 2
-      distDir <- getDistDir session
-      out <- readProcess (distDir </> "build" </> m </> m) [] []
-      assertEqual "DB exe output"
-                  "42\n"
-                  out
-      runActionsExe <- runExe session m
-      (outExe, statusExe) <- runWaitAll runActionsExe
-      assertEqual "Output from runExe"
-                  "42\n"
-                  outExe
-      assertEqual "after runExe" ExitSuccess statusExe
+
+      ifTestingExe env $ do
+         let m = "Main"
+             upd2 = buildExe [] [(T.pack m, "Main.hs")]
+         updateSessionD session upd2 2
+         distDir <- getDistDir session
+         out <- readProcess (distDir </> "build" </> m </> m) [] []
+         assertEqual "DB exe output"
+                     "42\n"
+                     out
+         runActionsExe <- runExe session m
+         (outExe, statusExe) <- runWaitAll runActionsExe
+         assertEqual "Output from runExe"
+                     "42\n"
+                     outExe
+         assertEqual "after runExe" ExitSuccess statusExe
   where
     upd = updateSourceFile "Main.hs" . L.unlines $
             [ "module Main where"

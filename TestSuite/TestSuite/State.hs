@@ -19,12 +19,13 @@ module TestSuite.State (
   , withModInfo
   , withDBStack
   , dontReuse
-  , requireHaddocks
   , skipTest
+  , ifTestingExe
     -- * Constructing tests
   , stdTest
   , withOK
-  , docTest
+  , docTests
+  , exeTests
     -- * Test suite global state
   , withCurrentDirectory
   , findExe
@@ -71,6 +72,9 @@ data TestSuiteConfig = TestSuiteConfig {
 
     -- | No haddock documentation installed on the test system
   , testSuiteConfigNoHaddocks :: Bool
+
+    -- | Skip buildExe tests
+  , testSuiteConfigNoExe :: Bool
 
     -- | Package DB stack for GHC 7.4
   , testSuiteConfigPackageDb74 :: Maybe String
@@ -181,15 +185,13 @@ withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
                  Nothing      -> startNewSession testSuiteSessionServer
 
     -- Reset session state
-    updateSession session
-                  (    updateGhcOpts testSuiteSessionGhcOpts
-                    <> updateDeleteManagedFiles
-                    <> updateCodeGeneration False
-                    <> updateEnv []
-                    <> updateTargets (TargetsExclude [])
-                    <> updateRelativeIncludes (sessionInitRelativeIncludes (deriveSessionInitParams testSuiteSessionServer))
-                  )
-                  (\_ -> return ())
+    let reset = updateGhcOpts testSuiteSessionGhcOpts
+             <> updateDeleteManagedFiles
+             <> updateCodeGeneration False
+             <> updateEnv []
+             <> updateTargets (TargetsExclude [])
+             <> updateRelativeIncludes (sessionInitRelativeIncludes (deriveSessionInitParams testSuiteSessionServer))
+    updateSession session reset (\_ -> return ())
 
     -- Run the test
     mresult <- try $ act session
@@ -217,15 +219,16 @@ defaultServerConfig TestSuiteEnv{..} = TestSuiteServerConfig {
     , testSuiteServerCabalMacros      = Nothing
     }
 
--- | Skip this test if the --no-haddocks flag is passed
-requireHaddocks :: TestSuiteEnv -> IO ()
-requireHaddocks st = do
-  let TestSuiteConfig{..} = testSuiteEnvConfig st
-  when testSuiteConfigNoHaddocks $ throwIO $ SkipTest "--no-haddocks"
-
 -- | Skip (the remainder of) this test
 skipTest :: String -> IO ()
 skipTest = throwIO . SkipTest
+
+-- | Skip this (part of) the test if --no-exe is passed
+ifTestingExe :: TestSuiteEnv -> Assertion -> Assertion
+ifTestingExe TestSuiteEnv{..} act =
+    unless testSuiteConfigNoExe act
+  where
+    TestSuiteConfig{..} = testSuiteEnvConfig
 
 {-------------------------------------------------------------------------------
   Constructing tests
@@ -267,9 +270,21 @@ stdTest st name = singleTest name . StdTest . ($ st)
 withOK :: TestSuiteEnv -> TestName -> (TestSuiteEnv -> IO String) -> TestTree
 withOK st name = singleTest name . WithOK . ($ st)
 
--- | Construct a test that relies on Haddocks being installed
-docTest :: TestSuiteEnv -> TestName -> (TestSuiteEnv -> Assertion) -> TestTree
-docTest st name test = stdTest st name (\env' -> requireHaddocks env' >> test env')
+-- | Lists of tests that should be run only if Haddocks are installed
+docTests :: TestSuiteEnv -> [TestTree] -> [TestTree]
+docTests TestSuiteEnv{..} ts
+    | testSuiteConfigNoHaddocks = []
+    | otherwise                 = ts
+  where
+    TestSuiteConfig{..} = testSuiteEnvConfig
+
+-- | Lists of tests that should be run only of --no-exe is not passed
+exeTests :: TestSuiteEnv -> [TestTree] -> [TestTree]
+exeTests TestSuiteEnv{..} ts
+    | testSuiteConfigNoExe = []
+    | otherwise            = ts
+  where
+    TestSuiteConfig{..} = testSuiteEnvConfig
 
 {-------------------------------------------------------------------------------
   Internal
@@ -355,6 +370,8 @@ newtype TestSuiteOptionNoSessionReuse = TestSuiteOptionNoSessionReuse Bool
   deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionNoHaddocks = TestSuiteOptionNoHaddocks Bool
   deriving (Eq, Ord, Typeable)
+newtype TestSuiteOptionNoExe = TestSuiteOptionNoExe Bool
+  deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionPackageDb74 = TestSuiteOptionPackageDb74 (Maybe String)
   deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionPackageDb78 = TestSuiteOptionPackageDb78 (Maybe String)
@@ -388,6 +405,13 @@ instance IsOption TestSuiteOptionNoHaddocks where
   optionName     = return "no-haddocks"
   optionHelp     = return "No haddock documentation installed on the test system"
   optionCLParser = flagCLParser Nothing (TestSuiteOptionNoHaddocks True)
+
+instance IsOption TestSuiteOptionNoExe where
+  defaultValue   = TestSuiteOptionNoExe False
+  parseValue     = fmap TestSuiteOptionNoExe . safeRead
+  optionName     = return "no-exe"
+  optionHelp     = return "Skip buildExe tests"
+  optionCLParser = flagCLParser Nothing (TestSuiteOptionNoExe True)
 
 instance IsOption TestSuiteOptionPackageDb74 where
   defaultValue   = TestSuiteOptionPackageDb74 Nothing
@@ -432,6 +456,7 @@ testSuiteCommandLineOptions = [
     Option (Proxy :: Proxy TestSuiteOptionKeepTempFiles)
   , Option (Proxy :: Proxy TestSuiteOptionNoSessionReuse)
   , Option (Proxy :: Proxy TestSuiteOptionNoHaddocks)
+  , Option (Proxy :: Proxy TestSuiteOptionNoExe)
   , Option (Proxy :: Proxy TestSuiteOptionPackageDb74)
   , Option (Proxy :: Proxy TestSuiteOptionPackageDb78)
   , Option (Proxy :: Proxy TestSuiteOptionExtraPaths74)
@@ -442,15 +467,16 @@ testSuiteCommandLineOptions = [
 
 parseOptions :: (TestSuiteConfig -> TestTree) -> TestTree
 parseOptions f =
-  askOption $ \(TestSuiteOptionKeepTempFiles  testSuiteConfigKeepTempFiles) ->
+  askOption $ \(TestSuiteOptionKeepTempFiles  testSuiteConfigKeepTempFiles)  ->
   askOption $ \(TestSuiteOptionNoSessionReuse testSuiteConfigNoSessionReuse) ->
-  askOption $ \(TestSuiteOptionNoHaddocks     testSuiteConfigNoHaddocks)    ->
-  askOption $ \(TestSuiteOptionPackageDb74    testSuiteConfigPackageDb74)   ->
-  askOption $ \(TestSuiteOptionPackageDb78    testSuiteConfigPackageDb78)   ->
-  askOption $ \(TestSuiteOptionExtraPaths74   testSuiteConfigExtraPaths74)  ->
-  askOption $ \(TestSuiteOptionExtraPaths78   testSuiteConfigExtraPaths78)  ->
-  askOption $ \(TestSuiteOptionTest74         testSuiteConfigTest74)        ->
-  askOption $ \(TestSuiteOptionTest78         testSuiteConfigTest78)        ->
+  askOption $ \(TestSuiteOptionNoHaddocks     testSuiteConfigNoHaddocks)     ->
+  askOption $ \(TestSuiteOptionNoExe          testSuiteConfigNoExe)          ->
+  askOption $ \(TestSuiteOptionPackageDb74    testSuiteConfigPackageDb74)    ->
+  askOption $ \(TestSuiteOptionPackageDb78    testSuiteConfigPackageDb78)    ->
+  askOption $ \(TestSuiteOptionExtraPaths74   testSuiteConfigExtraPaths74)   ->
+  askOption $ \(TestSuiteOptionExtraPaths78   testSuiteConfigExtraPaths78)   ->
+  askOption $ \(TestSuiteOptionTest74         testSuiteConfigTest74)         ->
+  askOption $ \(TestSuiteOptionTest78         testSuiteConfigTest78)         ->
   f TestSuiteConfig{..}
 
 {-------------------------------------------------------------------------------
