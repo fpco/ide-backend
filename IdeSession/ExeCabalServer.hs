@@ -42,6 +42,7 @@ runExeCabal conv req = do
   (stdOutputRd, stdOutputWr) <- createPipe
 
   -- Backup stdout, then replace stdout with the pipe's write end
+  IO.hFlush IO.stdout
   fflush nullPtr
   stdOutputBackup <- dup stdOutput
   _ <- dupTo stdOutputWr stdOutput
@@ -69,6 +70,7 @@ runExeCabal conv req = do
       buildLicsFromPkgs True licenseArgs
 
   -- Restore stdout
+  IO.hFlush IO.stdout
   fflush nullPtr
   dupTo stdOutputBackup stdOutput >> closeFd stdOutputBackup
 
