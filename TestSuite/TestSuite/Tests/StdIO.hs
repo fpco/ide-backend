@@ -263,8 +263,6 @@ test_Stderr env = withAvailableSession env $ \session -> do
             , "hello = hPutStrLn stderr \"Hello World\""
             ])
 
--- TODO: This test sometimes breaks because apparently the output is
--- non-deterministic... is that expected?
 test_Merge :: TestSuiteEnv -> Assertion
 test_Merge env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
@@ -285,6 +283,8 @@ test_Merge env = withAvailableSession env $ \session -> do
     assertEqual "" expectedOutput output
   where
     upd = (updateCodeGeneration True)
+       <> (updateStdoutBufferMode RunNoBuffering)
+       <> (updateStderrBufferMode RunNoBuffering)
        <> (updateSourceFile "M.hs" . unlinesUtf8 $
             [ "module M where"
             , "import System.IO"
