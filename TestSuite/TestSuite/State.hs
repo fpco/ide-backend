@@ -184,14 +184,10 @@ withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
                  Just session -> return (snd session)
                  Nothing      -> startNewSession testSuiteSessionServer
 
-    -- Reset session state
-    let reset = updateGhcOpts testSuiteSessionGhcOpts
-             <> updateDeleteManagedFiles
-             <> updateCodeGeneration False
-             <> updateEnv []
-             <> updateTargets (TargetsExclude [])
+    -- Setup session parameters
+    let setup = updateGhcOpts testSuiteSessionGhcOpts
              <> updateRelativeIncludes (sessionInitRelativeIncludes (deriveSessionInitParams testSuiteSessionServer))
-    updateSession session reset (\_ -> return ())
+    updateSession session setup (\_ -> return ())
 
     -- Run the test
     mresult <- try $ act session
@@ -199,8 +195,17 @@ withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
     -- Make the session available for further tests, or shut it down if the
     -- @--no-session-reuse@ command line option was used
     if testSuiteConfigNoSessionReuse testSuiteEnvConfig || not testSuiteSessionReuse
-      then shutdownSession session
-      else consMVar (testSuiteSessionServer, session) testSuiteStateAvailableSessions
+      then
+        shutdownSession session
+      else do
+        resetSession session
+
+        -- resetSession does some sanity checks to make sure that the session
+        -- reset worked okay. If these sanity checks fail, it will throw an
+        -- exception, in which case we will _not_ make that session available
+        -- for further use. This will leak the session, but that's okay: it's a
+        -- bug when this happens.
+        consMVar (testSuiteSessionServer, session) testSuiteStateAvailableSessions
 
     -- Return test result
     case mresult of
@@ -208,6 +213,28 @@ withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
       Right result -> return result
   where
     TestSuiteSessionSetup{..} = sessionSetup (defaultSessionSetup env)
+
+-- | Reset a session so that it can be reused in subsequent tests
+--
+-- This does not change any parameters that we have to set anyway
+-- (that is, anything set in `setup` in `withAvailableSession'`).
+--
+-- An alternative would be to set these parameters here to their ide-backend
+-- defaults; in that case, we could actually add an 'updateReset' to the
+-- ide-backend API.
+resetSession :: IdeSession -> IO ()
+resetSession session = do
+    updateSession session reset (\_ -> return ())
+
+    -- Sanity check: after updateDeleteManagedFiles the managed files should
+    -- actually be gone! (#238)
+    checkIsEmpty =<< getSourcesDir session
+    checkIsEmpty =<< getDataDir    session
+  where
+    reset = updateDeleteManagedFiles
+         <> updateCodeGeneration False
+         <> updateEnv []
+         <> updateTargets (TargetsExclude [])
 
 defaultServerConfig :: TestSuiteEnv -> TestSuiteServerConfig
 defaultServerConfig TestSuiteEnv{..} = TestSuiteServerConfig {
@@ -728,3 +755,20 @@ expandHomeDir path = unsafePerformIO $ do
         expand (x:xs)   = x     : expand xs
 
     return $ expand path
+
+-- Check that the specified directory contains no files
+-- (it may however contain subdirectories)
+checkIsEmpty :: FilePath -> IO ()
+checkIsEmpty parent = do
+    children <- filter (not . ignore) `liftM` getDirectoryContents parent
+    forM_ children $ \relChild -> do
+      let absChild = parent </> relChild
+      isFile <- doesFileExist      absChild
+      isDir  <- doesDirectoryExist absChild
+      when isFile $ throwIO (userError ("unexpected file " ++ relChild ++ " in " ++ parent))
+      when isDir  $ checkIsEmpty absChild
+  where
+    ignore :: FilePath -> Bool
+    ignore "."  = True
+    ignore ".." = True
+    ignore _    = False

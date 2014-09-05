@@ -13,8 +13,8 @@ import TestSuite.Assertions
 
 testGroupBuildDoc :: TestSuiteEnv -> TestTree
 testGroupBuildDoc env = testGroup "Build haddocks" [
---    stdTest env "From some .lhs files"       test_fromLhsFiles
-    stdTest env "Fail"                       test_fail
+    stdTest env "From some .lhs files"       test_fromLhsFiles
+  , stdTest env "Fail"                       test_fail
   , stdTest env "Build haddocks from ParFib" test_ParFib
   ]
 
