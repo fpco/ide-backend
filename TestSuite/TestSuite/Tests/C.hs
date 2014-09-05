@@ -23,6 +23,7 @@ testGroupC env = testGroup "Using C files" [
   , stdTest env "Errors in C file, then update C file (#201)"                     test_errorsThenUpdate
   , stdTest env "C header files in subdirectories (#212)"                         test_headersInSubdirs
   , stdTest env "C code writes to stdout (#210)"                                  test_stdout
+  , stdTest env "Deleting C file should unload object file (#241)"                test241
   , testGroup "Two C files (no cyclic dependencies)"     $ test_2        env
   , testGroup "Two C files (C files mutually dependent)" $ test_2_cyclic env
   ]
@@ -287,6 +288,45 @@ test_stdout env = withAvailableSession env $ \session -> do
     upd = updateCodeGeneration True
        <> updateSourceFile "hello.c" cfile
        <> updateSourceFile "Main.hs" hsfile
+
+test241 :: TestSuiteEnv -> Assertion
+test241 env = withAvailableSession env $ \session -> do
+    updateSessionP session (updateCodeGeneration True <> updHs <> updC "a.c") [
+        (1, 1, "Compiling a.c")
+      , (2, 2, "Compiling M")
+      ]
+    assertNoErrors session
+    do runActions <- runStmt session "M" "hello"
+       (output, result) <- runWaitAll runActions
+       assertEqual "" RunOk result
+       assertEqual "" "12345\n" output
+
+    updateSessionD session (updateSourceFileDelete "a.c") 0
+
+    updateSessionP session (updC "b.c") [
+        (1, 1, "Compiling b.c")
+      , (2, 2, "Compiling M")
+      ]
+    assertNoErrors session
+    do runActions <- runStmt session "M" "hello"
+       (output, result) <- runWaitAll runActions
+       assertEqual "" RunOk result
+       assertEqual "" "12345\n" output
+  where
+    updHs = updateSourceFile "M.hs" . L.unlines $ [
+               "module M where"
+             , "import Foreign.C"
+             , "foreign import ccall \"foo\" c_f :: CInt"
+             , "hello :: IO ()"
+             , "hello = print c_f"
+             , "main :: IO ()"
+             , "main = hello"
+             ]
+    updC f = updateSourceFile f . L.unlines $ [
+               "int foo() {"
+             , "  return 12345;"
+             , "}"
+             ]
 
 {-------------------------------------------------------------------------------
   Stress tests about the order of object loading

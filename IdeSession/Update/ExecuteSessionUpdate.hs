@@ -297,6 +297,19 @@ updateObjectFiles ghcOptionsChanged = do
 
     if not (null outdated)
       then do
+        -- We first unload all object files in case any symbols need to be
+        -- re-resolved.
+        rpcUnloadObjectFiles
+
+        -- Unrecord object files whose C files have been deleted (#241)
+        removeObsoleteObjectFiles
+
+        -- Recompile the C files and load the corresponding object files
+        cErrors   <- recompileCFiles outdated
+        objErrors <- rpcLoadObjectFiles
+
+        -- Finally, mark Haskell files as updated
+        --
         -- When C files change, the addresses of the symbols exported in the
         -- corresponding object files may change. To make sure that these
         -- changes are properly propagated, we unload and reload all object
@@ -323,9 +336,6 @@ updateObjectFiles ghcOptionsChanged = do
         -- > called by  hscInteractive
         --
         -- Hence, we really need to recompile, rather than just relink.
-        rpcUnloadObjectFiles
-        cErrors   <- recompileCFiles outdated
-        objErrors <- rpcLoadObjectFiles
         markAsUpdated $ dependenciesOf outdated
         return (length outdated, cErrors ++ objErrors)
       else
@@ -335,6 +345,18 @@ updateObjectFiles ghcOptionsChanged = do
     -- reload _all_ Haskell modules
     dependenciesOf :: [FilePath] -> FilePath -> Bool
     dependenciesOf _recompiled src = takeExtension src == ".hs"
+
+removeObsoleteObjectFiles :: ExecuteSessionUpdate ()
+removeObsoleteObjectFiles = do
+  objectFiles <- get ideObjectFiles
+  forM_ objectFiles $ \(cFile, (objFile, _timestamp)) -> do
+    mCInfo <- get (ideManagedFiles .> managedSource .> lookup' cFile)
+    case mCInfo of
+      Just _  ->
+        return ()
+      Nothing -> do
+        liftIO $ Dir.removeFile objFile
+        set (ideObjectFiles .> lookup' cFile) Nothing
 
 recompileCFiles :: [FilePath] -> ExecuteSessionUpdate [SourceError]
 recompileCFiles cFiles = do
