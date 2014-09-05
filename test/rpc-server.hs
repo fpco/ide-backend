@@ -12,12 +12,14 @@ import Data.Typeable (Typeable)
 import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
 import System.FilePath ((</>))
-import System.IO.Temp (withTempDirectory)
+import System.IO (hClose)
+import System.IO.Temp (withTempDirectory, openTempFile)
 import System.Posix.Files (createNamedPipe)
 import System.Posix.Signals (sigKILL)
 import qualified Control.Concurrent.Async as Async
 import qualified Control.Exception        as Ex
 import qualified Data.Binary              as Binary
+import qualified System.Directory         as Dir
 
 import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
@@ -90,8 +92,8 @@ isServerIOException ex ExternalException{externalStdErr} =
 testEcho :: RpcServer -> Assertion
 testEcho server = assertRpcEqual server "ping" "ping"
 
-testEchoServer :: RpcConversation -> IO ()
-testEchoServer RpcConversation{..} = forever $ do
+testEchoServer :: FilePath -> RpcConversation -> IO ()
+testEchoServer _errorLog RpcConversation{..} = forever $ do
   req <- get :: IO String
   put req
 
@@ -99,8 +101,8 @@ testEchoServer RpcConversation{..} = forever $ do
 testState :: RpcServer -> Assertion
 testState server = forM_ ([0 .. 9] :: [Int]) $ assertRpcEqual server ()
 
-testStateServer :: MVar Int -> RpcConversation -> IO ()
-testStateServer st RpcConversation{..} = forever $ do
+testStateServer :: MVar Int -> FilePath -> RpcConversation -> IO ()
+testStateServer st _errorLog RpcConversation{..} = forever $ do
   () <- get
   modifyMVar_ st $ \i -> do
     put i
@@ -140,8 +142,8 @@ testCustom server = do
   assertRpcEqual server Increment DoneCounting
   assertRpcEqual server GetCount (Count 1)
 
-testCustomServer :: MVar Int -> RpcConversation -> IO ()
-testCustomServer st RpcConversation{..} = forever $ do
+testCustomServer :: MVar Int -> FilePath -> RpcConversation -> IO ()
+testCustomServer st _errorLog RpcConversation{..} = forever $ do
   req <- get
   case req of
     Increment -> modifyMVar_ st $ \i -> do
@@ -156,8 +158,8 @@ testProgress :: RpcServer -> Assertion
 testProgress server =
   forM_ ([0 .. 9] :: [Int]) $ \i -> assertRpcEquals server i [i, i - 1 .. 0]
 
-testProgressServer :: RpcConversation -> IO ()
-testProgressServer RpcConversation{..} = forever $ do
+testProgressServer :: FilePath -> RpcConversation -> IO ()
+testProgressServer _errorLog RpcConversation{..} = forever $ do
   req <- get :: IO Int
   forM_ [req, req - 1 .. 1] $ put
   put (0 :: Int)
@@ -178,8 +180,8 @@ testStdout server = do
   assertRaises "" (== (userError "Manual shutdown"))
     (rpc server "ping" :: IO String)
 
-testStdoutServer :: RpcConversation -> IO ()
-testStdoutServer RpcConversation{..} = forever $ do
+testStdoutServer :: FilePath -> RpcConversation -> IO ()
+testStdoutServer _errorLog RpcConversation{..} = forever $ do
   req <- get :: IO String
   putStrLn "   vvvv    testStdout intentionally printing to stdout"
   put req
@@ -192,8 +194,8 @@ testConcurrentGetPut server =
     Right 1 <- Ex.try get :: IO (Either Ex.SomeException Int)
     return ()
 
-testConcurrentGetPutServer :: RpcConversation -> IO ()
-testConcurrentGetPutServer RpcConversation{..} = forever $ do
+testConcurrentGetPutServer :: FilePath -> RpcConversation -> IO ()
+testConcurrentGetPutServer _errorLog RpcConversation{..} = forever $ do
   i <- get
   put (i :: Int)
 
@@ -277,8 +279,8 @@ testConversation server = do
   -}
   assertRpcEqual server NoMoreGames ()
 
-testConversationServer :: RpcConversation -> IO ()
-testConversationServer RpcConversation{..} = outerLoop
+testConversationServer :: FilePath -> RpcConversation -> IO ()
+testConversationServer _errorLog RpcConversation{..} = outerLoop
   where
     outerLoop = do
       req <- labelExceptions "testConversationServer outerLoop: " $ get
@@ -304,8 +306,8 @@ testCrash server =
   assertRaises "" (isServerIOException crash) $
     assertRpcEqual server () ()
 
-testCrashServer :: RpcConversation -> IO ()
-testCrashServer RpcConversation{..} = do
+testCrashServer :: FilePath -> RpcConversation -> IO ()
+testCrashServer _errorLog RpcConversation{..} = do
   () <- get
   Ex.throwIO (userError crash)
 
@@ -319,8 +321,8 @@ testKill server = do
   assertRaises "" isServerKilledException $
     assertRpcEqual server "ping" "ping" -- Second does not
 
-testKillServer :: MVar Bool -> RpcConversation -> IO ()
-testKillServer firstRequest RpcConversation{..} = forever $ do
+testKillServer :: MVar Bool -> FilePath -> RpcConversation -> IO ()
+testKillServer firstRequest _errorLog RpcConversation{..} = forever $ do
   req <- get :: IO String
   modifyMVar_ firstRequest $ \isFirst -> do
     if isFirst
@@ -336,8 +338,8 @@ testKillAsync server = do
   assertRaises "" isServerKilledException $
     assertRpcEqual server "ping" "ping"
 
-testKillAsyncServer :: RpcConversation -> IO ()
-testKillAsyncServer RpcConversation{..} = forever $ do
+testKillAsyncServer :: FilePath -> RpcConversation -> IO ()
+testKillAsyncServer _errorLog RpcConversation{..} = forever $ do
   req <- get :: IO String
   -- Fork a thread which causes the server to crash 0.5 seconds after the request
   forkIO $ threadDelay 250000 >> throwSignal sigKILL
@@ -356,8 +358,8 @@ testFaultyDecoder server =
   assertRaises "" (isServerIOException "Faulty decoder") $
     assertRpcEqual server TypeWithFaultyDecoder ()
 
-testFaultyDecoderServer :: RpcConversation -> IO ()
-testFaultyDecoderServer RpcConversation{..} = forever $ do
+testFaultyDecoderServer :: FilePath -> RpcConversation -> IO ()
+testFaultyDecoderServer _errorLog RpcConversation{..} = forever $ do
   TypeWithFaultyDecoder <- get
   put ()
 
@@ -374,8 +376,8 @@ testFaultyEncoder server =
   assertRaises "" ((== "Faulty encoder") . externalStdErr) $
     assertRpcEqual server () TypeWithFaultyEncoder
 
-testFaultyEncoderServer :: RpcConversation -> IO ()
-testFaultyEncoderServer RpcConversation{..} = forever $ do
+testFaultyEncoderServer :: FilePath -> RpcConversation -> IO ()
+testFaultyEncoderServer _errorLog RpcConversation{..} = forever $ do
   () <- get
   put TypeWithFaultyEncoder
 
@@ -389,8 +391,8 @@ testCrashMulti server =
   assertRaises "" (isServerIOException crash) $
     assertRpcEquals server (3 :: Int) ([3, 2, 1, 0] :: [Int])
 
-testCrashMultiServer :: RpcConversation -> IO ()
-testCrashMultiServer RpcConversation{..} = forever $ do
+testCrashMultiServer :: FilePath -> RpcConversation -> IO ()
+testCrashMultiServer _errorLog RpcConversation{..} = forever $ do
   req <- get :: IO Int
   forM_ [req, req - 1 .. 1] $ put
   Ex.throwIO (userError crash)
@@ -401,8 +403,8 @@ testKillMulti server =
   assertRaises "" isServerKilledException $
     assertRpcEquals server (3 :: Int) ([3, 2, 1, 0] :: [Int])
 
-testKillMultiServer :: RpcConversation -> IO ()
-testKillMultiServer RpcConversation{..} = forever $ do
+testKillMultiServer :: FilePath -> RpcConversation -> IO ()
+testKillMultiServer _errorLog RpcConversation{..} = forever $ do
   req <- get :: IO Int
   forM_ [req, req - 1 .. 1] $ put
   throwSignal sigKILL
@@ -413,8 +415,8 @@ testKillAsyncMulti server =
   assertRaises "" isServerKilledException $
     assertRpcEquals server (3 :: Int) ([3, 2, 1, 0] :: [Int])
 
-testKillAsyncMultiServer :: RpcConversation -> IO ()
-testKillAsyncMultiServer RpcConversation{..} = forever $ do
+testKillAsyncMultiServer :: FilePath -> RpcConversation -> IO ()
+testKillAsyncMultiServer _errorLog RpcConversation{..} = forever $ do
   req <- get
   forkIO $ threadDelay (250000 + (req - 1) * 50000) >> throwSignal sigKILL
   forM_ [req, req - 1 .. 1] $ \i -> threadDelay 50000 >> put i
@@ -484,8 +486,8 @@ instance Binary ConcurrentServerRequest where
       2 -> return ConcurrentServerTerminate
       _ -> fail "ConcurrentServerRequest.get: invalid header"
 
-testConcurrentServer :: RpcConversation -> IO ()
-testConcurrentServer RpcConversation{..} = go
+testConcurrentServer :: FilePath -> RpcConversation -> IO ()
+testConcurrentServer _errorLog RpcConversation{..} = go
   where
     go = do
       req <- labelExceptions "testConcurrentServer: " $ get
@@ -503,14 +505,17 @@ testConcurrentServer RpcConversation{..} = go
 
               createNamedPipe stdin  0o600
               createNamedPipe stdout 0o600
-              createNamedPipe stderr 0o600
+
+              tmpDir <- Dir.getTemporaryDirectory
+              (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc.log"
+              hClose errorLogHandle
 
               -- Once we have created the pipes we can tell the client
-              putMVar pipes (stdin, stdout, stderr)
+              putMVar pipes (stdin, stdout, errorLogPath)
               concurrentConversation stdin stdout stderr testConversationServer
 
-          (stdin, stdout, stderr) <- readMVar pipes
-          put (stdin, stdout, stderr)
+          (stdin, stdout, errorLogPath) <- readMVar pipes
+          put (stdin, stdout, errorLogPath)
           go
         ConcurrentServerTerminate -> do
           put ()

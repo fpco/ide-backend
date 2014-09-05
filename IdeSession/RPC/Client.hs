@@ -14,16 +14,15 @@ module IdeSession.RPC.Client (
   , getRpcExitCode
   ) where
 
-import Control.Applicative ((<$>))
 import Control.Concurrent.MVar (MVar, newMVar, tryTakeMVar)
 import Control.Monad (void, unless)
 import Data.Binary (Binary, encode, decode)
 import Data.IORef (writeIORef, readIORef, newIORef)
 import Data.Typeable (Typeable)
 import Prelude hiding (take)
-import System.Directory (canonicalizePath, getPermissions, executable)
 import System.Exit (ExitCode)
 import System.IO (Handle, hClose)
+import System.IO.Temp (openTempFile)
 import System.Posix.IO (createPipe, closeFd, fdToHandle)
 import System.Posix.Signals (signalProcess, sigKILL)
 import System.Posix.Types (Fd)
@@ -37,7 +36,7 @@ import System.Process
   )
 import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
 import qualified Control.Exception as Ex
-import qualified Data.ByteString.Lazy.Char8 as BSL
+import qualified System.Directory  as Dir
 
 import IdeSession.Util.BlockingOps
 import IdeSession.RPC.API
@@ -51,8 +50,8 @@ import IdeSession.RPC.Stream
 data RpcServer = RpcServer {
     -- | Handle to write requests to
     rpcRequestW  :: Handle
-    -- | Handle to read server errors from
-  , rpcErrorsR   :: Handle
+    -- | Temporary file the server will write uncaught exceptions to
+  , rpcErrorLog :: FilePath
     -- | Handle on the server process itself
     --
     -- This is Nothing if we connected to an existing RPC server
@@ -99,15 +98,17 @@ forkRpcServer :: FilePath        -- ^ Filename of the executable
 forkRpcServer path args workingDir menv = do
   (requestR,  requestW)  <- createPipe
   (responseR, responseW) <- createPipe
-  (errorsR,   errorsW)   <- createPipe
+
+  tmpDir <- Dir.getTemporaryDirectory
+  (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc-server-.log"
+  hClose errorLogHandle
 
   let showFd :: Fd -> String
       showFd fd = show (fromIntegral fd :: Int)
 
-  let args' = args ++ map showFd [ requestR,  requestW
-                                 , responseR, responseW
-                                 , errorsR,   errorsW
-                                 ]
+  let args' = args
+           ++ [errorLogPath]
+           ++ map showFd [requestR, requestW, responseR, responseW]
 
   fullPath <- pathToExecutable path
   (Nothing, Nothing, Nothing, ph) <- createProcess (proc fullPath args') {
@@ -119,16 +120,14 @@ forkRpcServer path args workingDir menv = do
   -- to handles
   closeFd requestR
   closeFd responseW
-  closeFd errorsW
   requestW'  <- fdToHandle requestW
   responseR' <- fdToHandle responseR
-  errorsR'   <- fdToHandle errorsR
 
   st    <- newMVar RpcRunning
   input <- newStream responseR'
   return RpcServer {
       rpcRequestW  = requestW'
-    , rpcErrorsR   = errorsR'
+    , rpcErrorLog  = errorLogPath
     , rpcProc      = Just ph
     , rpcState     = st
     , rpcResponseR = input
@@ -137,9 +136,9 @@ forkRpcServer path args workingDir menv = do
   where
     pathToExecutable :: FilePath -> IO FilePath
     pathToExecutable relPath = do
-      fullPath    <- canonicalizePath relPath
-      permissions <- getPermissions fullPath
-      if executable permissions
+      fullPath    <- Dir.canonicalizePath relPath
+      permissions <- Dir.getPermissions fullPath
+      if Dir.executable permissions
         then return fullPath
         else Ex.throwIO . userError $ relPath ++ " not executable"
 
@@ -149,18 +148,17 @@ forkRpcServer path args workingDir menv = do
 -- of named pipes is only used for RPC connection.
 connectToRpcServer :: FilePath   -- ^ stdin named pipe
                    -> FilePath   -- ^ stdout named pipe
-                   -> FilePath   -- ^ stderr named pipe
+                   -> FilePath   -- ^ logfile for storing exceptions
                    -> (RpcServer -> IO a)
                    -> IO a
-connectToRpcServer requestW responseR errorsR act =
+connectToRpcServer requestW responseR errorLog act =
   Ex.bracket (openPipeForWriting requestW  timeout) hClose $ \requestW'  ->
-  Ex.bracket (openPipeForReading responseR timeout) hClose $ \responseR' ->
-  Ex.bracket (openPipeForReading errorsR   timeout) hClose $ \errorsR'   -> do
+  Ex.bracket (openPipeForReading responseR timeout) hClose $ \responseR' -> do
     st    <- newMVar RpcRunning
     input <- newStream responseR'
     act $ RpcServer {
         rpcRequestW  = requestW'
-      , rpcErrorsR   = errorsR'
+      , rpcErrorLog  = errorLog
       , rpcProc      = Nothing
       , rpcState     = st
       , rpcResponseR = input
@@ -222,6 +220,7 @@ illscopedConversationException =
 shutdown :: RpcServer -> IO ()
 shutdown server = withRpcServer server $ \_ -> do
   terminate server
+  ignoreIOExceptions $ Dir.removeFile (rpcErrorLog server)
   let ex = Ex.toException (userError "Manual shutdown")
   return (RpcStopped ex, ())
 
@@ -236,21 +235,15 @@ forceShutdown :: RpcServer -> IO ()
 forceShutdown server = Ex.mask_ $ do
   mst <- tryTakeMVar (rpcState server)
 
-  ignoreAllExceptions $ forceTerminate server
-  let ex = Ex.toException (userError "Forced manual shutdown")
+  ignoreIOExceptions $ forceTerminate server
+  ignoreIOExceptions $ Dir.removeFile (rpcErrorLog server)
 
   case mst of
     Nothing -> -- We failed to take the MVar. Shrug.
       return ()
-    Just _ ->
+    Just _ -> do
+      let ex = Ex.toException (userError "Forced manual shutdown")
       $putMVar (rpcState server) (RpcStopped ex)
-
--- | Silently ignore all exceptions
-ignoreAllExceptions :: IO () -> IO ()
-ignoreAllExceptions = Ex.handle ignore
-  where
-    ignore :: Ex.SomeException -> IO ()
-    ignore _ = return ()
 
 -- | Terminate the RPC connection
 --
@@ -324,7 +317,7 @@ getRpcExitCode RpcServer{rpcProc} =
 mapIOToExternal :: RpcServer -> IO a -> IO a
 mapIOToExternal server p = Ex.catch p $ \ex -> do
   let _ = ex :: Ex.IOException
-  merr <- BSL.unpack <$> BSL.hGetContents (rpcErrorsR server)
+  merr <- readFile (rpcErrorLog server)
   if null merr
     then Ex.throwIO (serverKilledException (Just ex))
     else Ex.throwIO (ExternalException merr (Just ex))

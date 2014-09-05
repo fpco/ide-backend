@@ -17,18 +17,19 @@ import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.C.Types (CFile)
 import System.Environment (withArgs, getEnvironment)
 import System.FilePath ((</>))
-import System.IO (Handle, hFlush)
-import System.IO.Temp (createTempDirectory)
+import System.IO (Handle, hFlush, hClose)
+import System.IO.Temp (createTempDirectory, openTempFile)
 import System.Mem (performGC)
 import System.Posix (Fd)
-import System.Posix.IO.ByteString
+import System.Posix.IO
 import System.Posix.Files (createNamedPipe)
 import System.Posix.Process (forkProcess, getProcessStatus)
 import System.Posix.Types (ProcessID)
 import qualified Control.Exception as Ex
-import qualified Data.ByteString as BSS (hGetSome, hPut, null)
-import qualified Data.List as List
-import qualified Data.Text as Text
+import qualified Data.ByteString   as BSS (hGetSome, hPut, null)
+import qualified Data.List         as List
+import qualified Data.Text         as Text
+import qualified System.Directory  as Dir
 
 import IdeSession.GHC.API
 import IdeSession.RPC.Server
@@ -38,8 +39,8 @@ import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
-import qualified IdeSession.Strict.List as StrictList
-import qualified IdeSession.Strict.Map  as StrictMap
+import qualified IdeSession.Strict.List  as StrictList
+import qualified IdeSession.Strict.Map   as StrictMap
 import qualified IdeSession.Types.Public as Public
 
 import qualified GHC
@@ -67,8 +68,8 @@ ghcServer = rpcServer ghcServerEngine
 --
 -- This function runs in end endless loop inside the @Ghc@ monad, making
 -- incremental compilation possible.
-ghcServerEngine :: RpcConversation -> IO ()
-ghcServerEngine conv@RpcConversation{..} = do
+ghcServerEngine :: FilePath -> RpcConversation -> IO ()
+ghcServerEngine errorLog conv@RpcConversation{..} = do
   -- The initial handshake with the client
   (configGenerateModInfo, initOpts, sessionDir) <- handleInit conv
   let distDir   = ideSessionDistDir   sessionDir
@@ -115,9 +116,9 @@ ghcServerEngine conv@RpcConversation{..} = do
                 genCode targets configGenerateModInfo
               return args
             ReqRun runCmd -> do
-              (pid, stdin, stdout, stderr) <- startConcurrentConversation sessionDir $ \conv' -> do
+              (pid, stdin, stdout, errorLog') <- startConcurrentConversation sessionDir $ \_errorLog' conv' -> do
                  ghcWithArgs args $ ghcHandleRun conv' runCmd
-              liftIO $ put (pid, stdin, stdout, stderr)
+              liftIO $ put (pid, stdin, stdout, errorLog')
               return args
             ReqSetEnv env -> do
               ghcHandleSetEnv conv initEnv env
@@ -132,7 +133,7 @@ ghcServerEngine conv@RpcConversation{..} = do
               ghcHandlePrint conv vars bind forceEval
               return args
             ReqLoad objects -> do
-              ghcHandleLoad conv objects
+              ghcHandleLoad errorLog conv objects
               return args
             ReqUnload objects -> do
               ghcHandleUnload conv objects
@@ -216,7 +217,7 @@ initSession distDir modInfo dOpts errsRef stRef pluginRef callback = do
 #endif
       }
 
-startConcurrentConversation :: FilePath -> (RpcConversation -> Ghc ()) -> Ghc (ProcessID, FilePath, FilePath, FilePath)
+startConcurrentConversation :: FilePath -> (FilePath -> RpcConversation -> Ghc ()) -> Ghc (ProcessID, FilePath, FilePath, FilePath)
 startConcurrentConversation sessionDir server = do
   -- Ideally, we'd have the child process create the temp directory and
   -- communicate the name back to us, so that the child process can remove the
@@ -225,31 +226,33 @@ startConcurrentConversation sessionDir server = do
   -- directory here; I suppose we could still delegate the responsibility of
   -- deleting the directory to the child, but instead we'll just remove the
   -- directory along with the rest of the session temp dirs on session exit.
-  (stdin, stdout, stderr) <- liftIO $ do
+  (stdin, stdout, errorLog) <- liftIO $ do
     tempDir <- createTempDirectory sessionDir "rpc."
     let stdin  = tempDir </> "stdin"
         stdout = tempDir </> "stdout"
-        stderr = tempDir </> "stderr"
 
     createNamedPipe stdin  0o600
     createNamedPipe stdout 0o600
-    createNamedPipe stderr 0o600
 
-    return (stdin, stdout, stderr)
+    tmpDir <- Dir.getTemporaryDirectory
+    (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc-snippet-.log"
+    hClose errorLogHandle
+
+    return (stdin, stdout, errorLogPath)
 
   -- Start the concurrent conversion. We use forkGhcProcess rather than forkGhc
   -- because we need to change global state in the child process; in particular,
   -- we need to redirect stdin, stdout, and stderr (as well as some other global
   -- state, including withArgs).
   liftIO $ performGC
-  processId <- forkGhcProcess $ ghcConcurrentConversation stdin stdout stderr server
+  processId <- forkGhcProcess $ ghcConcurrentConversation stdin stdout errorLog server
 
   -- We wait for the process to finish in a separate thread so that we do not
   -- accumulate zombies
   liftIO $ void $ forkIO $
     void $ getProcessStatus True False processId
 
-  return (processId, stdin, stdout, stderr)
+  return (processId, stdin, stdout, errorLog)
 
 -- | We cache our own "module summaries" in between compile requests
 data ModSummary = ModSummary {
@@ -307,11 +310,16 @@ ghcHandleCompile
 ghcHandleCompile RpcConversation{..}
                  pluginRef modsRef errsRef configSourcesDir
                  ideGenerateCode targets configGenerateModInfo = do
-    (errs, loadedModules) <-
-      suppressGhcOutput $ compileInGhc configSourcesDir
-                                       ideGenerateCode
-                                       targets
-                                       errsRef
+    -- | Half of a workaround for
+    -- http://hackage.haskell.org/trac/ghc/ticket/7456.  We suppress stdout
+    -- during compilation to avoid stray messages, e.g. from the linker.
+    --
+    -- TODO: Should we log the suppressed messages?
+    (_suppressed, (errs, loadedModules)) <-
+      captureGhcOutput $ compileInGhc configSourcesDir
+                                      ideGenerateCode
+                                      targets
+                                      errsRef
 
     let initialResponse = GhcCompileResult {
             ghcCompileErrors   = errs
@@ -482,21 +490,24 @@ ghcHandlePrint RpcConversation{..} var bind forceEval = do
   liftIO $ put vals
 
 -- | Handle a load object request
-ghcHandleLoad :: RpcConversation -> [FilePath] -> Ghc ()
-ghcHandleLoad RpcConversation{..} objects =
-  -- Missing objects get thrown as an exception in some auxiliary thread
-  -- without a top-level exception handler, so we cannot catch them and they
-  -- get printed to stdout. For now we just suppress the messages.
-  --
-  -- TODO: We should catch these messages and send them back as errors (the
-  -- resolveObjs step will still return Failed, so we detect the error -- we
-  -- just cannot give a very informative error message).
-  suppressGhcOutput $ liftIO $ do
-    mapM_ ObjLink.loadObj objects
-    success <- ObjLink.resolveObjs
-    case success of
-      GHC.Succeeded -> put True
-      GHC.Failed    -> put False
+ghcHandleLoad :: FilePath -> RpcConversation -> [FilePath] -> Ghc ()
+ghcHandleLoad errorLog RpcConversation{..} objects =
+  liftIO $ do
+    -- If loadObj fails, it fails with a hard crash (not an exception) and
+    -- hence we cannot capture the output. Instead, we redirect it to the
+    -- error log so that if the crash does happen, the RPC infastructure
+    -- will read this log file and use its constents to report an error.
+    redirectStderr errorLog $ mapM_ ObjLink.loadObj objects
+
+    -- Although resolveObjs does _not_ fail quite so spectacularly, it still
+    -- writes its error messages to stdout.
+    (suppressed, success) <- captureOutput $ ObjLink.resolveObjs
+    let response :: Either String ()
+        response =
+          case success of
+            GHC.Failed    -> Left suppressed
+            GHC.Succeeded -> Right ()
+    put response
 
 -- | Handle an unload object request
 ghcHandleUnload :: RpcConversation -> [FilePath] -> Ghc ()
@@ -653,18 +664,9 @@ ghcHandleCrash delay = liftIO $ do
 -- Auxiliary                                                                  --
 --------------------------------------------------------------------------------
 
--- | Half of a workaround for http://hackage.haskell.org/trac/ghc/ticket/7456.
--- We suppress stdout during compilation to avoid stray messages, e.g. from
--- the linker.
--- TODO: send all suppressed messages to a debug log file.
-suppressGhcOutput :: Ghc a -> Ghc a
-suppressGhcOutput p = do
-  stdOutputBackup <- liftIO suppressStdOutput
-  stdErrorBackup  <- liftIO suppressStdError
-  x <- p
-  liftIO $ restoreStdError  stdErrorBackup
-  liftIO $ restoreStdOutput stdOutputBackup
-  return x
+-- | Generalization of captureOutput
+captureGhcOutput :: Ghc a -> Ghc (String, a)
+captureGhcOutput = unsafeLiftIO captureOutput
 
 -- | Lift operations on `IO` to the `Ghc` monad. This is unsafe as it makes
 -- operations possible in the `Ghc` monad that weren't possible before
@@ -673,17 +675,24 @@ unsafeLiftIO :: (IO a -> IO b) -> Ghc a -> Ghc b
 unsafeLiftIO f (Ghc ghc) = Ghc $ \session -> f (ghc session)
 
 -- | Generalization of 'unsafeLiftIO'
-unsafeLiftIO' :: ((c -> IO a) -> IO b) -> (c -> Ghc a) -> Ghc b
-unsafeLiftIO' f g = Ghc $ \session ->
+_unsafeLiftIO1 :: ((c -> IO a) -> IO b) -> (c -> Ghc a) -> Ghc b
+_unsafeLiftIO1 f g = Ghc $ \session ->
   f $ \c -> case g c of Ghc ghc -> ghc session
+
+-- | Generalization of 'unsafeLiftIO'
+--
+-- TODO: Is there a more obvious way to define this progression?
+unsafeLiftIO2 :: ((c -> d -> IO a) -> IO b) -> (c -> d -> Ghc a) -> Ghc b
+unsafeLiftIO2 f g = Ghc $ \session ->
+  f $ \c d -> case g c d of Ghc ghc -> ghc session
 
 -- | Lift `withArgs` to the `Ghc` monad. Relies on `unsafeLiftIO`.
 ghcWithArgs :: [String] -> Ghc a -> Ghc a
 ghcWithArgs = unsafeLiftIO . withArgs
 
 -- | Fork within the `Ghc` monad. Use with caution.
-forkGhc :: Ghc () -> Ghc ThreadId
-forkGhc = unsafeLiftIO forkIO
+_forkGhc :: Ghc () -> Ghc ThreadId
+_forkGhc = unsafeLiftIO forkIO
 
 -- | forkProcess within the `Ghc` monad. Use with extreme caution.
 forkGhcProcess :: Ghc () -> Ghc ProcessID
@@ -693,7 +702,7 @@ forkGhcProcess = unsafeLiftIO forkProcess
 ghcConcurrentConversation :: FilePath
                           -> FilePath
                           -> FilePath
-                          -> (RpcConversation -> Ghc ())
+                          -> (FilePath -> RpcConversation -> Ghc ())
                           -> Ghc ()
-ghcConcurrentConversation requestR responseW errorsW =
-  unsafeLiftIO' (concurrentConversation requestR responseW errorsW)
+ghcConcurrentConversation requestR responseW errorLog =
+  unsafeLiftIO2 (concurrentConversation requestR responseW errorLog)

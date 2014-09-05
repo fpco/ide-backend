@@ -34,35 +34,38 @@ import IdeSession.RPC.Stream
 -- Start the RPC server. For an explanation of the command line arguments, see
 -- 'forkRpcServer'. This function does not return until the client requests
 -- termination of the RPC conversation (or there is an error).
-rpcServer :: (RpcConversation -> IO ()) -- ^ Request server
-          -> [String]                   -- ^ Command line args
+--
+-- The server is passed the RpcConversation to communicate with the client,
+-- as well as the path to the exception log (rarely needed -- only needed
+-- if the server thread kills the whole process unconditionally, without
+-- throwing an exception).
+rpcServer :: (FilePath -> RpcConversation -> IO ()) -- ^ Request server
+          -> [String]                               -- ^ Command line args
           -> IO ()
-rpcServer handler fds = do
+rpcServer handler args = do
   let readFd :: String -> Fd
       readFd fd = fromIntegral (read fd :: Int)
 
-  let [requestR, requestW, responseR, responseW, errorsR, errorsW] = map readFd fds
+  let errorLog : fds = args
+      [requestR, requestW, responseR, responseW] = map readFd fds
 
   closeFd requestW
   closeFd responseR
-  closeFd errorsR
   requestR'  <- fdToHandle requestR
   responseW' <- fdToHandle responseW
-  errorsW'   <- fdToHandle errorsW
 
-  rpcServer' requestR' responseW' errorsW' handler
+  rpcServer' requestR' responseW' errorLog handler
 
 -- | Start a concurrent conversation.
 concurrentConversation :: FilePath -- ^ stdin named pipe
                        -> FilePath -- ^ stdout named pipe
-                       -> FilePath -- ^ stderr named pipe
-                       -> (RpcConversation -> IO ())
+                       -> FilePath -- ^ log file for exceptions
+                       -> (FilePath -> RpcConversation -> IO ())
                        -> IO ()
-concurrentConversation requestR responseW errorsW server = do
+concurrentConversation requestR responseW errorLog server = do
     hin  <- openPipeForReading requestR  timeout
     hout <- openPipeForWriting responseW timeout
-    herr <- openPipeForWriting errorsW   timeout
-    rpcServer' hin hout herr server
+    rpcServer' hin hout errorLog server
   where
     timeout :: Int
     timeout = maxBound
@@ -70,14 +73,14 @@ concurrentConversation requestR responseW errorsW server = do
 -- | Start the RPC server
 rpcServer' :: Handle                     -- ^ Input
            -> Handle                     -- ^ Output
-           -> Handle                     -- ^ Errors
-           -> (RpcConversation -> IO ()) -- ^ The request server
+           -> FilePath                   -- ^ Log file for exceptions
+           -> (FilePath -> RpcConversation -> IO ()) -- ^ The request server
            -> IO ()
-rpcServer' hin hout herr server = do
-    requests   <- newChan :: IO (Chan BSL.ByteString)
-    responses  <- newChan :: IO (Chan (Maybe BSL.ByteString))
+rpcServer' hin hout errorLog server = do
+    requests  <- newChan :: IO (Chan BSL.ByteString)
+    responses <- newChan :: IO (Chan (Maybe BSL.ByteString))
 
-    setBinaryBlockBuffered [hin, hout, herr]
+    setBinaryBlockBuffered [hin, hout]
 
     -- Each thread installs it own exception handler before unmasking
     -- asynchronous exceptions. This way when an exception occurs we can
@@ -85,7 +88,7 @@ rpcServer' hin hout herr server = do
     (reader, writer, handler) <- Ex.mask $ \restore -> do
       reader  <- async $ readRequests   restore hin requests
       writer  <- async $ writeResponses restore responses hout
-      handler <- async $ channelHandler restore requests responses server
+      handler <- async $ channelHandler restore requests responses (server errorLog)
       return (reader, writer, handler)
 
     (_thread, ev) <- $waitAny [reader, writer, handler]
@@ -122,8 +125,7 @@ rpcServer' hin hout herr server = do
   where
     tryShowException :: Maybe Ex.SomeException -> IO ()
     tryShowException (Just ex) =
-      -- We don't want to throw an exception showing the previous exception
-      ignoreIOExceptions $ hPutFlush herr . BSL.pack . show $ ex
+      ignoreIOExceptions $ appendFile errorLog (show ex)
     tryShowException Nothing =
       return ()
 
@@ -151,6 +153,7 @@ data ServerEvent =
     -- | The reader thread and writer threads terminate with 'LostConnection'
     -- if an exception occurs
   | LostConnection Ex.SomeException
+  deriving Show
 
 -- | Decode messages from a handle and forward them to a channel.
 -- The boolean result indicates whether the shutdown is forced.

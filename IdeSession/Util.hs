@@ -16,12 +16,10 @@ module IdeSession.Util (
   , Diff(..)
   , applyMapDiff
     -- * Manipulating stdout and stderr
-  , suppressStdOutput
-  , redirectStdOutput
-  , restoreStdOutput
-  , suppressStdError
-  , redirectStdError
-  , restoreStdError
+  , swizzleStdout
+  , swizzleStderr
+  , redirectStderr
+  , captureOutput
   ) where
 
 import Control.Applicative ((<$>))
@@ -37,7 +35,8 @@ import Data.Maybe (fromMaybe)
 import Data.Tagged (Tagged, untag)
 import Data.Text (Text)
 import Data.Typeable (typeOf)
-import Foreign.Ptr (castPtr)
+import Foreign.C.Types (CFile)
+import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import GHC.Generics (Generic)
 import GHC.IO (unsafeUnmask)
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
@@ -46,9 +45,10 @@ import System.FilePath (splitFileName, (<.>), (</>))
 import System.FilePath (splitSearchPath, searchPathSeparator)
 import System.IO
 import System.IO.Error (isDoesNotExistError)
+import System.IO.Temp (withSystemTempFile)
 import System.Posix (Fd)
 import System.Posix.Env (setEnv, unsetEnv)
-import System.Posix.IO.ByteString
+import System.Posix.IO
 import System.Posix.Types (CPid(..))
 import Text.Show.Pretty
 import qualified Control.Exception            as Ex
@@ -58,7 +58,6 @@ import qualified Data.Binary.Builder.Internal as Bin (writeN)
 import qualified Data.Binary.Get.Internal     as Bin (readNWith)
 import qualified Data.Binary.Put              as Bin (putBuilder)
 import qualified Data.ByteString              as BSS
-import qualified Data.ByteString.Char8        as BSSC (pack)
 import qualified Data.ByteString.Lazy         as BSL
 import qualified Data.Text                    as Text
 import qualified Data.Text.Foreign            as Text
@@ -66,6 +65,8 @@ import qualified System.Posix.Files           as Files
 
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map as StrictMap
+
+foreign import ccall "fflush" fflush :: Ptr CFile -> IO ()
 
 {------------------------------------------------------------------------------
   Util
@@ -257,57 +258,55 @@ applyMapDiff diff = foldr (.) id (map aux $ StrictMap.toList diff)
   Manipulations with stdout and stderr.
 -------------------------------------------------------------------------------}
 
-type FdBackup = Fd
+swizzleStdout :: Fd -> IO a -> IO a
+swizzleStdout = swizzleHandle (stdout, stdOutput)
 
-suppressStdOutput :: IO FdBackup
-suppressStdOutput = suppressHandle stdout stdOutput
+swizzleStderr :: Fd -> IO a -> IO a
+swizzleStderr = swizzleHandle (stderr, stdError)
 
-redirectStdOutput :: FilePath -> IO FdBackup
-redirectStdOutput = redirectHandle stdout stdOutput
+swizzleHandle :: (Handle, Fd) -> Fd -> IO a -> IO a
+swizzleHandle (targetHandle, targetFd) fd act =
+    Ex.bracket swizzle unswizzle (\_ -> act)
+  where
+    swizzle :: IO Fd
+    swizzle = do
+      -- Flush existing handles
+      hFlush targetHandle
+      fflush nullPtr
 
-restoreStdOutput :: FdBackup -> IO ()
-restoreStdOutput = restoreHandle stdout stdOutput
+      -- Backup stdout, then replace stdout with the given fd
+      backup <- dup targetFd
+      _ <- dupTo fd targetFd
 
-suppressStdError :: IO FdBackup
-suppressStdError = suppressHandle stderr stdError
+      return backup
 
-redirectStdError :: FilePath -> IO FdBackup
-redirectStdError = redirectHandle stderr stdError
+    unswizzle :: Fd -> IO ()
+    unswizzle backup = do
+      -- Flush handles again
+      hFlush targetHandle
+      fflush nullPtr
 
-restoreStdError :: FdBackup -> IO ()
-restoreStdError = restoreHandle stderr stdError
+      -- Restore stdout
+      _ <- dupTo backup targetFd
+      closeFd backup
 
-suppressHandle :: Handle -> Fd -> IO FdBackup
-suppressHandle h fd = do
-  hFlush h
-  fdBackup <- dup fd
-  closeFd fd
-  -- Will use next available file descriptor: that of h, e.g., stdout.
-  _ <- openFd (BSSC.pack "/dev/null") WriteOnly Nothing defaultFileFlags
-  return fdBackup
+redirectStderr :: FilePath -> IO a -> IO a
+redirectStderr fp act = do
+  Ex.bracket (openFd fp WriteOnly (Just mode) defaultFileFlags)
+             closeFd $ \errorLogFd ->
+    swizzleStderr errorLogFd $
+      act
+  where
+    mode = Files.unionFileModes Files.ownerReadMode Files.ownerWriteMode
 
--- | Redirects a handle (e.g., stdout) to a file, Creates the file, if needed,
--- just truncates, if not.
-redirectHandle :: Handle -> Fd -> FilePath -> IO FdBackup
-redirectHandle h fd file = do
-  let mode = Files.unionFileModes Files.ownerReadMode Files.ownerWriteMode
-      fileBS = BSSC.pack file
-  -- The file can't be created down there in openFd, because then
-  -- a wrong fd gets captured.
-  void $ createFile fileBS mode
-  hFlush h
-  fdBackup <- dup fd
-  closeFd fd
-  -- Will use next available file descriptor: that of h, e.g., stdout.
-  _ <- openFd fileBS WriteOnly Nothing defaultFileFlags
-  return fdBackup
-
-restoreHandle :: Handle -> Fd -> FdBackup -> IO ()
-restoreHandle h fd fdBackup = do
-  hFlush h
-  closeFd fd
-  _ <- dup fdBackup
-  closeFd fdBackup
+captureOutput :: IO a -> IO (String, a)
+captureOutput act = do
+  withSystemTempFile "suppressed" $ \fp handle -> do
+    fd <- handleToFd handle
+    a  <- swizzleStdout fd . swizzleStderr fd $ act
+    closeFd fd
+    suppressed <- readFile fp
+    return (suppressed, a)
 
 {-------------------------------------------------------------------------------
   Orphans

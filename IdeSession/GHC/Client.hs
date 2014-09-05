@@ -33,6 +33,7 @@ import Control.Concurrent.MVar (newMVar)
 import Control.Monad (when, forever)
 import Data.Typeable (Typeable)
 import Data.Binary (Binary)
+import System.Directory (removeFile)
 import System.Exit (ExitCode)
 import System.Posix (ProcessID, sigKILL, signalProcess)
 import qualified Control.Exception as Ex
@@ -235,19 +236,19 @@ rpcRun server cmd translateResult =
       -- TODO: This is of course a tad dangerous, because if for whatever reason
       -- the communication with the main server stalls we cannot interrupt it.
       -- Perhaps we should introduce a separate timeout for that?
-      (pid, stdin, stdout, stderr) <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
+      (pid, stdin, stdout, errorLog) <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
 
       -- Unmask exceptions only once we've installed an exception handler to
       -- cleanup the process again
-      interruptible (aux pid stdin stdout stderr) `Ex.onException` signalProcess sigKILL pid
+      interruptible (aux pid stdin stdout errorLog) `Ex.onException` signalProcess sigKILL pid
   where
     aux :: ProcessID -> FilePath -> FilePath -> FilePath -> IO (RunActions a)
-    aux pid stdin stdout stderr = do
+    aux pid stdin stdout errorLog = do
       runWaitChan <- newChan :: IO (Chan SnippetAction)
       reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
       respThread <- async . Ex.handle (handleExternalException runWaitChan) $ do
-        connectToRpcServer stdin stdout stderr $ \server' ->
+        connectToRpcServer stdin stdout errorLog $ \server' ->
           ghcConversation (OutProcess server') $ \RpcConversation{..} -> do
             -- This "respThread" is responsible for reading responses from the RPC
             -- conversation, and writing them to the runWaitChan channel. This thread
@@ -265,7 +266,8 @@ rpcRun server cmd translateResult =
             withAsync (sendRequests put reqChan) $ \_reqThread -> do
               let go = do resp <- get
                           case resp of
-                            GhcRunDone result ->
+                            GhcRunDone result -> do
+                              ignoreIOExceptions $ removeFile errorLog
                               writeChan runWaitChan (SnippetTerminated result)
                             GhcRunOutp bs -> do
                               writeChan runWaitChan (SnippetOutput bs)
@@ -297,9 +299,10 @@ rpcRun server cmd translateResult =
         , interrupt   = writeChan reqChan GhcRunInterrupt
         , supplyStdin = writeChan reqChan . GhcRunInput
         , forceCancel = do
-            ignoreIOExceptions $ signalProcess sigKILL pid
-            writeChan runWaitChan SnippetForceTerminated
             cancel respThread
+            ignoreIOExceptions $ signalProcess sigKILL pid
+            ignoreIOExceptions $ removeFile errorLog
+            writeChan runWaitChan SnippetForceTerminated
         }
 
     sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> IO ()
@@ -318,7 +321,7 @@ rpcPrint :: GhcServer -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv
 rpcPrint server var bind forceEval = ghcRpc server (ReqPrint var bind forceEval)
 
 -- | Load an object file
-rpcLoad :: GhcServer -> [FilePath] -> IO Bool
+rpcLoad :: GhcServer -> [FilePath] -> IO (Either String ())
 rpcLoad server objects = ghcRpc server (ReqLoad objects)
 
 -- | Unload an object file

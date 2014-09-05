@@ -323,25 +323,19 @@ configureAndBuild BuildExeArgs{ bePackageDBStack   = configPackageDBStack
         -- when/if we construct @lbi@ without @configure@).
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
   -- Handle various exceptions and stderr/stdout printouts.
-  exitCode :: Either ExitCode () <- Ex.bracket
-    (do  -- stdOutputBackup <- redirectStdOutput beStdoutLog
-        stdErrorBackup  <- redirectStdError  beStderrLog
-        return ({-stdOutputBackup,-} stdErrorBackup))
-    (\({-stdOutputBackup,-} stdErrorBackup) -> do
-        -- restoreStdOutput stdOutputBackup
-        restoreStdError  stdErrorBackup)
-    (\_ -> Ex.try $ catchIOError confAndBuild
-                      (\e -> if isUserError e
-                             then do
-                               -- In the new cabal code some exceptions
-                               -- are handled with 'die', raising a user error,
-                               -- while some still do 'exit 1' and print
-                               -- to stderr. For uniformity, we redirect
-                               -- user errors to stderr, as well.
-                               hPutStrLn stderr $ "Exception caught:"
-                               hPutStrLn stderr $ show e
-                               exitFailure
-                             else ioError e))
+  exitCode :: Either ExitCode () <- redirectStderr beStderrLog $
+    Ex.try $ catchIOError confAndBuild $ \e ->
+      if isUserError e
+        then do
+          -- In the new cabal code some exceptions are handled with 'die',
+          -- raising a user error, while some still do 'exit 1' and print to
+          -- stderr. For uniformity, we redirect user errors to stderr, as
+          -- well.
+          hPutStrLn stderr $ "Exception caught:"
+          hPutStrLn stderr $ show e
+          exitFailure
+        else
+          ioError e
   return $! either id (const ExitSuccess) exitCode
 
 configureAndHaddock :: BuildExeArgs
@@ -384,16 +378,10 @@ configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
         , Setup.haddockVerbosity = Setup.Flag minBound
         }
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
-  exitCode :: Either ExitCode () <- Ex.bracket
-    (do  -- stdOutputBackup <- redirectStdOutput beStdoutLog
-        stdErrorBackup  <- redirectStdError  beStderrLog
-        return ({-stdOutputBackup,-} stdErrorBackup))
-    (\({-stdOutputBackup,-} stdErrorBackup) -> do
-        -- restoreStdOutput stdOutputBackup
-        restoreStdError  stdErrorBackup)
-    (\_ -> Ex.try $ do
-        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
-        Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags)
+  exitCode :: Either ExitCode () <- redirectStderr beStderrLog $
+    Ex.try $ do
+      lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+      Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
   return $! either id (const ExitSuccess) exitCode
 
 buildDotCabal :: FilePath -> [FilePath] -> [String] -> Computed
@@ -744,29 +732,23 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
                         ghcOptExtra = ["-o", replaceExtension absObj "dyn_o"]
                       }
 
-  exitCode :: Either ExitCode () <- Ex.bracket
-    (do  -- stdOutputBackup <- redirectStdOutput rcStdoutLog
-        stdErrorBackup  <- redirectStdError rcStderrLog
-        return ({-stdOutputBackup,-} stdErrorBackup))
-    (\({-stdOutputBackup,-} stdErrorBackup) -> do
-        -- restoreStdOutput stdOutputBackup
-        restoreStdError  stdErrorBackup)
-    (\_ -> Ex.try $ do
-        createDirectoryIfMissingVerbose verbosity True odir
-        (ghcProg, _) <- requireProgram
-                          verbosity Cabal.Program.ghcProgram (withPrograms lbi)
-        let runGhcProg = runGHC verbosity ghcProg
-        runGhcProg vanillaCcOpts
+  exitCode :: Either ExitCode () <- redirectStderr rcStderrLog $
+    Ex.try $ do
+      createDirectoryIfMissingVerbose verbosity True odir
+      (ghcProg, _) <- requireProgram
+                        verbosity Cabal.Program.ghcProgram (withPrograms lbi)
+      let runGhcProg = runGHC verbosity ghcProg
+      runGhcProg vanillaCcOpts
 
-        isGhcDynamic <- ghcDynamic minBound ghcProg
-        let doingTH = EnableExtension TemplateHaskell `elem` allExtensions libBi  -- TODO
-            forceSharedLib = doingTH && isGhcDynamic
-            -- TH always needs default libs, even when building for profiling
-            whenProfLib = when (withProfLib lbi)
-            whenSharedLib forceShared = when (forceShared || withSharedLib lbi)
+      isGhcDynamic <- ghcDynamic minBound ghcProg
+      let doingTH = EnableExtension TemplateHaskell `elem` allExtensions libBi  -- TODO
+          forceSharedLib = doingTH && isGhcDynamic
+          -- TH always needs default libs, even when building for profiling
+          whenProfLib = when (withProfLib lbi)
+          whenSharedLib forceShared = when (forceShared || withSharedLib lbi)
 
-        whenSharedLib forceSharedLib (runGhcProg sharedCcOpts)
-        whenProfLib (runGhcProg profCcOpts))
+      whenSharedLib forceSharedLib (runGhcProg sharedCcOpts)
+      whenProfLib (runGhcProg profCcOpts)
   return $! either id (const ExitSuccess) exitCode
 
 data BuildExeArgs = BuildExeArgs

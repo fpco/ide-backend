@@ -724,13 +724,15 @@ rpcLoadObjectFiles :: ExecuteSessionUpdate [SourceError]
 rpcLoadObjectFiles = do
   IdeIdleState{..} <- get id
   didLoad <- liftIO $ GHC.rpcLoad _ideGhcServer $ map (fst . snd) _ideObjectFiles
-  return [ SourceError {
-               errorKind = KindError
-             , errorSpan = TextSpan (Text.pack "No location information")
-             , errorMsg  = Text.pack "Failure during object loading"
-             }
-         | not didLoad
-         ]
+  case didLoad of
+    Left err ->
+      return [ SourceError {
+          errorKind = KindError
+        , errorSpan = TextSpan (Text.pack "No location information")
+        , errorMsg  = Text.pack $ "Failure during object loading: " ++ err
+        }]
+    Right () ->
+      return []
 
 {-------------------------------------------------------------------------------
   Auxiliary (generic)

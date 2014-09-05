@@ -5,8 +5,6 @@ module IdeSession.ExeCabalServer (
   ) where
 
 import Control.Concurrent.Async (async, wait)
-import Foreign.C.Types (CFile)
-import Foreign.Ptr (Ptr, nullPtr)
 import System.Exit (ExitCode)
 import System.IO.Error (isEOFError)
 import System.Posix.IO.ByteString
@@ -20,12 +18,10 @@ import IdeSession.RPC.Server
 import IdeSession.Types.Progress
 import IdeSession.Util
 
-foreign import ccall "fflush" fflush :: Ptr CFile -> IO ()
-
 -- | Handle RPC requests by calling Cabal functions, keeping track
 -- of progress and passing the results.
-exeCabalEngine :: RpcConversation -> IO ()
-exeCabalEngine conv@RpcConversation{..} = do
+exeCabalEngine :: FilePath -> RpcConversation -> IO ()
+exeCabalEngine _errorLog conv@RpcConversation{..} = do
     -- Start handling RPC calls
     let go = do
           req <- get
@@ -42,41 +38,34 @@ runExeCabal conv req = do
   (stdOutputRd, stdOutputWr) <- createPipe
 
   -- Backup stdout, then replace stdout with the pipe's write end
-  IO.hFlush IO.stdout
-  fflush nullPtr
-  stdOutputBackup <- dup stdOutput
-  _ <- dupTo stdOutputWr stdOutput
-  closeFd stdOutputWr
+  (exitCode, stdoutThread) <- swizzleStdout stdOutputWr $ do
+    -- Convert the read end to a handle
+    stdOutputRdHandle <- fdToHandle stdOutputRd
+    IO.hSetBuffering stdOutputRdHandle IO.LineBuffering
 
-  -- Convert the read end to a handle
-  stdOutputRdHandle <- fdToHandle stdOutputRd
-  IO.hSetBuffering stdOutputRdHandle IO.LineBuffering
+    let stdoutLog = case req of
+          ReqExeBuild buildExeArgs _ -> beStdoutLog buildExeArgs
+          ReqExeDoc   buildExeArgs   -> beStdoutLog buildExeArgs
+          ReqExeCc    runCcArgs      -> rcStdoutLog runCcArgs
+          ReqExeLic   licenseArgs    -> liStdoutLog licenseArgs
+    stdoutThread <- async $ readStdout conv stdOutputRdHandle stdoutLog
 
-  let stdoutLog = case req of
-        ReqExeBuild buildExeArgs _ -> beStdoutLog buildExeArgs
-        ReqExeDoc   buildExeArgs   -> beStdoutLog buildExeArgs
-        ReqExeCc    runCcArgs      -> rcStdoutLog runCcArgs
-        ReqExeLic   licenseArgs    -> liStdoutLog licenseArgs
-  stdoutThread <- async $ readStdout conv stdOutputRdHandle stdoutLog
+    exitCode <- case req of
+      ReqExeBuild buildExeArgs modArgs ->
+        configureAndBuild buildExeArgs modArgs
+      ReqExeDoc buildExeArgs ->
+        configureAndHaddock buildExeArgs
+      ReqExeCc runCcArgs ->
+        runComponentCc runCcArgs
+      ReqExeLic licenseArgs ->
+        buildLicsFromPkgs True licenseArgs
 
-  exitCode <- case req of
-    ReqExeBuild buildExeArgs modArgs ->
-      configureAndBuild buildExeArgs modArgs
-    ReqExeDoc buildExeArgs ->
-      configureAndHaddock buildExeArgs
-    ReqExeCc runCcArgs ->
-      runComponentCc runCcArgs
-    ReqExeLic licenseArgs ->
-      buildLicsFromPkgs True licenseArgs
-
-  -- Restore stdout
-  IO.hFlush IO.stdout
-  fflush nullPtr
-  dupTo stdOutputBackup stdOutput >> closeFd stdOutputBackup
+    return (exitCode, stdoutThread)
 
   -- Closing the write end of the stdout pipe will cause the stdout
   -- thread to terminate after it processed all remaining output;
   -- wait for this to happen
+  closeFd stdOutputWr
   wait stdoutThread
 
   return exitCode
