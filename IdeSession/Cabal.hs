@@ -322,7 +322,7 @@ configureAndBuild BuildExeArgs{ bePackageDBStack   = configPackageDBStack
         -- already. Hence we set it in @mkConfFlags@ (can be reverted,
         -- when/if we construct @lbi@ without @configure@).
         Build.build (localPkgDescr lbi) lbi buildFlags preprocessors
-  -- Handle various exceptions and stderr/stdout printouts.
+  -- Handle various exceptions and stderr printouts.
   exitCode :: Either ExitCode () <- redirectStderr beStderrLog $
     Ex.try $ catchIOError confAndBuild $ \e ->
       if isUserError e
@@ -378,10 +378,23 @@ configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
         , Setup.haddockVerbosity = Setup.Flag minBound
         }
       hookedBuildInfo = (Nothing, [])  -- we don't want to use hooks
+  let confAndBuild = do
+        lbi <- configure (gpDesc, hookedBuildInfo) confFlags
+        Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
+  -- Handle various exceptions and stderr printouts.
   exitCode :: Either ExitCode () <- redirectStderr beStderrLog $
-    Ex.try $ do
-      lbi <- configure (gpDesc, hookedBuildInfo) confFlags
-      Haddock.haddock (localPkgDescr lbi) lbi preprocessors haddockFlags
+    Ex.try $ catchIOError confAndBuild $ \e ->
+      if isUserError e
+        then do
+          -- In the new cabal code some exceptions are handled with 'die',
+          -- raising a user error, while some still do 'exit 1' and print to
+          -- stderr. For uniformity, we redirect user errors to stderr, as
+          -- well.
+          hPutStrLn stderr $ "Exception caught:"
+          hPutStrLn stderr $ show e
+          exitFailure
+        else
+          ioError e
   return $! either id (const ExitSuccess) exitCode
 
 buildDotCabal :: FilePath -> [FilePath] -> [String] -> Computed

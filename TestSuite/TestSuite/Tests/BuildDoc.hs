@@ -26,9 +26,11 @@ test_fromLhsFiles env = withAvailableSession env $ \session -> do
     assertNoErrors session
     let upd = buildDoc
     updateSessionD session upd 1
+    distDir <- getDistDir session
+    docStderr <- readFile $ distDir </> "doc/ide-backend-doc.stderr"
+    assertEqual "doc stderr empty" docStderr ""
     status1 <- getBuildDocStatus session
     assertEqual "after doc build" (Just ExitSuccess) status1
-    distDir <- getDistDir session
     indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
     assertBool ".lhs haddock files" indexExists
     hoogleExists <- doesFileExist $ distDir </> "doc/html/main/main-1.0.txt"
@@ -52,6 +54,10 @@ test_ParFib env = withAvailableSession env $ \session -> do
     let upd = buildDoc
     updateSessionD session upd 1
     distDir <- getDistDir session
+    docStderr <- readFile $ distDir </> "doc/ide-backend-doc.stderr"
+    assertEqual "doc stderr empty" docStderr ""
+    status1 <- getBuildDocStatus session
+    assertEqual "after doc build" (Just ExitSuccess) status1
     indexExists <- doesFileExist $ distDir </> "doc/html/main/index.html"
     assertBool "ParFib haddock files" indexExists
     hoogleExists <- doesFileExist $ distDir </> "doc/html/main/main-1.0.txt"
