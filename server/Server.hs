@@ -521,8 +521,14 @@ ghcHandleRun RpcConversation{..} runCmd = do
     (stdOutputRd, stdOutputBackup, stdErrorBackup) <- redirectStdout
     (stdInputWr,  stdInputBackup)                  <- redirectStdin
 
+    -- We don't need to keep a reference to the reqThread: when the snippet
+    -- terminates, the whole server process terminates with it and hence
+    -- so does the reqThread. If we wanted to reuse this server process we
+    -- would need to have some sort of handshake so make sure that the client
+    -- and the server both agree that further requests are no longer accepted
+    -- (we used to do that when we ran snippets inside the main server process).
     ghcThread    <- liftIO newEmptyMVar :: Ghc (MVar (Maybe ThreadId))
-    reqThread    <- liftIO . async $ readRunRequests ghcThread stdInputWr
+    _reqThread   <- liftIO . async $ readRunRequests ghcThread stdInputWr
     stdoutThread <- liftIO . async $ readStdout stdOutputRd
 
     -- This is a little tricky. We only want to deliver the UserInterrupt
