@@ -7,15 +7,14 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
 module IdeSession.Update.ExecuteSessionUpdate (runSessionUpdate) where
 
-import Prelude hiding (id, mod, span)
+import Prelude hiding (mod, span)
 import Control.Applicative (Applicative, (<$>))
-import Control.Category (id)
+import Control.Arrow (first)
 import Control.Monad (when, void, forM, liftM, filterM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader(..), ReaderT, runReaderT, asks)
-import Control.Monad.State (MonadState, StateT, execStateT)
+import Control.Monad.State (MonadState(..))
 import Data.Accessor (Accessor, (.>))
-import Data.Accessor.Monad.MTL.State (get, modify, set)
 import Data.Digest.Pure.MD5 (MD5Digest)
 import Data.Foldable (forM_)
 import Data.Maybe (isJust, catMaybes, fromMaybe)
@@ -24,10 +23,12 @@ import System.Exit (ExitCode(..))
 import System.FilePath (makeRelative, (</>), takeExtension, replaceExtension, dropFileName)
 import System.FilePath.Find (find, always, extension, (&&?), (||?), fileType, (==?), FileType (RegularFile))
 import System.Posix.Files (setFileTimes, getFileStatus, modificationTime)
-import qualified Data.ByteString.Char8      as BSS
-import qualified Data.ByteString.Lazy.Char8 as BSL
-import qualified Data.Text                  as Text
-import qualified System.Directory           as Dir
+import qualified Control.Exception             as Ex
+import qualified Data.ByteString.Char8         as BSS
+import qualified Data.ByteString.Lazy.Char8    as BSL
+import qualified Data.Text                     as Text
+import qualified System.Directory              as Dir
+import qualified Data.Accessor.Monad.MTL.State as Acc
 
 import IdeSession.Cabal
 import IdeSession.Config
@@ -35,6 +36,7 @@ import IdeSession.ExeCabalClient (invokeExeCabal)
 import IdeSession.GHC.API
 import IdeSession.State
 import IdeSession.Strict.Container
+import IdeSession.Strict.IORef (StrictIORef)
 import IdeSession.Types.Private hiding (RunResult(..))
 import IdeSession.Types.Progress
 import IdeSession.Types.Public (RunBufferMode(..), Targets(..))
@@ -46,6 +48,7 @@ import qualified IdeSession.Strict.List   as List
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
 import qualified IdeSession.Strict.Trie   as Trie
+import qualified IdeSession.Strict.IORef  as IORef
 
 {-------------------------------------------------------------------------------
   We execute session updates in a monad in which we have Reader access to
@@ -61,26 +64,38 @@ data IdeSessionUpdateEnv = IdeSessionUpdateEnv {
   }
 
 newtype ExecuteSessionUpdate a = ExecuteSessionUpdate (
-    ReaderT IdeSessionUpdateEnv (StateT IdeIdleState IO) a
+    ReaderT (IdeSessionUpdateEnv, StrictIORef IdeIdleState) IO a
   )
   deriving ( Functor
            , Applicative
            , Monad
            , MonadIO
-           , MonadReader IdeSessionUpdateEnv
-           , MonadState IdeIdleState
            )
+
+instance MonadReader IdeSessionUpdateEnv ExecuteSessionUpdate where
+  ask = ExecuteSessionUpdate $ fst <$> ask
+  local f (ExecuteSessionUpdate act) = ExecuteSessionUpdate $ local (first f) act
+
+-- We define MonadState using an IORef rather than StateT so that if an exception
+-- happens during the execution of a session update, writes to the state are not
+-- lost
+instance MonadState IdeIdleState ExecuteSessionUpdate where
+  get   = ExecuteSessionUpdate $ do stRef <- snd <$> ask ; liftIO $ IORef.readIORef  stRef
+  put s = ExecuteSessionUpdate $ do stRef <- snd <$> ask ; liftIO $ IORef.writeIORef stRef s
 
 runSessionUpdate :: Bool
                  -> IdeSessionUpdate
                  -> IdeStaticInfo
                  -> (Progress -> IO ())
                  -> IdeIdleState
-                 -> IO IdeIdleState
-runSessionUpdate justRestarted update staticInfo callback ideIdleState =
-    case executeSessionUpdate justRestarted (reflectSessionState ideIdleState update) of
+                 -> IO (IdeIdleState, Either Ex.SomeException ())
+runSessionUpdate justRestarted update staticInfo callback ideIdleState = do
+    stRef <- IORef.newIORef ideIdleState
+    mex <- Ex.try $ case executeSessionUpdate justRestarted (reflectSessionState ideIdleState update) of
       ExecuteSessionUpdate update' ->
-        execStateT (runReaderT update' env) ideIdleState
+        runReaderT update' (env, stRef)
+    ideIdleState' <- IORef.readIORef stRef
+    return (ideIdleState', mex)
   where
     env = IdeSessionUpdateEnv {
               ideUpdateStaticInfo = staticInfo
@@ -95,6 +110,12 @@ runSessionUpdate justRestarted update staticInfo callback ideIdleState =
 --   to relative includes, targets, certain ghc options).
 -- * The assume the session update has already been passed through
 --   'reflectSessionState' to reflect the state of the session.
+-- * Due to the MonadState instance, writes to the state will be preserved
+--   even if an exception occurs during the execution of the session update.
+--   Such exceptions should only happen when we contact the server (do RPC
+--   calls); it is therefore important we make sure to update our local state
+--   before updating the rmote state, so that _if_ a remote exception occurs,
+--   we can reset the state on the next call to updateSession.
 executeSessionUpdate :: Bool -> IdeSessionUpdate -> ExecuteSessionUpdate ()
 executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
     executeUpdateBufferModes ideUpdateStdoutMode ideUpdateStderrMode
@@ -140,7 +161,7 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
 
     when needsRecompile $ local (incrementNumSteps numActions) $ do
       GhcCompileResult{..} <- rpcCompile
-      oldComputed <- get ideComputed
+      oldComputed <- Acc.get ideComputed
       srcDir      <- asks $ ideSessionSourceDir . ideSessionDir . ideUpdateStaticInfo
 
       let applyDiff :: Strict (Map ModuleName) (Diff v)
@@ -152,7 +173,7 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
           diffTypes = Map.map (fmap mkExpMap) ghcCompileExpTypes
           diffAuto  = Map.map (fmap (constructAuto ghcCompileCache)) ghcCompileAuto
 
-      set ideComputed $ Maybe.just Computed {
+      Acc.set ideComputed $ Maybe.just Computed {
           computedErrors        = force cErrors
                           List.++ ghcCompileErrors
                           List.++ force (fromMaybe [] optionWarnings)
@@ -302,7 +323,7 @@ updateObjectFiles ghcOptionsChanged = do
       then do
         -- We first unload all object files in case any symbols need to be
         -- re-resolved.
-        rpcUnloadObjectFiles =<< get ideObjectFiles
+        rpcUnloadObjectFiles =<< Acc.get ideObjectFiles
 
         -- Recompile the C files and load the corresponding object files
         cErrors   <- recompileCFiles outdated
@@ -348,16 +369,16 @@ updateObjectFiles ghcOptionsChanged = do
 
 removeObsoleteObjectFiles :: ExecuteSessionUpdate ()
 removeObsoleteObjectFiles = do
-    objectFiles <- get ideObjectFiles
+    objectFiles <- Acc.get ideObjectFiles
     obsolete    <- filterM isObsolete objectFiles
     forM_ obsolete $ \(cFile, (objFile, _timestamp)) -> do
       liftIO $ Dir.removeFile objFile
-      set (ideObjectFiles .> lookup' cFile) Nothing
+      Acc.set (ideObjectFiles .> lookup' cFile) Nothing
     rpcUnloadObjectFiles obsolete
   where
     isObsolete :: (FilePath, (FilePath, LogicalTimestamp)) -> ExecuteSessionUpdate Bool
     isObsolete (cFile, _) = do
-      cInfo <- get (ideManagedFiles .> managedSource .> lookup' cFile)
+      cInfo <- Acc.get (ideManagedFiles .> managedSource .> lookup' cFile)
       return $ not (isJust cInfo)
 
 recompileCFiles :: [FilePath] -> ExecuteSessionUpdate [SourceError]
@@ -388,9 +409,9 @@ recompileCFiles cFiles = do
     if null errors
       then do
         ts' <- updateFileTimes absObj
-        set (ideObjectFiles .> lookup' relC) (Just (absObj, ts'))
+        Acc.set (ideObjectFiles .> lookup' relC) (Just (absObj, ts'))
       else do
-        set (ideObjectFiles .> lookup' relC) Nothing
+        Acc.set (ideObjectFiles .> lookup' relC) Nothing
 
     return errors
 
@@ -400,7 +421,7 @@ recompileCFiles cFiles = do
 outdatedObjectFiles :: Bool -> ExecuteSessionUpdate [FilePath]
 outdatedObjectFiles ghcOptionsChanged = do
   IdeStaticInfo{..} <- asks ideUpdateStaticInfo
-  managedFiles      <- get (ideManagedFiles .> managedSource)
+  managedFiles      <- Acc.get (ideManagedFiles .> managedSource)
 
   let cFiles :: [(FilePath, LogicalTimestamp)]
       cFiles = filter ((`elem` cExtensions) . takeExtension . fst)
@@ -414,7 +435,7 @@ outdatedObjectFiles ghcOptionsChanged = do
     else liftM catMaybes $ do
       forM cFiles $ \(c_fp, c_ts) -> do
         -- ideObjectFiles is indexed by the names of the corresponding C files
-        mObjFile <- get (ideObjectFiles .> lookup' c_fp)
+        mObjFile <- Acc.get (ideObjectFiles .> lookup' c_fp)
         return $ case mObjFile of
           -- No existing object file yet
           Nothing -> Just c_fp
@@ -429,10 +450,10 @@ runGcc :: FilePath -> FilePath -> FilePath -> ExecuteSessionUpdate [SourceError]
 runGcc absC absObj pref = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     callback                        <- asks ideUpdateCallback
-    relIncl                         <- get ideRelativeIncludes
+    relIncl                         <- Acc.get ideRelativeIncludes
 
     -- Pass GHC options so that ghc can pass the relevant options to gcc
-    ghcOpts <- get ideGhcOpts
+    ghcOpts <- Acc.get ideGhcOpts
 
     let ideDistDir   = ideSessionDistDir   ideSessionDir
         ideSourceDir = ideSessionSourceDir ideSessionDir
@@ -484,13 +505,13 @@ runGcc absC absObj pref = do
 markAsUpdated :: (FilePath -> Bool) -> ExecuteSessionUpdate ()
 markAsUpdated shouldMark = do
   IdeStaticInfo{..} <- asks ideUpdateStaticInfo
-  sources  <- get (ideManagedFiles .> managedSource)
+  sources  <- Acc.get (ideManagedFiles .> managedSource)
   sources' <- forM sources $ \(path, (digest, oldTS)) ->
     if shouldMark path
       then do newTS <- updateFileTimes (ideSessionSourceDir ideSessionDir </> path)
               return (path, (digest, newTS))
       else return (path, (digest, oldTS))
-  set (ideManagedFiles .> managedSource) sources'
+  Acc.set (ideManagedFiles .> managedSource) sources'
 
 {-------------------------------------------------------------------------------
   File commands
@@ -508,7 +529,7 @@ executeFileCmd cmd = do
 
   case cmd of
     FileWrite _ bs -> do
-      old <- get cachedInfo
+      old <- Acc.get cachedInfo
       -- We always overwrite the file, and then later set the timestamp back
       -- to what it was if it turns out the hash was the same. If we compute
       -- the hash first, we would force the entire lazy bytestring into memory
@@ -519,7 +540,7 @@ executeFileCmd cmd = do
           return False
         _ -> do
           newTS <- updateFileTimes remotePath
-          set cachedInfo (Just (newHash, newTS))
+          Acc.set cachedInfo (Just (newHash, newTS))
           return True
     FileCopy _ localFile -> do
       -- We just call 'FileWrite' because we need to read the file anyway to
@@ -529,7 +550,7 @@ executeFileCmd cmd = do
       executeFileCmd (FileWrite info bs)
     FileDelete _ -> do
       liftIO $ ignoreDoesNotExist $ Dir.removeFile remotePath
-      set cachedInfo Nothing
+      Acc.set cachedInfo Nothing
       -- TODO: We should really return True only if the file existed
       return True
   where
@@ -553,9 +574,9 @@ executeBuildExe extraOpts ms = do
         ideSourceDir = ideSessionSourceDir ideSessionDir
 
     callback          <- asks ideUpdateCallback
-    mcomputed         <- get ideComputed
-    ghcOpts           <- get ideGhcOpts
-    relativeIncludes  <- get ideRelativeIncludes
+    mcomputed         <- Acc.get ideComputed
+    ghcOpts           <- Acc.get ideGhcOpts
+    relativeIncludes  <- Acc.get ideRelativeIncludes
         -- Note that these do not contain the @packageDbArgs@ options.
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
@@ -606,7 +627,7 @@ executeBuildExe extraOpts ms = do
         -- We only reset the timestamp, if ghc modified the file.
         when (modificationTime fileStatus > newTS) $
           setFileTimes path newTS newTS
-    set ideBuildExeStatus (Just exitCode)
+    Acc.set ideBuildExeStatus (Just exitCode)
 
 executeBuildDoc :: ExecuteSessionUpdate ()
 executeBuildDoc = do
@@ -616,9 +637,9 @@ executeBuildDoc = do
         ideSourceDir = ideSessionSourceDir ideSessionDir
 
     callback          <- asks ideUpdateCallback
-    mcomputed         <- get ideComputed
-    ghcOpts           <- get ideGhcOpts
-    relativeIncludes  <- get ideRelativeIncludes
+    mcomputed         <- Acc.get ideComputed
+    ghcOpts           <- Acc.get ideGhcOpts
+    relativeIncludes  <- Acc.get ideRelativeIncludes
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
@@ -641,7 +662,7 @@ executeBuildDoc = do
                                     , beStderrLog
                                     }
                   invokeExeCabal ideStaticInfo (ReqExeDoc beArgs) callback
-    set ideBuildDocStatus (Just exitCode)
+    Acc.set ideBuildDocStatus (Just exitCode)
 
 executeBuildLicenses :: FilePath -> ExecuteSessionUpdate ()
 executeBuildLicenses cabalsDir = do
@@ -650,7 +671,7 @@ executeBuildLicenses cabalsDir = do
     let ideDistDir = ideSessionDistDir ideSessionDir
 
     callback  <- asks ideUpdateCallback
-    mcomputed <- get ideComputed
+    mcomputed <- Acc.get ideComputed
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
@@ -670,7 +691,7 @@ executeBuildLicenses cabalsDir = do
                        , liPkgs = pkgs
                        }
       invokeExeCabal ideStaticInfo (ReqExeLic liArgs) callback
-    set ideBuildLicensesStatus (Just exitCode)
+    Acc.set ideBuildLicensesStatus (Just exitCode)
 
 {-------------------------------------------------------------------------------
   Auxiliary (ide-backend specific)
@@ -686,8 +707,8 @@ updateFileTimes path = do
 -- | Get the next available logical timestamp
 nextLogicalTimestamp :: MonadState IdeIdleState m => m LogicalTimestamp
 nextLogicalTimestamp = do
-  newTS <- get ideLogicalTimestamp
-  modify ideLogicalTimestamp (+ 1)
+  newTS <- Acc.get ideLogicalTimestamp
+  Acc.modify ideLogicalTimestamp (+ 1)
   return newTS
 
 {-------------------------------------------------------------------------------
@@ -696,7 +717,7 @@ nextLogicalTimestamp = do
 
 rpcCompile :: ExecuteSessionUpdate GhcCompileResult
 rpcCompile = do
-    IdeIdleState{..} <- get id
+    IdeIdleState{..} <- get
     callback         <- asks ideUpdateCallback
     sourceDir        <- asks $ ideSessionSourceDir . ideSessionDir . ideUpdateStaticInfo
 
@@ -709,17 +730,17 @@ rpcCompile = do
 
 rpcSetEnv :: ExecuteSessionUpdate ()
 rpcSetEnv = do
-    IdeIdleState{..} <- get id
+    IdeIdleState{..} <- get
     liftIO $ GHC.rpcSetEnv _ideGhcServer _ideEnv
 
 rpcSetArgs :: ExecuteSessionUpdate ()
 rpcSetArgs = do
-    IdeIdleState{..} <- get id
+    IdeIdleState{..} <- get
     liftIO $ GHC.rpcSetArgs _ideGhcServer _ideArgs
 
 rpcSetGhcOpts :: ExecuteSessionUpdate [SourceError]
 rpcSetGhcOpts = do
-    IdeIdleState{..} <- get id
+    IdeIdleState{..} <- get
     srcDir <- asks $ ideSessionSourceDir . ideSessionDir . ideUpdateStaticInfo
     -- relative include path is part of the state rather than the
     -- config as of c0bf0042
@@ -740,13 +761,13 @@ rpcSetGhcOpts = do
 -- | Unload all current object files
 rpcUnloadObjectFiles :: [(FilePath, (FilePath, LogicalTimestamp))] -> ExecuteSessionUpdate ()
 rpcUnloadObjectFiles objects = do
-  IdeIdleState{..} <- get id
+  IdeIdleState{..} <- get
   liftIO $ GHC.rpcUnload _ideGhcServer $ map (fst . snd) objects
 
 -- | Reload all current object files
 rpcLoadObjectFiles :: ExecuteSessionUpdate [SourceError]
 rpcLoadObjectFiles = do
-  IdeIdleState{..} <- get id
+  IdeIdleState{..} <- get
   didLoad <- liftIO $ GHC.rpcLoad _ideGhcServer $ map (fst . snd) _ideObjectFiles
   case didLoad of
     Left err ->
@@ -765,6 +786,6 @@ rpcLoadObjectFiles = do
 maybeSet :: (MonadState st m, Eq a) => Accessor st a -> Maybe a -> m Bool
 maybeSet _   Nothing    = return False
 maybeSet acc (Just new) = do
-  old <- get acc
-  if old /= new then set acc new >> return True
+  old <- Acc.get acc
+  if old /= new then Acc.set acc new >> return True
                 else return False

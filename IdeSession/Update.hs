@@ -381,8 +381,17 @@ updateSession' IdeSession{ideStaticInfo, ideState} callback = \update ->
     go :: Bool -> IdeSessionUpdate -> IdeSessionState -> IO IdeSessionState
     go justRestarted update (IdeSessionIdle idleState) =
       case requiresSessionRestart idleState update of
-        Nothing -> Ex.handle (handleExternal idleState) $ IdeSessionIdle `fmap`
-          runSessionUpdate justRestarted update ideStaticInfo callback idleState
+        Nothing -> do
+          (idleState', mex) <- runSessionUpdate justRestarted update ideStaticInfo callback idleState
+          case mex of
+            Right () ->
+              return $ IdeSessionIdle idleState'
+            Left ex | Just extEx <- Ex.fromException ex ->
+              return $ IdeSessionServerDied extEx idleState'
+            Left ex ->
+              -- Hmm. This really shouldn't happen. Throw away updated state on
+              -- non-external exceptions? TODO.
+              Ex.throwIO ex
         Just restartParams ->
           restart justRestarted update restartParams idleState
     go justRestarted update (IdeSessionServerDied _ex idleState) =
@@ -404,9 +413,6 @@ updateSession' IdeSession{ideStaticInfo, ideState} callback = \update ->
           go True (resetSession <> update) (IdeSessionIdle idleState')
         ServerRestartFailed idleState' ->
           return $ IdeSessionServerDied failedToRestart idleState'
-
-    handleExternal :: IdeIdleState -> ExternalException -> IO IdeSessionState
-    handleExternal idleState e = return $ IdeSessionServerDied e idleState
 
 -- | @needsSessionRestart st upd@ returns true if update @upd@ requires a
 -- session restart given current state @st@. If a session restart is requried

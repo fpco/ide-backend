@@ -93,6 +93,7 @@ data ManagedFiles = ManagedFiles
   { sourceFiles :: [FilePath]
   , dataFiles   :: [FilePath]
   }
+  deriving Show
 
 {------------------------------------------------------------------------------
   Queries that rely on the static part of the state only
