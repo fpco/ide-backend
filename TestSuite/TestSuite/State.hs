@@ -228,13 +228,16 @@ resetSession session = do
 
     -- Sanity check: after updateDeleteManagedFiles the managed files should
     -- actually be gone! (#238)
-    checkIsEmpty =<< getSourcesDir session
-    checkIsEmpty =<< getDataDir    session
+    -- Ignoring object files due to #249.
+    checkIsEmpty ignoredExtensions =<< getSourcesDir session
+    checkIsEmpty ignoredExtensions =<< getDataDir    session
   where
     reset = updateDeleteManagedFiles
          <> updateCodeGeneration False
          <> updateEnv []
          <> updateTargets (TargetsExclude [])
+
+    ignoredExtensions = [".o", ".dyn_o"]
 
 defaultServerConfig :: TestSuiteEnv -> TestSuiteServerConfig
 defaultServerConfig TestSuiteEnv{..} = TestSuiteServerConfig {
@@ -758,16 +761,20 @@ expandHomeDir path = unsafePerformIO $ do
 
 -- Check that the specified directory contains no files
 -- (it may however contain subdirectories)
-checkIsEmpty :: FilePath -> IO ()
-checkIsEmpty parent = do
-    children <- filter (not . ignore) `liftM` getDirectoryContents parent
-    forM_ children $ \relChild -> do
-      let absChild = parent </> relChild
-      isFile <- doesFileExist      absChild
-      isDir  <- doesDirectoryExist absChild
-      when isFile $ throwIO (userError ("unexpected file " ++ relChild ++ " in " ++ parent))
-      when isDir  $ checkIsEmpty absChild
+checkIsEmpty :: [String] -> FilePath -> IO ()
+checkIsEmpty ignoredExtensions = go
   where
+    go :: FilePath -> IO ()
+    go parent = do
+      children <- filter (not . ignore) `liftM` getDirectoryContents parent
+      forM_ children $ \relChild ->
+        unless (takeExtension relChild `elem` ignoredExtensions) $ do
+          let absChild = parent </> relChild
+          isFile <- doesFileExist      absChild
+          isDir  <- doesDirectoryExist absChild
+          when isFile $ throwIO (userError ("unexpected file " ++ relChild ++ " in " ++ parent))
+          when isDir  $ go absChild
+
     ignore :: FilePath -> Bool
     ignore "."  = True
     ignore ".." = True

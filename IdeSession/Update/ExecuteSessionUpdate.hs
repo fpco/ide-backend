@@ -10,7 +10,7 @@ module IdeSession.Update.ExecuteSessionUpdate (runSessionUpdate) where
 import Prelude hiding (id, mod, span)
 import Control.Applicative (Applicative, (<$>))
 import Control.Category (id)
-import Control.Monad (when, void, forM, liftM)
+import Control.Monad (when, void, forM, liftM, filterM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader(..), ReaderT, runReaderT, asks)
 import Control.Monad.State (MonadState, StateT, execStateT)
@@ -104,6 +104,9 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
     filesChanged   <- executeUpdateFiles   ideUpdateFileCmds
     enabledCodeGen <- executeUpdateCodeGen ideUpdateCodeGen
     optionWarnings <- executeUpdateGhcOpts ideUpdateGhcOpts
+
+    -- Unrecord object files whose C files have been deleted (#241)
+    removeObsoleteObjectFiles
 
     let ghcOptionsChanged :: Bool
         ghcOptionsChanged = isJust optionWarnings
@@ -299,10 +302,7 @@ updateObjectFiles ghcOptionsChanged = do
       then do
         -- We first unload all object files in case any symbols need to be
         -- re-resolved.
-        rpcUnloadObjectFiles
-
-        -- Unrecord object files whose C files have been deleted (#241)
-        removeObsoleteObjectFiles
+        rpcUnloadObjectFiles =<< get ideObjectFiles
 
         -- Recompile the C files and load the corresponding object files
         cErrors   <- recompileCFiles outdated
@@ -348,15 +348,17 @@ updateObjectFiles ghcOptionsChanged = do
 
 removeObsoleteObjectFiles :: ExecuteSessionUpdate ()
 removeObsoleteObjectFiles = do
-  objectFiles <- get ideObjectFiles
-  forM_ objectFiles $ \(cFile, (objFile, _timestamp)) -> do
-    mCInfo <- get (ideManagedFiles .> managedSource .> lookup' cFile)
-    case mCInfo of
-      Just _  ->
-        return ()
-      Nothing -> do
-        liftIO $ Dir.removeFile objFile
-        set (ideObjectFiles .> lookup' cFile) Nothing
+    objectFiles <- get ideObjectFiles
+    obsolete    <- filterM isObsolete objectFiles
+    forM_ obsolete $ \(cFile, (objFile, _timestamp)) -> do
+      liftIO $ Dir.removeFile objFile
+      set (ideObjectFiles .> lookup' cFile) Nothing
+    rpcUnloadObjectFiles obsolete
+  where
+    isObsolete :: (FilePath, (FilePath, LogicalTimestamp)) -> ExecuteSessionUpdate Bool
+    isObsolete (cFile, _) = do
+      cInfo <- get (ideManagedFiles .> managedSource .> lookup' cFile)
+      return $ not (isJust cInfo)
 
 recompileCFiles :: [FilePath] -> ExecuteSessionUpdate [SourceError]
 recompileCFiles cFiles = do
@@ -736,10 +738,10 @@ rpcSetGhcOpts = do
     unrecognized str = "Unrecognized option " ++ show str
 
 -- | Unload all current object files
-rpcUnloadObjectFiles :: ExecuteSessionUpdate ()
-rpcUnloadObjectFiles = do
+rpcUnloadObjectFiles :: [(FilePath, (FilePath, LogicalTimestamp))] -> ExecuteSessionUpdate ()
+rpcUnloadObjectFiles objects = do
   IdeIdleState{..} <- get id
-  liftIO $ GHC.rpcUnload _ideGhcServer $ map (fst . snd) _ideObjectFiles
+  liftIO $ GHC.rpcUnload _ideGhcServer $ map (fst . snd) objects
 
 -- | Reload all current object files
 rpcLoadObjectFiles :: ExecuteSessionUpdate [SourceError]
