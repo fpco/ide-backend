@@ -288,7 +288,7 @@ test_LhsBoot env = withAvailableSession env $ \session -> do
     ifTestingExe env $ do
         let m = "A"
             updE = buildExe [] [(T.pack m, m <.> "lhs")]
-        updateSessionD session updE 4
+        updateSessionD session updE 5 -- TODO: Main may be compiled twice (#189)
         distDir <- getDistDir session
         buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
         assertEqual "buildStderr empty" "" buildStderr
