@@ -170,7 +170,7 @@ test_MinVersion env = withAvailableSession env $ \session -> do
     assertNoErrors session
     let m = "Main"
         upd2 = buildExe [] [(T.pack m, "Main3.hs")]
-    updateSessionD session upd2 3
+    updateSessionD session upd2 4 -- TODO: Some modules may be compiled twice (#189)
     distDir <- getDistDir session
     buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
     assertEqual "buildStderr empty" "" buildStderr
