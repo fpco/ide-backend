@@ -190,6 +190,12 @@ getCHeaders [sourceDir] =
 getCHeaders _sourceDirs =
   fail $ "getCHeaders: wrong sourceDir: " ++ intercalate ", " _sourceDirs
 
+-- TODO: this works OK if @(m, path)@ are simple, @updateRelativeIncludes@
+-- includes @""@ and/or the @Main@ module is in @Main.hs@.
+-- For more complex cases we'd need extensive exotic tests and then perhaps
+-- also more complex code that searches @updateRelativeIncludes@ paths, etc.
+-- I'd rather wait until we fix cabal/GHC not to require "Main" in "./Main.hs"
+-- and then simplify this and other code instead.
 exeDesc :: [FilePath] -> [FilePath] -> FilePath -> [String]
         -> (ModuleName, FilePath)
         -> IO Executable
@@ -284,8 +290,12 @@ configureAndBuild BuildExeArgs{ bePackageDBStack   = configPackageDBStack
     mapM (exeDesc sourcesDirs [ideSourcesDir] ideDistDir ghcOpts) ms
   let condExe exe = (exeName exe, CondNode exe exeDeps [])
       condExecutables = map condExe executables
-  hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
-  lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
+      mainFileExistsInDir dir = do
+        hsFound  <- doesFileExist $ dir </> "Main.hs"
+        lhsFound <- doesFileExist $ dir </> "Main.lhs"
+        return $! hsFound || lhsFound
+  mainFileChecks <- mapM mainFileExistsInDir sourcesDirs
+  let mainFileExists = or mainFileChecks
   -- Cabal can't find the code of @Main@ (to be used as the main executable
   -- module) in subdirectories or in @Foo.hs@. We need a @Main@ to build
   -- an executable, so any other @Main@ modules have to be ignored.
@@ -295,7 +305,7 @@ configureAndBuild BuildExeArgs{ bePackageDBStack   = configPackageDBStack
   -- "We'll be handling the disambiguation of Main modules ourselves before
   -- passing the files to you, so that shouldn't be an ide-backend concern.",
   -- so perhaps there won't be any problems.
-  let soundMs | hsFound || lhsFound = loadedMs
+  let soundMs | mainFileExists = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
   library <- libDesc False sourcesDirs [ideSourcesDir] ghcOpts projectMs
@@ -352,10 +362,15 @@ configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
   let condExecutables = []
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         relativeIncludes
-  hsFound  <- doesFileExist $ ideSourcesDir </> "Main.hs"
-  lhsFound <- doesFileExist $ ideSourcesDir </> "Main.lhs"
-  -- Cabal can't find the code of @Main@, except in the main dir. See above.
-  let soundMs | hsFound || lhsFound = loadedMs
+      mainFileExistsInDir dir = do
+        hsFound  <- doesFileExist $ dir </> "Main.hs"
+        lhsFound <- doesFileExist $ dir </> "Main.lhs"
+        return $! hsFound || lhsFound
+  mainFileChecks <- mapM mainFileExistsInDir sourcesDirs
+  let mainFileExists = or mainFileChecks
+  -- Cabal can't find the code of @Main@, except in the main dir.
+  -- See the comment above.
+  let soundMs | mainFileExists = loadedMs
               | otherwise = delete (Text.pack "Main") loadedMs
       projectMs = map (Distribution.ModuleName.fromString . Text.unpack) soundMs
   library <- libDesc False sourcesDirs [ideSourcesDir] ghcOpts projectMs

@@ -302,7 +302,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     ifTestingExe env $ do
        let m = "Main"
            upd2 = buildExe [] [(T.pack m, "Main3.hs")]
-       updateSessionD session upd2 3
+       updateSessionD session upd2 4
        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
        assertEqual "buildStderr empty" "" buildStderr
        exeOut <- readProcess (distDir </> "build" </> m </> m) [] []
@@ -398,7 +398,7 @@ test_DynamicInclude_TargetsInclude env = withAvailableSession env $ \session -> 
     ifTestingExe env $ do
        let m = "Main"
            upd2 = buildExe [] [(T.pack m, "Main3.hs")]
-       updateSessionD session upd2 3
+       updateSessionD session upd2 4
        distDir <- getDistDir session
        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
        assertEqual "buildStderr empty" "" buildStderr
