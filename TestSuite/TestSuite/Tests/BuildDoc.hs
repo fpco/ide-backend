@@ -14,13 +14,13 @@ import TestSuite.Assertions
 
 testGroupBuildDoc :: TestSuiteEnv -> TestTree
 testGroupBuildDoc env = testGroup "Build haddocks" [
-    stdTest env "From some .lhs files"       (test_fromLhsFiles False)
-  , stdTest env "From some .lhs with relativeIncludes"
+    stdTest env "From some .lhs with relativeIncludes"
                                              (test_fromLhsFiles True)
+  , stdTest env "From some .lhs files"       (test_fromLhsFiles False)
   , stdTest env "Fail"                       test_fail
-  , stdTest env "From ParFib files"          (test_ParFib False)
   , stdTest env "From ParFib with relativeIncludes"
                                              (test_ParFib True)
+  , stdTest env "From ParFib files"          (test_ParFib False)
   ]
 
 test_fromLhsFiles :: Bool -> TestSuiteEnv -> Assertion
@@ -29,7 +29,7 @@ test_fromLhsFiles relativeIncludes env = withAvailableSession env
     when relativeIncludes $
       updateSessionD session (updateRelativeIncludes ["", "Subdir"]) 0
     status0 <- getBuildDocStatus session
-    assertEqual "before module loading" Nothing status0
+    when relativeIncludes $ assertEqual "before module loading" Nothing status0
     withCurrentDirectory "test/compiler/utils" $ loadModulesFrom session "."
     assertNoErrors session
     let upd = buildDoc
@@ -58,6 +58,10 @@ test_fail env = withAvailableSession env $ \session -> do
 
 test_ParFib :: Bool -> TestSuiteEnv -> Assertion
 test_ParFib relativeIncludes env = withAvailableSession env $ \session -> do
+    -- Warning: this also results in @compiler/@ written to the top-level
+    -- session directory. Unless it breaks other tests, let's keep it,
+    -- so that we see what happens with strange @updateRelativeIncludes@
+    -- arguments and notice if other changes to code cause any larger breakage.
     when relativeIncludes $
       updateSessionD session
                      (updateRelativeIncludes ["", "../compiler/utils/Subdir"])

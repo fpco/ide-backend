@@ -652,8 +652,10 @@ executeBuildDoc = do
                   let beArgs =
                         BuildExeArgs{ bePackageDBStack   = configPackageDBStack
                                     , beExtraPathDirs    = configExtraPathDirs
-                                    , beSourcesDir       = ideSourceDir
-                                    , beDistDir          = ideDistDir
+                                    , beSourcesDir       =
+                                        makeRelative ideSessionDir ideSourceDir
+                                    , beDistDir          =
+                                        makeRelative ideSessionDir ideDistDir
                                     , beRelativeIncludes = relativeIncludes
                                     , beGhcOpts          = ghcOpts
                                     , beLibDeps          = libDeps

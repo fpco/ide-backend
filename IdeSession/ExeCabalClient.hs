@@ -33,7 +33,10 @@ invokeExeCabal IdeStaticInfo{..} args callback = do
       fail $ "Could not find ide-backend-exe-cabal"
     Just prog -> do
       env <- envWithPathOverride configExtraPathDirs
-      server <- forkRpcServer prog [] (Just (ideSessionDataDir ideSessionDir)) env
+      let cwd = case args of
+            ReqExeDoc{} -> ideSessionDir
+            _ -> ideSessionDataDir ideSessionDir
+      server <- forkRpcServer prog [] (Just cwd) env
       exitCode <- rpcRunExeCabal server args callback
       shutdown server  -- not long-running
       return exitCode
