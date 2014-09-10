@@ -384,14 +384,8 @@ updateSession' IdeSession{ideStaticInfo, ideState} callback = \update ->
         Nothing -> do
           (idleState', mex) <- runSessionUpdate justRestarted update ideStaticInfo callback idleState
           case mex of
-            Right () ->
-              return $ IdeSessionIdle idleState'
-            Left ex | Just extEx <- Ex.fromException ex ->
-              return $ IdeSessionServerDied extEx idleState'
-            Left ex ->
-              -- Hmm. This really shouldn't happen. Throw away updated state on
-              -- non-external exceptions? TODO.
-              Ex.throwIO ex
+            Nothing -> return $ IdeSessionIdle          idleState'
+            Just ex -> return $ IdeSessionServerDied ex idleState'
         Just restartParams ->
           restart justRestarted update restartParams idleState
     go justRestarted update (IdeSessionServerDied _ex idleState) =

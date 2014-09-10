@@ -502,11 +502,11 @@ ghcHandleLoad errorLog RpcConversation{..} objects =
     -- Although resolveObjs does _not_ fail quite so spectacularly, it still
     -- writes its error messages to stdout.
     (suppressed, success) <- captureOutput $ ObjLink.resolveObjs
-    let response :: Either String ()
+    let response :: Maybe String
         response =
           case success of
-            GHC.Failed    -> Left suppressed
-            GHC.Succeeded -> Right ()
+            GHC.Failed    -> Just suppressed
+            GHC.Succeeded -> Nothing
     put response
 
 -- | Handle an unload object request

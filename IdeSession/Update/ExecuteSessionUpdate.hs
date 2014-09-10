@@ -4,13 +4,13 @@
 --
 -- See comments for IdeSessionUpdate for a motivation of the split between the
 -- IdeSessionUpdate type and the ExecuteSessionUpdate type.
-{-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables, FlexibleInstances #-}
 module IdeSession.Update.ExecuteSessionUpdate (runSessionUpdate) where
 
 import Prelude hiding (mod, span)
 import Control.Applicative (Applicative, (<$>))
 import Control.Monad (when, void, forM, liftM, filterM)
-import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.IO.Class (MonadIO(..))
 import Control.Monad.Reader (MonadReader(..), ReaderT, runReaderT, asks)
 import Control.Monad.State (MonadState(..))
 import Data.Accessor (Accessor, (.>))
@@ -23,16 +23,17 @@ import System.FilePath (makeRelative, (</>), takeExtension, replaceExtension, dr
 import System.FilePath.Find (find, always, extension, (&&?), (||?), fileType, (==?), FileType (RegularFile))
 import System.Posix.Files (setFileTimes, getFileStatus, modificationTime)
 import qualified Control.Exception             as Ex
+import qualified Data.Accessor.Monad.MTL.State as Acc
 import qualified Data.ByteString.Char8         as BSS
 import qualified Data.ByteString.Lazy.Char8    as BSL
 import qualified Data.Text                     as Text
 import qualified System.Directory              as Dir
-import qualified Data.Accessor.Monad.MTL.State as Acc
 
 import IdeSession.Cabal
 import IdeSession.Config
 import IdeSession.ExeCabalClient (invokeExeCabal)
 import IdeSession.GHC.API
+import IdeSession.RPC.API (ExternalException)
 import IdeSession.State
 import IdeSession.Strict.Container
 import IdeSession.Strict.IORef (StrictIORef)
@@ -42,12 +43,12 @@ import IdeSession.Types.Public (RunBufferMode(..), Targets(..))
 import IdeSession.Update.IdeSessionUpdate
 import IdeSession.Util
 import qualified IdeSession.GHC.Client    as GHC
+import qualified IdeSession.Strict.IORef  as IORef
 import qualified IdeSession.Strict.IntMap as IntMap
 import qualified IdeSession.Strict.List   as List
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
 import qualified IdeSession.Strict.Trie   as Trie
-import qualified IdeSession.Strict.IORef  as IORef
 
 {-------------------------------------------------------------------------------
   We execute session updates in a monad in which we have Reader access to
@@ -59,9 +60,11 @@ import qualified IdeSession.Strict.IORef  as IORef
 
 data IdeSessionUpdateEnv = IdeSessionUpdateEnv {
     ideUpdateStaticInfo :: IdeStaticInfo
-  , ideUpdateCallback   :: forall m. MonadIO m => Progress -> m ()
+  , ideUpdateCallback   :: Progress -> IO ()
     -- For the StateT instance
   , ideUpdateStateRef :: StrictIORef IdeIdleState
+    -- For liftIO
+  , ideUpdateExceptionRef :: StrictIORef (Maybe ExternalException)
   }
 
 newtype ExecuteSessionUpdate a = ExecuteSessionUpdate {
@@ -70,7 +73,6 @@ newtype ExecuteSessionUpdate a = ExecuteSessionUpdate {
   deriving ( Functor
            , Applicative
            , Monad
-           , MonadIO
            , MonadReader IdeSessionUpdateEnv
            )
 
@@ -86,24 +88,67 @@ instance MonadState IdeIdleState ExecuteSessionUpdate where
             stRef <- ideUpdateStateRef <$> ask
             liftIO $ IORef.writeIORef stRef s
 
+-- | Kind of like 'liftIO', but with a special treatment for external
+-- exceptions. When the IO action throws an ExternalException, _or_ when a
+-- previous IO exception threw an ExternalException, we return a dummy value
+-- and record the exception separately. Thus, for an action of type
+--
+-- > foo :: IO ()
+--
+-- we will return () on an exception, as if the action returned successfully;
+-- similarly, for an action of type
+--
+-- > bar :: IO [SourceError]
+--
+-- we will return the empty list on an exception. The rationale is that if
+-- ExternalException occurs, we will eventually record the session as dead (in
+-- the top-level updateSession function), but everything else in the execution
+-- of the session update should still happen (#251).
+--
+-- NOTE: We deal _only_ with external exceptions here. Any other kind of
+-- exception should be explicitly caught and dealt with by the IO action.
+tryIO :: Dummy a => IO a -> ExecuteSessionUpdate a
+tryIO act = ExecuteSessionUpdate $ do
+  exRef <- ideUpdateExceptionRef <$> ask
+  mPreviousException <- liftIO $ IORef.readIORef exRef
+  case mPreviousException of
+    Just _  ->
+      return dummy
+    Nothing -> do
+      mNewException <- liftIO $ Ex.try $ act
+      case mNewException of
+        Left ex -> do liftIO $ IORef.writeIORef exRef (Just ex)
+                      return dummy
+        Right a -> return a
+
+-- | For code that we _know_ is exception free we can just execute the action.
+-- Of course, this needs manual verification that these cases are actually okay.
+-- If the action _does_ throw an exception this may end the session update
+-- prematurely.
+exceptionFree :: IO a -> ExecuteSessionUpdate a
+exceptionFree = ExecuteSessionUpdate . liftIO
+
 runSessionUpdate :: Bool
                  -> IdeSessionUpdate
                  -> IdeStaticInfo
                  -> (Progress -> IO ())
                  -> IdeIdleState
-                 -> IO (IdeIdleState, Either Ex.SomeException ())
+                 -> IO (IdeIdleState, Maybe ExternalException)
 runSessionUpdate justRestarted update staticInfo callback ideIdleState = do
     stRef <- IORef.newIORef ideIdleState
+    exRef <- IORef.newIORef Nothing
 
-    mex <- Ex.try $ runReaderT (unwrapUpdate $ executeSessionUpdate justRestarted update')
-                               IdeSessionUpdateEnv {
-                                   ideUpdateStaticInfo = staticInfo
-                                 , ideUpdateCallback   = liftIO . callback
-                                 , ideUpdateStateRef   = stRef
-                                 }
+    runReaderT (unwrapUpdate $ executeSessionUpdate justRestarted update')
+               IdeSessionUpdateEnv {
+                   ideUpdateStaticInfo   = staticInfo
+                 , ideUpdateCallback     = liftIO . callback
+                 , ideUpdateStateRef     = stRef
+                 , ideUpdateExceptionRef = exRef
+                 }
 
     ideIdleState' <- IORef.readIORef stRef
-    return (ideIdleState', mex)
+    mException    <- IORef.readIORef exRef
+    return (ideIdleState', mException)
   where
     update' = reflectSessionState ideIdleState update
 
@@ -377,7 +422,7 @@ removeObsoleteObjectFiles = do
     objectFiles <- Acc.get ideObjectFiles
     obsolete    <- filterM isObsolete objectFiles
     forM_ obsolete $ \(cFile, (objFile, _timestamp)) -> do
-      liftIO $ Dir.removeFile objFile
+      exceptionFree $ Dir.removeFile objFile
       Acc.set (ideObjectFiles .> lookup' cFile) Nothing
     rpcUnloadObjectFiles obsolete
   where
@@ -401,14 +446,14 @@ recompileCFiles cFiles = do
         absObj = objDir </> relObj
 
     let msg = "Compiling " ++ relC
-    callback $ Progress {
+    exceptionFree $ callback $ Progress {
         progressStep      = i
       , progressNumSteps  = length cFiles
       , progressParsedMsg = Just (Text.pack msg)
       , progressOrigMsg   = Just (Text.pack msg)
       }
 
-    liftIO $ Dir.createDirectoryIfMissing True (dropFileName absObj)
+    exceptionFree $ Dir.createDirectoryIfMissing True (dropFileName absObj)
 
     errors <- runGcc absC absObj objDir
     if null errors
@@ -463,7 +508,7 @@ runGcc absC absObj pref = do
     let ideDistDir   = ideSessionDistDir   ideSessionDir
         ideSourceDir = ideSessionSourceDir ideSessionDir
 
-    liftIO $ do
+    exceptionFree $ do
      let SessionConfig{..} = ideConfig
          stdoutLog   = ideDistDir </> "ide-backend-cc.stdout"
          stderrLog   = ideDistDir </> "ide-backend-cc.stderr"
@@ -525,6 +570,8 @@ markAsUpdated shouldMark = do
 -- | Execute a file command
 --
 -- Returns 'True' if any files were changed.
+--
+-- TODO: We should verify each use of exceptionFree here.
 executeFileCmd :: FileCmd -> ExecuteSessionUpdate Bool
 executeFileCmd cmd = do
   IdeStaticInfo{..} <- asks ideUpdateStaticInfo
@@ -538,10 +585,10 @@ executeFileCmd cmd = do
       -- We always overwrite the file, and then later set the timestamp back
       -- to what it was if it turns out the hash was the same. If we compute
       -- the hash first, we would force the entire lazy bytestring into memory
-      newHash <- liftIO $ writeFileAtomic remotePath bs
+      newHash <- exceptionFree $ writeFileAtomic remotePath bs
       case old of
         Just (oldHash, oldTS) | oldHash == newHash -> do
-          liftIO $ setFileTimes remotePath oldTS oldTS
+          exceptionFree $ setFileTimes remotePath oldTS oldTS
           return False
         _ -> do
           newTS <- updateFileTimes remotePath
@@ -551,10 +598,10 @@ executeFileCmd cmd = do
       -- We just call 'FileWrite' because we need to read the file anyway to
       -- compute the hash. Note that `localPath` is interpreted relative to the
       -- current directory
-      bs <- liftIO $ BSL.readFile localFile
+      bs <- exceptionFree $ BSL.readFile localFile
       executeFileCmd (FileWrite info bs)
     FileDelete _ -> do
-      liftIO $ ignoreDoesNotExist $ Dir.removeFile remotePath
+      exceptionFree $ ignoreDoesNotExist $ Dir.removeFile remotePath
       Acc.set cachedInfo Nothing
       -- TODO: We should really return True only if the file existed
       return True
@@ -586,7 +633,7 @@ executeBuildExe extraOpts ms = do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    liftIO $ Dir.createDirectoryIfMissing False $ ideDistDir </> "build"
+    exceptionFree $ Dir.createDirectoryIfMissing False $ ideDistDir </> "build"
     let beStdoutLog = ideDistDir </> "build/ide-backend-exe.stdout"
         beStderrLog = ideDistDir </> "build/ide-backend-exe.stderr"
         errors = case toLazyMaybe mcomputed of
@@ -595,13 +642,13 @@ executeBuildExe extraOpts ms = do
           Just Computed{computedErrors} -> toLazyList computedErrors
     exitCode <-
       if any (== KindError) $ map errorKind errors then do
-        liftIO $ do
+        exceptionFree $ do
           writeFile beStderrLog
             "Source errors encountered. Not attempting to build executables."
           return $ ExitFailure 1
       else do
         let ghcOpts' = "-rtsopts=some" : ghcOpts ++ extraOpts
-        liftIO $ do
+        exceptionFree $ do
                 (loadedMs, pkgs) <- buildDeps mcomputed
                 libDeps <- externalDeps pkgs
                 let beArgs =
@@ -620,7 +667,7 @@ executeBuildExe extraOpts ms = do
     -- Solution 2. to #119: update timestamps of .o (and all other) files
     -- according to the session's artificial timestamp.
     newTS <- nextLogicalTimestamp
-    liftIO $ do
+    exceptionFree $ do
       objectPaths <- find always
                           (fileType ==? RegularFile
                            &&? (extension ==? ".o"
@@ -648,10 +695,10 @@ executeBuildDoc = do
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
-    liftIO $ Dir.createDirectoryIfMissing False $ ideDistDir </> "doc"
+    exceptionFree $ Dir.createDirectoryIfMissing False $ ideDistDir </> "doc"
     let beStdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
         beStderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
-    exitCode <- liftIO $ do
+    exitCode <- exceptionFree $ do
                   (loadedMs, pkgs) <- buildDeps mcomputed
                   libDeps <- externalDeps pkgs
                   let beArgs =
@@ -684,7 +731,7 @@ executeBuildLicenses cabalsDir = do
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
     let liStdoutLog = ideDistDir </> "licenses.stdout"  -- progress
         liStderrLog = ideDistDir </> "licenses.stderr"  -- warnings and errors
-    exitCode <- liftIO $ do
+    exitCode <- exceptionFree $ do
       (_, pkgs) <- buildDeps mcomputed
       let liArgs =
             LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
@@ -705,14 +752,14 @@ executeBuildLicenses cabalsDir = do
 -------------------------------------------------------------------------------}
 
 -- | Update the file times of the given file with the next logical timestamp
-updateFileTimes :: (MonadState IdeIdleState m, MonadIO m) => FilePath -> m LogicalTimestamp
+updateFileTimes :: FilePath -> ExecuteSessionUpdate LogicalTimestamp
 updateFileTimes path = do
   ts <- nextLogicalTimestamp
-  liftIO $ setFileTimes path ts ts
+  exceptionFree $ setFileTimes path ts ts
   return ts
 
 -- | Get the next available logical timestamp
-nextLogicalTimestamp :: MonadState IdeIdleState m => m LogicalTimestamp
+nextLogicalTimestamp :: ExecuteSessionUpdate LogicalTimestamp
 nextLogicalTimestamp = do
   newTS <- Acc.get ideLogicalTimestamp
   Acc.modify ideLogicalTimestamp (+ 1)
@@ -733,17 +780,17 @@ rpcCompile = do
           TargetsInclude l -> TargetsInclude $ map (sourceDir </>) l
           TargetsExclude l -> TargetsExclude $ map (sourceDir </>) l
 
-    liftIO $ GHC.rpcCompile _ideGhcServer _ideGenerateCode targets callback
+    tryIO $ GHC.rpcCompile _ideGhcServer _ideGenerateCode targets callback
 
 rpcSetEnv :: ExecuteSessionUpdate ()
 rpcSetEnv = do
     IdeIdleState{..} <- get
-    liftIO $ GHC.rpcSetEnv _ideGhcServer _ideEnv
+    tryIO $ GHC.rpcSetEnv _ideGhcServer _ideEnv
 
 rpcSetArgs :: ExecuteSessionUpdate ()
 rpcSetArgs = do
     IdeIdleState{..} <- get
-    liftIO $ GHC.rpcSetArgs _ideGhcServer _ideArgs
+    tryIO $ GHC.rpcSetArgs _ideGhcServer _ideArgs
 
 rpcSetGhcOpts :: ExecuteSessionUpdate [SourceError]
 rpcSetGhcOpts = do
@@ -752,7 +799,7 @@ rpcSetGhcOpts = do
     -- relative include path is part of the state rather than the
     -- config as of c0bf0042
     let relOpts = relInclToOpts srcDir _ideRelativeIncludes
-    (leftover, warnings) <- liftIO $ GHC.rpcSetGhcOpts _ideGhcServer (_ideGhcOpts ++ relOpts)
+    (leftover, warnings) <- tryIO $ GHC.rpcSetGhcOpts _ideGhcServer (_ideGhcOpts ++ relOpts)
     return
       [ SourceError {
             errorKind = KindWarning
@@ -769,22 +816,64 @@ rpcSetGhcOpts = do
 rpcUnloadObjectFiles :: [(FilePath, (FilePath, LogicalTimestamp))] -> ExecuteSessionUpdate ()
 rpcUnloadObjectFiles objects = do
   IdeIdleState{..} <- get
-  liftIO $ GHC.rpcUnload _ideGhcServer $ map (fst . snd) objects
+  tryIO $ GHC.rpcUnload _ideGhcServer $ map (fst . snd) objects
 
 -- | Reload all current object files
 rpcLoadObjectFiles :: ExecuteSessionUpdate [SourceError]
 rpcLoadObjectFiles = do
   IdeIdleState{..} <- get
-  didLoad <- liftIO $ GHC.rpcLoad _ideGhcServer $ map (fst . snd) _ideObjectFiles
+  didLoad <- tryIO $ GHC.rpcLoad _ideGhcServer $ map (fst . snd) _ideObjectFiles
   case didLoad of
-    Left err ->
+    Just err ->
       return [ SourceError {
           errorKind = KindError
         , errorSpan = TextSpan (Text.pack "No location information")
         , errorMsg  = Text.pack $ "Failure during object loading: " ++ err
         }]
-    Right () ->
+    Nothing ->
       return []
+
+{-------------------------------------------------------------------------------
+  Dummy values (see tryIO)
+-------------------------------------------------------------------------------}
+
+class Dummy a where
+  dummy :: a
+
+instance Dummy () where
+  dummy = ()
+instance Dummy [a] where
+  dummy = []
+instance (Dummy a, Dummy b) => Dummy (a, b) where
+  dummy = (dummy, dummy)
+instance Dummy (Maybe a) where
+  dummy = Nothing
+
+instance Dummy (Strict [] a) where
+  dummy = List.nil
+instance Dummy (Strict (Map k) a) where
+  dummy = Map.empty
+instance Dummy (Strict IntMap a) where
+  dummy = IntMap.empty
+
+instance Dummy ExplicitSharingCache where
+  dummy = ExplicitSharingCache {
+      filePathCache = dummy
+    , idPropCache   = dummy
+    }
+
+instance Dummy GhcCompileResult where
+  dummy = GhcCompileResult {
+      ghcCompileErrors   = dummy
+    , ghcCompileLoaded   = dummy
+    , ghcCompileCache    = dummy
+    , ghcCompileImports  = dummy
+    , ghcCompileAuto     = dummy
+    , ghcCompileSpanInfo = dummy
+    , ghcCompilePkgDeps  = dummy
+    , ghcCompileExpTypes = dummy
+    , ghcCompileUseSites = dummy
+    }
 
 {-------------------------------------------------------------------------------
   Auxiliary (generic)

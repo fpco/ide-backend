@@ -321,7 +321,7 @@ rpcPrint :: GhcServer -> Public.Name -> Bool -> Bool -> IO Public.VariableEnv
 rpcPrint server var bind forceEval = ghcRpc server (ReqPrint var bind forceEval)
 
 -- | Load an object file
-rpcLoad :: GhcServer -> [FilePath] -> IO (Either String ())
+rpcLoad :: GhcServer -> [FilePath] -> IO (Maybe String)
 rpcLoad server objects = ghcRpc server (ReqLoad objects)
 
 -- | Unload an object file
