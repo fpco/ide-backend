@@ -59,32 +59,31 @@ test_PackageDependencies env = withAvailableSession' env (withGhcOpts ["-hide-pa
             ])
 
 test_Register_NoRestart :: TestSuiteEnv -> Assertion
-test_Register_NoRestart env = do
-  withAvailableSession' env (withGhcOpts ["-package simple-lib17"]) $ \session -> do
-    updateSessionD session upd 1
-    assertSomeErrors session
+test_Register_NoRestart env = withAvailableSession env $ \session -> do
+    -- Session is started successfully, because we haven't referenced the
+    -- package yet.
 
     withInstalledPackage env "test/simple-lib17" $ do
-      -- No restartSession yet, hence the exception at session init.
+      -- Package is now installed, but the session not restarted, so we cannot
+      -- reference the new package
       updateSessionD session upd 1
       assertSomeErrors session
   where
-    upd = updateSourceFile "Main.hs" . L.unlines $
+    upd = updateGhcOpts ["-package simple-lib17"]
+       <> (updateSourceFile "Main.hs" . L.unlines $
             [ "module Main where"
             , "import SimpleLib (simpleLib)"
             , "main = print simpleLib"
-            ]
+            ])
 
 test_Register_Restart :: TestSuiteEnv -> Assertion
-test_Register_Restart env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ \session -> do
-    withInstalledPackage env "test/simple-lib17" $ do
-      updateSessionD session upd 1
-      assertSomeErrors session
+test_Register_Restart env = withAvailableSession env $ \session -> do
+    -- Session is started successfully, because we haven't referenced the
+    -- package yet.
 
     withInstalledPackage env "test/simple-lib17" $ do
-      -- NOTE: We used to pass defaultSessionInitParams as argument here. Not
-      -- sure why. Removed it (because it's no longer supported).
-      restartSession session -- only now the package accessible
+      -- After restarting the session the new package should be visible
+      restartSession session
       updateSessionD session upd 1
       assertNoErrors session
 
@@ -103,8 +102,10 @@ test_Register_Restart env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ 
                      "42\n"
                      outExe
          assertEqual "after runExe" ExitSuccess statusExe
+
   where
-    upd = updateSourceFile "Main.hs" . L.unlines $
+    upd = updateGhcOpts ["-package simple-lib17", "-XCPP"]
+       <> (updateSourceFile "Main.hs" . L.unlines $
             [ "module Main where"
             , "import SimpleLib (simpleLib)"
             , "#if MIN_VERSION_simple_lib17(0,1,0)"
@@ -112,7 +113,7 @@ test_Register_Restart env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ 
             , "#else"
             , "terrible error"
             , "#endif"
-            ]
+            ])
 
 test_PackageDB_ModInfoFalse :: TestSuiteEnv -> Assertion
 test_PackageDB_ModInfoFalse env = withAvailableSession' env setup $ \session -> do
