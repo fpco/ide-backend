@@ -32,7 +32,7 @@ import System.Exit (ExitCode (ExitSuccess, ExitFailure), exitFailure)
 import System.FilePath ( (</>), takeFileName, makeRelative
                        , takeDirectory, replaceExtension )
 import System.FilePath.Find (find, always, extension)
-import System.Directory (doesFileExist)
+import System.Directory (removeFile, doesFileExist)
 import System.IO.Temp (createTempDirectory)
 import System.IO (IOMode(WriteMode), hClose, openBinaryFile, hPutStr, hPutStrLn, stderr)
 import System.IO.Error (isUserError, catchIOError)
@@ -282,6 +282,12 @@ configureAndBuild BuildExeArgs{ bePackageDBStack   = configPackageDBStack
                               , beLibDeps          = libDeps
                               , beLoadedMs         = loadedMs
                               , .. } ms = do
+  -- We need to make sure the user never loses any error message.
+  -- Therefore we never wipe out such files in the midst of ide-backend
+  -- operation, but only at the start of user-triggered commands,
+  -- after he had full access to the previous content of the files.
+  beStderrLogExists <- doesFileExist beStderrLog
+  when beStderrLogExists $ removeFile beStderrLog
   let mainDep = Package.Dependency pkgNameMain anyVersion
       exeDeps = mainDep : libDeps
       sourcesDirs = map (\path -> ideSourcesDir </> path)
@@ -359,6 +365,8 @@ configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
                                 , beLibDeps = libDeps
                                 , beLoadedMs = loadedMs
                                 , .. } = do
+  beStderrLogExists <- doesFileExist beStderrLog
+  when beStderrLogExists $ removeFile beStderrLog
   let condExecutables = []
       sourcesDirs = map (\path -> ideSourcesDir </> path)
                         relativeIncludes
@@ -471,6 +479,7 @@ buildLicsFromPkgs logProgress
                              , liCabalsDir      = cabalsDir
                              , liPkgs           = pkgs
                              } = do
+  -- Note that @liStderrLog@ is removed in @openBinaryFile@ below.
   -- The following computations are very expensive, so should be done once,
   -- instead of at each invocation of @findLicense@ that needs to perform
   -- @lookupSourcePackageId@.
@@ -735,6 +744,8 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
                         , rcPref           = pref
                         , rcIncludeDirs    = includeDirs
                         , .. }             = do
+  rcStderrLogExists <- doesFileExist rcStderrLog
+  when rcStderrLogExists $ removeFile rcStderrLog
   let verbosity = silent
       -- TODO: create dist.23412/build? see cabalMacrosLocation
       buildDir = ideDistDir
