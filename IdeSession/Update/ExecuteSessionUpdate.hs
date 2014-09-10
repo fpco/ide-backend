@@ -9,7 +9,6 @@ module IdeSession.Update.ExecuteSessionUpdate (runSessionUpdate) where
 
 import Prelude hiding (mod, span)
 import Control.Applicative (Applicative, (<$>))
-import Control.Arrow (first)
 import Control.Monad (when, void, forM, liftM, filterM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader(..), ReaderT, runReaderT, asks)
@@ -61,27 +60,31 @@ import qualified IdeSession.Strict.IORef  as IORef
 data IdeSessionUpdateEnv = IdeSessionUpdateEnv {
     ideUpdateStaticInfo :: IdeStaticInfo
   , ideUpdateCallback   :: forall m. MonadIO m => Progress -> m ()
+    -- For the StateT instance
+  , ideUpdateStateRef :: StrictIORef IdeIdleState
   }
 
-newtype ExecuteSessionUpdate a = ExecuteSessionUpdate (
-    ReaderT (IdeSessionUpdateEnv, StrictIORef IdeIdleState) IO a
-  )
+newtype ExecuteSessionUpdate a = ExecuteSessionUpdate {
+    unwrapUpdate :: ReaderT IdeSessionUpdateEnv IO a
+  }
   deriving ( Functor
            , Applicative
            , Monad
            , MonadIO
+           , MonadReader IdeSessionUpdateEnv
            )
-
-instance MonadReader IdeSessionUpdateEnv ExecuteSessionUpdate where
-  ask = ExecuteSessionUpdate $ fst <$> ask
-  local f (ExecuteSessionUpdate act) = ExecuteSessionUpdate $ local (first f) act
 
 -- We define MonadState using an IORef rather than StateT so that if an exception
 -- happens during the execution of a session update, writes to the state are not
 -- lost
 instance MonadState IdeIdleState ExecuteSessionUpdate where
-  get   = ExecuteSessionUpdate $ do stRef <- snd <$> ask ; liftIO $ IORef.readIORef  stRef
-  put s = ExecuteSessionUpdate $ do stRef <- snd <$> ask ; liftIO $ IORef.writeIORef stRef s
+  get   = ExecuteSessionUpdate $ do
+            stRef <- ideUpdateStateRef <$> ask
+            liftIO $ IORef.readIORef  stRef
+
+  put s = ExecuteSessionUpdate $ do
+            stRef <- ideUpdateStateRef <$> ask
+            liftIO $ IORef.writeIORef stRef s
 
 runSessionUpdate :: Bool
                  -> IdeSessionUpdate
@@ -91,16 +94,18 @@ runSessionUpdate :: Bool
                  -> IO (IdeIdleState, Either Ex.SomeException ())
 runSessionUpdate justRestarted update staticInfo callback ideIdleState = do
     stRef <- IORef.newIORef ideIdleState
-    mex <- Ex.try $ case executeSessionUpdate justRestarted (reflectSessionState ideIdleState update) of
-      ExecuteSessionUpdate update' ->
-        runReaderT update' (env, stRef)
+
+    mex <- Ex.try $ runReaderT (unwrapUpdate $ executeSessionUpdate justRestarted update')
+                               IdeSessionUpdateEnv {
+                                   ideUpdateStaticInfo = staticInfo
+                                 , ideUpdateCallback   = liftIO . callback
+                                 , ideUpdateStateRef   = stRef
+                                 }
+
     ideIdleState' <- IORef.readIORef stRef
     return (ideIdleState', mex)
   where
-    env = IdeSessionUpdateEnv {
-              ideUpdateStaticInfo = staticInfo
-            , ideUpdateCallback   = liftIO . callback
-            }
+    update' = reflectSessionState ideIdleState update
 
 -- | Execute a session update
 --
