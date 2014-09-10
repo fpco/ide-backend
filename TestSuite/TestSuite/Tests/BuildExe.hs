@@ -264,8 +264,6 @@ test_wrongFilename env = withAvailableSession env $ \session -> do
       assertNoErrors session
     let m   = "Main"
         upd = buildExe [] [(T.pack m, "foooooooooooooooo.hs")]
-    status0 <- getBuildExeStatus session
-    assertEqual "before exe build" Nothing status0
     updateSessionD session upd 1
     assertNoErrors session
     status1 <- getBuildExeStatus session
