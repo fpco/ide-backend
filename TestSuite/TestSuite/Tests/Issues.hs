@@ -406,7 +406,7 @@ test214 env = withAvailableSession env $ \session -> do
           <> updateSourceFile "foo.c" (L.unlines
                [ "#include <zlib.h>"
                , "#include <stdio.h>"
-               , "void print_zlib_version(z_stream *stream, int window_bits) {"
+               , "void print_zlib_version() {"
                , "  fputs(zlibVersion(), stderr);"
                , "}"
                ])
