@@ -758,14 +758,14 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
       vanillaCcOpts = (componentCcGhcOptions verbosity lbi
                          libBi clbi pref absC)`mappend` mempty {
                         -- ghc ignores -odir for .o files coming from .c files
-                        ghcOptExtra = ["-o", absObj] ++ rcOptions
+                        ghcOptExtra = ["-o", absObj] ++ rcOptions,
+                        ghcOptFPic        = Setup.toFlag True
                       }
       profCcOpts    = vanillaCcOpts `mappend` mempty {
                         ghcOptProfilingMode = Setup.toFlag True,
                         ghcOptObjSuffix     = Setup.toFlag "p_o"
                       }
       sharedCcOpts  = vanillaCcOpts `mappend` mempty {
-                        ghcOptFPic        = Setup.toFlag True,
                         ghcOptDynLinkMode = Setup.toFlag GhcDynamicOnly,
                         ghcOptObjSuffix   = Setup.toFlag "dyn_o",
                         ghcOptExtra = ["-o", replaceExtension absObj "dyn_o"]
