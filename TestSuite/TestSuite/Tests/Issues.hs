@@ -43,6 +43,7 @@ testGroupIssues env = testGroup "Issues" $ [
   , stdTest env "#219: runStmt gets corrupted by async exceptions"                                test219
   , stdTest env "#220: Calling forceCancel can have detrimental side-effects"                     test220
   , stdTest env "#224: Package flags are not reset correctly"                                     test224
+  , stdTest env "#229: Client library does not detect snippet server crash"                       test229
   ] ++ exeTests env [
     stdTest env "#119: Re-building an executable after a code change does not rebuild"            test119
   , stdTest env "#169: Data files should not leak in exe building"                                test169_buildExe
@@ -535,3 +536,26 @@ test224 env = withAvailableSession env $ \session -> do
     upd2 = updateGhcOpts []
         <> updateCodeGeneration True
         <> updateSourceFile "Main.hs" "main = putStrLn \"Hi 2\""
+
+test229 :: TestSuiteEnv -> Assertion
+test229 env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 2
+    assertNoErrors session
+
+    -- Actually run the code, just to be sure linking worked properly
+    runActions <- runStmt session "Main" "crash"
+    (output, result) <- runWaitAll runActions
+    assertEqual "" RunOk result
+    assertEqual "" "We're not actually getting any output" output
+  where
+    upd :: IdeSessionUpdate
+    upd    = updateCodeGeneration True
+          <> updateSourceFile "Main.hs" "foreign import ccall \"crash\" crash :: IO ()"
+          <> updateSourceFile "foo.c" (L.unlines
+               [ "#include <stdio.h>"
+               , "void crash() {"
+               , "  char *p = NULL;"
+               , "  *p = '!';"
+               , "  printf(\"We won't get this far\\n\");"
+               , "}"
+               ])
