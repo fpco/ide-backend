@@ -544,9 +544,10 @@ test229 env = withAvailableSession env $ \session -> do
 
     -- Actually run the code, just to be sure linking worked properly
     runActions <- runStmt session "Main" "crash"
-    (output, result) <- runWaitAll runActions
-    assertEqual "" RunOk result
-    assertEqual "" "We're not actually getting any output" output
+    (_output, result) <- runWaitAll runActions
+    case result of
+      RunGhcException _ -> return ()
+      _ -> assertFailure $ "Unexpected run result " ++ show result
   where
     upd :: IdeSessionUpdate
     upd    = updateCodeGeneration True
