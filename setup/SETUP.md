@@ -248,6 +248,10 @@ only a few minor differences, explained when they come up.
     The tests are no longer as picky as they used to be about the versions of
     these packages; if you are getting test failures with different versions,
     you should file a bug.
+
+    However, the *order* in which you install the above is important: you must
+    install mtl before monads-tf or you will get test failures (this is due
+    to incompletely package information in the ghc runtime (#95).
   - whatever other packages you want to be available to snippets at runtime
 
 Running the tests
