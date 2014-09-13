@@ -539,10 +539,11 @@ test224 env = withAvailableSession env $ \session -> do
         <> updateSourceFile "Main.hs" "main = putStrLn \"Hi 2\""
 
 test229 :: TestSuiteEnv -> Assertion
-test229 env = withAvailableSession env $ \session -> do
 #if defined(darwin_HOST_OS)
+test229 env = withAvailableSession env $ \_session -> do
     skipTest "Known failure on OSX"
 #else
+test229 env = withAvailableSession env $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
 
