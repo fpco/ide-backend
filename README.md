@@ -23,28 +23,229 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
- *  Version 0.8.1???.
+ *  Version 0.9
 
-     * Session is now internally restarted after `updateRelativeIncludes`
-       and after `updateTargets` (#178, #177). No heuristics are currently
-       implemented, so even calls that effectively don't change anything cause
-       a recompilation. Note that you need path `""` in relative includes
-       for `updateTargets` and `buildExe` to be aware of the same set of
-       source directories (#184).
+    * Required ghc patch levels:
 
-     * Invoking the Cabal functions that print to stdout and stderr
-       is now done via our RPC (#180) that starts a separate binary
-       ide-backend-exe-cabal. The stdout output it redirected to a log file
-       and analyzed to provide Progress updates. The binary has to be
-       present on the path. E.g., when you run ide-backend tests
-       you can add the extra fpco-stock-7.4 path component (see SETUP.md),
-       into which the binary is installed by default with 'cabal install':
+      - For ghc 7.4: 796f4f89aeaacc778c75f7f05ecf6e37279841ce
+      - For ghc 7.8: 1cb68c640a7066532eab990956b3220036e7ee31
+
+    * This release requires a new version of the ide-backend-rts (0.1.3),
+      which makes sure Handles get reset even when the snippet fails
+
+    * New features:
+
+      - Support for the official ghc 7.8.3 release, and moved to Cabal 1.18.1.3
+        for Cabal-ide-backend.
+
+      - buildExe now supports setting targets. The API for setting targets has
+        changed as is now
+
+            updateTargets :: Targets -> IdeSessionUpdate
+
+        where
+
+            data Targets = TargetsInclude [FilePath]
+                         | TargetsExclude [FilePath]
+
+      - Ability to change include paths dynamically (#178). Note that changing
+        include paths (as well as changing targets) will cause a server restart.
+
+      - Ability to hide and unhide packages dynamically, and change Safe
+        Haskell flags dynamically (#185, #224). Unlike we had previously
+        thought, we can in fact do this without a server restart.
+
+      - Executables can now be run from ide-backend with the same API as
+        running snippets (#181). Most of our runStmt tests in the test suite
+        now have an according runExe test (which can however be disabled with
+        the --no-exe to the test suite). Note that we _do_ expect _some_
+        semantic differences between tests and snippets through the API; in
+        particular, since we don't manage the executable, we cannot affect its
+        I/O buffering modes or encoding settings. Also, the RunActions returned
+        by runExe eventually return an ExitCode rather than a RunResult.
+
+      - Snippets now run as independent processes and the "Running" state is
+        gone from ide-backend. The RPC framework is modified to be able to
+        deal with multiple RPC conversations (and fixed some bugs that were
+        introduced in that change: #225); RPC conversations with the split off
+        processes happen over named pipes. This uses 'forkProcess', for which
+        we have identified and fixed a number of ghc RTS bugs (#9377, #9347,
+        #9296, #9295, #9284). The use of a separate process is necessary
+        because we need to be able to change process global state for the
+        snippet (buffering, current working directory, value of getArgs, etc.).
+        Issue #206 was partly related to these ghc bugs.  One consequence of
+        this is that it is now possible to change data files while a snippet is
+        running (#176).
+
+      - The API for changing environment variables is changed (#202). It is now
+
+            updateEnv :: [(String, Maybe String)] -> IdeSessionUpdate
+
+        and is intended to be stateless rather than cumulative as it had been.
+
+      - The API for setting options is changed. We no longer make a (public)
+        distinction between static ghc options and dynamic ghc options, and
+        the configStaticOpts are gone from the ide-backend configuration.
+        Instead, we simply have
+
+            updateGhcOpts :: [String] -> IdeSessionUpdate
+
+        and ide-backend handles the distinction entirely internally. Note that
+        so far the only option that we have come across that are truly static
+        (i.e., require a session restart) are changes to the linker flags.
+        Anything else (including changes to the package visibility) we can
+        handle server side without a restart.
+
+      - Similarly, removed the relative includes from the configuration and
+        moved them to the session init parameters where they should have been
+        from the start (because they can be changed dynamically).
+
+        Note that you need path `""` in relative includes for `updateTargets`
+        and `buildExe` to be aware of the same set of source directories
+        (#184).
+
+    * Closed issues:
+
+      - Asymptotic performance improvement (#167, ghc #7478) and added
+        performance unit tests. These are very rough at the moment and can fail
+        simply due to high system load, for instance.
+
+      - Make sure ghc sees changes to dependent files (#134, ghc #7473).
+
+      - #169 TODO. I'm not sure I understand exactly what, if anything,
+        we changed here.
+
+      - Invoking the Cabal functions that print to stdout and stderr is now
+        done via our RPC (#180) that starts a separate binary
+        ide-backend-exe-cabal. This is necessary so that we can change process
+        global state such as the current working directory without affecting
+        the rest of the system.
+
+        The stdout output it redirected to a log file and analyzed to provide
+        Progress updates. The binary has to be present on the path. E.g., when
+        you run ide-backend tests you can add the extra fpco-stock-7.4 path
+        component (see SETUP.md), into which the binary is installed by default
+        with 'cabal install':
 
          IDE_BACKEND_EXTRA_PATH_DIRS=~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
          IDE_BACKEND_PACKAGE_DB=~/env/fpco-patched-7.4/dot-ghc/snippet-db \
          dist/build/ghc-errors/ghc-errors
 
-     * ...
+      - forceCancel of a snippet now sends sigKILL rather than "requesting"
+        a server shutdown (#173).
+
+      - TODO: #191 ?
+
+      - configRelativeIncludes taken into account when building C files (#212).
+
+      - Make it possible to override path to GHC (#205).
+
+      - Disable idle GC in the server (#206).
+
+      - Don't lose location information when getting multiple error messages
+        (#213).
+
+      - Make sure we don't lose output from C code by flushing C buffers as well
+        as Haskell buffers (#210).
+
+      - Make sure that we can set linker flags dynamically (#214).
+
+      - Fix inconsistent user package database loading (#221).
+
+      - Make sure that runStmt can safely be interrupted without putting the
+        main session in an inconsistent state or leading to deadlock (#219,
+        #220) and that it will terminate the server if it does get interrupted
+        (#231).
+
+      - Make sure server terminates when client does (#194).
+
+      - Be consistent (GHC API/exe building) about Haskell2010 (#190).
+
+      - Better fix to #119: we no longer wipe the entire build directory when
+        building executables, but instead update the timestamps of .o files.
+        This gives us better performance when building executables.
+
+      - Unload object file when a previously correct C file is replaced with
+        one containing errors (#201) or when the C file is removed from the
+        session (#241).
+
+      - Make sure object files are resolved correctly, even if they were
+        previously loaded (#228, #230) and properly report linker errors
+        to the client (#242).
+
+      - Make sure relevant ghc options are passed to ghc when compiling C files
+        (#218) and recompile C files when options are changed (#214).
+
+      - Make sure calling Haddock does not change the source files in the
+        session (#238).
+
+      - Make sure the client gets as much information as possible on a hard
+        server crash (#239).
+
+      - Remove previous error logs on calls to buildExe etc (#245) so that
+        on a call to buildExe we don't leave confusing old error messages lying
+        around.
+
+      - Make sure to generate position independent code (#244).
+
+    * Other minor bug fixes and changes:
+
+      - Don't skip ghc progress messages that include "[TH]" (these were
+        confusing our parser)
+      - Changed bounds on dependencies
+      - Internal refactoring of the updateSession logic, which is now a lot
+        more comprehensible (mostly possible now because we no longer have
+        a "Running" state, and starting a snippet is now independent of the
+        main session). This implies a minor API change; IdeSessionUpdate is no
+        longer a Monad, and no longer takes a type argument. It still satisifes
+        Monoid, however, and this should barely affect client code (other than
+        perhaps a type annotation here and there, replacing `IdeSessionUpdate
+        ()` with `IdeSessionUpdate`). This also resolves a race condition that
+        was present in `updateSession` (where a concurrent update session might
+        grab the session lock while the first session update was attempting to
+        restart the session). Also, better treatment of exceptions during
+        session updates (#250, #253).
+      - Added updateDeleteManagedFiles session update to remove all managed
+        (source and data) files from a session.
+      - Catch and report exceptions thrown by Haddock building.
+
+    * Test suite has been significantly refactored (#217, #237, #231), and is
+      now far more modular (dramatically improved compile times), can re-use
+      sessions for tests (which has brought to light quite a few bugs) as well
+      as in parallel (although the latter has not been tested sufficiently
+      yet), and uses tasty rather than test-framework. Various minor fixes to
+      the tests:
+
+      - GHC 7.8 started using fancy (unicode) quotes, which confused some tests.
+      - Added test for .hsboot files in subdirectories (#177)
+      - Don't rely on availability of profiling libs in the tests.
+      - Don't rely on the IsString instance for Data.ByteString because it
+        uses `pack` and thus throws away UTF8 data (#234).
+      - Test for package registration fixed (#250). Note that a running session
+        will NOT notice newly installed package until it is restarted (nor will
+        it notice that it needs to be restarted -- this needs to be initiated
+        with a call to restartSession).
+
+    * Open issues:
+
+      - The ghc linker is broken in the threaded runtime, which will affect
+        bindings to C libraries (ghc #8648). We suspect that #175 is caused
+        by this.
+      - On OSX we do not detect when a snippet server dies (#229). The problem
+        does not occur on Linux.
+      - buildExe sometimes compiles modules more than once (#189). This should
+        not change anything semantically but we have to allow for it in the
+        tests (since we get more progress messages than we expect) and of course
+        it has a performance impact.
+      - Building executables leaves .o and .dyn_o files in the session src/
+        directory (#249). The client should not really be affected by this
+        however.
+      - We currently _always_ restart the session when the relative includes
+        or targets change. This is correct but conservative and unnecessary.
+        Figuring out precisely when this is needed however is rather difficult
+        and probably not worth the effort. (Note that we don't restart when
+        the options "change" (by a call to updateTargets etc) to their current
+        value in the session.
 
  *  Version 0.8.
 
