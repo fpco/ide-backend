@@ -864,8 +864,7 @@ instance Dummy ExplicitSharingCache where
 
 instance Dummy GhcCompileResult where
   dummy = GhcCompileResult {
-      ghcCompileErrors   = dummy
-    , ghcCompileLoaded   = dummy
+      ghcCompileLoaded   = dummy
     , ghcCompileCache    = dummy
     , ghcCompileImports  = dummy
     , ghcCompileAuto     = dummy
@@ -873,6 +872,11 @@ instance Dummy GhcCompileResult where
     , ghcCompilePkgDeps  = dummy
     , ghcCompileExpTypes = dummy
     , ghcCompileUseSites = dummy
+    , ghcCompileErrors   = force [SourceError {
+          errorKind = KindError
+        , errorSpan = TextSpan (Text.pack "No location information")
+        , errorMsg  = Text.pack "GHC server died (dummy error)"
+        }]
     }
 
 {-------------------------------------------------------------------------------
