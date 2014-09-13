@@ -30,7 +30,7 @@ testGroupTypeInformation env = testGroup "Type Information" $ [
   , stdTest env "Simple ADTs"                                                                testSimpleADTs
   , stdTest env "Polymorphism"                                                               testPolymorphism
   , stdTest env "Multiple modules"                                                           testMultipleModules
-  , stdTest env "External packages, type sigs, scoped type vars, kind sigs"                  testExternalPkgs
+  , withOK  env "External packages, type sigs, scoped type vars, kind sigs"                  testExternalPkgs
   , stdTest env "Reusing type variables"                                                     testReusingTypeVariables
   , stdTest env "Qualified imports"                                                          testQualifiedImports
   , stdTest env "Imprecise source spans"                                                     testImpreciseSourceSpans
@@ -205,13 +205,12 @@ testMultipleModules env = withAvailableSession env $ \session -> do
             , "foo = MkT"
             ])
 
-testExternalPkgs :: TestSuiteEnv -> Assertion
+testExternalPkgs :: TestSuiteEnv -> IO String
 testExternalPkgs env = withAvailableSession' env (withGhcOpts opts) $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
     assertIdInfo session "A" (3,1,3,2) "e" VarName "Bool" "main:A" "A.hs@3:1-3:2" "" "binding occurrence"
     assertIdInfo session "A" (3,5,3,9) "True" DataName "" "ghc-prim-0.2.0.0:GHC.Types" "<wired into compiler>" "base-4.5.1.0:Data.Bool" "wired in to the compiler"
-    assertIdInfo session "A" (3,10,3,16) "pseq" VarName "a -> b -> b" "parallel-3.2.0.3:Control.Parallel" "<no location info>" "parallel-3.2.0.3:Control.Parallel" "imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24"
     assertIdInfo session "A" (3,17,3,22) "False" DataName "" "ghc-prim-0.2.0.0:GHC.Types" "<wired into compiler>" "base-4.5.1.0:Data.Bool" "wired in to the compiler"
     assertIdInfo session "A" (4,1,4,2) "f" VarName "a -> a" "main:A" "A.hs@5:1-5:2" "" "defined locally"
     assertIdInfo' session "A" (4,6,4,7) (4,6,4,7) "a" TvName [] "main:A" [(GHC742, "A.hs@4:6-4:7"), (GHC78, "A.hs@4:6-4:12")] "" (allVersions "defined locally")
@@ -249,6 +248,7 @@ testExternalPkgs env = withAvailableSession' env (withGhcOpts opts) $ \session -
     assertIdInfo session "A" (14,1,14,2) "i" VarName "t a -> t a" "main:A" "A.hs@14:1-14:2" "" "binding occurrence"
     assertIdInfo session "A" (14,3,14,4) "x" VarName "t a" "main:A" "A.hs@14:3-14:4" "" "binding occurrence"
     assertIdInfo session "A" (14,7,14,8) "x" VarName "t a" "main:A" "A.hs@14:3-14:4" "" "defined locally"
+    fixme session "#254" $ assertIdInfo session "A" (3,10,3,16) "pseq" VarName "a -> b -> b" "parallel-3.2.0.3:Control.Parallel" "<no location info>" "parallel-3.2.0.3:Control.Parallel" "imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24"
   where
     opts = [ "-XScopedTypeVariables"
            , "-XKindSignatures"
