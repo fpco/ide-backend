@@ -526,11 +526,8 @@ runExe session m = do
       (Just stdin_hdl, Nothing, Nothing, ph) <- createProcess cproc
 
       -- The runActionState holds 'Just' the result of the snippet, or 'Nothing' if
-      -- it has not yet terminated.  initially is the termination callback to be
-      -- called
+      -- it has not yet terminated.
       runActionsState <- newMVar Nothing
-
-      forceTermination <- newMVar False
 
       return $ RunActions
         { runWait = $modifyStrictMVar runActionsState $ \st -> case st of
@@ -541,17 +538,12 @@ runExe session m = do
               if BSS.null bs
                 then do
                   res <- waitForProcess ph
-                  forceTerm <- $takeStrictMVar forceTermination
-                  -- TODO: Should we do something with forceTerm?
-                  -- runCmd will return RunForceTerminated on forceCancel
                   return (Just res, Right res)
                 else
                   return (Nothing, Left bs)
         , interrupt = interruptProcessGroupOf ph
         , supplyStdin = \bs -> BSS.hPut stdin_hdl bs >> IO.hFlush stdin_hdl
-        , forceCancel = do
-            $swapStrictMVar forceTermination True
-            terminateProcess ph
+        , forceCancel = terminateProcess ph
         }
       -- We don't need to close any handles. At the latest GC closes them.
  where
