@@ -246,6 +246,9 @@ Changelog
         and probably not worth the effort. (Note that we don't restart when
         the options "change" (by a call to updateTargets etc) to their current
         value in the session.
+      - The debugging API is **disabled** in this release, as it needs to be
+        updated to work with the separate server (forkProcess) for running
+        snippets.
 
  *  Version 0.8.
 
