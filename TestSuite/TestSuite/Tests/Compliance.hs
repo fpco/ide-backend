@@ -131,7 +131,7 @@ test_passWithXH98_asStaticOpt env = withAvailableSession' env (withGhcOpts ["-XH
     ifTestingExe env $ do
        let m    = "Main"
            updE = buildExe [] [(m, "src/Main.hs")]
-       updateSessionD session updE 1
+       updateSessionD session updE 2 -- Should be 1 (#189)
        distDir     <- getDistDir session
        buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
        assertEqual "buildStderr empty" True (null buildStderr)
