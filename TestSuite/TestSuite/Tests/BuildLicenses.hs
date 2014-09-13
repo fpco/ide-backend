@@ -16,7 +16,8 @@ import TestSuite.Assertions
 
 testGroupBuildLicenses :: TestSuiteEnv -> TestTree
 testGroupBuildLicenses env = testGroup "Build licenses" [
-    stdTest env "Build licenses from NamedFieldPuns (with errors)"                       test_NamedFieldPuns
+    stdTest env "Build licenses from NamedFieldPuns without errors"                      test_NamedFieldPunsCorrect
+  , stdTest env "Build licenses from NamedFieldPuns (with errors)"                       test_NamedFieldPunsErrors
   , stdTest env "Build licenses with wrong cabal files and fail"                         test_wrongCabalFile
   , stdTest env "Build licenses from ParFib"                                             test_ParFib
   , stdTest env "Build licenses from Cabal"                                              test_Cabal
@@ -25,8 +26,27 @@ testGroupBuildLicenses env = testGroup "Build licenses" [
   , stdTest env "Build licenses from TH with a wrong cabals dir and don't fail"          test_TH
   ]
 
-test_NamedFieldPuns :: TestSuiteEnv -> Assertion
-test_NamedFieldPuns env = withAvailableSession' env (withGhcOpts ["-hide-package monads-tf"]) $ \session -> do
+test_NamedFieldPunsCorrect :: TestSuiteEnv -> Assertion
+test_NamedFieldPunsCorrect env = withAvailableSession' env (withGhcOpts ["-hide-package monads-tf"]) $ \session -> do
+    let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
+        update2 = updateGhcOpts punOpts
+    updateSessionD session update2 0
+    loadModulesFrom session "test/Puns"
+    assertNoErrors session
+    cabalsPath <- canonicalizePath "test/Puns/cabals"
+    let upd = buildLicenses cabalsPath
+    updateSessionD session upd 99
+    assertNoErrors session
+    distDir <- getDistDir session
+    licensesWarns <- readFile $ distDir </> "licenses.stderr"
+    assertEqual "licensesWarns length" 3 (length $ lines licensesWarns)
+    status <- getBuildLicensesStatus session
+    assertEqual "after license build" (Just ExitSuccess) status
+    licenses <- readFile $ distDir </> "licenses.txt"
+    assertBool "licenses length" $ length licenses >= 27142
+
+test_NamedFieldPunsErrors :: TestSuiteEnv -> Assertion
+test_NamedFieldPunsErrors env = withAvailableSession' env (withGhcOpts ["-hide-package monads-tf"]) $ \session -> do
     loadModulesFrom session "test/Puns"
     assertMoreErrors session
     cabalsPath <- canonicalizePath "test/Puns/cabals"
@@ -35,11 +55,9 @@ test_NamedFieldPuns env = withAvailableSession' env (withGhcOpts ["-hide-package
     assertMoreErrors session
     distDir <- getDistDir session
     licensesWarns <- readFile $ distDir </> "licenses.stderr"
-    assertEqual "licensesWarns length" 3 (length $ lines licensesWarns)
+    assertEqual "licensesError length" 1 (length $ lines licensesWarns)
     status <- getBuildLicensesStatus session
-    assertEqual "after license build" (Just ExitSuccess) status
-    licenses <- readFile $ distDir </> "licenses.txt"
-    assertBool "licenses length" $ length licenses >= 27142
+    assertEqual "after license build" (Just $ ExitFailure 1) status
 
 test_wrongCabalFile :: TestSuiteEnv -> Assertion
 test_wrongCabalFile env = withAvailableSession' env (withGhcOpts ["-hide-package monads-tf"]) $ \session -> do

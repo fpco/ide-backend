@@ -280,7 +280,7 @@ test_typeErrors env = withAvailableSession env $ \session -> do
     status <- getBuildExeStatus session
     assertEqual "" (Just $ ExitFailure 1) status
     buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
-    assertEqual "" "Source errors encountered. Not attempting to build executables." buildStderr
+    assertEqual "" "Source or other errors encountered. Not attempting to build executables." buildStderr
   where
     upd1 = (updateCodeGeneration True)
         <> (updateSourceFile "Main.hs" "main = foo")

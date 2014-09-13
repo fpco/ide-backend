@@ -644,7 +644,7 @@ executeBuildExe extraOpts ms = do
       if any (== KindError) $ map errorKind errors then do
         exceptionFree $ do
           writeFile beStderrLog
-            "Source errors encountered. Not attempting to build executables."
+            "Source or other errors encountered. Not attempting to build executables."
           return $ ExitFailure 1
       else do
         let ghcOpts' = "-rtsopts=some" : ghcOpts ++ extraOpts
@@ -698,7 +698,17 @@ executeBuildDoc = do
     exceptionFree $ Dir.createDirectoryIfMissing False $ ideDistDir </> "doc"
     let beStdoutLog = ideDistDir </> "doc/ide-backend-doc.stdout"
         beStderrLog = ideDistDir </> "doc/ide-backend-doc.stderr"
-    exitCode <- exceptionFree $ do
+        errors = case toLazyMaybe mcomputed of
+          Nothing ->
+            error "This session state does not admit artifact generation."
+          Just Computed{computedErrors} -> toLazyList computedErrors
+    exitCode <-
+      if any (== KindError) $ map errorKind errors then do
+        exceptionFree $ do
+          writeFile beStderrLog
+            "Source or other errors encountered. Not attempting to build documentation."
+          return $ ExitFailure 1
+      else exceptionFree $ do
                   (loadedMs, pkgs) <- buildDeps mcomputed
                   libDeps <- externalDeps pkgs
                   let beArgs =
@@ -731,20 +741,30 @@ executeBuildLicenses cabalsDir = do
       fail "Features using cabal API require configGenerateModInfo, currently (#86)."
     let liStdoutLog = ideDistDir </> "licenses.stdout"  -- progress
         liStderrLog = ideDistDir </> "licenses.stderr"  -- warnings and errors
-    exitCode <- exceptionFree $ do
-      (_, pkgs) <- buildDeps mcomputed
-      let liArgs =
-            LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
-                       , liExtraPathDirs = configExtraPathDirs ideConfig
-                       , liLicenseExc = configLicenseExc ideConfig
-                       , liDistDir = ideDistDir
-                       , liStdoutLog
-                       , liStderrLog
-                       , licenseFixed = configLicenseFixed ideConfig
-                       , liCabalsDir = cabalsDir
-                       , liPkgs = pkgs
-                       }
-      invokeExeCabal ideStaticInfo (ReqExeLic liArgs) callback
+        errors = case toLazyMaybe mcomputed of
+          Nothing ->
+            error "This session state does not admit artifact generation."
+          Just Computed{computedErrors} -> toLazyList computedErrors
+    exitCode <-
+      if any (== KindError) $ map errorKind errors then do
+        exceptionFree $ do
+          writeFile liStderrLog
+            "Source or other errors encountered. Not attempting to build licenses."
+          return $ ExitFailure 1
+      else exceptionFree $ do
+        (_, pkgs) <- buildDeps mcomputed
+        let liArgs =
+              LicenseArgs{ liPackageDBStack = configPackageDBStack ideConfig
+                         , liExtraPathDirs = configExtraPathDirs ideConfig
+                         , liLicenseExc = configLicenseExc ideConfig
+                         , liDistDir = ideDistDir
+                         , liStdoutLog
+                         , liStderrLog
+                         , licenseFixed = configLicenseFixed ideConfig
+                         , liCabalsDir = cabalsDir
+                         , liPkgs = pkgs
+                         }
+        invokeExeCabal ideStaticInfo (ReqExeLic liArgs) callback
     Acc.set ideBuildLicensesStatus (Just exitCode)
 
 {-------------------------------------------------------------------------------
