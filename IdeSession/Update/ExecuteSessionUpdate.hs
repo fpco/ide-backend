@@ -702,11 +702,14 @@ executeBuildDoc = do
           Nothing ->
             error "This session state does not admit artifact generation."
           Just Computed{computedErrors} -> toLazyList computedErrors
+        isDummyError err =
+          errorKind err == KindError
+          && errorMsg err == Text.pack "GHC server died (dummy error)"
     exitCode <-
-      if any (== KindError) $ map errorKind errors then do
+      if any isDummyError errors then do
         exceptionFree $ do
           writeFile beStderrLog
-            "Source or other errors encountered. Not attempting to build documentation."
+            "GHC server died. Not attempting to build documentation."
           return $ ExitFailure 1
       else exceptionFree $ do
                   (loadedMs, pkgs) <- buildDeps mcomputed
