@@ -133,7 +133,10 @@ Changelog
       - forceCancel of a snippet now sends sigKILL rather than "requesting"
         a server shutdown (#173).
 
-      - TODO: #191 ?
+      - Added updateRtsOpts to the API and set default stack size to 8MB (#191).
+        However, limiting stack size does not seem to work for ghc 7.4. ghci
+        manages it so there must be a way, but simply starting the server with
+        +RTS -K.. -RTS does is not sufficient (#258). 
 
       - configRelativeIncludes taken into account when building C files (#212).
 
@@ -248,6 +251,7 @@ Changelog
       - The debugging API is **disabled** in this release, as it needs to be
         updated to work with the separate server (forkProcess) for running
         snippets.
+      - Limiting stack size does not work for 7.4 (#258). 
 
  *  Version 0.8.
 

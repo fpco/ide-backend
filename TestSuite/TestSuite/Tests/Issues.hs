@@ -38,6 +38,7 @@ testGroupIssues env = testGroup "Issues" $ [
   , stdTest env "#169: Data files should not leak into compilation if referenced"                 test169
   , stdTest env "#170: GHC API expects 'main' to be present in 'Main'"                            test170_GHC
   , stdTest env "#185: Invalid GHC option and option warnings"                                    test185
+  , stdTest env "#191: Limit stack size (#191)"                                                   test191
   , withOK  env "#194: Start server without bracket (need MANUAL check that server will die)"     test194
   , stdTest env "#213: Missing location information"                                              test213
   , stdTest env "#214: Changing linker flags"                                                     test214
@@ -565,3 +566,58 @@ test229 env = withAvailableSession env $ \session -> do
                , "}"
                ])
 #endif
+
+test191 :: TestSuiteEnv -> Assertion
+test191 env = withAvailableSession env $ \session -> do
+    when (testSuiteEnvGhcVersion env == GHC742) $
+      skipTest "Known failure on 7.4.2 (#191)"
+
+    updateSessionD session upd 1
+    assertNoErrors session
+
+    -- In the default session stack limit is 8M. test1 should fail:
+    do runActions <- runStmt session "Main" "test1"
+       (_output, result) <- runWaitAll runActions
+       case result of
+         RunProgException _ -> return ()
+         _ -> assertFailure $ "Unexpected run result " ++ show result
+
+    -- But test2 should work:
+    do runActions <- runStmt session "Main" "test2"
+       (_output, result) <- runWaitAll runActions
+       case result of
+         RunOk -> return ()
+         _ -> assertFailure $ "Unexpected run result " ++ show result
+
+    -- But after we change the stack size, test2 too will crash:
+    updateSessionD session (updateRtsOpts ["-K128K"]) 1
+    do runActions <- runStmt session "Main" "test2"
+       (_output, result) <- runWaitAll runActions
+       case result of
+         RunProgException _ -> return ()
+         _ -> assertFailure $ "Unexpected run result " ++ show result
+
+    -- But test3 will still work:
+    do runActions <- runStmt session "Main" "test3"
+       (_output, result) <- runWaitAll runActions
+       case result of
+         RunOk -> return ()
+         _ -> assertFailure $ "Unexpected run result " ++ show result
+  where
+    upd :: IdeSessionUpdate
+    upd = updateCodeGeneration True
+       <> (updateSourceFile "Main.hs" $ L.unlines [
+              "overflow :: Int -> IO Int"
+            , "overflow n = do"
+            , "  n' <- overflow (n + 1)"
+            , "  return (n + n')"
+            , ""
+            , "test1 :: IO ()"
+            , "test1 = print =<< overflow 0"
+            , ""
+            , "test2 :: IO ()"
+            , "test2 = print $ foldl (+) 0 [1..100000]"
+            , ""
+            , "test3 :: IO ()"
+            , "test3 = print (1 :: Int)"
+            ])

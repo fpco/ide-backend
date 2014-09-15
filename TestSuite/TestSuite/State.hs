@@ -235,7 +235,8 @@ resetSession session = do
     reset = updateDeleteManagedFiles
          <> updateCodeGeneration False
          <> updateEnv []
-         <> updateTargets (TargetsExclude [])
+         <> updateTargets (sessionInitTargets defaultSessionInitParams)
+         <> updateRtsOpts (sessionInitRtsOpts defaultSessionInitParams)
 
     ignoredExtensions = [".o", ".dyn_o"]
 

@@ -120,6 +120,7 @@ module IdeSession (
   , updateSourceFileFromFile
   , updateSourceFileDelete
   , updateGhcOpts
+  , updateRtsOpts
   , updateRelativeIncludes
   , updateCodeGeneration
   , updateDataFile

@@ -19,6 +19,7 @@ module IdeSession.Update.IdeSessionUpdate (
   , updateDataFileFromFile
   , updateDataFileDelete
   , updateGhcOpts
+  , updateRtsOpts
   , updateRelativeIncludes
   , updateCodeGeneration
   , updateEnv
@@ -92,6 +93,7 @@ data IdeSessionUpdate = IdeSessionUpdate {
   , ideUpdateExes        :: [([String], [(ModuleName, FilePath)])]
   , ideUpdateDocs        :: Bool
   , ideUpdateLicenses    :: [FilePath]
+  , ideUpdateRtsOpts     :: Maybe [String]
   }
   deriving Show
 
@@ -110,6 +112,7 @@ instance Monoid IdeSessionUpdate where
     , ideUpdateExes        = []
     , ideUpdateDocs        = False
     , ideUpdateLicenses    = []
+    , ideUpdateRtsOpts     = Nothing
     }
 
   a `mappend` b = IdeSessionUpdate {
@@ -131,6 +134,7 @@ instance Monoid IdeSessionUpdate where
     , ideUpdateStdoutMode  = ideUpdateStdoutMode  b `mplus` ideUpdateStdoutMode  a
     , ideUpdateStderrMode  = ideUpdateStderrMode  b `mplus` ideUpdateStderrMode  a
     , ideUpdateTargets     = ideUpdateTargets     b `mplus` ideUpdateTargets     a
+    , ideUpdateRtsOpts     = ideUpdateRtsOpts     b `mplus` ideUpdateRtsOpts     a
     }
 
 data FileInfo = FileInfo {
@@ -241,6 +245,15 @@ updateDataFileDelete fp = mempty { ideUpdateFileCmds = [FileDelete fileInfo] }
 -- by the last call to updateGhcOptions.
 updateGhcOpts :: [String] -> IdeSessionUpdate
 updateGhcOpts opts = mempty { ideUpdateGhcOpts = Just opts }
+
+-- | Set RTS options for the ghc session (this does not affect executables)
+--
+-- This will cause a session restart.
+--
+-- NOTE: Limiting stack size does not seem to work for ghc 7.4
+-- (https://github.com/fpco/ide-backend/issues/258).
+updateRtsOpts :: [String] -> IdeSessionUpdate
+updateRtsOpts opts = mempty { ideUpdateRtsOpts = Just opts }
 
 -- | Set include paths (equivalent of GHC's @-i@ parameter).
 -- In general, this requires session restart,

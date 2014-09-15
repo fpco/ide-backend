@@ -17,6 +17,7 @@ module IdeSession.Update (
   , updateSourceFileFromFile
   , updateSourceFileDelete
   , updateGhcOpts
+  , updateRtsOpts
   , updateRelativeIncludes
   , updateCodeGeneration
   , updateDataFile
@@ -118,6 +119,11 @@ data SessionInitParams = SessionInitParams {
     -- Defaults to @TargetsExclude []@ -- i.e., compile all modules in the
     -- project.
   , sessionInitTargets :: Public.Targets
+
+    -- | RTS options
+    --
+    -- Defaults to @-K8M@
+  , sessionInitRtsOpts :: [String]
   }
 
 defaultSessionInitParams :: SessionInitParams
@@ -126,6 +132,7 @@ defaultSessionInitParams = SessionInitParams {
   , sessionInitGhcOptions       = []
   , sessionInitRelativeIncludes = [""]
   , sessionInitTargets          = Public.TargetsExclude []
+  , sessionInitRtsOpts          = ["-K8M"]
   }
 
 -- | The SessionInitParams that correspond to an existing session
@@ -141,6 +148,7 @@ sessionInitParamsFor idleState = SessionInitParams {
   , sessionInitGhcOptions       = idleState ^. ideGhcOpts
   , sessionInitRelativeIncludes = idleState ^. ideRelativeIncludes
   , sessionInitTargets          = idleState ^. ideTargets
+  , sessionInitRtsOpts          = idleState ^. ideRtsOpts
   }
 
 -- | Set up the initial state of the session according to the given parameters
@@ -186,6 +194,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
   -- Start the GHC server (as a separate process)
   mServer <- forkGhcServer sessionInitGhcOptions
                            sessionInitRelativeIncludes
+                           sessionInitRtsOpts
                            ideStaticInfo
   let (state, server, version) = case mServer of
          Right (s, v) -> (IdeSessionIdle,         s,          v)
@@ -216,6 +225,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
         , _ideGhcOpts             = sessionInitGhcOptions
         , _ideRelativeIncludes    = sessionInitRelativeIncludes
         , _ideTargets             = sessionInitTargets
+        , _ideRtsOpts             = sessionInitRtsOpts
         }
 
   ideState <- newMVar (state idleState)
@@ -325,6 +335,7 @@ executeRestart initParams@SessionInitParams{..} staticInfo idleState = do
   forceShutdownGhcServer $ _ideGhcServer idleState
   mServer <- forkGhcServer sessionInitGhcOptions
                            sessionInitRelativeIncludes
+                           sessionInitRtsOpts
                            staticInfo
   case mServer of
     Right (server, version) -> do
@@ -335,6 +346,7 @@ executeRestart initParams@SessionInitParams{..} staticInfo idleState = do
               _ideComputed         = Maybe.nothing
             , _ideGhcOpts          = sessionInitGhcOptions
             , _ideRelativeIncludes = sessionInitRelativeIncludes
+            , _ideRtsOpts          = sessionInitRtsOpts
             , _ideGenerateCode     = False
             , _ideObjectFiles      = []
             , _ideEnv              = []
@@ -419,6 +431,7 @@ requiresSessionRestart st IdeSessionUpdate{..} =
              , sessionInitRelativeIncludes = fromMaybe (st ^. ideRelativeIncludes) ideUpdateRelIncls
              , sessionInitTargets          = fromMaybe (st ^. ideTargets)          ideUpdateTargets
              , sessionInitGhcOptions       = fromMaybe (st ^. ideGhcOpts)          ideUpdateGhcOpts
+             , sessionInitRtsOpts          = fromMaybe (st ^. ideRtsOpts)          ideUpdateRtsOpts
              }
       else Nothing
   where
@@ -426,6 +439,7 @@ requiresSessionRestart st IdeSessionUpdate{..} =
     requiresRestart =
          (ideUpdateRelIncls `changes` ideRelativeIncludes)
       || (ideUpdateTargets  `changes` ideTargets)
+      || (ideUpdateRtsOpts  `changes` ideRtsOpts)
       || (any optRequiresRestart (listChanges' ideUpdateGhcOpts ideGhcOpts))
 
     optRequiresRestart :: String -> Bool

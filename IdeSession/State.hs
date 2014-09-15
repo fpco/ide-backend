@@ -32,6 +32,7 @@ module IdeSession.State
   , ideStderrBufferMode
   , ideBreakInfo
   , ideTargets
+  , ideRtsOpts
   , managedSource
   , managedData
   ) where
@@ -161,6 +162,8 @@ data IdeIdleState = IdeIdleState {
   , _ideBreakInfo        :: !(Strict Maybe Public.BreakInfo)
     -- | Targets for compilation
   , _ideTargets          :: !Public.Targets
+    -- | RTS options (for the ghc session, not for executables)
+  , _ideRtsOpts          :: [String]
   }
 
 -- | The collection of source and data files submitted by the user.
@@ -224,6 +227,7 @@ ideStdoutBufferMode    :: Accessor IdeIdleState Public.RunBufferMode
 ideStderrBufferMode    :: Accessor IdeIdleState Public.RunBufferMode
 ideBreakInfo           :: Accessor IdeIdleState (Strict Maybe Public.BreakInfo)
 ideTargets             :: Accessor IdeIdleState Public.Targets
+ideRtsOpts             :: Accessor IdeIdleState [String]
 
 ideLogicalTimestamp = accessor _ideLogicalTimestamp $ \x s -> s { _ideLogicalTimestamp = x }
 ideComputed         = accessor _ideComputed         $ \x s -> s { _ideComputed         = x }
@@ -244,6 +248,7 @@ ideStdoutBufferMode = accessor _ideStdoutBufferMode $ \x s -> s { _ideStdoutBuff
 ideStderrBufferMode = accessor _ideStderrBufferMode $ \x s -> s { _ideStderrBufferMode = x }
 ideBreakInfo        = accessor _ideBreakInfo        $ \x s -> s { _ideBreakInfo        = x }
 ideTargets          = accessor _ideTargets          $ \x s -> s { _ideTargets          = x }
+ideRtsOpts          = accessor _ideRtsOpts          $ \x s -> s { _ideRtsOpts          = x }
 
 managedSource :: Accessor ManagedFilesInternal [ManagedFile]
 managedData   :: Accessor ManagedFilesInternal [ManagedFile]

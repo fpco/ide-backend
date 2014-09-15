@@ -65,9 +65,10 @@ import Distribution.Simple.Program.Find ( -- From our patched cabal
 -- | Start the ghc server
 forkGhcServer :: [String]      -- ^ Initial ghc options
               -> [FilePath]    -- ^ Relative includes
+              -> [String]      -- ^ RTS options
               -> IdeStaticInfo -- ^ Session setup info
               -> IO (Either ExternalException (GhcServer, GhcVersion))
-forkGhcServer ghcOpts relIncls IdeStaticInfo{ideConfig, ideSessionDir} = do
+forkGhcServer ghcOpts relIncls rtsOpts IdeStaticInfo{ideConfig, ideSessionDir} = do
   when configInProcess $
     fail "In-process ghc server not currently supported"
 
@@ -77,7 +78,11 @@ forkGhcServer ghcOpts relIncls IdeStaticInfo{ideConfig, ideSessionDir} = do
       fail $ "Could not find ide-backend-server"
     Just prog -> do
       env     <- envWithPathOverride configExtraPathDirs
-      server  <- OutProcess <$> forkRpcServer prog [] (Just (ideSessionDataDir ideSessionDir)) env
+      server  <- OutProcess <$> forkRpcServer
+                   prog
+                   (["+RTS"] ++ rtsOpts ++ ["-RTS"])
+                   (Just (ideSessionDataDir ideSessionDir))
+                   env
       version <- Ex.try $ do
         GhcInitResponse{..} <- rpcInit server GhcInitRequest {
             ghcInitClientApiVersion   = ideBackendApiVersion

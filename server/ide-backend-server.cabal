@@ -67,6 +67,7 @@ executable ide-backend-server
 
   ghc-options:        -Wall
                       -threaded
+                      -rtsopts
                       -- use the compacting GC:
                       -with-rtsopts=-c
                       -- disable idle GC
