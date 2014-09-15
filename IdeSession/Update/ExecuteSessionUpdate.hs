@@ -706,6 +706,15 @@ executeBuildDoc = do
           errorKind err == KindError
           && errorMsg err == Text.pack "GHC server died (dummy error)"
     exitCode <-
+      -- If some modules contain source errors we might still want to be able
+      -- to generate documentation of the remainder. However, we rely on ghc's
+      -- dependency tracking to tell us _which_ modules we need to compile.
+      -- If the ghc server died we don't get any dependency information, and
+      -- would hence conclude that the module graph is empty and generate
+      -- empty documentation, which is confusing.
+      -- (Note that a similar situation will arise if the root of the module
+      -- graph contains source errors, in which case we will also get an
+      -- empty dependency graph. This is harder to take into account, however.)
       if any isDummyError errors then do
         exceptionFree $ do
           writeFile beStderrLog
