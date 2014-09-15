@@ -57,8 +57,8 @@ Changelog
 
       - Executables can now be run from ide-backend with the same API as
         running snippets (#181). Most of our runStmt tests in the test suite
-        now have an according runExe test (which can however be disabled with
-        the --no-exe to the test suite). Note that we _do_ expect _some_
+        now have a corresponding runExe test (which can however be disabled with
+        the --no-exe test suite option). Note that we _do_ expect _some_
         semantic differences between tests and snippets through the API; in
         particular, since we don't manage the executable, we cannot affect its
         I/O buffering modes or encoding settings. Also, the RunActions returned
@@ -112,8 +112,7 @@ Changelog
 
       - Make sure ghc sees changes to dependent files (#134, ghc #7473).
 
-      - #169 TODO. I'm not sure I understand exactly what, if anything,
-        we changed here.
+      - We correctly wipe out the GHC search path before setting our own (#169).
 
       - Invoking the Cabal functions that print to stdout and stderr is now
         done via our RPC (#180) that starts a separate binary
