@@ -56,7 +56,7 @@ executable ide-backend-server
     cpp-options: -DGHC_742
   if impl(ghc == 7.8.*)
     build-depends: time    >= 1.4    && < 1.5,
-                   haddock == 2.15.0
+                   haddock-api == 2.15.0
     cpp-options: -DGHC_78
     ghc-options: -dynamic
 
