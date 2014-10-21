@@ -532,7 +532,7 @@ runExe session m = do
       let cproc = (proc exePath args) { cwd = Just dataDir
                                       , env = Just $ Map.toList envMap
                                       , create_group = True
-                                          -- ^ for interruptProcessGroupOf
+                                          -- for interruptProcessGroupOf
                                       , std_in = CreatePipe
                                       , std_out = UseHandle std_wr_hdl
                                       , std_err = UseHandle std_wr_hdl
