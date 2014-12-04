@@ -51,8 +51,8 @@ executable ide-backend-server
     cpp-options: -DGHC_761
 
   if impl(ghc == 7.4.2.*)
-    build-depends: old-time >= 1.1  && < 1.2,
-                   haddock  >= 2.11 && < 2.12
+    build-depends: old-time >= 1.1  && < 1.2
+                  --EKB XXX ,haddock  >= 2.11 && < 2.12
     cpp-options: -DGHC_742
   if impl(ghc == 7.8.*)
     build-depends: time    >= 1.4    && < 1.5,
