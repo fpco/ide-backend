@@ -184,12 +184,12 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
 
     -- Recompile C files. Notes:
     --
-    -- * Unless ghc options have changed, we recompile C files only when they
+    -- - Unless ghc options have changed, we recompile C files only when they
     --   have been modified (by comparing the timestamp on the C file to the
     --   timestamp on the correponding object file).
-    -- * We do this _after_ setting ghc because because some ghc options are
+    -- - We do this _after_ setting ghc because because some ghc options are
     --   passed to the C compiler (#218)
-    -- * Similarly, when the ghc options have changed, we conversatively
+    -- - Similarly, when the ghc options have changed, we conversatively
     --   recompile (and, importantly, relink -- #218) _all_ C files.
     (numActions, cErrors) <- updateObjectFiles ghcOptionsChanged
     let cFilesChanged :: Bool
