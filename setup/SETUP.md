@@ -197,10 +197,9 @@ only a few minor differences, explained when they come up.
   (See http://www.edsko.net/2013/02/10/comprehensive-haskell-sandboxes/ , the
   last section, "Known Limitations".)
 
-* For ghc 7.4 and 7.8 install
+* Install 
 
-  - Branch "ide-backend-experimental-74" of ghc (see instructions below)
-    or branch "ide-backend-experimental-78", respectively
+  - The appropriate branch of ghc (see below)
   - ide-backend/vendor/binary (binary-ide-backend)
     (make sure to ghc-pkg hide binary-ide-backend)
   - ide-backend-server and dependencies (including alex/happy)
@@ -220,13 +219,13 @@ only a few minor differences, explained when they come up.
 
   To initialize the snippet DB use
 
-      ghc-pkg init /Users/dev/env/fpco-patched-7.4/dot-ghc/snippet-db
+      ghc-pkg init /Users/dev/env/fpco-patched-7.8/dot-ghc/snippet-db
 
   To install packages into the snippet DB use
 
       cabal install --package-db=clear \
                     --package-db=global \
-                    --package-db=/Users/dev/env/fpco-patched-7.4/dot-ghc/snippet-db
+                    --package-db=/Users/dev/env/fpco-patched-7.8/dot-ghc/snippet-db
 
   (modifying absolute paths as required, of course).  Clearing the package DB
   is necessary so that we do not rely on any dependencies in the user DB (which
@@ -238,7 +237,7 @@ only a few minor differences, explained when they come up.
   - the test suite requires the following packages (you might of course want to
     use a separate snippet DB for the test suite:)
 
-    * parallel (tested with 3.2.0.4; necessary also for 7.8.3 now)
+    * parallel (tested with 3.2.0.4; necessary also for 7.8 now)
     * mtl (tested with 2.1.3.1, 2.2.1)
     * monads-tf (testd with 0.1.0.1, 0.1.0.2)
     * yesod-1.2.4 (optional; only required for one test; install with
@@ -369,16 +368,16 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
 * Go to the ghc directory, and checkout the ide-backend branch of 7.8:
 
-      git checkout ide-backend-experimental-78
+      git checkout ide-backend-7.8.4
 
 * Get the corresponding version of the core libraries:
 
       ./sync-all --no-dph -r git://git.haskell.org get -b ghc-7.8 
 
-  WARNING: There are no ghc-7.8.3-release tags for these libraries, so this
+  WARNING: There are no ghc-7.8.4-release tags for these libraries, so this
   checks out the "latest" 7.8 branch for each dependency. This may or may not
   break in the future. Just for reference, I have included the fingerprint of
-  the repo as I built it as ghc-7.8.3.fp in this directory.
+  the repo as I built it as ghc-7.8.4.fp in this directory.
 
 * Create build.mk
 
@@ -409,18 +408,82 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
   symlinks in ~/env/fpco-patched-7.8/local/bin:
 
       ghc              -> ../src/ghc/inplace/bin/ghc-stage2
-      ghc-7.8.3.<date> -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-7.8.4.<date> -> ../src/ghc/inplace/bin/ghc-stage2
       ghc-pkg          -> ../src/ghc/inplace/bin/ghc-pkg
       haddock          -> ../src/ghc/inplace/bin/haddock
       hsc2hs           -> ../src/ghc/inplace/bin/hsc2hs
 
   (<date> will vary). 
 
-* You will probably also want to install the bundled Haddock: run
+* You will probably also want to install the bundled Haddock (in the new
+  sandbox): run
 
       cabal install
 
   in utils/haddock. 
+
+ghc 7.10
+--------
+
+From version 7.10 ghc uses proper submodules which makes it much easier to make
+sure we have the right version of all the dependencies.
+
+* Get ghc from fpco; in ~/env/fpco-patched-7.8/local/src, run
+
+      git clone git@github.com:fpco/ghc
+
+* Go to the ghc directory, and checkout the ide-backend branch of 7.10:
+
+      git checkout ide-backend-7.10
+
+* Get the corresponding version of the core libraries:
+
+      git submodule init
+      git sobmodule update
+
+* Create build.mk
+
+      cp mk/build.mk.sample mk/build.mk
+
+  select the quick BuildFlavour
+
+      BuildFlavour = quick
+
+  and make sure haddocks get built by setting
+
+      HADDOCK_DOCS = YES
+
+  in the section for the "quick" build flavour (make sure there are no trailing
+  spaces in your build.mk).
+
+  NOTE: This assumes wanting to do ghc dev. For performance builds you should
+  pick a different build flavour.
+
+* Build as usual
+
+      perl boot && ./configure && make -j8
+
+  (OSX Mavericks: Unlike 7.4, ghc 7.8 can build with clang so you don't need to
+  do anything special.)
+
+* Make the in-place compiler available as normal; i.e. create the following
+  symlinks in ~/env/fpco-patched-7.8/local/bin:
+
+      ghc               -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-7.10.0.<date> -> ../src/ghc/inplace/bin/ghc-stage2
+      ghc-pkg           -> ../src/ghc/inplace/bin/ghc-pkg
+      haddock           -> ../src/ghc/inplace/bin/haddock
+      hsc2hs            -> ../src/ghc/inplace/bin/hsc2hs
+
+  (<date> will vary). 
+
+* You will probably also want to install the bundled Haddock (in the new
+  sandbox): run
+
+      cabal install
+
+  in utils/haddock/haddock-library, utils/haddock/haddock-api and utils/haddock
+  (in that order).
 
 DEBUGGING
 ---------
