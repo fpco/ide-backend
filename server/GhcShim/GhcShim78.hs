@@ -19,6 +19,16 @@ module GhcShim.GhcShim78
   , packageDBFlags
   , setGhcOptions
   , storeDynFlags
+    -- * Package keys (see GhcShim.hs).
+  , PackageKey
+  , PackageQualifier
+  , lookupPackage
+  , mainPackageKey
+  , modulePackageKey
+  , packageKeyString
+  , stringToPackageKey
+  , packageKeyToSourceId
+  , findExposedModule
     -- * Folding
   , AstAlg(..)
   , fold
@@ -30,12 +40,14 @@ module GhcShim.GhcShim78
 
 import Prelude hiding (id, span)
 import Control.Monad (void, forM_, liftM)
-import Data.Time (UTCTime)
 import Data.IORef
+import Data.Time (UTCTime)
+import Data.Version
 import System.IO.Unsafe (unsafePerformIO)
+import qualified Data.Maybe as Maybe
 
 import Bag
-import BasicTypes
+import BasicTypes hiding (Version)
 import ConLike (ConLike(RealDataCon))
 import DataCon (dataConRepType)
 import DynFlags
@@ -43,8 +55,10 @@ import ErrUtils
 import FastString
 import GHC hiding (getBreak)
 import Linker
+import Module
 import MonadUtils
 import Outputable hiding (showSDoc)
+import PackageConfig (PackageConfig)
 import Pair
 import PprTyThing
 import Pretty
@@ -55,6 +69,12 @@ import TcType
 import Type
 import TysWiredIn
 import qualified BreakArray
+import qualified Packages
+
+import qualified Distribution.Package              as Cabal
+import qualified Distribution.InstalledPackageInfo as Cabal
+import qualified Distribution.Text                 as Cabal
+import qualified Distribution.Compat.ReadP         as Cabal
 
 import GhcShim.API
 import IdeSession.GHC.API (GhcVersion(..))
@@ -132,7 +152,7 @@ type GhcTime = UTCTime
 ------------------------------------------------------------------------------}
 
 ghcGetVersion :: GhcVersion
-ghcGetVersion = GHC78
+ghcGetVersion = GHC_7_8
 
 packageDBFlags :: Bool -> [String] -> [String]
 packageDBFlags userDB specificDBs =
@@ -695,6 +715,65 @@ restoreDynFlagsFrom new old = new {
   , warningFlags          = warningFlags          old
   , ways                  = ways                  old
   }
+
+{-------------------------------------------------------------------------------
+  Package keys
+-------------------------------------------------------------------------------}
+
+type PackageKey       = GHC.PackageId
+type PackageQualifier = Maybe FastString
+
+packageKeyString :: PackageKey -> String
+packageKeyString = packageIdString
+
+stringToPackageKey :: String -> PackageKey
+stringToPackageKey = stringToPackageId
+
+mainPackageKey :: PackageKey
+mainPackageKey = mainPackageId
+
+lookupPackage :: DynFlags -> PackageKey -> Maybe PackageConfig
+lookupPackage = Packages.lookupPackage . Packages.pkgIdMap . pkgState
+
+modulePackageKey :: Module -> PackageKey
+modulePackageKey = modulePackageId
+
+-- | Translate a package key to a source ID (name and version)
+--
+-- NOTE: The version of wired-in packages is completely wiped out, but we use a
+-- leak in the form of a Cabal package id for the same package, which still
+-- contains a version. See
+-- <http://www.haskell.org/ghc/docs/7.8.3/html/libraries/ghc/Module.html#g:3>
+packageKeyToSourceId :: DynFlags -> PackageKey -> Maybe (String, String)
+packageKeyToSourceId dflags p = do
+    pkgCfg <- lookupPackage dflags p
+    let srcId   = Cabal.sourcePackageId pkgCfg
+        instId  = installedToSourceId $ Cabal.installedPackageId pkgCfg
+        name    = pkgName srcId
+        version = Cabal.pkgVersion srcId `orIfZero` Cabal.pkgVersion instId
+    return (name, showVersion (stripInPlace version))
+  where
+    orIfZero :: Version -> Version -> Version
+    orIfZero v a = case v of Version [] [] -> a ; _otherwise -> v
+
+    stripInPlace :: Version -> Version
+    stripInPlace (Version bs ts) = Version bs (filter (/= "inplace") ts)
+
+-- | Find an exposed module in an exposed package
+findExposedModule :: DynFlags -> PackageQualifier -> ModuleName -> Maybe PackageKey
+findExposedModule dflags pkgQual impMod = Maybe.listToMaybe pkgIds
+  where
+    pkgAll      = Packages.lookupModuleInAllPackages dflags impMod
+    pkgExposed  = map fst $ filter isExposed pkgAll
+    pkgMatching = filter (matchesQual pkgQual) pkgExposed
+    pkgIds      = map Packages.packageConfigId pkgMatching
+
+    matchesQual :: PackageQualifier -> PackageConfig -> Bool
+    matchesQual Nothing   _ = True
+    matchesQual (Just fs) p = unpackFS fs == pkgName (Cabal.sourcePackageId p)
+
+    isExposed :: (PackageConfig, Bool) -> Bool
+    isExposed (pkgCfg, moduleExposed) = Cabal.exposed pkgCfg && moduleExposed
 
 {------------------------------------------------------------------------------
   Traversing the AST
@@ -1489,3 +1568,35 @@ splitFunTy2 ty0 = let (arg1, ty1) = splitFunTy ty0
 typeOfTyThing :: TyThing -> Maybe Type
 typeOfTyThing (AConLike (RealDataCon dataCon)) = Just $ dataConRepType dataCon
 typeOfTyThing _ = Nothing  -- we probably don't want psOrigResTy from PatSynCon
+
+{-------------------------------------------------------------------------------
+  Auxiliary
+-------------------------------------------------------------------------------}
+
+-- | Parse an installed package ID as if it was a source package ID
+--
+-- NOTE: This no longer works for ghc 7.10 and up.
+installedToSourceId :: Cabal.InstalledPackageId -> Cabal.PackageId
+installedToSourceId (Cabal.InstalledPackageId instId) = parseSourceId instId
+
+-- | Parse a source package ID
+--
+-- Returns an empty package ID if the parse failed.
+parseSourceId :: String -> Cabal.PackageId
+parseSourceId = emptyOnParseFailure
+              . Maybe.mapMaybe successfulParse
+              . Cabal.readP_to_S Cabal.parse
+  where
+    successfulParse :: (a, String) -> Maybe a
+    successfulParse (a, unparsed) = if null unparsed then Just a else Nothing
+
+    emptyOnParseFailure :: [Cabal.PackageId] -> Cabal.PackageId
+    emptyOnParseFailure (i:_) = i
+    emptyOnParseFailure []    = Cabal.PackageIdentifier {
+                                    pkgName    = Cabal.PackageName ""
+                                  , pkgVersion = Version [] []
+                                  }
+
+-- | Extract a version from an installed package ID
+pkgName :: Cabal.PackageIdentifier -> String
+pkgName pkgId = let Cabal.PackageName nm = Cabal.pkgName pkgId in nm

@@ -56,7 +56,7 @@ data GhcRunResponse =
   deriving (Typeable, Generic)
 
 -- | GHC version
-data GhcVersion = GHC742 | GHC78
+data GhcVersion = GHC_7_4 | GHC_7_8 | GHC_7_10
   deriving (Typeable, Show, Eq, Generic)
 
 instance PrettyVal GhcInitResponse
@@ -109,12 +109,14 @@ instance Binary GhcRunResponse where
       _ -> fail "GhcRunResponse.get: invalid header"
 
 instance Binary GhcVersion where
-  put GHC742 = putWord8 0
-  put GHC78  = putWord8 1
+  put GHC_7_4  = putWord8 0
+  put GHC_7_8  = putWord8 1
+  put GHC_7_10 = putWord8 2
 
   get = do
     header <- getWord8
     case header of
-      0 -> return GHC742
-      1 -> return GHC78
+      0 -> return GHC_7_4
+      1 -> return GHC_7_8
+      2 -> return GHC_7_10
       _ -> fail "GhcVersion.get: invalid header"

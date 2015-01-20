@@ -301,6 +301,7 @@ test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withGhcOpts packageOpts) $
           , modulePackage = PackageId {
                 packageName    = "base"
               , packageVersion = Just "X.Y.Z"
+              , packageKey     = "base" -- ignoreVersions sets key == name
               }
           }
         monads_tf mod = ModuleId {
@@ -308,6 +309,7 @@ test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withGhcOpts packageOpts) $
           , modulePackage = PackageId {
                 packageName    = "monads-tf"
               , packageVersion = Just "X.Y.Z"
+              , packageKey     = "monads-tf"
               }
           }
     assertSameSet "imports: " (ignoreVersions . fromJust . imports $ "A") $ [
@@ -357,6 +359,7 @@ test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withGhcOpts packageOpts) $
           , modulePackage = PackageId {
                 packageName    = "base"
               , packageVersion = Just "X.Y.Z"
+              , packageKey     = "base" -- ignoreVersions sets key == name
               }
           }
         mtl mod = ModuleId {
@@ -364,6 +367,7 @@ test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withGhcOpts packageOpts) $
           , modulePackage = PackageId {
                 packageName    = "mtl"
               , packageVersion = Just "X.Y.Z"
+              , packageKey     = "mtl"
               }
           }
     assertSameSet "imports: " (ignoreVersions . fromJust . imports $ "A") $ [
@@ -457,8 +461,9 @@ test_UnhideHide env = withAvailableSession env $ \session -> do
           (output, result) <- runWaitAll runActions
           assertEqual "" RunOk result
           case testSuiteEnvGhcVersion env of
-            GHC742 -> assertEqual "" "7.4\n" output
-            GHC78  -> assertEqual "" "7.8\n" output
+            GHC_7_4  -> assertEqual "" "7.4\n" output
+            GHC_7_8  -> assertEqual "" "7.8\n" output
+            GHC_7_10 -> assertFailure "Not yet implemented for 7.10"
 
     -- First, check that we cannot import from the ghc package
     do let upd = (updateSourceFile "A.hs" $ L.unlines [

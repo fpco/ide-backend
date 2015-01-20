@@ -122,11 +122,13 @@ test_PartialModule env = withAvailableSession' env (withGhcOpts ["-XPackageImpor
       , "foo ="
       ])
 
+    -- ignoreVersions sets the key to be equal to the name
     base mod = ModuleId {
         moduleName    = T.pack mod
       , modulePackage = PackageId {
             packageName    = "base"
           , packageVersion = Just "X.Y.Z"
+          , packageKey     = "base"
           }
       }
     par mod = ModuleId {
@@ -134,6 +136,7 @@ test_PartialModule env = withAvailableSession' env (withGhcOpts ["-XPackageImpor
       , modulePackage = PackageId {
             packageName    = "parallel"
           , packageVersion = Just "X.Y.Z"
+          , packageKey     = "parallel"
           }
       }
 

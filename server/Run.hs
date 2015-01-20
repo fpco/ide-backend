@@ -66,7 +66,9 @@ import System.IO.Unsafe (unsafePerformIO)
 -- http://hackage.haskell.org/trac/ghc/ticket/7548
 -- is not fixed in this version. Compilation should fail,
 -- because the problem is not minor and not easy to spot otherwise.
-#else
+#error "GHC 7.6.1 is broken (#7548) and not supported"
+#endif
+
 import Bag (bagToList)
 import DynFlags (defaultDynFlags)
 import Exception (ghandle)
@@ -79,9 +81,8 @@ import GHC hiding (
   , getBreak
   )
 import GhcMonad (liftIO)
-import Module (mainPackageId)
 import OccName (occEnvElts)
-import Outputable (PprStyle, qualName, qualModule, mkUserStyle)
+import Outputable (PprStyle, mkUserStyle)
 import RdrName (GlobalRdrEnv, GlobalRdrElt, gre_name)
 import RnNames (rnImports)
 import TcRnMonad (initTc)
@@ -93,7 +94,7 @@ import qualified Config        as GHC
 import qualified Outputable    as GHC
 import qualified ByteCodeInstr as GHC
 import qualified Id            as GHC
-#endif
+
 #if __GLASGOW_HASKELL__ >= 706
 import ErrUtils   ( MsgDoc )
 #else
@@ -240,10 +241,22 @@ importList summary = do
   let unLIE :: LIE RdrName -> Text
       unLIE (L _ name) = Text.pack $ pretty dflags GHC.defaultUserStyle name
 
+#if __GLASGOW_HASKELL__ >= 710
+  let unLocNames :: Located [LIE name] -> [LIE name]
+      unLocNames (L _ names) = names
+#else
+  let unLocNames :: [LIE name] -> [LIE name]
+      unLocNames names = names
+#endif
+
+#if __GLASGOW_HASKELL__ >= 710
+  let mkImportEntities :: Maybe (Bool, Located [LIE RdrName]) -> ImportEntities
+#else
   let mkImportEntities :: Maybe (Bool, [LIE RdrName]) -> ImportEntities
+#endif
       mkImportEntities Nothing               = ImportAll
-      mkImportEntities (Just (True, names))  = ImportHiding (force $ map unLIE names)
-      mkImportEntities (Just (False, names)) = ImportOnly   (force $ map unLIE names)
+      mkImportEntities (Just (True, names))  = ImportHiding (force $ map unLIE (unLocNames names))
+      mkImportEntities (Just (False, names)) = ImportOnly   (force $ map unLIE (unLocNames names))
 
   let goImp :: Located (ImportDecl RdrName) -> Import
       goImp (L _ decl) = Import {
@@ -410,7 +423,7 @@ breakFromSpan modName span newValue = runMaybeT $ do
       else Nothing
 
     mod :: Module
-    mod = mkModule mainPackageId (mkModuleName . Text.unpack $ modName)
+    mod = mkModule mainPackageKey (mkModuleName . Text.unpack $ modName)
 
 importBreakInfo :: Maybe GHC.BreakInfo
                 -> [Name]
@@ -478,7 +491,7 @@ collectSrcError errsRef handlerOutput handlerRemaining flags
    ++ "  SrcSpan: "  ++ show srcspan
 -- ++ "  PprStyle: " ++ show style
    ++ "  MsgDoc: "
-   ++ showSDocForUser flags (qualName style,qualModule style) msg
+   ++ showSDocForUser flags (queryQual style) msg
    ++ "\n"
   -- Actually collect errors.
   collectSrcError'
@@ -495,16 +508,16 @@ collectSrcError' errsRef _ _ flags severity srcspan style msg
                       SevError   -> Just KindError
                       SevFatal   -> Just KindError
                       _          -> Nothing
-  = do let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+  = do let msgstr = showSDocForUser flags (queryQual style) msg
        sp <- extractSourceSpan srcspan
        modifyIORef errsRef (StrictList.cons $ SourceError errKind sp (Text.pack msgstr))
 
 collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
-  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+  = let msgstr = showSDocForUser flags (queryQual style) msg
      in handlerOutput msgstr
 
 collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
-  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+  = let msgstr = showSDocForUser flags (queryQual style) msg
      in handlerRemaining msgstr
 
 -- TODO: perhaps make a honest SrcError from the first span from the first
@@ -552,6 +565,14 @@ showSDocDebug  flags msg = GHC.showSDocDebug flags msg
 showSDocDebug _flags msg = GHC.showSDocDebug        msg
 #endif
 
+queryQual :: PprStyle -> PrintUnqualified
+#if __GLASGOW_HASKELL__ >= 710
+queryQual = GHC.queryQual
+#else
+queryQual style = (GHC.qualName style, GHC.qualModule style)
+#endif
+
+
 -----------------------
 -- Debug
 --
@@ -561,3 +582,4 @@ _debugPpContext flags msg = do
   context <- getContext
   liftIO $ debug dVerbosity
     $ msg ++ ": " ++ showSDocDebug flags (GHC.ppr context)
+

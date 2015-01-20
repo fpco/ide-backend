@@ -23,6 +23,7 @@ module TestSuite.Assertions (
   , assertExpTypes
   , ignoreVersions
   , allVersions
+  , allBut74
   , assertUseSites
   , assertAlphaEquiv
     -- * Known problems
@@ -200,7 +201,11 @@ assertIdInfo session
 type PerVersion a = [(GhcVersion, a)]
 
 allVersions :: a -> PerVersion a
-allVersions x = [(GHC742, x), (GHC78, x)]
+allVersions x = [(GHC_7_4, x), (GHC_7_8, x), (GHC_7_10, x)]
+
+-- | Give special case for 7.4.2 only
+allBut74 :: a -> a -> PerVersion a
+allBut74 x y = [(GHC_7_4, x), (GHC_7_8, y), (GHC_7_10, y)]
 
 assertIdInfo' :: IdeSession
               -> String                -- ^ Module
@@ -393,10 +398,14 @@ instance IgnoreVersions ModuleId where
     , modulePackage = ignoreVersions modulePackage
     }
 
+-- From 7.10 and up the package key is a hash that includes the package version,
+-- which is definitely not something we want to compare when we ignore versions.
+-- So here we just replace the package key with the package name.
 instance IgnoreVersions PackageId where
   ignoreVersions PackageId{..} = PackageId {
       packageName    = packageName
     , packageVersion = ignoreVersions packageVersion
+    , packageKey     = packageName
     }
 
 {-------------------------------------------------------------------------------
@@ -452,9 +461,9 @@ knownProblems = [
     -- so the error does not crop up. I don't know if this is true for _all_
     -- errors or just for this particular one (I tried a few but didn't see
     -- filepaths in any of them).
-    ("#32", [GHC742])
+    ("#32", [GHC_7_4])
     -- https://github.com/fpco/ide-backend/issues/254
-  , ("#254", [GHC78])
+  , ("#254", [GHC_7_8])
   ]
 
 fixme :: IdeSession -> String -> IO () -> IO String

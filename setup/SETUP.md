@@ -237,7 +237,7 @@ only a few minor differences, explained when they come up.
   - the test suite requires the following packages (you might of course want to
     use a separate snippet DB for the test suite:)
 
-    * parallel (tested with 3.2.0.4; necessary also for 7.8 now)
+    * parallel (tested with 3.2.0.4, 3.2.0.6; necessary also for 7.8 now)
     * mtl (tested with 2.1.3.1, 2.2.1)
     * monads-tf (testd with 0.1.0.1, 0.1.0.2)
     * yesod-1.2.4 (optional; only required for one test; install with
@@ -265,12 +265,15 @@ The most conversative way to run the test suite is:
 
     PATH=/bin:/usr/bin \
     dist/build/TestSuite/TestSuite \
-      --extra-paths-74 ~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
-      --extra-paths-78 ~/env/fpco-patched-7.8/local/bin:~/env/fpco-patched-7.8/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
-      --package-db-74 ~/env/fpco-patched-7.4/dot-ghc/snippet-db \
-      --package-db-78 ~/env/fpco-patched-7.8/dot-ghc/snippet-db \
-      --test-74 \
-      --test-78 \
+      --extra-paths-74  ~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin   \
+      --extra-paths-78  ~/env/fpco-patched-7.8/local/bin:~/env/fpco-patched-7.8/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin   \
+      --extra-paths-710 ~/env/fpco-patched-7.10/local/bin:~/env/fpco-patched-7.10/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
+      --package-db-74  ~/env/fpco-patched-7.4/dot-ghc/snippet-db  \
+      --package-db-78  ~/env/fpco-patched-7.8/dot-ghc/snippet-db  \
+      --package-db-710 ~/env/fpco-patched-7.10/dot-ghc/snippet-db \
+      --test-74  \
+      --test-78  \
+      --test-710 \
       --no-session-reuse \
       -j1 
 

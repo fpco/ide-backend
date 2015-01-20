@@ -147,6 +147,7 @@ test_1000_noLicense env = withAvailableSession env $ \session -> do
     pkgs = map (\(name, _) ->
                  PackageId{ packageName    = T.pack name
                           , packageVersion = Just "1.0"
+                          , packageKey     = T.pack name -- ?? TODO
                           }
                ) lics
 
@@ -183,6 +184,7 @@ test_1000_noUsefulInfo env = withAvailableSession env $ \session -> do
     pkgs = map (\(name, _) ->
                  PackageId{ packageName    = T.pack name
                           , packageVersion = Just "1.0"
+                          , packageKey     = T.pack name -- ?? TODO
                           }
                ) lics
 

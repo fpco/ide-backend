@@ -15,7 +15,7 @@ import TestSuite.Session
 import TestSuite.State
 
 testGroupIntegration :: TestSuiteEnv -> TestTree
-testGroupIntegration env = testGroup "Integration" [
+testGroupIntegration env = testGroup "Integration" $ integrationTests env [
     integrationTest env "Overwrite with error"                                       test_overwriteWithError
   , integrationTest env "Overwrite with the same module name in all files"           test_overwriteWithSameModuleName
   , integrationTest env "Overwrite modules many times"                               test_overwriteModulesManyTimes

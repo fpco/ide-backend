@@ -321,8 +321,9 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
     version <- getGhcVersion session
     case version of
-      GHC742 -> assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: test/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: test/FFI\n \n " (ignoreVersions dotCabal)
-      GHC78  -> assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: test/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: test/FFI\n \n " (ignoreVersions dotCabal)
+      GHC_7_4  -> assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: test/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: test/FFI\n \n " (ignoreVersions dotCabal)
+      GHC_7_8  -> assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: test/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: test/FFI\n \n " (ignoreVersions dotCabal)
+      GHC_7_10 -> assertFailure "Not yet implemented for 7.10"
     let pkgDir = distDir </> "dotCabal.test"
     createDirectoryIfMissing False pkgDir
     L.writeFile (pkgDir </> "libName.cabal") dotCabal
@@ -472,11 +473,11 @@ test_SSE_via_buildExe env = withAvailableSession env $ \session -> do
 -------------------------------------------------------------------------------}
 
 assertCheckWarns :: S.ByteString -> Assertion
-assertCheckWarns checkWarns =
-  assertEqual "checkWarns for dotCabal" (filterCheckWarns checkWarns) (filterCheckWarns "These warnings may cause trouble when distributing the package:\n* No 'category' field.\n\n* No 'maintainer' field.\n\nThe following errors will cause portability problems on other environments:\n* The package is missing a Setup.hs or Setup.lhs script.\n\n* No 'synopsis' or 'description' field.\n\n* The 'license' field is missing or specified as AllRightsReserved.\n\nHackage would reject this package.\n")
-
-filterCheckWarns :: S.ByteString -> S.ByteString
-filterCheckWarns s =
-  let (bs1, rest1) = S.breakSubstring "The following warnings are likely affect your build negatively" s
-      (_,   bs2)   = S.breakSubstring "These warnings may cause trouble" rest1
-  in S.append bs1 bs2
+assertCheckWarns warns = do
+    expect "No 'category' field"
+    expect "No 'maintainer' field"
+    expect "The package is missing a Setup.hs or Setup.lhs script"
+    expect "No 'synopsis' or 'description' field"
+  where
+    expect :: S.ByteString -> Assertion
+    expect str = assertBool ("Expected " ++ show str) (str `S.isInfixOf` warns)

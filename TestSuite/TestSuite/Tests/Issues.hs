@@ -367,15 +367,17 @@ test213 env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     version <- getGhcVersion session
     case version of
-      GHC742 -> -- 7.4.2 just reports the first module error
+      GHC_7_4 -> -- 7.4.2 just reports the first module error
         assertSourceErrors session [
             [(Just "Main.hs", "Could not find module")]
           ]
-      GHC78 -> -- 7.8 reports both; make sure we have location info (#213)
+      GHC_7_8 -> -- 7.8 reports both; make sure we have location info (#213)
         assertSourceErrors session [
             [(Just "Main.hs", "Could not find module")]
           , [(Just "Main.hs", "Could not find module")]
           ]
+      GHC_7_10 ->
+        assertFailure "Not yet implemented for 7.10"
   where
     upd = updateSourceFile "Main.hs" $ L.unlines
         [ "import DoesNotExist1"
@@ -569,7 +571,7 @@ test229 env = withAvailableSession env $ \session -> do
 
 test191 :: TestSuiteEnv -> Assertion
 test191 env = withAvailableSession env $ \session -> do
-    when (testSuiteEnvGhcVersion env == GHC742) $
+    when (testSuiteEnvGhcVersion env == GHC_7_4) $
       skipTest "Known failure on 7.4.2 (#191)"
 
     updateSessionD session upd 1

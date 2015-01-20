@@ -30,54 +30,54 @@ import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
 import Control.Monad.Reader (local)
 #endif
 
-import Control.Monad.State.Class (MonadState(..))
-import Control.Applicative (Applicative, (<$>))
-import Data.Text (Text)
-import qualified Data.Text as Text
-import Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as BSSC
-import Data.Maybe (fromMaybe, fromJust)
 import Prelude hiding (id, mod, span, writeFile)
-import System.IO.Unsafe (unsafePerformIO)
-import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
-import qualified Debug.Trace as Debug
+import Control.Applicative (Applicative, (<$>))
+import Control.Monad.State.Class (MonadState(..))
 import Data.Accessor (Accessor, accessor, (.>))
+import Data.ByteString (ByteString)
+import Data.HashMap.Strict (HashMap)
+import Data.Maybe (fromMaybe, fromJust)
+import Data.Text (Text)
+import System.IO.Unsafe (unsafePerformIO)
 import qualified Data.Accessor.Monad.MTL.State as AccState
+import qualified Data.ByteString.Char8         as BSSC
+import qualified Data.HashMap.Strict           as HashMap
+import qualified Data.Text                     as Text
+import qualified Debug.Trace                   as Debug
 
-import IdeSession.Types.Private
 import IdeSession.Strict.Container
+import IdeSession.Strict.IORef
+import IdeSession.Strict.Pair
+import IdeSession.Strict.StateT
+import IdeSession.Types.Private as Private
 import qualified IdeSession.Strict.IntMap as IntMap
 import qualified IdeSession.Strict.Map    as Map
 import qualified IdeSession.Strict.Maybe  as Maybe
-import IdeSession.Strict.IORef
-import IdeSession.Strict.StateT
-import IdeSession.Strict.Pair
 
-import GHC hiding (PackageId, idType, moduleName, ModuleName)
-import qualified GHC
-import qualified Module
+import DynFlags (HasDynFlags(..), getDynFlags)
+import GHC hiding (idType, moduleName, ModuleName)
+import HscMain (hscParse', tcRnModule', getHscEnv)
+import HscTypes (Hsc, TypeEnv, HscEnv(hsc_dflags), mkPrintUnqualified)
+import IOEnv (getEnv)
 import MonadUtils (MonadIO (..))
-import qualified Name
+import NameEnv (nameEnvUniqueElts)
 import OccName
 import Outputable hiding (trace)
-import qualified RdrName
 import TcRnTypes
+import Unique (Unique, getUnique, getKey)
 import Var hiding (idInfo)
 import VarEnv (TidyEnv, emptyTidyEnv)
-import Unique (Unique, getUnique, getKey)
-import HscTypes (Hsc, TypeEnv, HscEnv(hsc_dflags), mkPrintUnqualified)
-import NameEnv (nameEnvUniqueElts)
-import IOEnv (getEnv)
-import DynFlags (HasDynFlags(..), getDynFlags)
-import HscMain (hscParse', tcRnModule', getHscEnv)
+import qualified GHC
+import qualified Module
+import qualified Name
+import qualified RdrName
 
 import Conv
-import Haddock
 import FilePathCaching
+import GhcShim
+import Haddock
 import IdPropCaching
 import TraceMonad
-import GhcShim
 
 {------------------------------------------------------------------------------
   Caching
@@ -125,7 +125,7 @@ data PluginResult = PluginResult {
     -- TODO: Why aren't we using strict types for the first two fields?
     pluginIdList   :: !IdList
   , pluginExpTypes :: ![(SourceSpan, Text)]
-  , pluginPkgDeps  :: !(Strict [] PackageId)
+  , pluginPkgDeps  :: !(Strict [] Private.PackageId)
   , pluginUseSites :: !UseSites
   }
 

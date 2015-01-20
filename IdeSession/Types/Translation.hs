@@ -120,6 +120,7 @@ instance ExplicitSharing Public.IdInfo where
       unknownPackage = Public.PackageId {
          packageName    = Text.pack "<<unknown package>>"
        , packageVersion = Nothing
+       , packageKey     = Text.pack "<<unknown package>>"
        }
 
 instance ExplicitSharing Public.ModuleId where
@@ -132,6 +133,7 @@ instance ExplicitSharing Public.PackageId where
   removeExplicitSharing _cache Private.PackageId{..} = Public.PackageId {
       Public.packageName    = packageName
     , Public.packageVersion = toLazyMaybe packageVersion
+    , Public.packageKey     = packageKey
     }
 
 instance ExplicitSharing Public.IdScope where

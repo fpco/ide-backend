@@ -152,9 +152,13 @@ data ModuleId = ModuleId
   }
   deriving (Eq, Ord, Generic)
 
+-- | A package ID in ide-backend consists of a human-readable package name
+-- and version (what Cabal calls a source ID) along with ghc's internal
+-- package key (primarily for internal use).
 data PackageId = PackageId
   { packageName    :: !Text
   , packageVersion :: !(Maybe Text)
+  , packageKey     :: !Text
   }
   deriving (Eq, Ord, Generic)
 
@@ -286,9 +290,9 @@ instance Show ModuleId where
   show (ModuleId mo pkg) = show pkg ++ ":" ++ Text.unpack mo
 
 instance Show PackageId where
-  show (PackageId name (Just version)) =
+  show (PackageId name (Just version) _pkey) =
     Text.unpack name ++ "-" ++ Text.unpack version
-  show (PackageId name Nothing) =
+  show (PackageId name Nothing _pkey) =
     Text.unpack name
 
 instance Show IdInfo where
@@ -429,8 +433,11 @@ instance Binary ModuleId where
   get = ModuleId <$> get <*> get
 
 instance Binary PackageId where
-  put PackageId{..} = put packageName >> put packageVersion
-  get = PackageId <$> get <*> get
+  put PackageId{..} = do
+    put packageName
+    put packageVersion
+    put packageKey
+  get = PackageId <$> get <*> get <*> get
 
 instance Binary IdInfo where
   put IdInfo{..} = put idProp >> put idScope

@@ -21,18 +21,12 @@ import Data.Either (rights)
 import qualified Data.Map as LazyMap
 
 -- GHC imports; unqualified where no confusion can arise
-import GHC (
-    DynFlags(pkgState)
-  , unLoc
-  , RdrName
-  , ImportDecl(..)
-  , Located
-  )
-import qualified GHC
-import qualified Packages as GHC
-import qualified Name     as GHC
+import GHC (DynFlags, unLoc, RdrName, ImportDecl(..), Located)
 import MonadUtils (MonadIO(..)) -- ghc's MonadIO
 import Outputable (defaultUserStyle)
+import qualified GHC
+import qualified Name     as GHC
+import qualified Packages as GHC
 
 -- Haddock imports
 import qualified Documentation.Haddock as Hk
@@ -54,9 +48,9 @@ import GhcShim
 
 pkgDepsFromModSummary :: DynFlags
                       -> GHC.ModSummary
-                      -> [GHC.PackageId]
+                      -> [PackageKey]
 pkgDepsFromModSummary dflags s =
-    catMaybes (map (uncurry (guessModulePackage dflags)) impMods)
+    catMaybes (map (uncurry (findExposedModule dflags)) impMods)
   where
     aux :: Located (ImportDecl RdrName)
         -> (PackageQualifier, GHC.ModuleName)
@@ -72,11 +66,10 @@ pkgDepsFromModSummary dflags s =
 ------------------------------------------------------------------------------}
 
 haddockInterfaceFilePath :: DynFlags
-                         -> GHC.PackageId
+                         -> PackageKey
                          -> Either String FilePath
-haddockInterfaceFilePath dflags pkg = do
-  let pkgIdMap = GHC.pkgIdMap (pkgState dflags)
-  case GHC.lookupPackage pkgIdMap pkg of
+haddockInterfaceFilePath dflags pkg =
+  case lookupPackage dflags pkg of
     Nothing ->
       Left $ "Package configuration for "
           ++ pretty dflags defaultUserStyle pkg
@@ -92,7 +85,7 @@ haddockInterfaceFilePath dflags pkg = do
 
 haddockInterfaceFor :: DynFlags
                     -> Hk.NameCacheAccessor IO
-                    -> GHC.PackageId
+                    -> PackageKey
                     -> IO (Either String LinkEnv)
 haddockInterfaceFor dflags cache pkg = do
     case haddockInterfaceFilePath dflags pkg of
@@ -152,11 +145,11 @@ homeModuleFor dflags linkEnv name =
   TODO: However, we might be able to be a bit smarter about memory usage here?
 ------------------------------------------------------------------------------}
 
-linkEnvPerPackageCache :: StrictIORef (Strict (Map GHC.PackageId) (Either String LinkEnv))
+linkEnvPerPackageCache :: StrictIORef (Strict (Map PackageKey) (Either String LinkEnv))
 {-# NOINLINE linkEnvPerPackageCache #-}
 linkEnvPerPackageCache = unsafePerformIO $ newIORef StrictMap.empty
 
-linkEnvForPackage :: DynFlags -> GHC.PackageId -> IO (Either String LinkEnv)
+linkEnvForPackage :: DynFlags -> PackageKey -> IO (Either String LinkEnv)
 linkEnvForPackage dynFlags pkgId = do
   cache <- readIORef linkEnvPerPackageCache
   case StrictMap.lookup pkgId cache of
@@ -167,11 +160,11 @@ linkEnvForPackage dynFlags pkgId = do
       writeIORef linkEnvPerPackageCache cache'
       return linkEnv
 
-linkEnvPerDepsCache :: StrictIORef (Strict (Map [GHC.PackageId]) LinkEnv)
+linkEnvPerDepsCache :: StrictIORef (Strict (Map [PackageKey]) LinkEnv)
 {-# NOINLINE linkEnvPerDepsCache #-}
 linkEnvPerDepsCache = unsafePerformIO $ newIORef StrictMap.empty
 
-linkEnvForDeps :: DynFlags -> [GHC.PackageId] -> IO LinkEnv
+linkEnvForDeps :: DynFlags -> [PackageKey] -> IO LinkEnv
 linkEnvForDeps dynFlags deps = do
   cache <- readIORef linkEnvPerDepsCache
   case StrictMap.lookup deps cache of
