@@ -1,6 +1,7 @@
 module TestSuite.Tests.TypeInformation (testGroupTypeInformation) where
 
 import Prelude hiding (span, mod)
+import Control.Monad
 import Data.Monoid
 import Test.Tasty
 import Test.HUnit
@@ -49,6 +50,12 @@ testGroupTypeInformation env = testGroup "Type Information" $ [
   , stdTest env "Updated session (#142)"                                                     testUpdatedSession
   , stdTest env "spanInfo vs expTypes (#3043)"                                               testSpanInfoVsExpTypes
   , stdTest env "Consistency of IdMap/explicit sharing cache through multiple updates (#88)" test_StateOfCacheThroughoutUpdates
+  , stdTest env "HsWrapper: WpTyApp"                                                         test_HsWrapper_WpTyApp
+  , stdTest env "HsWrapper: WpTyLam"                                                         test_HsWrapper_WpTyLam
+  , stdTest env "HsWrapper: WpEvApp"                                                         test_HsWrapper_WpEvApp
+  , stdTest env "HsWrapper: WpEvLam"                                                         test_HsWrapper_WpEvLam
+  , stdTest env "HsWrapper: WpCast"                                                          test_HsWrapper_WpCast
+  , stdTest env "HsWrapper: WpFun"                                                           test_HsWrapper_WpFun
   ]
 
 test_Consistency_Local :: TestSuiteEnv -> Assertion
@@ -1499,3 +1506,142 @@ test_UseSites_Local env = withAvailableSession' env (withGhcOpts ["-XScopedTypeV
               , {- 14 -} "g :: forall a b. a -> b -> a"
               , {- 15 -} "g x y = x"
               ])
+
+{-------------------------------------------------------------------------------
+  Tests for dealing with HsWrapper
+-------------------------------------------------------------------------------}
+
+test_HsWrapper_WpTyApp :: TestSuiteEnv -> Assertion
+test_HsWrapper_WpTyApp env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 1
+    assertNoErrors session
+
+    expTypes <- getExpTypes session
+    assertExpTypes expTypes "A" (5,5,5,6) [
+        (5,5,5,6, "Int -> Int") -- after type application
+      , (5,5,5,6, "a -> a")     -- polymorphic type
+      ]
+  where
+    upd = (updateSourceFile "A.hs" . L.unlines $ [
+               {- 1 -} "module A where"
+             , {- 2 -} "f :: a -> a"
+             , {- 3 -} "f = undefined"
+             , {- 4 -} "g :: Int -> Int"
+             , {- 5 -} "g = f" -- requires WpTyApp
+             ])
+
+test_HsWrapper_WpTyLam :: TestSuiteEnv -> Assertion
+test_HsWrapper_WpTyLam env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 1
+    assertNoErrors session
+
+    expTypes <- getExpTypes session
+    assertExpTypes expTypes "A" (8,7,8,8) [
+        (8,5,8,8,"Int")         -- result of application
+      , (8,7,8,8,"a -> a -> a") -- generalized
+      , (8,7,8,8,"a -> a -> a") -- instantiated with skolems
+      , (8,7,8,8,"a -> b -> b") -- poly type of type of g
+      ]
+  where
+    upd = (updateSourceFile "A.hs" . L.unlines $ [
+               {- 1 -} "{-# LANGUAGE RankNTypes #-}"
+             , {- 2 -} "module A where"
+             , {- 3 -} "f :: (forall a. a -> a -> a) -> Int"
+             , {- 4 -} "f = undefined"
+             , {- 5 -} "g :: forall a b. a -> b -> b"
+             , {- 6 -} "g = undefined"
+             , {- 7 -} "h :: Int"
+             , {- 8 -} "h = f g" -- requires WpTyApp, WpTyLam
+             ])
+
+test_HsWrapper_WpEvApp :: TestSuiteEnv -> Assertion
+test_HsWrapper_WpEvApp env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 1
+    assertNoErrors session
+
+    expTypes <- getExpTypes session
+    assertExpTypes expTypes "A" (5,5,5,6) [
+        (5,5,5,6,"Int -> Int")     -- after type and evidence application
+      , (5,5,5,6,"Eq a => a -> a") -- original type
+      ]
+  where
+    upd = (updateSourceFile "A.hs" . L.unlines $ [
+               {- 1 -} "module A where"
+             , {- 2 -} "f :: Eq a => a -> a"
+             , {- 3 -} "f = undefined"
+             , {- 4 -} "g :: Int -> Int"
+             , {- 5 -} "g = f" -- requires WpTyApp, WpEvApp
+             ])
+
+test_HsWrapper_WpEvLam :: TestSuiteEnv -> Assertion
+test_HsWrapper_WpEvLam env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 1
+    assertNoErrors session
+
+    expTypes <- getExpTypes session
+    assertExpTypes expTypes "A" (8,7,8,8) [
+        (8,5,8,8,"Int")                         -- Result of application
+      , (8,7,8,8,"Eq a => a -> a -> a")         -- Evidence and type lambdas added
+      , (8,7,8,8,"a -> a -> a")                 -- Instantiated
+      , (8,7,8,8,"(Eq a, Eq b) => a -> b -> b") -- Original polymorphic type
+      ]
+  where
+    upd = (updateSourceFile "A.hs" . L.unlines $ [
+               {- 1 -} "{-# LANGUAGE RankNTypes #-}"
+             , {- 2 -} "module A where"
+             , {- 3 -} "f :: (forall a. Eq a => a -> a -> a) -> Int"
+             , {- 4 -} "f = undefined"
+             , {- 5 -} "g :: forall a b. (Eq a, Eq b) => a -> b -> b"
+             , {- 6 -} "g = undefined"
+             , {- 7 -} "h :: Int"
+             , {- 8 -} "h = f g" -- requires WpTyApp, WpTyLam, WpEvApp, WpEvLam, WpLet
+             ])
+
+test_HsWrapper_WpCast :: TestSuiteEnv -> Assertion
+test_HsWrapper_WpCast env = withAvailableSession env $ \session -> do
+    updateSessionD session upd 1
+    assertNoErrors session
+
+    expTypes <- getExpTypes session
+    assertExpTypes expTypes "A" (4,7,4,8) [
+        (4,7,4,8,"b") -- after the cast
+      , (4,7,4,8,"a") -- before the cast
+      ]
+  where
+    upd = (updateSourceFile "A.hs" . L.unlines $ [
+               {- 1 -} "{-# LANGUAGE GADTs #-}"
+             , {- 2 -} "module A where"
+             , {- 3 -} "f :: a ~ b => a -> b"
+             , {- 4 -} "f x = x" -- requires WpCast
+             ])
+
+test_HsWrapper_WpFun :: TestSuiteEnv -> Assertion
+test_HsWrapper_WpFun env = withAvailableSession env $ \session -> do
+    when (testSuiteEnvGhcVersion env < GHC_7_10) $
+      skipTest "Only supported in GHC 7.10 and up"
+
+    updateSessionD session upd 1
+    assertNoErrors session
+
+    -- See "Wrinkle 2" in TcUnify in the GHC sources. This example gets
+    -- elaborated to
+    --
+    -- > f1 = \k -> k @ Int @ Char
+    --
+    -- (this is necessary for full subsumption checking). Prior to GHC 7.10
+    -- this example would not type check.
+
+    expTypes <- getExpTypes session
+    assertExpTypes expTypes "A" (6,6,6,7) [
+        (6,6,6,7,"(forall a b. a -> b) -> Int")  -- after HsWrap
+      , (6,6,6,7,"(Int -> Char) -> Int")         -- before HsWrap
+      ]
+  where
+    upd = (updateSourceFile "A.hs" . L.unlines $ [
+               {- 1 -} "{-# LANGUAGE RankNTypes #-}"
+             , {- 2 -} "module A where"
+             , {- 3 -} "g :: (Int -> Char) -> Int"
+             , {- 4 -} "g = undefined"
+             , {- 5 -} "f1 :: (forall a b. a -> b) -> Int"
+             , {- 6 -} "f1 = g"
+             ])

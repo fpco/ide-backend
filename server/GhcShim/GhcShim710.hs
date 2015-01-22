@@ -1585,14 +1585,16 @@ instance FoldId id => Fold (HsDataDefn id) where
   Operations on types
 ------------------------------------------------------------------------------}
 
+-- | Apply a wrapper to a type
 applyWrapper :: HsWrapper -> Type -> Type
 applyWrapper WpHole            t = t -- identity
-applyWrapper (WpTyApp t')      t = applyTy t t'
-applyWrapper (WpEvApp _)       t = funRes1 t
 applyWrapper (WpCompose w1 w2) t = applyWrapper w1 . applyWrapper w2 $ t
+applyWrapper (WpFun _ _ t1 t2) _ = mkFunTy t1 t2
 applyWrapper (WpCast coercion) _ = let Pair _ t = tcCoercionKind coercion in t
-applyWrapper (WpTyLam v)       t = mkForAllTy v t
 applyWrapper (WpEvLam v)       t = mkFunTy (evVarPred v) t
+applyWrapper (WpEvApp _)       t = funRes1 t
+applyWrapper (WpTyLam v)       t = mkForAllTy v t
+applyWrapper (WpTyApp t')      t = applyTy t t'
 applyWrapper (WpLet _)         t = t -- we don't care about evidence _terms_
 
 -- | Given @a -> b@, return @b@

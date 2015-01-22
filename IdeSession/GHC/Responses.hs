@@ -56,8 +56,10 @@ data GhcRunResponse =
   deriving (Typeable, Generic)
 
 -- | GHC version
+--
+-- NOTE: Defined in such a way that the Ord instance makes sense.
 data GhcVersion = GHC_7_4 | GHC_7_8 | GHC_7_10
-  deriving (Typeable, Show, Eq, Generic)
+  deriving (Typeable, Show, Eq, Ord, Generic)
 
 instance PrettyVal GhcInitResponse
 instance PrettyVal GhcCompileResponse
