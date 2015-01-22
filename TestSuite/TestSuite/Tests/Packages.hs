@@ -32,7 +32,7 @@ testGroupPackages env = testGroup "Packages" $ [
   , stdTest env "Using something from a different package (no \"Loading package\" msg)"           test_UseFromDifferentPackage
   ] ++ docTests env [
     stdTest env "Consistency of multiple modules of the same name"                                test_Consistency
-  , withOK  env "Consistency of multiple modules of the same name: PackageImports"                test_Consistency_PackageImports
+  , stdTest env "Consistency of multiple modules of the same name: PackageImports"                test_Consistency_PackageImports
   , stdTest env "Module name visible from 2 packages --- picked from monads-tf"                   test_ModuleIn2Pkgs_1
   ]
 
@@ -254,7 +254,7 @@ test_Consistency env = withAvailableSession env $ \sess -> do
     assertIdInfo sess "Bar" (3, 7, 3, 15) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
 -- would fail:           assertIdInfo gif "Baz" (6, 8, 6, 9) "foobar" VarName "IO ()" "main:Control.Parallel" "Control/Parallel.hs@7:1-7:7" "" "imported from main:Control/Parallel at Baz.hs@3:1-3:24"
 
-test_Consistency_PackageImports :: TestSuiteEnv -> IO String
+test_Consistency_PackageImports :: TestSuiteEnv -> Assertion
 test_Consistency_PackageImports env = withAvailableSession env $ \sess -> do
     let cb     = \_ -> return ()
         update = flip (updateSession sess) cb
@@ -288,7 +288,7 @@ test_Consistency_PackageImports env = withAvailableSession env $ \sess -> do
 
     assertNoErrors sess
     assertIdInfo sess "Bar" (3, 7, 3, 15) "putStrLn" VarName "String -> IO ()" "base-4.5.1.0:System.IO" "<no location info>" "base-4.5.1.0:System.IO" "imported from base-4.5.1.0:Prelude at Bar.hs@1:8-1:11"
-    fixme sess "#254" $ assertIdInfo sess "Baz" (7, 7, 7, 10) "par" VarName "a1 -> b1 -> b1" "parallel-X.Y.Z:Control.Parallel" "<no location info>" "parallel-X.Y.Z:Control.Parallel" "imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35"
+    assertIdInfo sess "Baz" (7, 7, 7, 10) "par" VarName "a1 -> b1 -> b1" "parallel-X.Y.Z:Control.Parallel" "<no location info>" "parallel-X.Y.Z:Control.Parallel" "imported from parallel-X.Y.Z:Control.Parallel at Baz.hs@4:1-4:35"
 
 test_ModuleIn2Pkgs_1 :: TestSuiteEnv -> Assertion
 test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withGhcOpts packageOpts) $ \session -> do

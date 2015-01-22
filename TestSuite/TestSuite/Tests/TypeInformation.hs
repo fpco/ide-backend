@@ -30,7 +30,7 @@ testGroupTypeInformation env = testGroup "Type Information" $ [
   , stdTest env "Simple ADTs"                                                                testSimpleADTs
   , stdTest env "Polymorphism"                                                               testPolymorphism
   , stdTest env "Multiple modules"                                                           testMultipleModules
-  , withOK  env "External packages, type sigs, scoped type vars, kind sigs"                  testExternalPkgs
+  , stdTest env "External packages, type sigs, scoped type vars, kind sigs"                  testExternalPkgs
   , stdTest env "Reusing type variables"                                                     testReusingTypeVariables
   , stdTest env "Qualified imports"                                                          testQualifiedImports
   , stdTest env "Imprecise source spans"                                                     testImpreciseSourceSpans
@@ -205,7 +205,7 @@ testMultipleModules env = withAvailableSession env $ \session -> do
             , "foo = MkT"
             ])
 
-testExternalPkgs :: TestSuiteEnv -> IO String
+testExternalPkgs :: TestSuiteEnv -> Assertion
 testExternalPkgs env = withAvailableSession' env (withGhcOpts opts) $ \session -> do
     updateSessionD session upd 2
     assertNoErrors session
@@ -248,7 +248,7 @@ testExternalPkgs env = withAvailableSession' env (withGhcOpts opts) $ \session -
     assertIdInfo session "A" (14,1,14,2) "i" VarName "t a -> t a" "main:A" "A.hs@14:1-14:2" "" "binding occurrence"
     assertIdInfo session "A" (14,3,14,4) "x" VarName "t a" "main:A" "A.hs@14:3-14:4" "" "binding occurrence"
     assertIdInfo session "A" (14,7,14,8) "x" VarName "t a" "main:A" "A.hs@14:3-14:4" "" "defined locally"
-    fixme session "#254" $ assertIdInfo session "A" (3,10,3,16) "pseq" VarName "a -> b -> b" "parallel-3.2.0.3:Control.Parallel" "<no location info>" "parallel-3.2.0.3:Control.Parallel" "imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24"
+    assertIdInfo session "A" (3,10,3,16) "pseq" VarName "a -> b -> b" "parallel-3.2.0.3:Control.Parallel" "<no location info>" "parallel-3.2.0.3:Control.Parallel" "imported from parallel-3.2.0.3:Control.Parallel at A.hs@2:1-2:24"
   where
     opts = [ "-XScopedTypeVariables"
            , "-XKindSignatures"
