@@ -22,19 +22,6 @@ import qualified IdeSession.Types.Private as Private
 import qualified IdeSession.Types.Public  as Public
 import qualified IdeSession.Strict.Maybe  as Maybe
 
--- Debugging
-import System.IO.Unsafe (unsafePerformIO)
-import Outputable
-
-{-------------------------------------------------------------------------------
-  Debugging
--------------------------------------------------------------------------------}
-
-traceToFile :: FilePath -> String -> a -> a
-traceToFile path str a = unsafePerformIO $ do
-    appendFile path (str ++ "\n")
-    return a
-
 {------------------------------------------------------------------------------
   Conversions from ghc's types to our types
 ------------------------------------------------------------------------------}
@@ -52,12 +39,10 @@ importPackageId :: DynFlags -> PackageKey -> Private.PackageId
 importPackageId dflags p =
   case packageKeyToSourceId dflags p of
     Nothing ->
-      traceToFile "/tmp/importPackageId.log" (show (showPpr dflags p, "Nothing")) $
       if p == mainPackageKey
         then importMainPackage
         else error $ "importPackageId:" ++ packageKeyString p
     Just (pkgName, pkgVersion) ->
-      traceToFile "/tmp/importPackageId.log" (show (showPpr dflags p, pkgName, pkgVersion)) $
       Private.PackageId {
           Private.packageName    = Text.pack pkgName
         , Private.packageVersion = Maybe.just $ Text.pack pkgVersion
