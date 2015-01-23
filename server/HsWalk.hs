@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, DeriveDataTypeable, FlexibleInstances,
+{-# LANGUAGE CPP, DeriveDataTypeable, FlexibleInstances, FlexibleContexts,
              GeneralizedNewtypeDeriving, MultiParamTypeClasses, TemplateHaskell,
              TypeSynonymInstances, ScopedTypeVariables #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
@@ -154,7 +154,7 @@ runHscQQ stRef qq@(HsQuasiQuote quoter _span _str) = do
 runRnSplice :: StrictIORef ExtractIdsSuspendedState
             -> LHsExpr Name -> RnM (LHsExpr Name)
 runRnSplice stRef expr = do
-  extractIdsResumeTc stRef $ extractIds SpanInSplice expr
+  extractIdsResumeTc stRef $ extractPreIds SpanInSplice expr
   return expr
 
 runHscPlugin :: StrictIORef (Strict (Map ModuleName) PluginResult)
@@ -172,10 +172,10 @@ runHscPlugin symbolRef stRef mod_summary = do
     -- It is important we do this *first*, because this creates the initial
     -- cache with the IdInfo objects, which we can then update by processing
     -- the typed AST and the global type environment.
-    extractIds SpanId (tcg_rn_decls tcEnv)
+    extractPreIds SpanId (tcg_rn_decls tcEnv)
 
     -- Information provided by the type checker
-    extractIds SpanId (tcg_binds tcEnv)
+    extractPostIds (tcg_binds tcEnv)
 
     -- Type environment constructed for this module
     extractTypesFromTypeEnv (tcg_type_env tcEnv)
@@ -534,13 +534,22 @@ showTypeForUser typ = do
   where
     showForalls = False
 
-extractIds :: Fold a => (IdInfo -> SpanInfo) -> a -> ExtractIdsM (Maybe Type)
-extractIds mkSpanInfo = fold AstAlg {
+extractPreIds :: Fold Name a => (IdInfo -> SpanInfo) -> a -> ExtractIdsM (Maybe Type)
+extractPreIds mkSpanInfo = fold AstAlg {
     astMark        = ast
   , astUnsupported = unsupported
   , astExpType     = recordExpType
-  , astName        = recordName mkSpanInfo
-  , astVar         = recordId
+  , astId          = recordName mkSpanInfo
+  , astPhase       = FoldPreTc
+  }
+
+extractPostIds :: Fold Var a => a -> ExtractIdsM (Maybe Type)
+extractPostIds = fold AstAlg {
+    astMark        = ast
+  , astUnsupported = unsupported
+  , astExpType     = recordExpType
+  , astId          = recordId
+  , astPhase       = FoldPostTc
   }
 
 recordId :: Located Id -> IsBinder -> ExtractIdsM (Maybe Type)
