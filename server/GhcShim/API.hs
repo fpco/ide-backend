@@ -29,7 +29,7 @@ data AstAlg m id = AstAlg {
     -- | Found a subexpression type
   , astExpType :: SrcSpan -> Maybe Type -> m (Maybe Type)
     -- | Found a 'Name' (i.e., pre type checking)
-  , astId :: Located id -> IsBinder -> m (Maybe Type)
+  , astId :: IsBinder -> Located id -> m (Maybe Type)
     -- | Are we running pre or post type checking?
   , astPhase :: FoldPhase id
   }

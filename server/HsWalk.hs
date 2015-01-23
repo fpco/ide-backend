@@ -552,17 +552,17 @@ extractPostIds = fold AstAlg {
   , astPhase       = FoldPostTc
   }
 
-recordId :: Located Id -> IsBinder -> ExtractIdsM (Maybe Type)
-recordId (L span id) _idIsBinder = do
+recordId :: IsBinder -> Located Id -> ExtractIdsM (Maybe Type)
+recordId _idIsBinder (L span id) = do
     recordType (getUnique id) typ
     recordExpType span (Just typ)
   where
     typ = Var.varType id
 
 recordName :: (IdInfo -> SpanInfo)
-           -> Located Name -> IsBinder
+           -> IsBinder -> Located Name
            -> ExtractIdsM (Maybe Type)
-recordName mkSpanInfo (L span name) idIsBinder = do
+recordName mkSpanInfo idIsBinder (L span name) = do
   span' <- extractSourceSpan span
   case span' of
     ProperSpan sourceSpan -> do

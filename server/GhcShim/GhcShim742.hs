@@ -718,10 +718,10 @@ instance Fold id (HsValBinds id) where
 
 instance Fold id (LSig id) where
   fold alg (L span (TypeSig names tp)) = astMark alg (Just span) "TypeSig" $ do
-    forM_ names $ \name -> astId alg name SigSite
+    forM_ names $ astId alg SigSite
     fold alg tp
   fold alg (L span (GenericSig names tp)) = astMark alg (Just span) "GenericSig" $ do
-    forM_ names $ \name -> astId alg name SigSite
+    forM_ names $ astId alg SigSite
     fold alg tp
 
   -- Only in generated code
@@ -742,7 +742,7 @@ instance Fold id (LHsType id) where
   fold alg (L span (HsFunTy arg res)) = astMark alg (Just span) "HsFunTy" $
     fold alg [arg, res]
   fold alg (L span (HsTyVar name)) = astMark alg (Just span) "HsTyVar" $
-    astId alg (L span name) UseSite
+    astId alg UseSite (L span name)
   fold alg (L span (HsForAllTy explicitFlag tyVars ctxt body)) = astMark alg (Just span) "hsForAllTy" $ do
     case explicitFlag of
       Explicit -> fold alg tyVars
@@ -776,7 +776,7 @@ instance Fold id (LHsType id) where
     fold alg typ
   fold alg (L span (HsOpTy left (_wrapper, op) right)) = astMark alg (Just span) "HsOpTy" $ do
     fold alg [left, right]
-    astId alg op UseSite
+    astId alg UseSite op
   fold alg (L span (HsIParamTy _var typ)) = astMark alg (Just span) "HsIParamTy" $
     -- _var is not located
     fold alg typ
@@ -803,9 +803,9 @@ instance Fold id (Located (HsQuasiQuote id)) where
 
 instance Fold id (LHsTyVarBndr id) where
   fold alg (L span (UserTyVar name _postTcKind)) = astMark alg (Just span) "UserTyVar" $ do
-    astId alg (L span name) DefSite
+    astId alg DefSite (L span name)
   fold alg (L span (KindedTyVar name kind _postTcKind)) = astMark alg (Just span) "KindedTyVar" $ do
-    astId alg (L span name) DefSite
+    astId alg DefSite (L span name)
     fold alg kind
 
 instance Fold id (LHsContext id) where
@@ -817,7 +817,7 @@ instance Fold id (LHsBinds id) where
 
 instance Fold id (LHsBind id) where
   fold alg (L span bind@(FunBind {})) = astMark alg (Just span) "FunBind" $ do
-    astId alg (fun_id bind) DefSite
+    astId alg DefSite (fun_id bind)
     fold alg (fun_matches bind)
   fold alg (L span bind@(PatBind {})) = astMark alg (Just span) "PatBind" $ do
     fold alg (pat_lhs bind)
@@ -828,7 +828,7 @@ instance Fold id (LHsBind id) where
     return Nothing
   fold alg (L span bind@(AbsBinds {})) = astMark alg (Just span) "AbsBinds" $ do
     forM_ (abs_exports bind) $ \abs_export ->
-      astId alg (L typecheckOnly (abe_poly abs_export)) DefSite
+      astId alg DefSite (L typecheckOnly (abe_poly abs_export))
     fold alg (abs_binds bind)
 
 typecheckOnly :: SrcSpan
@@ -885,7 +885,7 @@ instance Fold id (LHsExpr id) where
     _rightTy <- fold alg right
     astExpType alg span (funRes2 <$> opTy)
   fold alg (L span (HsVar id)) = astMark alg (Just span) "HsVar" $ do
-    astId alg (L span id) UseSite
+    astId alg UseSite (L span id)
   fold alg (L span (HsWrap wrapper expr)) = astMark alg (Just span) "HsWrap" $ do
     ty <- fold alg (L span expr)
     astExpType alg span (applyWrapper wrapper <$> ty)
@@ -920,7 +920,7 @@ instance Fold id (LHsExpr id) where
     -- Only traverse the postTcExpr in the right phase (types force us! yay! :)
     case astPhase alg of
       FoldPreTc -> do
-        astId alg con UseSite
+        astId alg UseSite con
         return Nothing
       FoldPostTc -> do
         conTy <- fold alg (L (getLoc con) postTcExpr)
@@ -1069,7 +1069,7 @@ instance Fold id a => Fold id (HsRecFields id a) where
 
 instance Fold id a => Fold id (HsRecField id a) where
   fold alg (HsRecField id arg _pun) = astMark alg Nothing "HsRecField" $ do
-    astId alg id UseSite
+    astId alg UseSite id
     fold alg arg
 
 -- The meaning of the constructors of LStmt isn't so obvious; see various
@@ -1096,11 +1096,11 @@ instance Fold id (LPat id) where
   fold alg (L span (WildPat postTcType)) = astMark alg (Just span) "WildPat" $
     astExpType alg span (ifPostTc alg postTcType)
   fold alg (L span (VarPat id)) = astMark alg (Just span) "VarPat" $
-    astId alg (L span id) DefSite
+    astId alg DefSite (L span id)
   fold alg (L span (LazyPat pat)) = astMark alg (Just span) "LazyPat" $
     fold alg pat
   fold alg (L span (AsPat id pat)) = astMark alg (Just span) "AsPat" $ do
-    astId alg id DefSite
+    astId alg DefSite id
     fold alg pat
   fold alg (L span (ParPat pat)) = astMark alg (Just span) "ParPat" $
     fold alg pat
@@ -1114,12 +1114,12 @@ instance Fold id (LPat id) where
     fold alg pats
   fold alg (L span (ConPatIn con details)) = astMark alg (Just span) "ConPatIn" $ do
     -- Unlike ValBindsIn and HsValBindsIn, we *do* get ConPatIn
-    astId alg con UseSite -- the constructor name is non-binding
+    astId alg UseSite con -- the constructor name is non-binding
     fold alg details
   fold alg (L span (ConPatOut {pat_con, pat_args})) = astMark alg (Just span) "ConPatOut" $ do
     -- this pattern match on unit is necessary to avoid ghc bug (not sure why)
     () <- case astPhase alg of
-      FoldPreTc  -> do astId alg (L (getLoc pat_con) (dataConName (unLoc pat_con))) UseSite
+      FoldPreTc  -> do astId alg UseSite (L (getLoc pat_con) (dataConName (unLoc pat_con)))
                        return ()
       FoldPostTc -> return ()
     fold alg pat_args
@@ -1128,7 +1128,7 @@ instance Fold id (LPat id) where
   fold alg (L span (NPat _ _ _)) = astMark alg (Just span) "NPat" $
     return Nothing
   fold alg (L span (NPlusKPat id _lit _rebind1 _rebind2)) = astMark alg (Just span) "NPlusKPat" $ do
-    astId alg id DefSite
+    astId alg DefSite id
   fold alg (L span (ViewPat expr pat _postTcType)) = astMark alg (Just span) "ViewPat" $ do
     fold alg expr
     fold alg pat
@@ -1156,7 +1156,7 @@ instance (Fold id arg, Fold id rec) => Fold id (HsConDetails arg rec) where
 instance Fold id (LTyClDecl id) where
   fold alg (L span decl@(TyData {})) = astMark alg (Just span) "TyData" $ do
     fold alg (tcdCtxt decl)
-    astId alg (tcdLName decl) DefSite
+    astId alg DefSite (tcdLName decl)
     fold alg (tcdTyVars decl)
     fold alg (tcdTyPats decl)
     fold alg (tcdKindSig decl)
@@ -1164,7 +1164,7 @@ instance Fold id (LTyClDecl id) where
     fold alg (tcdDerivs decl)
   fold alg (L span decl@(ClassDecl {})) = astMark alg (Just span) "ClassDecl" $ do
     fold alg (tcdCtxt decl)
-    astId alg (tcdLName decl) DefSite
+    astId alg DefSite (tcdLName decl)
     fold alg (tcdTyVars decl)
     -- Sadly, we don't get location info for the functional dependencies
     fold alg (tcdSigs decl)
@@ -1174,21 +1174,21 @@ instance Fold id (LTyClDecl id) where
     fold alg (tcdDocs decl)
   fold alg (L span decl@(TySynonym {})) = astMark alg (Just span) "TySynonym" $ do
     -- See "Representation of indexed types" in compiler/hsSyn/HsDecls.lhs
-    astId alg (tcdLName decl) (case tcdTyPats decl of
-                                  Nothing -> DefSite
-                                  Just _  -> UseSite)
+    case tcdTyPats decl of
+      Nothing -> astId alg DefSite (tcdLName decl)
+      Just _  -> astId alg UseSite (tcdLName decl)
     fold alg (tcdTyVars decl)
     fold alg (tcdTyPats decl)
     fold alg (tcdSynRhs decl)
   fold alg (L span decl@(TyFamily {})) = astMark alg (Just span) "TyFamily" $  do
-    astId alg (tcdLName decl) DefSite
+    astId alg DefSite (tcdLName decl)
     fold alg (tcdTyVars decl)
     fold alg (tcdKind decl)
   fold alg (L span _decl@(ForeignType {})) = astUnsupported alg (Just span) "ForeignType"
 
 instance Fold id (LConDecl id) where
   fold alg (L span decl@(ConDecl {})) = astMark alg (Just span) "ConDecl" $ do
-    astId alg (con_name decl) DefSite
+    astId alg DefSite (con_name decl)
     fold alg (con_qvars decl)
     fold alg (con_cxt decl)
     fold alg (con_details decl)
@@ -1202,7 +1202,7 @@ instance Fold id (ResType id) where
 
 instance Fold id (ConDeclField id) where
   fold alg (ConDeclField name typ _doc) = do
-    astId alg name DefSite
+    astId alg DefSite name
     fold alg typ
 
 instance Fold id (LInstDecl id) where
@@ -1218,7 +1218,7 @@ instance Fold id (LDerivDecl id) where
 
 instance Fold id (LFixitySig id) where
   fold alg (L span (FixitySig name _fixity)) = astMark alg (Just span) "LFixitySig" $ do
-    astId alg name SigSite
+    astId alg SigSite name
 
 instance Fold id (LDefaultDecl id) where
   fold alg (L span (DefaultDecl typs)) = astMark alg (Just span) "LDefaultDecl" $ do
@@ -1226,16 +1226,16 @@ instance Fold id (LDefaultDecl id) where
 
 instance Fold id (LForeignDecl id) where
   fold alg (L span (ForeignImport name sig _coercion _import)) = astMark alg (Just span) "ForeignImport" $ do
-    astId alg name DefSite
+    astId alg DefSite name
     fold alg sig
   fold alg (L span (ForeignExport name sig _coercion _export)) = astMark alg (Just span) "ForeignExport" $ do
-    astId alg name UseSite
+    astId alg UseSite name
     fold alg sig
 
 instance Fold id (LWarnDecl id) where
   fold alg (L span (Warning name _txt)) = astMark alg (Just span) "Warning" $ do
     -- We use the span of the entire warning because we don't get location info for name
-    astId alg (L span name) UseSite
+    astId alg UseSite (L span name)
 
 instance Fold id (LAnnDecl id) where
   fold alg (L span _) = astUnsupported alg (Just span) "LAnnDecl"
