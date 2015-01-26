@@ -366,18 +366,18 @@ test213 :: TestSuiteEnv -> Assertion
 test213 env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     version <- getGhcVersion session
-    case version of
-      GHC_7_4 -> -- 7.4.2 just reports the first module error
+    if version < GHC_7_8
+      then
+        -- 7.4.2 just reports the first module error
         assertSourceErrors session [
             [(Just "Main.hs", "Could not find module")]
           ]
-      GHC_7_8 -> -- 7.8 reports both; make sure we have location info (#213)
+      else
+        -- 7.8 and up report both; make sure we have location info (#213)
         assertSourceErrors session [
             [(Just "Main.hs", "Could not find module")]
           , [(Just "Main.hs", "Could not find module")]
           ]
-      GHC_7_10 ->
-        assertFailure "Not yet implemented for 7.10"
   where
     upd = updateSourceFile "Main.hs" $ L.unlines
         [ "import DoesNotExist1"

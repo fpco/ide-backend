@@ -23,7 +23,8 @@ module TestSuite.Assertions (
   , assertExpTypes
   , ignoreVersions
   , allVersions
-  , allBut74
+  , from78
+  , from710
   , assertUseSites
   , assertAlphaEquiv
     -- * Known problems
@@ -192,9 +193,9 @@ assertIdInfo session
                 expectedNameSpace
                 (case expectedType of "" -> []
                                       _  -> allVersions expectedType)
-                expectedDefModule
+                (allVersions expectedDefModule)
                 (allVersions expectedDefSpan)
-                expectedHome
+                (allVersions expectedHome)
                 (allVersions expectedScope)
 
 -- | If no answer is specified for a given version, it will not be verified
@@ -203,9 +204,13 @@ type PerVersion a = [(GhcVersion, a)]
 allVersions :: a -> PerVersion a
 allVersions x = [(GHC_7_4, x), (GHC_7_8, x), (GHC_7_10, x)]
 
--- | Give special case for 7.4.2 only
-allBut74 :: a -> a -> PerVersion a
-allBut74 x y = [(GHC_7_4, x), (GHC_7_8, y), (GHC_7_10, y)]
+-- | One case for 7.4, and one for 7.8 and up
+from78 :: a -> a -> PerVersion a
+from78 x y = [(GHC_7_4, x), (GHC_7_8, y), (GHC_7_10, y)]
+
+-- | One case for 7.4 and 7.8, and one for 7.10 and up
+from710 :: a -> a -> PerVersion a
+from710 x y = [(GHC_7_4, x), (GHC_7_8, x), (GHC_7_10, y)]
 
 assertIdInfo' :: IdeSession
               -> String                -- ^ Module
@@ -214,9 +219,9 @@ assertIdInfo' :: IdeSession
               -> String                -- ^ Name
               -> IdNameSpace           -- ^ Namespace
               -> PerVersion String     -- ^ Type
-              -> String                -- ^ Defining module
+              -> PerVersion String     -- ^ Defining module
               -> PerVersion String     -- ^ Defining span
-              -> String                -- ^ Home module
+              -> PerVersion String     -- ^ Home module
               -> PerVersion String     -- ^ Scope
               -> Assertion
 assertIdInfo' session
@@ -226,9 +231,9 @@ assertIdInfo' session
               expectedName
               expectedNameSpace
               expectedTypes
-              expectedDefModule
+              expectedDefModules
               expectedDefSpans
-              expectedHome
+              expectedHomes
               expectedScopes = do
     idInfo  <- getSpanInfo session
     version <- getGhcVersion session
@@ -250,12 +255,17 @@ assertIdInfo' session
         , assertEqual "namespace" expectedNameSpace idSpace
 
         , case lookup version expectedDefSpans of
-            Nothing              -> return ()
-            Just expectedDefSpan -> assertEqual "def span" expectedDefSpan
-                                                           (show idDefSpan)
+            Nothing ->
+              return ()
+            Just expectedDefSpan ->
+              assertEqual "def span" expectedDefSpan (show idDefSpan)
 
-        , assertEqual "def module" (ignoreVersions expectedDefModule)
-                                   (ignoreVersions (show idDefinedIn))
+        , case lookup version expectedDefModules of
+            Nothing ->
+              return ()
+            Just expectedDefModule ->
+              assertEqual "def module" (ignoreVersions expectedDefModule)
+                                       (ignoreVersions (show idDefinedIn))
 
         , case lookup version expectedScopes of
             Nothing            -> return ()
@@ -271,10 +281,15 @@ assertIdInfo' session
               -- Not checking
               return ()
 
-        , case idHomeModule of
-            Nothing         -> assertEqual "home" expectedHome ""
-            Just actualHome -> assertEqual "home" (ignoreVersions expectedHome)
-                                                  (ignoreVersions (show actualHome))
+        , case (lookup version expectedHomes, idHomeModule) of
+            (Just expectedHome, Nothing) ->
+              assertEqual "home" expectedHome ""
+            (Just expectedHome, Just actualHome) ->
+              assertEqual "home" (ignoreVersions expectedHome)
+                                 (ignoreVersions (show actualHome))
+            (Nothing, _) ->
+              -- Not checking
+              return ()
         ]
 
 assertExpTypes :: (ModuleName -> SourceSpan -> [(SourceSpan, T.Text)])
@@ -462,6 +477,8 @@ knownProblems = [
     -- errors or just for this particular one (I tried a few but didn't see
     -- filepaths in any of them).
     ("#32", [GHC_7_4])
+    -- https://github.com/fpco/ide-backend/issues/254
+  , ("#254", [GHC_7_10])
   ]
 
 fixme :: IdeSession -> String -> IO () -> IO String
