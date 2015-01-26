@@ -28,6 +28,8 @@ module TestSuite.State (
   , docTests
   , exeTests
   , integrationTests
+    -- * Paths
+  , testInputPathCabal
     -- * Test suite global state
   , withCurrentDirectory
   , findExe
@@ -805,6 +807,20 @@ requireExclusiveAccess act = do
           ExclusiveExecution _ ->
             -- Some other thread currently needs exclusive access.. Wait.
             retry
+
+{-------------------------------------------------------------------------------
+  Paths
+
+  TODO: Currently all tests hardcode the "TestSuite/inputs" path. We should
+  define testInputPath here and use it throughout.
+-------------------------------------------------------------------------------}
+
+testInputPathCabal :: TestSuiteEnv -> FilePath
+testInputPathCabal env =
+    case testSuiteEnvGhcVersion env of
+      GHC_7_4  -> "TestSuite/inputs/Cabal-1.14.0"
+      GHC_7_8  -> "TestSuite/inputs/Cabal-1.18.1.5"
+      GHC_7_10 -> "TestSuite/inputs/Cabal-1.22.0.0"
 
 {-------------------------------------------------------------------------------
   Auxiliary

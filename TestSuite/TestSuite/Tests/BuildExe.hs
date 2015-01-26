@@ -28,8 +28,8 @@ testGroupBuildExe env = testGroup "Build executable" $ exeTests env [
 
 -- TODO: We should mark this session as dont-reuse (there is no point)
 test_fromLhsFiles :: TestSuiteEnv -> Assertion
-test_fromLhsFiles env = withAvailableSession' env (withIncludes ["test/compiler/utils"]) $ \session -> do
-    loadModulesFrom session "test/compiler/utils"
+test_fromLhsFiles env = withAvailableSession' env (withIncludes ["TestSuite/inputs/compiler/utils"]) $ \session -> do
+    loadModulesFrom session "TestSuite/inputs/compiler/utils"
     assertNoErrors session
     status0 <- getBuildExeStatus session
     assertEqual "before exe build" Nothing status0
@@ -85,7 +85,7 @@ test_fromLhsFiles env = withAvailableSession' env (withIncludes ["test/compiler/
 
 test_fromLhsFiles_DynamicIncludePathChange :: TestSuiteEnv -> Assertion
 test_fromLhsFiles_DynamicIncludePathChange env = withAvailableSession env $ \session -> do
-    loadModulesFrom session "test/compiler/utils"
+    loadModulesFrom session "TestSuite/inputs/compiler/utils"
     assertNoErrors session
     let m = "Maybes"
         upd0 = buildExe [] [(T.pack m, m <.> "lhs")]
@@ -95,7 +95,7 @@ test_fromLhsFiles_DynamicIncludePathChange env = withAvailableSession env $ \ses
     -- Expected failure! The updateRelativeIncludes below is really needed.
     assertEqual "after exe build 1" (Just $ ExitFailure 1) status0
     updateSessionD session
-                   (updateRelativeIncludes ["test/compiler/utils"])
+                   (updateRelativeIncludes ["TestSuite/inputs/compiler/utils"])
                    4
     assertNoErrors session
     distDir <- getDistDir session
@@ -189,7 +189,7 @@ test_2TH env = withAvailableSession env $ \session -> do
 
 test_fromMain :: TestSuiteEnv -> Assertion
 test_fromMain env = withAvailableSession env $ \session -> do
-    withCurrentDirectory "test/MainModule" $ do
+    withCurrentDirectory "TestSuite/inputs/MainModule" $ do
       loadModulesFrom session "."
       assertNoErrors session
     let m   = "Main"
@@ -198,18 +198,18 @@ test_fromMain env = withAvailableSession env $ \session -> do
     distDir <- getDistDir session
     fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
     assertEqual "ParFib exe output"
-                "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                "running 'A single file with a code to run in parallel' from MainModule/ParFib, which says fib 24 = 75025\n"
                 fibOut
     runActionsExe <- runExe session m
     (outExe, statusExe) <- runWaitAll runActionsExe
     assertEqual "Output from runExe"
-                "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                "running 'A single file with a code to run in parallel' from MainModule/ParFib, which says fib 24 = 75025\n"
                 outExe
     assertEqual "after runExe" ExitSuccess statusExe
 
 test_explicitPackage :: TestSuiteEnv -> Assertion
 test_explicitPackage env = withAvailableSession' env (withGhcOpts packageOpts) $ \session -> do
-    withCurrentDirectory "test/MainModule" $ do
+    withCurrentDirectory "TestSuite/inputs/MainModule" $ do
       loadModulesFrom session "."
       assertNoErrors session
     let m   = "Main"
@@ -218,12 +218,12 @@ test_explicitPackage env = withAvailableSession' env (withGhcOpts packageOpts) $
     distDir <- getDistDir session
     fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
     assertEqual "ParFib exe output"
-                "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                "running 'A single file with a code to run in parallel' from MainModule/ParFib, which says fib 24 = 75025\n"
                 fibOut
     runActionsExe <- runExe session m
     (outExe, statusExe) <- runWaitAll runActionsExe
     assertEqual "Output from runExe"
-                "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                "running 'A single file with a code to run in parallel' from MainModule/ParFib, which says fib 24 = 75025\n"
                 outExe
     assertEqual "after runExe" ExitSuccess statusExe
   where
@@ -235,7 +235,7 @@ test_explicitPackage env = withAvailableSession' env (withGhcOpts packageOpts) $
 
 test_ParfibMain :: TestSuiteEnv -> Assertion
 test_ParfibMain env = withAvailableSession env $ \session -> do
-    withCurrentDirectory "test/MainModule" $ do
+    withCurrentDirectory "TestSuite/inputs/MainModule" $ do
       loadModulesFrom session "."
       assertNoErrors session
     let m   = "ParFib.Main"
@@ -248,18 +248,18 @@ test_ParfibMain env = withAvailableSession env $ \session -> do
     distDir <- getDistDir session
     fibOut <- readProcess (distDir </> "build" </> m </> m) [] []
     assertEqual "ParFib exe output"
-                "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                "running 'A single file with a code to run in parallel' from MainModule/ParFib, which says fib 24 = 75025\n"
                 fibOut
     runActionsExe <- runExe session m
     (outExe, statusExe) <- runWaitAll runActionsExe
     assertEqual "Output from runExe"
-                "running 'A single file with a code to run in parallel' from test/MainModule, which says fib 24 = 75025\n"
+                "running 'A single file with a code to run in parallel' from MainModule/ParFib, which says fib 24 = 75025\n"
                 outExe
     assertEqual "after runExe" ExitSuccess statusExe
 
 test_wrongFilename :: TestSuiteEnv -> Assertion
 test_wrongFilename env = withAvailableSession env $ \session -> do
-    withCurrentDirectory "test/MainModule" $ do
+    withCurrentDirectory "TestSuite/inputs/MainModule" $ do
       loadModulesFrom session "."
       assertNoErrors session
     let m   = "Main"

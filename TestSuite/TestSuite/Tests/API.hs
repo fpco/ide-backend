@@ -48,7 +48,7 @@ testDuplicateShutdown env =
 testNestedSessions :: TestSuiteEnv -> Assertion
 testNestedSessions env =
     withSession (defaultServerConfig env) $ \session -> do
-      loadModulesFrom session "test/ABnoError"
+      loadModulesFrom session "TestSuite/inputs/ABnoError"
 
       withSession (defaultServerConfig env) $ \s2 -> do
        withSession (defaultServerConfig env) $ \s3 -> do

@@ -253,31 +253,31 @@ test_12 env = withAvailableSession env $ \session -> do
 
 test_Switch_TargetsInclude :: TestSuiteEnv -> Assertion
 test_Switch_TargetsInclude env = withAvailableSession env $ \session -> do
-    loadModulesFrom' session "test/AnotherA" (TargetsInclude ["test/AnotherA/A.hs"])
+    loadModulesFrom' session "TestSuite/inputs/AnotherA" (TargetsInclude ["TestSuite/inputs/AnotherA/A.hs"])
     assertOneError session
     updateSessionD session (updateCodeGeneration True) 0
     updateSessionD session
-                   (updateSourceFileFromFile "test/ABnoError/B.hs")
+                   (updateSourceFileFromFile "TestSuite/inputs/ABnoError/B.hs")
                    0
     assertOneError session
     updateSessionD session
-                   (updateSourceFileFromFile "test/AnotherB/B.hs")
+                   (updateSourceFileFromFile "TestSuite/inputs/AnotherB/B.hs")
                    0
     assertOneError session
 
     updateSessionD session
-                   (updateRelativeIncludes ["", "test/AnotherA", "test/ABnoError"])
+                   (updateRelativeIncludes ["", "TestSuite/inputs/AnotherA", "TestSuite/inputs/ABnoError"])
                    2  -- note the recompilation
     assertNoErrors session
 
     do runActions <- runStmt session "Main" "main"
        (output, _) <- runWaitAll runActions
-       assertEqual "output" "\"running 'A depends on B, no errors' from test/ABnoError\"\n" output
+       assertEqual "output" "\"running 'A depends on B, no errors' from ABnoError\"\n" output
 
     let m = "Main"
     distDir <- getDistDir session
     ifTestingExe env $ do
-       let updE = buildExe [] [(T.pack m, "test/AnotherA/A.hs")]
+       let updE = buildExe [] [(T.pack m, "TestSuite/inputs/AnotherA/A.hs")]
        updateSessionD session updE 4 -- TODO: Some modules may be compiled more than once (#189)
        status <- getBuildExeStatus session
        assertEqual "after exe build" (Just ExitSuccess) status
@@ -285,12 +285,12 @@ test_Switch_TargetsInclude env = withAvailableSession env $ \session -> do
           readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
        assertEqual "A throws exception" (ExitFailure 1) stExc
        assertEqual "exe output with old include path"
-                   "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                   "\"running 'A depends on B, no errors' from ABnoError\"\n"
                    out
        runActionsExe <- runExe session m
        (outExe, statusExe) <- runWaitAll runActionsExe
        assertEqual "Output from runExe"
-                   "\"running 'A depends on B, no errors' from test/ABnoError\"\nMain: A.hs throws exception\n"
+                   "\"running 'A depends on B, no errors' from ABnoError\"\nMain: A.hs throws exception\n"
                    outExe
        assertEqual "after runExe" (ExitFailure 1) statusExe
 
@@ -302,17 +302,17 @@ test_Switch_TargetsInclude env = withAvailableSession env $ \session -> do
          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
        assertEqual "A throws exception" (ExitFailure 1) stExc2
        assertEqual "exe output with old include path"
-                   "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                   "\"running 'A depends on B, no errors' from ABnoError\"\n"
                    out2
        runActionsExe2 <- runExe session m
        (outExe2, statusExe2) <- runWaitAll runActionsExe2
        assertEqual "Output from runExe 2"
-                   "\"running 'A depends on B, no errors' from test/ABnoError\"\nMain: A.hs throws exception\n"
+                   "\"running 'A depends on B, no errors' from ABnoError\"\nMain: A.hs throws exception\n"
                    outExe2
        assertEqual "after runExe" (ExitFailure 1) statusExe2
 
     updateSessionD session
-                   (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
+                   (updateRelativeIncludes ["TestSuite/inputs/AnotherA", "TestSuite/inputs/AnotherB"])
                    2
     assertNoErrors session
 
@@ -321,7 +321,7 @@ test_Switch_TargetsInclude env = withAvailableSession env $ \session -> do
        assertEqual "output3" "\"running A with another B\"\n" output3
 
     updateSessionD session
-                   (updateSourceFileDelete "test/ABnoError/B.hs")
+                   (updateSourceFileDelete "TestSuite/inputs/ABnoError/B.hs")
                    0  -- already recompiled above
     assertNoErrors session
 
@@ -332,7 +332,7 @@ test_Switch_TargetsInclude env = withAvailableSession env $ \session -> do
     -- And this one works OK even without updateSourceFileDelete
     -- and even without session restart.
     ifTestingExe env $ do
-       let updE3 = buildExe [] [(T.pack m, "test/AnotherA/A.hs")]
+       let updE3 = buildExe [] [(T.pack m, "TestSuite/inputs/AnotherA/A.hs")]
        updateSessionD session updE3 1
        status3 <- getBuildExeStatus session
        -- Path "" no longer in include paths here!
@@ -357,27 +357,27 @@ test_Switch_TargetsInclude env = withAvailableSession env $ \session -> do
 
 test_Switch_TargetsExclude :: TestSuiteEnv -> Assertion
 test_Switch_TargetsExclude env = withAvailableSession env $ \session -> do
-    loadModulesFrom' session "test/AnotherA" (TargetsExclude [])
+    loadModulesFrom' session "TestSuite/inputs/AnotherA" (TargetsExclude [])
     assertOneError session
 
     updateSessionD session (updateCodeGeneration True) 0
     updateSessionD session
-                   (updateSourceFileFromFile "test/ABnoError/B.hs")
+                   (updateSourceFileFromFile "TestSuite/inputs/ABnoError/B.hs")
                    2
     assertNoErrors session
     updateSessionD session
-                   (updateRelativeIncludes ["", "test/AnotherA", "test/ABnoError"])
+                   (updateRelativeIncludes ["", "TestSuite/inputs/AnotherA", "TestSuite/inputs/ABnoError"])
                    2  -- with TargetsExclude [], this is superfluous
     assertNoErrors session
 
     do runActions <- runStmt session "Main" "main"
        (output, _) <- runWaitAll runActions
-       assertEqual "output" "\"running 'A depends on B, no errors' from test/ABnoError\"\n" output
+       assertEqual "output" "\"running 'A depends on B, no errors' from ABnoError\"\n" output
 
     distDir <- getDistDir session
     let m = "Main"
     ifTestingExe env $ do
-       let updE = buildExe [] [(T.pack m, "test/AnotherA/A.hs")]
+       let updE = buildExe [] [(T.pack m, "TestSuite/inputs/AnotherA/A.hs")]
        updateSessionD session updE 4 -- TODO: Some modules may be compiled more than once (#189)
        status <- getBuildExeStatus session
        assertEqual "after exe build" (Just ExitSuccess) status
@@ -385,12 +385,12 @@ test_Switch_TargetsExclude env = withAvailableSession env $ \session -> do
           readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
        assertEqual "A throws exception" (ExitFailure 1) stExc
        assertEqual "exe output with old include path"
-                   "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                   "\"running 'A depends on B, no errors' from ABnoError\"\n"
                    out
        runActionsExe <- runExe session m
        (outExe, statusExe) <- runWaitAll runActionsExe
        assertEqual "Output from runExe"
-                   "\"running 'A depends on B, no errors' from test/ABnoError\"\nMain: A.hs throws exception\n"
+                   "\"running 'A depends on B, no errors' from ABnoError\"\nMain: A.hs throws exception\n"
                    outExe
        assertEqual "after runExe" (ExitFailure 1) statusExe
 
@@ -402,31 +402,31 @@ test_Switch_TargetsExclude env = withAvailableSession env $ \session -> do
          readProcessWithExitCode (distDir </> "build" </> m </> m) [] []
        assertEqual "A throws exception" (ExitFailure 1) stExc2
        assertEqual "exe output with old include path"
-                   "\"running 'A depends on B, no errors' from test/ABnoError\"\n"
+                   "\"running 'A depends on B, no errors' from ABnoError\"\n"
                    out2
        runActionsExe2 <- runExe session m
        (outExe2, statusExe2) <- runWaitAll runActionsExe2
        assertEqual "Output from runExe 2"
-                   "\"running 'A depends on B, no errors' from test/ABnoError\"\nMain: A.hs throws exception\n"
+                   "\"running 'A depends on B, no errors' from ABnoError\"\nMain: A.hs throws exception\n"
                    outExe2
        assertEqual "after runExe" (ExitFailure 1) statusExe2
 
     updateSessionD session
-                   (updateSourceFileDelete "test/ABnoError/B.hs")
+                   (updateSourceFileDelete "TestSuite/inputs/ABnoError/B.hs")
                    0
     assertOneError session
     updateSessionD session
-                   (updateSourceFileFromFile "test/AnotherB/B.hs")
+                   (updateSourceFileFromFile "TestSuite/inputs/AnotherB/B.hs")
                    2
     assertNoErrors session
 
     updateSessionD session
-                   (updateTargets (TargetsInclude ["test/AnotherA/A.hs"]))
+                   (updateTargets (TargetsInclude ["TestSuite/inputs/AnotherA/A.hs"]))
                    0
     assertOneError session
 
     updateSessionD session
-                   (updateRelativeIncludes ["test/AnotherA", "test/AnotherB"])
+                   (updateRelativeIncludes ["TestSuite/inputs/AnotherA", "TestSuite/inputs/AnotherB"])
                    2  -- with TargetsExclude, this would be superfluous
     assertNoErrors session  -- fixed the error from above
     updateSessionD session
@@ -439,7 +439,7 @@ test_Switch_TargetsExclude env = withAvailableSession env $ \session -> do
        assertEqual "output3" "\"running A with another B\"\n" output3
 
     ifTestingExe env $ do
-       let updE3 = buildExe [] [(T.pack m, "test/AnotherA/A.hs")]
+       let updE3 = buildExe [] [(T.pack m, "TestSuite/inputs/AnotherA/A.hs")]
        updateSessionD session updE3 1
        status3 <- getBuildExeStatus session
        -- Path "" no longer in include paths here!
@@ -466,26 +466,26 @@ test_Switch_TargetsInclude_MainNotInPath :: TestSuiteEnv -> Assertion
 test_Switch_TargetsInclude_MainNotInPath env = withAvailableSession env $ \session -> do
     -- Since we set the target explicitly, ghc will need to be able to find
     -- the other module (B) on its own; that means it will need an include
-    -- path to <ideSourcesDir>/test/ABnoError
-    loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
+    -- path to <ideSourcesDir>/TestSuite/inputs/ABnoError
+    loadModulesFrom' session "TestSuite/inputs/ABnoError" (TargetsInclude ["TestSuite/inputs/ABnoError/A.hs"])
     assertOneError session
     updateSessionD session
-                   (updateSourceFileFromFile "test/AnotherB/B.hs")
+                   (updateSourceFileFromFile "TestSuite/inputs/AnotherB/B.hs")
                    0
     assertOneError session
 
     updateSessionD session (updateCodeGeneration True) 0
     updateSessionD session
-                   (updateRelativeIncludes ["test/ABnoError"])
+                   (updateRelativeIncludes ["TestSuite/inputs/ABnoError"])
                    2  -- note the recompilation
     assertNoErrors session
 
     runActions <- runStmt session "Main" "main"
     (output, _) <- runWaitAll runActions
-    assertEqual "output" "\"running 'A depends on B, no errors' from test/ABnoError\"\n" output
+    assertEqual "output" "\"running 'A depends on B, no errors' from ABnoError\"\n" output
 
     updateSessionD session
-                   (updateRelativeIncludes ["test/AnotherB"])  -- A not in path
+                   (updateRelativeIncludes ["TestSuite/inputs/AnotherB"])  -- A not in path
                    2
     assertNoErrors session
 
@@ -494,7 +494,7 @@ test_Switch_TargetsInclude_MainNotInPath env = withAvailableSession env $ \sessi
     assertEqual "output3" "\"running A with another B\"\n" output3
 
     updateSessionD session
-                   (updateSourceFileDelete "test/ABnoError/B.hs")
+                   (updateSourceFileDelete "TestSuite/inputs/ABnoError/B.hs")
                    0  -- already recompiled above
     assertNoErrors session
 
@@ -512,12 +512,12 @@ test_Switch_TargetsInclude_MainNotInPath env = withAvailableSession env $ \sessi
          -- Failure due to no A in path.
 
     updateSessionD session
-                   (updateRelativeIncludes ["", "test/AnotherB"])  -- A still not in path
+                   (updateRelativeIncludes ["", "TestSuite/inputs/AnotherB"])  -- A still not in path
                    2
     assertNoErrors session
 
     -- buildExe with full paths works though, if the includes have ""
-    let updE41 = buildExe [] [(T.pack m, "test/ABnoError/A.hs")]
+    let updE41 = buildExe [] [(T.pack m, "TestSuite/inputs/ABnoError/A.hs")]
     ifTestingExe env $ do
        updateSessionD session updE41 3 -- TODO: Some modules may be compiled more than once (#189)
        status41 <- getBuildExeStatus session
@@ -536,7 +536,7 @@ test_Switch_TargetsInclude_MainNotInPath env = withAvailableSession env $ \sessi
        assertEqual "after runExe" (ExitFailure 1) statusExe
 
     updateSessionD session
-                   (updateRelativeIncludes ["test/AnotherB", "test/ABnoError"])  -- A again in path
+                   (updateRelativeIncludes ["TestSuite/inputs/AnotherB", "TestSuite/inputs/ABnoError"])  -- A again in path
                    2
     assertNoErrors session
 
@@ -563,7 +563,7 @@ test_Switch_TargetsInclude_MainNotInPath env = withAvailableSession env $ \sessi
        assertEqual "after runExe" (ExitFailure 1) statusExe4
 
     updateSessionD session
-                   (updateRelativeIncludes ["test/ABnoError"])
+                   (updateRelativeIncludes ["TestSuite/inputs/ABnoError"])
                    0
     assertOneError session  -- correct
 

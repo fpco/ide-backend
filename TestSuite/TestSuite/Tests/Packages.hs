@@ -63,7 +63,7 @@ test_Register_NoRestart env = withAvailableSession env $ \session -> do
     -- Session is started successfully, because we haven't referenced the
     -- package yet.
 
-    withInstalledPackage env "test/simple-lib17" $ do
+    withInstalledPackage env "TestSuite/inputs/simple-lib17" $ do
       -- Package is now installed, but the session not restarted, so we cannot
       -- reference the new package
       updateSessionD session upd 1
@@ -81,7 +81,7 @@ test_Register_Restart env = withAvailableSession env $ \session -> do
     -- Session is started successfully, because we haven't referenced the
     -- package yet.
 
-    withInstalledPackage env "test/simple-lib17" $ do
+    withInstalledPackage env "TestSuite/inputs/simple-lib17" $ do
       -- After restarting the session the new package should be visible
       restartSession session
       updateSessionD session upd 1

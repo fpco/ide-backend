@@ -48,9 +48,9 @@ test_FFI_via_API env = withAvailableSession env $ \session -> do
   where
     upd = mconcat [
         updateCodeGeneration True
-      , updateSourceFileFromFile "test/FFI/Main.hs"
-      , updateSourceFileFromFile "test/FFI/life.c"
-      , updateSourceFileFromFile "test/FFI/life.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/life.c"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/life.h"
       ]
 
 test_FFI_via_API_restartSession :: TestSuiteEnv -> Assertion
@@ -70,9 +70,9 @@ test_FFI_via_API_restartSession env = withAvailableSession env $ \session -> do
   where
     upd = mconcat [
         updateCodeGeneration True
-      , updateSourceFileFromFile "test/FFI/Main.hs"
-      , updateSourceFileFromFile "test/FFI/life.c"
-      , updateSourceFileFromFile "test/FFI/life.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/life.c"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/life.h"
       ]
 
 test_deleteReadd :: TestSuiteEnv -> Assertion
@@ -80,20 +80,20 @@ test_deleteReadd env = withAvailableSession env $ \session -> do
     updateSessionD session upd 3
     assertNoErrors session
 
-    updateSessionD session (updateSourceFileDelete "test/FFI/life.c") 0
+    updateSessionD session (updateSourceFileDelete "TestSuite/inputs/FFI/life.c") 0
     assertNoErrors session
 
-    updateSessionD session (updateSourceFileFromFile "test/FFI/life.c") 4
+    updateSessionD session (updateSourceFileFromFile "TestSuite/inputs/FFI/life.c") 4
     assertNoErrors session
 
-    updateSessionD session (updateSourceFileDelete "test/FFI/life.c") 0
+    updateSessionD session (updateSourceFileDelete "TestSuite/inputs/FFI/life.c") 0
     assertNoErrors session
 
     restartSession session
     updateSessionD session mempty 1
     assertOneError session
 
-    updateSessionD session (updateSourceFileFromFile "test/FFI/life.c") 4
+    updateSessionD session (updateSourceFileFromFile "TestSuite/inputs/FFI/life.c") 4
     assertNoErrors session
 
     runActions <- runStmt session "Main" "main"
@@ -104,9 +104,9 @@ test_deleteReadd env = withAvailableSession env $ \session -> do
   where
     upd = mconcat [
         updateCodeGeneration True
-      , updateSourceFileFromFile "test/FFI/Main.hs"
-      , updateSourceFileFromFile "test/FFI/life.c"
-      , updateSourceFileFromFile "test/FFI/life.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/life.c"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/life.h"
       ]
 
 test_deleteAddDifferent :: TestSuiteEnv -> Assertion
@@ -114,14 +114,14 @@ test_deleteAddDifferent env = withAvailableSession env $ \session -> do
     updateSessionD session upd 3
     assertNoErrors session
 
-    updateSessionD session (updateSourceFileDelete "test/FFI/life.c"
-                            <> updateSourceFileDelete "test/FFI/life.h") 0
+    updateSessionD session (updateSourceFileDelete "TestSuite/inputs/FFI/life.c"
+                            <> updateSourceFileDelete "TestSuite/inputs/FFI/life.h") 0
     assertNoErrors session
 
 {- duplicate definition for symbol...    errorMsg = "Server killed"
-    updateSessionD session (updateSourceFileFromFile "test/FFI/ffiles/life.c"
-                            <> updateSourceFileFromFile "test/FFI/ffiles/local.h"
-                            <> updateSourceFileFromFile "test/FFI/ffiles/life.h") 4
+    updateSessionD session (updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.c"
+                            <> updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/local.h"
+                            <> updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.h") 4
     assertNoErrors session
     runActions <- runStmt session "Main" "main"
     (output, result) <- runWaitAll runActions
@@ -132,9 +132,9 @@ test_deleteAddDifferent env = withAvailableSession env $ \session -> do
   where
     upd = mconcat [
         updateCodeGeneration True
-      , updateSourceFileFromFile "test/FFI/Main.hs"
-      , updateSourceFileFromFile "test/FFI/life.c"
-      , updateSourceFileFromFile "test/FFI/life.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/life.c"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/life.h"
       ]
 
 test_fromSubdir_buildExe :: TestSuiteEnv -> Assertion
@@ -142,7 +142,7 @@ test_fromSubdir_buildExe env = withAvailableSession env $ \session -> do
     updateSessionD session upd 3
     assertNoErrors session
     let m = "Main"
-        upd2 = buildExe [] [(T.pack m, "test/FFI/Main2.hs")]
+        upd2 = buildExe [] [(T.pack m, "TestSuite/inputs/FFI/Main2.hs")]
     updateSessionD session upd2 1
     distDir <- getDistDir session
     buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
@@ -158,19 +158,19 @@ test_fromSubdir_buildExe env = withAvailableSession env $ \session -> do
   where
     upd = mconcat [
         updateCodeGeneration True
-      , updateSourceFileFromFile "test/FFI/Main2.hs"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.c"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.h"
-      , updateSourceFileFromFile "test/FFI/ffiles/local.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main2.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.c"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/local.h"
       ]
 
 test_MinVersion :: TestSuiteEnv -> Assertion
 test_MinVersion env = withAvailableSession env $ \session -> do
-    withCurrentDirectory "test/FFI" $ updateSessionD session upd 4
+    withCurrentDirectory "TestSuite/inputs/FFI" $ updateSessionD session upd 4
     assertNoErrors session
     let m = "Main"
         upd2 = buildExe [] [(T.pack m, "Main3.hs")]
-    updateSessionD session upd2 4 -- TODO: Some modules may be compiled twice (#189)
+    updateSessionD session upd2 5 -- TODO: Some modules may be compiled twice (#189)
     distDir <- getDistDir session
     buildStderr <- readFile $ distDir </> "build/ide-backend-exe.stderr"
     assertEqual "buildStderr empty" "" buildStderr
@@ -193,7 +193,7 @@ test_MinVersion env = withAvailableSession env $ \session -> do
       ]
 
 test_MinVersion_withIncludes :: TestSuiteEnv -> Assertion
-test_MinVersion_withIncludes env = withAvailableSession' env (withIncludes ["test/FFI"]) $ \session -> do
+test_MinVersion_withIncludes env = withAvailableSession' env (withIncludes ["TestSuite/inputs/FFI"]) $ \session -> do
     updateSessionD session upd 4
     assertNoErrors session
     let m = "Main"
@@ -213,15 +213,15 @@ test_MinVersion_withIncludes env = withAvailableSession' env (withIncludes ["tes
   where
     upd = mconcat [
         updateCodeGeneration True
-      , updateSourceFileFromFile "test/FFI/Main3.hs"
-      , updateSourceFileFromFile "test/FFI/A.hs"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.c"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.h"
-      , updateSourceFileFromFile "test/FFI/ffiles/local.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main3.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/A.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.c"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/local.h"
       ]
 
 test_MinVersion_restartSession :: TestSuiteEnv -> Assertion
-test_MinVersion_restartSession env = withAvailableSession' env (withIncludes ["test/FFI"]) $ \session -> do
+test_MinVersion_restartSession env = withAvailableSession' env (withIncludes ["TestSuite/inputs/FFI"]) $ \session -> do
     updateSessionD session upd 4
     assertNoErrors session
 
@@ -229,17 +229,17 @@ test_MinVersion_restartSession env = withAvailableSession' env (withIncludes ["t
     updateSessionD session mempty 4
     assertNoErrors session
 
-    updateSessionD session (updateSourceFileDelete "test/FFI/ffiles/life.c"
-                            <> updateSourceFileDelete "test/FFI/ffiles/life.h"
-                            <> updateSourceFileDelete "test/FFI/ffiles/local.h") 0
+    updateSessionD session (updateSourceFileDelete "TestSuite/inputs/FFI/ffiles/life.c"
+                            <> updateSourceFileDelete "TestSuite/inputs/FFI/ffiles/life.h"
+                            <> updateSourceFileDelete "TestSuite/inputs/FFI/ffiles/local.h") 0
     assertNoErrors session
 
     restartSession session
     updateSessionD session mempty 4
     assertOneError session
 
-    updateSessionD session (updateSourceFileFromFile "test/FFI/life.h"
-                            <> updateSourceFileFromFile "test/FFI/life.c") 4
+    updateSessionD session (updateSourceFileFromFile "TestSuite/inputs/FFI/life.h"
+                            <> updateSourceFileFromFile "TestSuite/inputs/FFI/life.c") 4
     assertNoErrors session
 
     ifTestingExe env $ do
@@ -260,18 +260,18 @@ test_MinVersion_restartSession env = withAvailableSession' env (withIncludes ["t
   where
     upd = mconcat [
         updateCodeGeneration True
-      , updateSourceFileFromFile "test/FFI/Main3.hs"
-      , updateSourceFileFromFile "test/FFI/A.hs"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.c"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.h"
-      , updateSourceFileFromFile "test/FFI/ffiles/local.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main3.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/A.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.c"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/local.h"
       ]
 
 test_TargetsExclude :: TestSuiteEnv -> Assertion
-test_TargetsExclude env = withAvailableSession' env (withIncludes ["test/FFI"]) $ \session -> do
+test_TargetsExclude env = withAvailableSession' env (withIncludes ["TestSuite/inputs/FFI"]) $ \session -> do
     updateSessionD session upd 4
     assertNoErrors session
-    updateSessionD session (updateSourceFileDelete "test/FFI/ffiles/life.c") 0
+    updateSessionD session (updateSourceFileDelete "TestSuite/inputs/FFI/ffiles/life.c") 0
     assertNoErrors session
 
     restartSession session
@@ -283,7 +283,7 @@ test_TargetsExclude env = withAvailableSession' env (withIncludes ["test/FFI"]) 
 GHCi runtime linker: fatal error: I found a duplicate definition for symbol
    meaningOfLife
 whilst processing object file
-   /tmp/ide-backend-test.28928/dist.28928/objs/test/FFI/ffiles/life.o
+   /tmp/ide-backend-test.28928/dist.28928/objs/TestSuite/inputs/FFI/ffiles/life.o
 This could be caused by:
    * Loading two different object files which export the same symbol
    * Specifying the same object file twice on the GHCi command line
@@ -294,8 +294,8 @@ GHCi cannot safely continue in this situation.  Exiting now.  Sorry.
   Using the FFI via GHC API with deleting and adding a different .c file: [Failed]
 Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server died>>, errorMsg = "Server killed"}
 -}
-    updateSessionD session (updateSourceFileFromFile "test/FFI/life.c"
-                            <> updateSourceFileFromFile "test/FFI/life.h") 5
+    updateSessionD session (updateSourceFileFromFile "TestSuite/inputs/FFI/life.c"
+                            <> updateSourceFileFromFile "TestSuite/inputs/FFI/life.h") 5
     assertNoErrors session
 
     distDir <- getDistDir session
@@ -321,8 +321,8 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
     version <- getGhcVersion session
     case version of
-      GHC_7_4  -> assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: test/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: test/FFI\n \n " (ignoreVersions dotCabal)
-      GHC_7_8  -> assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: test/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: test/FFI\n \n " (ignoreVersions dotCabal)
+      GHC_7_4  -> assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: TestSuite/inputs/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: TestSuite/inputs/FFI\n \n " (ignoreVersions dotCabal)
+      GHC_7_8  -> assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: TestSuite/inputs/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: TestSuite/inputs/FFI\n \n " (ignoreVersions dotCabal)
       GHC_7_10 -> assertFailure "Not yet implemented for 7.10"
     let pkgDir = distDir </> "dotCabal.test"
     createDirectoryIfMissing False pkgDir
@@ -332,14 +332,14 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
   where
     upd = mconcat [
         updateCodeGeneration True
-      , updateSourceFileFromFile "test/FFI/Main.hs"
-      , updateSourceFileFromFile "test/FFI/Main2.hs"
-      , updateSourceFileFromFile "test/FFI/Main3.hs"
-      , updateSourceFileFromFile "test/FFI/A.hs"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.c"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.h"
-      , updateSourceFileFromFile "test/FFI/ffiles/local.h"
-      , updateTargets (TargetsExclude ["test/FFI/life.c", "test/FFI/life.h", "life.c", "life.h", "test/FFI/Main.hs", "test/FFI/Main2.hs"])
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main2.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main3.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/A.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.c"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/local.h"
+      , updateTargets (TargetsExclude ["TestSuite/inputs/FFI/life.c", "TestSuite/inputs/FFI/life.h", "life.c", "life.h", "TestSuite/inputs/FFI/Main.hs", "TestSuite/inputs/FFI/Main2.hs"])
       ]
 
 test_DynamicInclude :: TestSuiteEnv -> Assertion
@@ -351,7 +351,7 @@ test_DynamicInclude env = withAvailableSession env $ \session -> do
     assertNoErrors session
 
     updateSessionD session
-                   (updateRelativeIncludes ["test/FFI"])
+                   (updateRelativeIncludes ["TestSuite/inputs/FFI"])
                    4
     assertNoErrors session
 
@@ -373,11 +373,11 @@ test_DynamicInclude env = withAvailableSession env $ \session -> do
   where
     upd = mconcat [
         updateCodeGeneration True
-      , updateSourceFileFromFile "test/FFI/Main3.hs"
-      , updateSourceFileFromFile "test/FFI/A.hs"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.c"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.h"
-      , updateSourceFileFromFile "test/FFI/ffiles/local.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main3.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/A.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.c"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/local.h"
       ]
 
 test_DynamicInclude_TargetsInclude :: TestSuiteEnv -> Assertion
@@ -386,14 +386,14 @@ test_DynamicInclude_TargetsInclude env = withAvailableSession env $ \session -> 
     assertNoErrors session
 
     updateSessionD session
-                   (updateRelativeIncludes ["test/FFI"])
+                   (updateRelativeIncludes ["TestSuite/inputs/FFI"])
                    4
     assertNoErrors session
 
-    updateSessionD session (updateTargets (TargetsInclude ["test/FFI/Main2.hs"])) 3
+    updateSessionD session (updateTargets (TargetsInclude ["TestSuite/inputs/FFI/Main2.hs"])) 3
     assertNoErrors session
 
-    updateSessionD session (updateTargets (TargetsInclude ["test/FFI/Main3.hs"])) 4
+    updateSessionD session (updateTargets (TargetsInclude ["TestSuite/inputs/FFI/Main3.hs"])) 4
     assertNoErrors session
 
     ifTestingExe env $ do
@@ -414,14 +414,14 @@ test_DynamicInclude_TargetsInclude env = withAvailableSession env $ \session -> 
   where
     upd = mconcat [
         updateCodeGeneration True
-      , updateTargets (TargetsInclude ["test/FFI/Main.hs"])
-      , updateSourceFileFromFile "test/FFI/Main.hs"
-      , updateSourceFileFromFile "test/FFI/Main2.hs"
-      , updateSourceFileFromFile "test/FFI/Main3.hs"
-      , updateSourceFileFromFile "test/FFI/A.hs"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.c"
-      , updateSourceFileFromFile "test/FFI/ffiles/life.h"
-      , updateSourceFileFromFile "test/FFI/ffiles/local.h"
+      , updateTargets (TargetsInclude ["TestSuite/inputs/FFI/Main.hs"])
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main2.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/Main3.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/A.hs"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.c"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/life.h"
+      , updateSourceFileFromFile "TestSuite/inputs/FFI/ffiles/local.h"
       ]
 
 test_SSE_via_API :: TestSuiteEnv -> Assertion

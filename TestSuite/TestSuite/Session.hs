@@ -74,7 +74,7 @@ loadModule file contents =
   where
     -- This is a hack: construct a module name from a filename
     mname :: FilePath -> String
-    mname path = case "test/" `substr` path of
+    mname path = case "TestSuite/inputs/" `substr` path of
       Just rest -> dotToSlash . dropExtension . dropFirstPathComponent $ rest
       Nothing   -> takeBaseName path
 

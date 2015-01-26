@@ -12,14 +12,6 @@ category:             Development
 build-type:           Simple
 cabal-version:        >=1.10
 
-Flag build-coc
-  description: Build exe to measure cost of compilation
-  default:     False
-
-Flag test-pkg-dbs
-  description: Build the test suite for package DBs
-  default:     False
-
 library
   exposed-modules:    IdeSession
   other-modules:      IdeSession.State,
@@ -164,7 +156,7 @@ test-suite typecheck-dir
   ghc-options:        -Wall -fno-warn-unused-do-bind
   ghc-options:        -with-rtsopts=-K16M
 
-test-suite TestSuite 
+test-suite TestSuite
   type:               exitcode-stdio-1.0
   main-is:            TestSuite.hs
   hs-source-dirs:     TestSuite
@@ -172,7 +164,7 @@ test-suite TestSuite
                       -- turn is used by the RPC test suite too. We should
                       -- probably merge that in, too.
                       test
-  other-modules:      TestSuite.State                      
+  other-modules:      TestSuite.State
                       TestSuite.Assertions
                       TestSuite.Session
                       TestSuite.Tests.API
@@ -222,10 +214,10 @@ test-suite TestSuite
                       containers,
                       deepseq
   default-language:   Haskell2010
-  ghc-options:        -Wall 
+  ghc-options:        -Wall
                       -threaded
                       -with-rtsopts=-N
-  default-extensions: RecordWildCards                      
+  default-extensions: RecordWildCards
                       NamedFieldPuns
                       DeriveDataTypeable
                       OverloadedStrings
@@ -233,25 +225,6 @@ test-suite TestSuite
   other-extensions:   TypeSynonymInstances
                       FlexibleInstances
                       OverlappingInstances
-
-test-suite test-pkg-dbs
-  type:               exitcode-stdio-1.0
-  main-is:            test-pkg-dbs.hs
--- server for Debug:
-  hs-source-dirs:     test server
-  if flag(test-pkg-dbs)
-    build-depends:      base, ide-backend,
-                        bytestring, directory, filepath, text, process,
-                        HUnit, test-framework, test-framework-hunit
-  else
-    buildable: False
-
-  default-language:   Haskell2010
-  default-extensions: MonoLocalBinds,
-                      BangPatterns, RecordWildCards, NamedFieldPuns
-  other-extensions:   CPP, TemplateHaskell, ScopedTypeVariables,
-                      DeriveDataTypeable
-  ghc-options:        -Wall -fno-warn-unused-do-bind
 
 test-suite rpc-server
   type:               exitcode-stdio-1.0
@@ -282,29 +255,3 @@ test-suite rpc-server
   other-extensions:   CPP, TemplateHaskell, ScopedTypeVariables,
                       DeriveDataTypeable
   ghc-options:        -Wall -fno-warn-unused-do-bind
-
-test-suite NamedPipeTest
-  type:               exitcode-stdio-1.0
-  main-is:            NamedPipeTest.hs
-  hs-source-dirs:     test
-  build-depends:      base,
-                      process,
-                      directory,
-                      bytestring,
-                      unix,
-                      binary-ide-backend
-  default-language:   Haskell2010
-  default-extensions: RankNTypes 
-                      GADTs
-                      DeriveDataTypeable
-                      ScopedTypeVariables
-  ghc-options:        -Wall
-
-executable coc
-  main-is:          coc.hs
-  hs-source-dirs:   test
-  if flag(build-coc)
-    build-depends:    ide-backend, base, random, time, bytestring
-  else
-    buildable: False
-  default-language: Haskell2010
