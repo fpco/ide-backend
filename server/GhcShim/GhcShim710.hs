@@ -842,9 +842,9 @@ instance Fold id (LSig id) where
     return Nothing
   fold alg (L span (SpecSig _ _ _)) = astMark alg (Just span) "SpecSig" $
     return Nothing
-  fold alg (L span (SpecInstSig _)) = astMark alg (Just span) "SpecInstSig" $
+  fold alg (L span (SpecInstSig _ _)) = astMark alg (Just span) "SpecInstSig" $
     return Nothing
-  fold alg (L span (MinimalSig _)) = astMark alg (Just span) "MinimalSig" $
+  fold alg (L span (MinimalSig _ _)) = astMark alg (Just span) "MinimalSig" $
     return Nothing
 
 instance Fold id (LHsType id) where
@@ -923,7 +923,7 @@ instance Fold id (LHsTyVarBndr id) where
   fold alg (L span (UserTyVar name)) = astMark alg (Just span) "UserTyVar" $ do
     astId alg DefSite (L span name)
   fold alg (L span (KindedTyVar name kind)) = astMark alg (Just span) "KindedTyVar" $ do
-    astId alg DefSite (L span name)
+    astId alg DefSite name
     fold alg kind
 
 instance Fold id (LHsContext id) where
@@ -965,7 +965,8 @@ instance Fold id body => Fold id (MatchGroup id body) where
     fold alg mg_alts
 
 instance Fold id body => Fold id (LMatch id body) where
-  fold alg (L span (Match pats _type rhss)) = astMark alg (Just span) "Match" $ do
+  fold alg (L span (Match _fun_id pats _type rhss)) = astMark alg (Just span) "Match" $ do
+    -- TODO: should we do something with _fun_id?
     fold alg pats
     fold alg rhss
 
@@ -1130,11 +1131,11 @@ instance Fold id (LHsExpr id) where
     fold alg expr
   fold alg (L span (HsBinTick _trueTick _falseTick expr)) = astMark alg (Just span) "HsBinTick" $ do
     fold alg expr
-  fold alg (L span (HsTickPragma _span expr)) = astMark alg (Just span) "HsTickPragma" $ do
+  fold alg (L span (HsTickPragma _src _span expr)) = astMark alg (Just span) "HsTickPragma" $ do
     fold alg expr
-  fold alg (L span (HsSCC _string expr)) = astMark alg (Just span) "HsSCC" $ do
+  fold alg (L span (HsSCC _src _string expr)) = astMark alg (Just span) "HsSCC" $ do
     fold alg expr
-  fold alg (L span (HsCoreAnn _string expr)) = astMark alg (Just span) "HsCoreAnn" $ do
+  fold alg (L span (HsCoreAnn _src _string expr)) = astMark alg (Just span) "HsCoreAnn" $ do
     fold alg expr
   fold alg (L span (HsSpliceE _isTyped splice)) = astMark alg (Just span) "HsSpliceE" $ do
     fold alg splice
@@ -1355,13 +1356,18 @@ instance Fold id (LConDecl id) where
     forM_ (con_names decl) $ astId alg DefSite
     fold alg (con_qvars decl)
     fold alg (con_cxt decl)
-    fold alg (con_details decl)
+    fold alg (unlocRec (con_details decl))
     fold alg (con_res decl)
+   where
+    unlocRec :: HsConDetails a (Located b) -> HsConDetails a b
+    unlocRec (PrefixCon args)      = PrefixCon args
+    unlocRec (RecCon    rec)       = RecCon    (unLoc rec)
+    unlocRec (InfixCon  arg1 arg2) = InfixCon  arg1 arg2
 
 instance Fold id ty => Fold id (ResType ty) where
   fold alg ResTyH98 = astMark alg Nothing "ResTyH98" $ do
     return Nothing -- Nothing to do
-  fold alg (ResTyGADT ty) = astMark alg Nothing "ResTyGADT" $ do
+  fold alg (ResTyGADT span ty) = astMark alg (Just span) "ResTyGADT" $ do
     fold alg ty
 
 instance Fold id (LConDeclField id) where
@@ -1399,15 +1405,22 @@ instance Fold id (LForeignDecl id) where
     fold alg sig
 
 instance Fold id (LWarnDecl id) where
-  fold alg (L span (Warning name _txt)) = astMark alg (Just span) "Warning" $ do
-    -- We use the span of the entire warning because we don't get location info for name
-    astId alg UseSite (L span name)
+  fold alg (L span (Warning names _txt)) = astMark alg (Just span) "Warning" $ do
+    forM_ names $ astId alg UseSite
+    return Nothing
+
+instance Fold id (LWarnDecls id) where
+  fold alg (L span (Warnings _src warnings)) = astMark alg (Just span) "Warnings" $ do
+    fold alg warnings
 
 instance Fold id (LAnnDecl id) where
   fold alg (L span _) = astUnsupported alg (Just span) "LAnnDecl"
 
 instance Fold id (LRuleDecl id) where
   fold alg (L span _) = astUnsupported alg (Just span) "LRuleDecl"
+
+instance Fold id (LRuleDecls id) where
+  fold alg (L span _) = astUnsupported alg (Just span) "LRuleDecls"
 
 instance Fold id (LVectDecl id) where
   fold alg (L span _) = astUnsupported alg (Just span) "LVectDecl"
