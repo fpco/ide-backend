@@ -688,7 +688,7 @@ generateMacros configPackageDBStack configExtraPathDirs = do
           hcPkgProgram    = ghcPkg
         , noPkgDbStack    = False
         , noVerboseFlag   = False
-        , flagPackageConf = False
+        , flagPackageConf = True  -- a `False` value here breaks everything!
         }
   pkgidss <- mapM (HcPkg.list hcPkgInfo verbosity) configPackageDBStack
   let newestPkgs = map last . groupBy ((==) `on` Package.packageName) . sort . concat $ pkgidss
@@ -712,35 +712,35 @@ localBuildInfo buildDir withPackageDB configExtraPathDirs = BuildInfo.LocalBuild
   , BuildInfo.compiler            = Simple.Compiler.Compiler
       -- TODO: Why is it okay that we always say 7.4.2 here?
       { compilerId         = Compiler.CompilerId Compiler.GHC (Version [7, 4, 2] [])
-      , compilerLanguages  = undefined
-      , compilerExtensions = undefined
+      , compilerLanguages  = error "compilerLanguages not defined"
+      , compilerExtensions = error "compilerExtensions not defined"
         -- TOOD: new fields
-      , compilerAbiTag     = undefined
-      , compilerCompat     = undefined
-      , compilerProperties = undefined
+      , compilerAbiTag     = error "compilerAbiTag not defined"
+      , compilerCompat     = error "compilerCompat not defined"
+      , compilerProperties = Map.empty -- Must be defined
       }
   , BuildInfo.buildDir
-  , BuildInfo.configFlags         = undefined
-  , BuildInfo.extraConfigArgs     = undefined
-  , BuildInfo.installDirTemplates = undefined
-  , BuildInfo.componentsConfigs   = undefined
-  , BuildInfo.installedPkgs       = undefined
-  , BuildInfo.pkgDescrFile        = undefined
-  , BuildInfo.localPkgDescr       = undefined
-  , BuildInfo.withVanillaLib      = undefined
-  , BuildInfo.withDynExe          = undefined
-  , BuildInfo.withProfExe         = undefined
-  , BuildInfo.withGHCiLib         = undefined
-  , BuildInfo.splitObjs           = undefined
-  , BuildInfo.stripExes           = undefined
-  , BuildInfo.progPrefix          = undefined
-  , BuildInfo.progSuffix          = undefined
+  , BuildInfo.configFlags         = error "BuildInfo.configFlags not defined"
+  , BuildInfo.extraConfigArgs     = error "BuildInfo.extraConfigArgs not defined"
+  , BuildInfo.installDirTemplates = error "BuildInfo.installDirTemplates not defined"
+  , BuildInfo.componentsConfigs   = error "BuildInfo.componentsConfigs not defined"
+  , BuildInfo.installedPkgs       = error "BuildInfo.installedPkgs not defined"
+  , BuildInfo.pkgDescrFile        = error "BuildInfo.pkgDescrFile not defined"
+  , BuildInfo.localPkgDescr       = error "BuildInfo.localPkgDescr not defined"
+  , BuildInfo.withVanillaLib      = error "BuildInfo.withVanillaLib not defined"
+  , BuildInfo.withDynExe          = error "BuildInfo.withDynExe not defined"
+  , BuildInfo.withProfExe         = error "BuildInfo.withProfExe not defined"
+  , BuildInfo.withGHCiLib         = error "BuildInfo.withGHCiLib not defined"
+  , BuildInfo.splitObjs           = error "BuildInfo.splitObjs not defined"
+  , BuildInfo.stripExes           = error "BuildInfo.stripExes not defined"
+  , BuildInfo.progPrefix          = error "BuildInfo.progPrefix not defined"
+  , BuildInfo.progSuffix          = error "BuildInfo.progSuffix not defined"
   -- TODO: New fields
-  , BuildInfo.pkgKey              = undefined
-  , BuildInfo.instantiatedWith    = undefined
-  , BuildInfo.withDebugInfo       = undefined
-  , BuildInfo.stripLibs           = undefined
-  , BuildInfo.relocatable         = undefined
+  , BuildInfo.pkgKey              = error "BuildInfo.pkgKey not defined"
+  , BuildInfo.instantiatedWith    = error "BuildInfo.instantiatedWith not defined"
+  , BuildInfo.withDebugInfo       = Simple.Compiler.NoDebugInfo -- must be defined
+  , BuildInfo.stripLibs           = error "BuildInfo.stripLibs not defined"
+  , BuildInfo.relocatable         = error "BuildInfo.relocatable not defined"
   }
 
 -- | Run gcc via ghc, with correct parameters.

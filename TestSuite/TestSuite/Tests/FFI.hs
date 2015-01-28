@@ -319,7 +319,7 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     -- the generated file changes so often
     dotCabalFromName <- getDotCabal session
     let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-    assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\nlicense-file: \"\"\ndata-dir: \"\"\n \nlibrary\n    build-depends: array ==X.Y.Z, base ==X.Y.Z,\n                   containers ==X.Y.Z, deepseq ==X.Y.Z, ghc-prim ==X.Y.Z,\n                   integer-gmp ==X.Y.Z, pretty ==X.Y.Z, template-haskell ==X.Y.Z\n    exposed-modules: A\n    exposed: True\n    buildable: True\n    c-sources: TestSuite/inputs/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes: life.h local.h life.h\n    hs-source-dirs: TestSuite/inputs/FFI\n \n " (ignoreVersions dotCabal)
+    assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\n\nlibrary\n    build-depends:\n        array ==X.Y.Z,\n        base ==X.Y.Z,\n        containers ==X.Y.Z,\n        deepseq ==X.Y.Z,\n        ghc-prim ==X.Y.Z,\n        integer-gmp ==X.Y.Z,\n        pretty ==X.Y.Z,\n        template-haskell ==X.Y.Z\n    exposed-modules:\n        A\n    c-sources:\n        TestSuite/inputs/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes:\n        life.h\n        local.h\n        life.h\n    hs-source-dirs: TestSuite/inputs/FFI\n\n"  (ignoreVersions dotCabal)
     let pkgDir = distDir </> "dotCabal.test"
     createDirectoryIfMissing False pkgDir
     L.writeFile (pkgDir </> "libName.cabal") dotCabal
