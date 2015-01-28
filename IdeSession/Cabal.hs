@@ -46,7 +46,6 @@ import qualified Distribution.ModuleName
 import Distribution.PackageDescription
 import Distribution.PackageDescription.PrettyPrint (showGenericPackageDescription)
 import qualified Distribution.Package as Package
-import Distribution.Package (Dependency(..), PackageName(..))
 import Distribution.ParseUtils ( parseFields, simpleField, ParseResult (..)
                                , FieldDescr, parseLicenseQ, parseFilePathQ
                                , parseFreeText, showFilePath, showFreeText
@@ -54,11 +53,11 @@ import Distribution.ParseUtils ( parseFields, simpleField, ParseResult (..)
 import qualified Distribution.Simple.Build as Build
 import Distribution.Simple.Build.Macros
 import qualified Distribution.Simple.Haddock as Haddock
-import Distribution.Simple (PackageDBStack, PackageDB(..))
+import Distribution.Simple (PackageDBStack)
 import qualified Distribution.Simple.Compiler as Simple.Compiler
 import Distribution.Simple.Configure (configure)
 import Distribution.Simple.GHC (getInstalledPackages, componentCcGhcOptions,
-                                ghcDynamic)
+                                isDynamic)
 import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo (..)
                                           , ComponentLocalBuildInfo (..)
                                           , localPkgDescr)
@@ -74,11 +73,14 @@ import qualified Distribution.Simple.Program.HcPkg as HcPkg
 import Distribution.System (buildPlatform)
 import qualified Distribution.Text
 import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
-import Distribution.Version (VersionRange, anyVersion, thisVersion)
+import Distribution.Version (anyVersion, thisVersion)
 import Distribution.Verbosity (silent)
+import qualified Distribution.Utils.NubList as NubList
 import Language.Haskell.Extension (Extension(..), KnownExtension(..),
                                    Language (Haskell2010))
 import Language.Haskell.TH.Syntax (lift, runIO)
+
+import qualified Data.Map as Map
 
 import IdeSession.GHC.API (cExtensions, cHeaderExtensions)
 import IdeSession.Licenses ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
@@ -110,7 +112,7 @@ pkgDescFromName pkgName version = PackageDescription
                        , pkgVersion = version
                        }
   , license        = AllRightsReserved  -- dummy
-  , licenseFile    = ""
+  , licenseFiles   = []
   , copyright      = ""
   , maintainer     = ""
   , author         = ""
@@ -230,9 +232,13 @@ libDesc relative ideSourcesDir ideSourcesDirForC ghcOpts ms = do
   cSources <- getCSources relative ideSourcesDirForC
   cHeaders <- getCHeaders ideSourcesDirForC
   return $ Library
-    { exposedModules = ms
-    , libExposed = False
-    , libBuildInfo = bInfo ideSourcesDir ghcOpts cSources cHeaders
+    { exposedModules     = ms
+    , libExposed         = False
+    , libBuildInfo       = bInfo ideSourcesDir ghcOpts cSources cHeaders
+      -- These are new fields. TODO: Do we give them the right values?
+    , reexportedModules  = []
+    , requiredSignatures = []
+    , exposedSignatures  = []
     }
 
 -- TODO: we could do the parsing early and export parsed Versions via our API,
@@ -267,7 +273,7 @@ mkConfFlags ideDistDir configPackageDBStack progPathExtra =
     , Setup.configVerbosity = Setup.Flag minBound
       -- @Nothing@ wipes out default, initial DBs.
     , Setup.configPackageDBs = Nothing : map Just configPackageDBStack
-    , Setup.configProgramPathExtra = progPathExtra
+    , Setup.configProgramPathExtra = NubList.toNubList progPathExtra
     }
 
 configureAndBuild :: BuildExeArgs
@@ -690,7 +696,13 @@ generateMacros configPackageDBStack configExtraPathDirs = do
   let verbosity = silent
   (ghcPkg, _) <- requireProgram verbosity ghcPkgProgram
                                 (defaultProgramConfiguration configExtraPathDirs)
-  pkgidss <- mapM (HcPkg.list verbosity ghcPkg) configPackageDBStack
+  let hcPkgInfo = HcPkg.HcPkgInfo {
+          hcPkgProgram    = ghcPkg
+        , noPkgDbStack    = False
+        , noVerboseFlag   = False
+        , flagPackageConf = False
+        }
+  pkgidss <- mapM (HcPkg.list hcPkgInfo verbosity) configPackageDBStack
   let newestPkgs = map last . groupBy ((==) `on` Package.packageName) . sort . concat $ pkgidss
   return $ generatePackageVersionMacros newestPkgs
 
@@ -710,15 +722,19 @@ localBuildInfo buildDir withPackageDB configExtraPathDirs = LocalBuildInfo
   , withProfLib         = False
   , withSharedLib       = False
   , compiler            = Simple.Compiler.Compiler
+      -- TODO: Why is it okay that we always say 7.4.2 here?
       { compilerId         = Compiler.CompilerId Compiler.GHC (Version [7, 4, 2] [])
       , compilerLanguages  = undefined
       , compilerExtensions = undefined
+        -- TOOD: new fields
+      , compilerAbiTag     = undefined
+      , compilerCompat     = undefined
+      , compilerProperties = undefined
       }
   , buildDir
   , configFlags         = undefined
   , extraConfigArgs     = undefined
   , installDirTemplates = undefined
-  , scratchDir          = undefined
   , componentsConfigs   = undefined
   , installedPkgs       = undefined
   , pkgDescrFile        = undefined
@@ -731,6 +747,12 @@ localBuildInfo buildDir withPackageDB configExtraPathDirs = LocalBuildInfo
   , stripExes           = undefined
   , progPrefix          = undefined
   , progSuffix          = undefined
+  -- TODO: New fields
+  , pkgKey              = undefined
+  , instantiatedWith    = undefined
+  , withDebugInfo       = undefined
+  , stripLibs           = undefined
+  , relocatable         = undefined
   }
 
 -- | Run gcc via ghc, with correct parameters.
@@ -744,51 +766,57 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
                         , rcPref           = pref
                         , rcIncludeDirs    = includeDirs
                         , .. }             = do
-  rcStderrLogExists <- doesFileExist rcStderrLog
-  when rcStderrLogExists $ removeFile rcStderrLog
-  let verbosity = silent
-      -- TODO: create dist.23412/build? see cabalMacrosLocation
-      buildDir = ideDistDir
-      lbi      = localBuildInfo buildDir configPackageDBStack configExtraPathDirs
-      libBi    = emptyBuildInfo{includeDirs} -- TODO: set ccOptions?
-      odir     = Setup.fromFlag (ghcOptObjDir vanillaCcOpts)
-      clbi     = LibComponentLocalBuildInfo [] []
-                   -- a stub, this would be expensive (lookups in pkgIndex);
-                   -- TODO: is it needed? e.g., for C calling into Haskell?
-      vanillaCcOpts = (componentCcGhcOptions verbosity lbi
-                         libBi clbi pref absC)`mappend` mempty {
-                        -- ghc ignores -odir for .o files coming from .c files
-                        ghcOptExtra = ["-o", absObj] ++ rcOptions,
-                        ghcOptFPic        = Setup.toFlag True
-                      }
-      profCcOpts    = vanillaCcOpts `mappend` mempty {
-                        ghcOptProfilingMode = Setup.toFlag True,
-                        ghcOptObjSuffix     = Setup.toFlag "p_o"
-                      }
-      sharedCcOpts  = vanillaCcOpts `mappend` mempty {
-                        ghcOptDynLinkMode = Setup.toFlag GhcDynamicOnly,
-                        ghcOptObjSuffix   = Setup.toFlag "dyn_o",
-                        ghcOptExtra = ["-o", replaceExtension absObj "dyn_o"]
-                      }
+    rcStderrLogExists <- doesFileExist rcStderrLog
+    when rcStderrLogExists $ removeFile rcStderrLog
 
-  exitCode :: Either ExitCode () <- redirectStderr rcStderrLog $
-    Ex.try $ do
-      createDirectoryIfMissingVerbose verbosity True odir
-      (ghcProg, _) <- requireProgram
-                        verbosity Cabal.Program.ghcProgram (withPrograms lbi)
-      let runGhcProg = runGHC verbosity ghcProg
-      runGhcProg vanillaCcOpts
+    exitCode <- redirectStderr rcStderrLog $
+      Ex.try $ do
+        createDirectoryIfMissingVerbose verbosity True odir
+        (ghcProg, _) <- requireProgram
+                          verbosity Cabal.Program.ghcProgram (withPrograms lbi)
+        let runGhcProg = runGHC verbosity ghcProg comp
+        runGhcProg vanillaCcOpts
 
-      isGhcDynamic <- ghcDynamic minBound ghcProg
-      let doingTH = EnableExtension TemplateHaskell `elem` allExtensions libBi  -- TODO
-          forceSharedLib = doingTH && isGhcDynamic
-          -- TH always needs default libs, even when building for profiling
-          whenProfLib = when (withProfLib lbi)
-          whenSharedLib forceShared = when (forceShared || withSharedLib lbi)
+        -- TH always needs default libs, even when building for profiling
+        -- TODO: Should we detect the use of TH in a different way?
+        let doingTH        = EnableExtension TemplateHaskell
+                               `elem` allExtensions libBi
+            isGhcDynamic   = isDynamic comp
+            forceSharedLib = doingTH && isGhcDynamic
+            whenProfLib    = when (withProfLib lbi)
+            whenSharedLib forceShared = when (forceShared || withSharedLib lbi)
 
-      whenSharedLib forceSharedLib (runGhcProg sharedCcOpts)
-      whenProfLib (runGhcProg profCcOpts)
-  return $! either id (const ExitSuccess) exitCode
+        whenSharedLib forceSharedLib (runGhcProg sharedCcOpts)
+        whenProfLib (runGhcProg profCcOpts)
+    return $! either id (\() -> ExitSuccess) exitCode
+  where
+    verbosity = silent
+    buildDir  = ideDistDir -- TODO: create dist.23412/build? see cabalMacrosLocation
+    lbi       = localBuildInfo buildDir configPackageDBStack configExtraPathDirs
+    comp      = compiler lbi
+    libBi     = emptyBuildInfo{includeDirs} -- TODO: set ccOptions?
+    odir      = Setup.fromFlag (ghcOptObjDir vanillaCcOpts)
+
+    -- a stub, this would be expensive (lookups in pkgIndex);
+    -- TODO: is it needed? e.g., for C calling into Haskell?
+    clbi      = LibComponentLocalBuildInfo [] [] Map.empty []
+
+    -- Construct CC options for various kinds of flavours
+    vanillaCcOpts = (componentCcGhcOptions verbosity lbi
+                       libBi clbi pref absC) `mappend` mempty {
+                      -- ghc ignores -odir for .o files coming from .c files
+                      ghcOptExtra = NubList.toNubListR $ ["-o", absObj] ++ rcOptions,
+                      ghcOptFPic  = Setup.toFlag True
+                    }
+    profCcOpts    = vanillaCcOpts `mappend` mempty {
+                      ghcOptProfilingMode = Setup.toFlag True,
+                      ghcOptObjSuffix     = Setup.toFlag "p_o"
+                    }
+    sharedCcOpts  = vanillaCcOpts `mappend` mempty {
+                      ghcOptDynLinkMode = Setup.toFlag GhcDynamicOnly,
+                      ghcOptObjSuffix   = Setup.toFlag "dyn_o",
+                      ghcOptExtra       = NubList.toNubListR ["-o", replaceExtension absObj "dyn_o"]
+                    }
 
 data BuildExeArgs = BuildExeArgs
   { bePackageDBStack   :: PackageDBStack
@@ -924,10 +952,6 @@ instance Binary LicenseArgs where
                     <*> get <*> get <*> get
                     <*> get <*> get <*> get
 
-instance Binary License where
-  put = put . show
-  get = read <$> get
-
 instance Binary ExitCode where
   put ExitSuccess = putWord8 0
   put (ExitFailure code) = putWord8 1 >> put code
@@ -938,33 +962,3 @@ instance Binary ExitCode where
       0 -> return ExitSuccess
       1 -> ExitFailure <$> get
       _ -> fail "ExitCode.get: invalid header"
-
-instance Binary PackageDB where
-  put GlobalPackageDB = putWord8 0
-  put UserPackageDB = putWord8 1
-  put (SpecificPackageDB path) = putWord8 2 >> put path
-
-  get = do
-    header <- getWord8
-    case header of
-      0 -> return GlobalPackageDB
-      1 -> return UserPackageDB
-      2 -> SpecificPackageDB <$> get
-      _ -> fail "GlobalPackageDB.get: invalid header"
-
-instance Binary Dependency where
-  put (Dependency pn vr) = do
-    put pn
-    put vr
-
-  get = Dependency <$> get <*> get
-
-instance Binary VersionRange where  -- very complex type, but compact String rep
-  put = put . show
-
-  get = read <$> get
-
-instance Binary PackageName where
-  put (PackageName n) = put n
-
-  get = PackageName <$> get

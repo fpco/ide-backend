@@ -32,7 +32,7 @@ import IdeSession.GHC.Responses
 -- We use a Unix timestamp for this so that these API versions have some
 -- semantics (http://www.epochconverter.com/, GMT).
 ideBackendApiVersion :: Int
-ideBackendApiVersion = 1421932045
+ideBackendApiVersion = 1422360183
 
 {------------------------------------------------------------------------------
   Configuration

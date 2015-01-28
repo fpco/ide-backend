@@ -78,7 +78,7 @@ library
                       utf8-string          >= 0.3     && < 0.4,
                       template-haskell,
                       -- our own private fork:
-                      Cabal-ide-backend    >= 1.18,
+                      Cabal-ide-backend    >= 1.22,
                       ghc-prim,
                       pretty-show
 
@@ -131,7 +131,7 @@ executable ide-backend-exe-cabal
                       attoparsec           >= 0.10    && < 0.13,
                       template-haskell,
                       -- our own private fork:
-                      Cabal-ide-backend    >= 1.18,
+                      Cabal-ide-backend    >= 1.22,
                       ghc-prim,
                       pretty-show
 

@@ -162,8 +162,16 @@ we use for ide-backend-server). For now we will assume it's a stock 7.4.
   - Standard installation of ghc 7.4.2
   - ide-backend/vendor/cabal/Cabal (Cabal-ide-backend) and
     ide-backend/vendor/binary (binary-ide-backend)
-    (make sure to ghc-pkg hide these packages)
   - ide-backend and dependencies
+
+NOTE on installing Cabal-ide-backend: Cabal-ide-backend relies on
+binary-ide-backend; this is just for compatibility with the rest ide-backend,
+and it can build against the standard binary, but it does need binary >= 0.7 in
+order to build. If you are building Cabal in an environment with, say,
+binary-0.5 and binary-ide-backend-0.7.3.0, then calling configure on Cabal will
+fail because configuring cabal builds all of cabal (this is a quick of cabal --
+bootstrapping problem). To fix this, temporarily hide binary and expose
+binary-ide-backend when building Cabal. 
 
 The fpco-patched-7.4 and fpco-patched-7.8 sandboxes
 ---------------------------------------------------
@@ -197,11 +205,10 @@ only a few minor differences, explained when they come up.
   (See http://www.edsko.net/2013/02/10/comprehensive-haskell-sandboxes/ , the
   last section, "Known Limitations".)
 
-* Install 
+* Install
 
   - The appropriate branch of ghc (see below)
   - ide-backend/vendor/binary (binary-ide-backend)
-    (make sure to ghc-pkg hide binary-ide-backend)
   - ide-backend-server and dependencies (including alex/happy)
 
 * Create package DB for snippets (the "snippet DB")
@@ -275,7 +282,7 @@ The most conversative way to run the test suite is:
       --test-78  \
       --test-710 \
       --no-session-reuse \
-      -j1 
+      -j1
 
 The test suite runs the tests against both 7.4 and 7.8, and configures the
 sessions correspondingly given the above command line options. In this example
@@ -330,7 +337,7 @@ ghc 7.4
 
   in the section for the "quick" build flavour (make sure there are no trailing
   spaces in your build.mk).
-  
+
   NOTE: This assumes wanting to do ghc dev. For performance builds you should
   pick a different build flavour.
 
@@ -375,7 +382,7 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
 * Get the corresponding version of the core libraries:
 
-      ./sync-all --no-dph -r git://git.haskell.org get -b ghc-7.8 
+      ./sync-all --no-dph -r git://git.haskell.org get -b ghc-7.8
 
   WARNING: There are no ghc-7.8.4-release tags for these libraries, so this
   checks out the "latest" 7.8 branch for each dependency. This may or may not
@@ -416,14 +423,14 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
       haddock          -> ../src/ghc/inplace/bin/haddock
       hsc2hs           -> ../src/ghc/inplace/bin/hsc2hs
 
-  (<date> will vary). 
+  (<date> will vary).
 
 * You will probably also want to install the bundled Haddock (in the new
   sandbox): run
 
       cabal install
 
-  in utils/haddock. 
+  in utils/haddock.
 
 ghc 7.10
 --------
@@ -478,7 +485,7 @@ sure we have the right version of all the dependencies.
       haddock           -> ../src/ghc/inplace/bin/haddock
       hsc2hs            -> ../src/ghc/inplace/bin/hsc2hs
 
-  (<date> will vary). 
+  (<date> will vary).
 
 * You will probably also want to install the bundled Haddock (in the new
   sandbox): run
