@@ -171,7 +171,7 @@ order to build. If you are building Cabal in an environment with, say,
 binary-0.5 and binary-ide-backend-0.7.3.0, then calling configure on Cabal will
 fail because configuring cabal builds all of cabal (this is a quick of cabal --
 bootstrapping problem). To fix this, temporarily hide binary and expose
-binary-ide-backend when building Cabal. 
+binary-ide-backend when building Cabal.
 
 The fpco-patched-7.4 and fpco-patched-7.8 sandboxes
 ---------------------------------------------------
@@ -449,7 +449,7 @@ sure we have the right version of all the dependencies.
 * Get the corresponding version of the core libraries:
 
       git submodule init
-      git sobmodule update
+      git submodule update
 
 * Create build.mk
 
