@@ -34,20 +34,16 @@ importMainPackage = Private.PackageId {
   , Private.packageKey     = Text.pack $ packageKeyString mainPackageKey
   }
 
--- | Attempt to find out the version of a package
+-- | Find out the version of a package
 importPackageId :: DynFlags -> PackageKey -> Private.PackageId
+importPackageId _ p | p == mainPackageKey = importMainPackage
 importPackageId dflags p =
-  case packageKeyToSourceId dflags p of
-    Nothing ->
-      if p == mainPackageKey
-        then importMainPackage
-        else error $ "importPackageId:" ++ packageKeyString p
-    Just (pkgName, pkgVersion) ->
-      Private.PackageId {
-          Private.packageName    = Text.pack pkgName
-        , Private.packageVersion = Maybe.just $ Text.pack pkgVersion
-        , Private.packageKey     = Text.pack $ packageKeyString p
-        }
+    let (pkgName, pkgVersion) = packageKeyToSourceId dflags p in
+    Private.PackageId {
+        Private.packageName    = Text.pack pkgName
+      , Private.packageVersion = Maybe.just $ Text.pack pkgVersion
+      , Private.packageKey     = Text.pack $ packageKeyString p
+      }
 
 importModuleId :: DynFlags -> GHC.Module -> Private.ModuleId
 importModuleId dflags mod = Private.ModuleId {

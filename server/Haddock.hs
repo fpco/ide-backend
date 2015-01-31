@@ -69,18 +69,15 @@ haddockInterfaceFilePath :: DynFlags
                          -> PackageKey
                          -> Either String FilePath
 haddockInterfaceFilePath dflags pkg =
-  case lookupPackage dflags pkg of
-    Nothing ->
-      Left $ "Package configuration for "
-          ++ pretty dflags defaultUserStyle pkg
-          ++ " not found"
-    Just cfg | null (GHC.haddockInterfaces cfg) -> do
+  let cfg = lookupPackage dflags pkg in
+  case () of
+    () | null (GHC.haddockInterfaces cfg) -> do
       Left $ "No haddock interfaces found for package "
           ++ pretty dflags defaultUserStyle pkg
-    Just cfg | length (GHC.haddockInterfaces cfg) > 1 -> do
+    () | length (GHC.haddockInterfaces cfg) > 1 -> do
       Left $ "Too many haddock interfaces found for package "
           ++ pretty dflags defaultUserStyle pkg
-    Just cfg ->
+    _otherwise ->
       Right . head . GHC.haddockInterfaces $ cfg
 
 haddockInterfaceFor :: DynFlags

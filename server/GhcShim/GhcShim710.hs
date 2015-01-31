@@ -41,6 +41,7 @@ module GhcShim.GhcShim710
 import Prelude hiding (id, span)
 import Control.Monad (void, forM_, liftM)
 import Data.IORef
+import Data.Maybe (fromMaybe)
 import Data.Time (UTCTime)
 import Data.Version
 import System.IO.Unsafe (unsafePerformIO)
@@ -59,7 +60,6 @@ import Module
 import MonadUtils
 import Outputable hiding (showSDoc)
 import PackageConfig
-import Packages
 import Pair
 import PprTyThing
 import Pretty
@@ -70,6 +70,7 @@ import TcType
 import Type
 import TysWiredIn
 import qualified BreakArray
+import qualified Packages
 
 import qualified Distribution.Package      as Cabal
 import qualified Distribution.Text         as Cabal
@@ -722,17 +723,44 @@ restoreDynFlagsFrom new old = new {
 
 type PackageQualifier = Maybe FastString
 
+lookupPackageBySourceId :: DynFlags -> Cabal.PackageId -> PackageConfig
+lookupPackageBySourceId dflags (Cabal.PackageIdentifier (Cabal.PackageName name) version) =
+    case filter matchesId (Packages.listPackageConfigMap dflags) of
+      (cfg:_)    -> cfg
+      _otherwise -> error $ "No package found with name " ++ name ++ " and version " ++ showVersion version
+  where
+    matchesId :: PackageConfig -> Bool
+    matchesId cfg = packageNameString cfg == name
+                 && packageVersion    cfg == version
+
+-- | Lookup a package by package key
+--
+-- Throws a runtime error when the package cannot be found (since these
+-- package keys from from ghc and/or haddock, we should never ever be
+-- presented with an invalid key).
+--
+-- HOWEVER: Since Haddock is currently inconsistent about package keys versus
+-- package source IDs <https://github.com/haskell/haddock/issues/362>,
+-- if we cannot find the package key we try again, re-interpreting the
+-- package key as an installed package ID.
+lookupPackage :: DynFlags -> PackageKey -> PackageConfig
+lookupPackage dflags pkey = fromMaybe workaroundHaddockBug (Packages.lookupPackage dflags pkey)
+  where
+    workaroundHaddockBug = lookupPackageBySourceId dflags (parseSourceId (packageKeyString pkey))
+
 -- | Translate a package key to a source ID (name and version)
+--
+-- See comments for `lookupPackage` about runtime errors.
 --
 -- From 7.10 ghc maintains version numbers even for built-in packages, so
 -- earlier tricks to recover this information are no longer necessary.
-packageKeyToSourceId :: DynFlags -> PackageKey -> Maybe (String, String)
-packageKeyToSourceId dflags p = do
-    pkgCfg <- lookupPackage dflags p
-    let srcId   = sourcePackageIdParsed pkgCfg
+packageKeyToSourceId :: DynFlags -> PackageKey -> (String, String)
+packageKeyToSourceId dflags p =
+    let pkgCfg  = lookupPackage dflags p
+        srcId   = sourcePackageIdParsed pkgCfg
         name    = pkgName srcId
         version = Cabal.pkgVersion srcId
-    return (name, showVersion (stripInPlace version))
+    in (name, showVersion (stripInPlace version))
   where
     stripInPlace :: Version -> Version
     stripInPlace (Version bs ts) = Version bs (filter (/= "inplace") ts)

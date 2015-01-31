@@ -626,8 +626,11 @@ stringToPackageKey = stringToPackageId
 mainPackageKey :: PackageKey
 mainPackageKey = mainPackageId
 
-lookupPackage :: DynFlags -> PackageKey -> Maybe PackageConfig
-lookupPackage = Packages.lookupPackage . Packages.pkgIdMap . pkgState
+lookupPackage :: DynFlags -> PackageKey -> PackageConfig
+lookupPackage dflags pkey =
+    Maybe.fromMaybe
+      (error $ "lookupPackage: invalid key " ++ packageKeyString pkey)
+      (Packages.lookupPackage (Packages.pkgIdMap (pkgState dflags)) pkey)
 
 modulePackageKey :: Module -> PackageKey
 modulePackageKey = modulePackageId
@@ -638,14 +641,14 @@ modulePackageKey = modulePackageId
 -- leak in the form of a Cabal package id for the same package, which still
 -- contains a version. See
 -- <http://www.haskell.org/ghc/docs/7.4.2/html/libraries/ghc/Module.html#g:3>
-packageKeyToSourceId :: DynFlags -> PackageKey -> Maybe (String, String)
-packageKeyToSourceId dflags p = do
-    pkgCfg <- lookupPackage dflags p
-    let srcId   = Cabal.sourcePackageId pkgCfg
+packageKeyToSourceId :: DynFlags -> PackageKey -> (String, String)
+packageKeyToSourceId dflags p =
+    let pkgCfg  = lookupPackage dflags p
+        srcId   = Cabal.sourcePackageId pkgCfg
         instId  = installedToSourceId $ Cabal.installedPackageId pkgCfg
         name    = pkgName srcId
         version = Cabal.pkgVersion srcId `orIfZero` Cabal.pkgVersion instId
-    return (name, showVersion (stripInPlace version))
+    in (name, showVersion (stripInPlace version))
   where
     orIfZero :: Version -> Version -> Version
     orIfZero v a = case v of Version [] [] -> a ; _otherwise -> v
