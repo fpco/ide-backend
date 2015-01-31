@@ -292,14 +292,14 @@ ifTestingIntegration TestSuiteEnv{..} act = do
 -------------------------------------------------------------------------------}
 
 data TestCase =
-    StdTest Assertion
+    StdTest TestName Assertion
     -- Tests that report more than just "OK"
-  | WithOK (IO String)
+  | WithOK TestName (IO String)
   deriving Typeable
 
 runTestCase :: TestCase -> IO Result
-runTestCase (StdTest t) = registerTest t >> return (testPassed "")
-runTestCase (WithOK  t) = registerTest t >>= return . testPassed
+runTestCase (StdTest nm t) = registerTest nm t >> return (testPassed "")
+runTestCase (WithOK  nm t) = registerTest nm t >>= return . testPassed
 
 instance IsTest TestCase where
   -- TODO: Measure time and use for testPassed in normal case
@@ -318,11 +318,11 @@ instance Exception SkipTest
 
 -- | Construct a standard test case
 stdTest :: TestSuiteEnv -> TestName -> (TestSuiteEnv -> Assertion) -> TestTree
-stdTest st name = singleTest name . StdTest . ($ st)
+stdTest st name = singleTest name . StdTest name . ($ st)
 
 -- | Construct a test case that reports OK with a non-standard string
 withOK :: TestSuiteEnv -> TestName -> (TestSuiteEnv -> IO String) -> TestTree
-withOK st name = singleTest name . WithOK . ($ st)
+withOK st name = singleTest name . WithOK name . ($ st)
 
 -- | Lists of tests that should be run only if Haddocks are installed
 docTests :: TestSuiteEnv -> [TestTree] -> [TestTree]
@@ -729,8 +729,8 @@ testSuiteThreadsTVar :: TVar TestSuiteThreads
 testSuiteThreadsTVar = unsafePerformIO $ newTVarIO $ NormalExecution [] []
 
 -- | Every test execution should be wrapped in registerTest
-registerTest :: IO a -> IO a
-registerTest act = do
+registerTest :: TestName -> IO a -> IO a
+registerTest _name act = do
     tid <- myThreadId
     bracket_ (register tid) (unregister tid) act
   where
