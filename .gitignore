@@ -4,3 +4,5 @@ test/OldLogs
 tags
 dist/
 unversioned/
+cabal.sandbox.config*
+.cabal-sandbox

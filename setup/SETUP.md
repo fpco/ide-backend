@@ -498,7 +498,14 @@ sure we have the right version of all the dependencies.
 Using cabal sandboxes
 =====================
 
-TODO: This section should replace the section above.
+We need to build one instance of ide-backend-server per ghc version we want to
+support; for ghc 7.4.2 we need a patched ghc to do this; for ghc 7.8 and 7.10
+patches are optional. In this section we describe how to build
+ide-backend-server against all versions of ghc. When we say a particular version
+of ghc is "active" we simply mean that it's in the path; we will build
+everything in their own sandbox. See [Comprehensive Haskell Sandboxes,
+Revisted](http://www.edsko.net/2015/03/09/sandboxes-revisited/) for some details
+on using sandboxes with multiple versions of ghc.
 
 Sandbox for building the server
 -------------------------------
@@ -509,7 +516,7 @@ With the patched compiler active, create the new sandbox in
 `~/path/to/ide-backend/server`:
 
 ```
-cabal sandbox init
+cabal sandbox init --sandbox ./.cabal-sandbox/7.8.4
 cabal sandbox add-source ../vendor/binary
 cabal install
 ```
@@ -532,7 +539,7 @@ This works pretty much as it does for `ghc` 7.8.4, but we need to install the
 Haddock bundled with `ghc`:
 
 ```
-cabal sandbox init
+cabal sandbox init --sandbox ./.cabal-sandbox/7.10
 cabal sandbox add-source ../vendor/binary
 cabal install ~/path/to/ghc/7.10/utils/haddock/haddock-{library,api}
 cabal install
