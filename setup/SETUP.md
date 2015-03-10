@@ -495,8 +495,138 @@ sure we have the right version of all the dependencies.
   in utils/haddock/haddock-library, utils/haddock/haddock-api and utils/haddock
   (in that order).
 
+Using cabal sandboxes
+=====================
+
+TODO: This section should replace the section above.
+
+Sandbox for building the server
+-------------------------------
+
+### For ghc 7.4.2 and 7.8.4
+
+With the patched compiler active, create the new sandbox in
+`~/path/to/ide-backend/server`:
+
+```
+cabal sandbox init
+cabal sandbox add-source ../vendor/binary
+cabal install
+```
+
+Or, if you want to hack on `ide-backend-server`, replace that last line with
+
+```
+cabal install --only-dependencies
+cabal configure
+cabal build
+cabal install --only
+```
+
+TODO: Would be nicer if we could remove the need for ide-backend-binary, but
+this would mean dropping support for ghc 7.4.2.
+
+### For ghc 7.10
+
+This works pretty much as it does for `ghc` 7.8.4, but we need to install the
+Haddock bundled with `ghc`:
+
+```
+cabal sandbox init
+cabal sandbox add-source ../vendor/binary
+cabal install ~/path/to/ghc/7.10/utils/haddock/haddock-{library,api}
+cabal install
+```
+
+Or, if you want to hack on `ide-backend-server`, replace that last line with
+
+```
+cabal install --only-dependencies
+cabal configure
+cabal build
+cabal install --only
+```
+
+(Currently this relies on a patched version of `bytestring-trie`; hopefully this
+will be resolved before the official release.)
+
+Sandbox for building the library
+--------------------------------
+
+With either a patched or a stock ghc, run in `~/path/to/ide-backend`:
+
+```
+cabal sandbox init
+cabal sandbox add-source vendor/binary
+cabal sandbox add-source vendor/cabal/Cabal
+cabal install
+```
+
+Or, if you want to hack on `ide-backend-server`, replace that last line with
+
+```
+cabal install --only-dependencies --enable-tests
+cabal configure --enable-tests
+cabal build
+cabal install --only
+```
+
+Setting up snippet sandboxes for running the tests
+--------------------------------------------------
+
+There are lots of ways you could do this; I find this way convenient. Create
+directories
+
+```
+snippet-dbs/7.4.2
+snippet-dbs/7.8.4
+snippet-dbs/7.10
+```
+
+Then for each directory activate the corresponding **patched** version of `ghc` and run
+
+```
+cabal sandbox init --sandbox=.
+echo "documentation: True" >cabal.config
+cabal install parallel
+cabal install mtl
+cabal install monads-tf
+cabal install ~/path/to/ide-backend/rts
+```
+
+and optionally also install `yesod` and `parsec` (this is only necessary for a
+few tests). It is important to install `parallel`, `mtl` and `monads-tf` in this
+order (issue #95). It is also important to use the patched version of `ghc`
+here, not because we need those patches but because the version used to compile
+these snippets must match the version used by the `ide-backend-server`.
+
+Running the tests
+-----------------
+
+The safest way to run the test suite is to do:
+
+```
+PATH=/bin:/usr/bin \
+dist/build/TestSuite/TestSuite \
+  --extra-paths-74  ~/path/to/patched/ghc/7.4.2:~/path/to/7.4.2/ide-backend-server:~/path/to/ide-backend/.cabal-sandbox/bin \
+  --extra-paths-78  ~/path/to/patched/ghc/7.8.4:~/path/to/7.8.4/ide-backend-server:~/path/to/ide-backend/.cabal-sandbox/bin \
+  --extra-paths-710 ~/path/to/patched/ghc/7.10:~/path/to/7.10/ide-backend-server:~/path/to/ide-backend/.cabal-sandbox/bin \
+  --package-db-74  ~/path/to/snippet-dbs/7.4.2/x86_64-osx-ghc-7.4.2.20140729-packages.conf.d \
+  --package-db-78  ~/path/to/snippet-dbs/7.8.4/x86_64-osx-ghc-7.8.4.20141229-packages.conf.d \
+  --package-db-710 ~/path/to/snippet-dbs/7.10/x86_64-osx-ghc-7.10.0.20150131-packages.conf.d \
+  --test-74  \
+  --test-78  \
+  --test-710 \
+  --no-session-reuse \
+  -j1
+```
+
+If you want to speed up the tests you can leave out `--no-session-reuse` and
+`-j1`; this _should_ work equally well but may not. If it doesn't, this may
+either indicate a bug in the test suite or in `ide-backend` itself.
+
 DEBUGGING
----------
+=========
 
 * If ide-backend complains about being unable to open dynamic libraries (even
   with ghc 7.4, or with ghc 7.8 NOT configured for dynamic libraries), such as
