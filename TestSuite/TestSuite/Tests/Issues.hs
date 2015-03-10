@@ -592,7 +592,9 @@ test191 env = withAvailableSession env $ \session -> do
          _ -> assertFailure $ "Unexpected run result " ++ show result
 
     -- But after we change the stack size, test2 too will crash:
-    updateSessionD session (updateRtsOpts ["-K128K"]) 1
+    -- (Note that we cannot set this value _too_ low otherwise the main server
+    -- itself, rather than the snippet, will crash. See Issue #266.)
+    updateSessionD session (updateRtsOpts ["-K256K"]) 1
     do runActions <- runStmt session "Main" "test2"
        (_output, result) <- runWaitAll runActions
        case result of
