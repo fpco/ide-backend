@@ -613,11 +613,11 @@ Running the tests
 The safest way to run the test suite is to do:
 
 ```
-PATH=/bin:/usr/bin \
-dist/build/TestSuite/TestSuite \
-  --extra-paths-74  ~/path/to/patched/ghc/7.4.2:~/path/to/7.4.2/ide-backend-server:~/path/to/ide-backend/.cabal-sandbox/bin \
-  --extra-paths-78  ~/path/to/patched/ghc/7.8.4:~/path/to/7.8.4/ide-backend-server:~/path/to/ide-backend/.cabal-sandbox/bin \
-  --extra-paths-710 ~/path/to/patched/ghc/7.10:~/path/to/7.10/ide-backend-server:~/path/to/ide-backend/.cabal-sandbox/bin \
+PATH=/bin:/usr/bin:~/path/to/ide-backend/.cabal-sandbox/bin:~/path/to/cabal \
+dist/build/TestSuite/TestSuite: \
+  --extra-paths-74  ~/path/to/patched/ghc/7.4.2:~/path/to/7.4.2/ide-backend-server \
+  --extra-paths-78  ~/path/to/patched/ghc/7.8.4:~/path/to/7.8.4/ide-backend-server \
+  --extra-paths-710 ~/path/to/patched/ghc/7.10:~/path/to/7.10/ide-backend-server \
   --package-db-74  ~/path/to/snippet-dbs/7.4.2/x86_64-osx-ghc-7.4.2.20140729-packages.conf.d \
   --package-db-78  ~/path/to/snippet-dbs/7.8.4/x86_64-osx-ghc-7.8.4.20141229-packages.conf.d \
   --package-db-710 ~/path/to/snippet-dbs/7.10/x86_64-osx-ghc-7.10.0.20150131-packages.conf.d \

@@ -231,7 +231,7 @@ test_Interleaved env = withAvailableSession env $ \session -> do
     do interrupt runActionsExe
        resOrEx <- runWait runActionsExe
        case resOrEx of
-         Right result -> assertEqual "after runExe" (ExitFailure 2) result
+         Right result -> assertEqual "after runExe" (ExitFailure (-2)) result -- SIGINT
          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
   where
     upd = (updateCodeGeneration True)
@@ -320,7 +320,7 @@ test_Merge_runExe env = withAvailableSession env $ \session -> do
           , "Hello World 7"
           , "Hello World 8"
           ]
-    assertEqual "" result ExitSuccess
+    assertEqual "" ExitSuccess result 
     assertEqual "" expectedOutput output
   where
     -- Note that we have to set buffering here, to match the default

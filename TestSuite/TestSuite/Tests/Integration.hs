@@ -186,7 +186,7 @@ test_dontLoseFilesInRestart session originalUpdate lm = do
     assertNoErrors session
     updateSessionD session update3 0  -- 0: nothing to generate code from
     exitCodeBefore <- getGhcExitCode serverBefore
-    assertEqual "exitCodeBefore" (Just ExitSuccess) exitCodeBefore
+    assertEqual "exitCodeBefore" (Just (ExitFailure (-9))) exitCodeBefore -- SIGKILL
   where
     update  = originalUpdate <> updateCodeGeneration True
     update2 = mconcat $ map updateSourceFileDelete lm

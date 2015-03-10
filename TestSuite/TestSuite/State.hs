@@ -630,19 +630,12 @@ withInstalledPackage env pkgDir act =
 -- This should not be used in isolation because it changes test global state.
 packageInstall :: TestSuiteEnv -> FilePath -> IO ()
 packageInstall env@TestSuiteEnv{..} pkgDir = do
-  cabalExe <- findExe env "cabal"
-  oldEnv   <- System.Environment.getEnvironment
-  let oldEnvMap          = Map.fromList oldEnv
-      adjustPATH oldPATH = extraPathDirs ++ ":" ++ oldPATH
-      newEnvMap          = Map.adjust adjustPATH "PATH" oldEnvMap
-      newEnv             = Map.toList newEnvMap
-  forM_ [ ["clean"]
-        , ["configure", "--package-db=" ++ packageDb, "--disable-library-profiling"]
-        , ["build"]
-        , ["copy"]
-        , ["register"]
-        ] $ \cmd -> do
-    let opts = cmd ++ ["-v0"]
+    cabalExe <- findExe env "cabal"
+    oldEnv   <- System.Environment.getEnvironment
+    let oldEnvMap          = Map.fromList oldEnv
+        adjustPATH oldPATH = extraPathDirs ++ ":" ++ oldPATH
+        newEnvMap          = Map.adjust adjustPATH "PATH" oldEnvMap
+        newEnv             = Map.toList newEnvMap
     (_,_,_,r2) <- createProcess (proc cabalExe opts)
                     { cwd = Just pkgDir
                     , env = Just newEnv
@@ -659,6 +652,14 @@ packageInstall env@TestSuiteEnv{..} pkgDir = do
         GHC_7_4  -> testSuiteConfigPackageDb74  testSuiteEnvConfig
         GHC_7_8  -> testSuiteConfigPackageDb78  testSuiteEnvConfig
         GHC_7_10 -> testSuiteConfigPackageDb710 testSuiteEnvConfig
+
+    opts = [ "--no-require-sandbox"
+           , "install"
+           , "--package-db=" ++ packageDb
+           , "--disable-library-profiling"
+           , "-v0"
+           ]
+
 
 -- | Used only in the definition of 'withInstalledPackage'
 --
