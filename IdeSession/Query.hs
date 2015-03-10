@@ -352,8 +352,9 @@ dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
     putStrLn $ "*** " ++ Text.unpack mod ++ " ***"
     forM_ (StrictIntervalMap.toList (Private.idMapToMap idMap)) $ \(i, idInfo) -> do
       let idInfo' = removeExplicitSharing computedCache idInfo
-          (StrictIntervalMap.Interval (_, fromLine, fromCol) (_, toLine, toCol)) = i
-      putStrLn $ show (fromLine, fromCol, toLine, toCol)  ++ ": " ++ show idInfo'
+          (StrictIntervalMap.Interval (fn, fromLine, fromCol) (_, toLine, toCol)) = i
+          fn' = dereferenceFilePathPtr computedCache fn
+      putStrLn $ show (fn', fromLine, fromCol, toLine, toCol)  ++ ": " ++ show idInfo'
 
 {------------------------------------------------------------------------------
   Auxiliary
