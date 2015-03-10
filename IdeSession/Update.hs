@@ -125,6 +125,7 @@ data SessionInitParams = SessionInitParams {
     -- Defaults to @-K8M@
   , sessionInitRtsOpts :: [String]
   }
+  deriving Show
 
 defaultSessionInitParams :: SessionInitParams
 defaultSessionInitParams = SessionInitParams {
@@ -135,20 +136,20 @@ defaultSessionInitParams = SessionInitParams {
   , sessionInitRtsOpts          = ["-K8M"]
   }
 
--- | The SessionInitParams that correspond to an existing session
+-- | Session initialization parameters for an existing session.
 --
 -- For internal use only (used in 'updateSession' when restarting the session).
 --
 -- We set 'sessionInitCabalMacros' to 'Nothing' because the cabal macros file
 -- has already been written to disk, and we don't remove the project directory
 -- on a session restart.
-sessionInitParamsFor :: IdeIdleState -> SessionInitParams
-sessionInitParamsFor idleState = SessionInitParams {
+sessionRestartParams :: IdeIdleState -> IdeSessionUpdate -> SessionInitParams
+sessionRestartParams st IdeSessionUpdate{..} = SessionInitParams {
     sessionInitCabalMacros      = Nothing
-  , sessionInitGhcOptions       = idleState ^. ideGhcOpts
-  , sessionInitRelativeIncludes = idleState ^. ideRelativeIncludes
-  , sessionInitTargets          = idleState ^. ideTargets
-  , sessionInitRtsOpts          = idleState ^. ideRtsOpts
+  , sessionInitGhcOptions       = fromMaybe (st ^. ideGhcOpts)          ideUpdateGhcOpts
+  , sessionInitRelativeIncludes = fromMaybe (st ^. ideRelativeIncludes) ideUpdateRelIncls
+  , sessionInitTargets          = fromMaybe (st ^. ideTargets)          ideUpdateTargets
+  , sessionInitRtsOpts          = fromMaybe (st ^. ideRtsOpts)          ideUpdateRtsOpts
   }
 
 -- | Set up the initial state of the session according to the given parameters
@@ -392,16 +393,18 @@ updateSession' IdeSession{ideStaticInfo, ideState} callback = \update ->
   where
     go :: Bool -> IdeSessionUpdate -> IdeSessionState -> IO IdeSessionState
     go justRestarted update (IdeSessionIdle idleState) =
-      case requiresSessionRestart idleState update of
-        Nothing -> do
+      if not (requiresSessionRestart idleState update)
+        then do
           (idleState', mex) <- runSessionUpdate justRestarted update ideStaticInfo callback idleState
           case mex of
             Nothing -> return $ IdeSessionIdle          idleState'
             Just ex -> return $ IdeSessionServerDied ex idleState'
-        Just restartParams ->
+        else do
+          let restartParams = sessionRestartParams idleState update
           restart justRestarted update restartParams idleState
-    go justRestarted update (IdeSessionServerDied _ex idleState) =
-      restart justRestarted update (sessionInitParamsFor idleState) idleState
+    go justRestarted update (IdeSessionServerDied _ex idleState) = do
+      let restartParams = sessionRestartParams idleState update
+      restart justRestarted update restartParams idleState
     go _ _ IdeSessionShutdown =
       Ex.throwIO (userError "Session already shut down.")
 
@@ -420,28 +423,18 @@ updateSession' IdeSession{ideStaticInfo, ideState} callback = \update ->
         ServerRestartFailed idleState' ->
           return $ IdeSessionServerDied failedToRestart idleState'
 
--- | @needsSessionRestart st upd@ returns true if update @upd@ requires a
--- session restart given current state @st@. If a session restart is requried
--- we return how the new session should be initialized.
-requiresSessionRestart :: IdeIdleState -> IdeSessionUpdate -> Maybe SessionInitParams
+-- | @requiresSessionRestart st upd@ returns true if update @upd@ requires a
+-- session restart given current state @st@.
+--
+-- See 'sessionRestartParams' to compute the session initialization parameters
+-- for the new session.
+requiresSessionRestart :: IdeIdleState -> IdeSessionUpdate -> Bool
 requiresSessionRestart st IdeSessionUpdate{..} =
-    if requiresRestart
-      then Just SessionInitParams {
-               sessionInitCabalMacros      = Nothing
-             , sessionInitRelativeIncludes = fromMaybe (st ^. ideRelativeIncludes) ideUpdateRelIncls
-             , sessionInitTargets          = fromMaybe (st ^. ideTargets)          ideUpdateTargets
-             , sessionInitGhcOptions       = fromMaybe (st ^. ideGhcOpts)          ideUpdateGhcOpts
-             , sessionInitRtsOpts          = fromMaybe (st ^. ideRtsOpts)          ideUpdateRtsOpts
-             }
-      else Nothing
-  where
-    requiresRestart :: Bool
-    requiresRestart =
          (ideUpdateRelIncls `changes` ideRelativeIncludes)
       || (ideUpdateTargets  `changes` ideTargets)
       || (ideUpdateRtsOpts  `changes` ideRtsOpts)
       || (any optRequiresRestart (listChanges' ideUpdateGhcOpts ideGhcOpts))
-
+  where
     optRequiresRestart :: String -> Bool
     optRequiresRestart str =
          -- Library flags cannot be changed dynamically (#214)
