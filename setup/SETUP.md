@@ -541,7 +541,7 @@ Haddock bundled with `ghc`:
 ```
 cabal sandbox init --sandbox ./.cabal-sandbox/7.10
 cabal sandbox add-source ../vendor/binary
-cabal install ~/path/to/ghc/7.10/utils/haddock/haddock-{library,api}
+cabal sandbox add-source ~/path/to/ghc/7.10/utils/haddock/haddock-{library,api}
 cabal install
 ```
 

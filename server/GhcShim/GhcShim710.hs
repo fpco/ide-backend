@@ -238,6 +238,7 @@ setupLinkerState newPackages = do
   > enableGlasgowExts          generalFlags, extensions, extensionFlags
   > exposePackage              packageFlags
   > exposePackageId            packageFlags
+  > exposePackageKey           packageFlags
   > forceRecompile             generalFlags
   > hidePackage                packageFlags
   > ignorePackage              packageFlags
@@ -252,7 +253,6 @@ setupLinkerState newPackages = do
   > setDumpFlag                dumpFlags, generalFlags
   > setDumpFlag'               dumpFlags, generalFlags
   > setDumpPrefixForce         dumpPrefixForce
-  > setDumpSimplPhases         generalFlags, shouldDumpSimplPhase
   > setDylibInstallName        dylibInstallName
   > setDynHiSuf                dynHiSuf
   > setDynObjectSuf            dynObjectSuf
@@ -273,17 +273,18 @@ setupLinkerState newPackages = do
   > setOutputDir               objectDir, hiDir, stubDir, dumpDir
   > setOutputFile              outputFile
   > setOutputHi                outputHi
-  > setPackageName             thisPackage
+  > setPackageKey              thisPackage
   > setPackageTrust            generalFlags, pkgTrustOnLoc
   > setPgmP                    settings
   > setRtsOpts                 rtsOpts
   > setRtsOptsEnabled          rtsOptsEnabled
-  > setSafeHaskell             safeHaskell
-  > setStubDir                 stubDir
+  > setSafeHaskell             safeHaskell, safeInfer, trustworthyOnLoc
+  > setSigOf                   sigOf
+  > setStubDir                 stubDir, includePaths
   > setTarget                  hscTarget
   > setTargetWithPlatform      hscTarget
   > setTmpDir                  settings
-  > setVerboseCore2Core        dumpFlags, generalFlags, shouldDumpSimplPhase
+  > setVerboseCore2Core        dumpFlags, generalFlags
   > setVerbosity               verbosity
   > setWarningFlag             warningFlags
   > trustPackage               packageFlags
@@ -318,6 +319,7 @@ setupLinkerState newPackages = do
   > "auto-all"                      ** sets profAuto
   > "caf-all"                       setGeneralFlag
   > "cpp"                           setExtensionFlag
+  > "dannot-lint"                   setGeneralFlag
   > "dasm-lint"                     setGeneralFlag
   > "dcmm-lint"                     setGeneralFlag
   > "dcore-lint"                    setGeneralFlag
@@ -330,6 +332,7 @@ setupLinkerState newPackages = do
   > "ddump-asm-regalloc-stages"     setDumpFlag
   > "ddump-asm-stats"               setDumpFlag
   > "ddump-bcos"                    setDumpFlag
+  > "ddump-call-arity"              setDumpFlag
   > "ddump-cmm"                     setDumpFlag
   > "ddump-cmm-cbe"                 setDumpFlag
   > "ddump-cmm-cfg"                 setDumpFlag
@@ -341,10 +344,10 @@ setupLinkerState newPackages = do
   > "ddump-cmm-sink"                setDumpFlag
   > "ddump-cmm-sp"                  setDumpFlag
   > "ddump-cmm-split"               setDumpFlag
-  > "ddump-core-pipeline"           setDumpFlag
   > "ddump-core-stats"              setDumpFlag
   > "ddump-cs-trace"                setDumpFlag
   > "ddump-cse"                     setDumpFlag
+  > "ddump-debug"                   setDumpFlag
   > "ddump-deriv"                   setDumpFlag
   > "ddump-ds"                      setDumpFlag
   > "ddump-file-prefix"             setDumpPrefixForce
@@ -357,6 +360,7 @@ setupLinkerState newPackages = do
   > "ddump-llvm"                    setObjTarget, setDumpFlag'
   > "ddump-minimal-imports"         setGeneralFlag
   > "ddump-mod-cycles"              setDumpFlag
+  > "ddump-mod-map"                 setDumpFlag
   > "ddump-occur-anal"              setDumpFlag
   > "ddump-opt-cmm"                 setDumpFlag
   > "ddump-parsed"                  setDumpFlag
@@ -370,7 +374,6 @@ setupLinkerState newPackages = do
   > "ddump-rules"                   setDumpFlag
   > "ddump-simpl"                   setDumpFlag
   > "ddump-simpl-iterations"        setDumpFlag
-  > "ddump-simpl-phases"            setDumpSimplPhases
   > "ddump-simpl-stats"             setDumpFlag
   > "ddump-simpl-trace"             setDumpFlag
   > "ddump-spec"                    setDumpFlag
@@ -400,6 +403,7 @@ setupLinkerState newPackages = do
   > "dstg-lint"                     setGeneralFlag
   > "dstg-stats"                    setGeneralFlag
   > "dsuppress-all"                 setGeneralFlag
+  > "dth-dec-file"                  setDumpFlag
   > "dtrace-level"                  ** sets traceLevel
   > "dumpdir"                       setDumpDir
   > "dverbose-core2core"            setVerbosity, setVerboseCore2Core
@@ -424,6 +428,9 @@ setupLinkerState newPackages = do
   > "fhistory-size"                 ** sets historySize
   > "fliberate-case-threshold"      ** sets liberateCaseThreshold
   > "fllvm"                         setObjTarget
+  > "fmax-inline-alloc-size"        ** sets maxInlineAllocSize
+  > "fmax-inline-memcpy-insns"      ** sets maxInlineMemcpyInsns
+  > "fmax-inline-memset-insns"      ** sets maxInlineMemsetInsns
   > "fmax-relevant-binds"           ** sets maxRelevantBinds
   > "fmax-simplifier-iterations"    ** sets maxSimplIterations
   > "fmax-worker-args"              ** sets maxWorkerArgs
@@ -433,7 +440,7 @@ setupLinkerState newPackages = do
   > "fno-liberate-case-threshold"   ** sets liberateCaseThreshold
   > "fno-max-relevant-binds"        ** sets maxRelevantBinds
   > "fno-prof-auto"                 ** sets profAuto
-  > "fno-safe-infer"                setSafeHaskell
+  > "fno-safe-infer"                ** sets safeInfer
   > "fno-spec-constr-count"         ** sets specConstrCount
   > "fno-spec-constr-threshold"     ** sets specConstrThreshold
   > "fobject-code"                  setTargetWithPlatform
@@ -461,6 +468,7 @@ setupLinkerState newPackages = do
   > "funfolding-use-threshold"      ** sets ufUseThreshold
   > "fvia-C"                        <<warning only>>
   > "fvia-c"                        <<warning only>>
+  > "g"                             setGeneralFlag
   > "ghci-script"                   addGhciScript
   > "gransim"                       addWay
   > "haddock"                       setGeneralFlag
@@ -477,8 +485,6 @@ setupLinkerState newPackages = do
   > "keep-hc-files"                 setGeneralFlag
   > "keep-llvm-file"                setObjTarget, setGeneralFlag
   > "keep-llvm-files"               setObjTarget, setGeneralFlag
-  > "keep-raw-s-file"               <<warning only>>
-  > "keep-raw-s-files"              <<warning only>>
   > "keep-s-file"                   setGeneralFlag
   > "keep-s-files"                  setGeneralFlag
   > "keep-tmp-files"                setGeneralFlag
@@ -490,10 +496,11 @@ setupLinkerState newPackages = do
   > "mavx512er"                     ** sets avx512er
   > "mavx512f"                      ** sets avx512f
   > "mavx512pf"                     ** sets avx512pf
-  > "monly-2-regs"                  <<warning only>>
-  > "monly-3-regs"                  <<warning only>>
-  > "monly-4-regs"                  <<warning only>>
   > "msse"                          ** sets sseVersion
+  > "msse2"                         ** sets sseVersion
+  > "msse3"                         ** sets sseVersion
+  > "msse4"                         ** sets sseVersion
+  > "msse4.2"                       ** sets sseVersion
   > "n"                             <<warning only>>
   > "ndp"                           addWay
   > "no-auto"                       ** sets profAuto
@@ -512,17 +519,9 @@ setupLinkerState newPackages = do
   > "optP"                          addOptP
   > "opta"                          alterSettings
   > "optc"                          addOptc
-  > "optdep--exclude-module"        addDepExcludeMod
-  > "optdep--include-pkg-deps"      setDepIncludePkgDeps
-  > "optdep--include-prelude"       setDepIncludePkgDeps
-  > "optdep-f"                      setDepMakefile
-  > "optdep-s"                      addDepSuffix
-  > "optdep-w"                      <<warning only>>
-  > "optdep-x"                      addDepExcludeMod
   > "optl"                          addOptl
   > "optlc"                         alterSettings
   > "optlo"                         alterSettings
-  > "optm"                          <<warning only>>
   > "optwindres"                    alterSettings
   > "osuf"                          setObjectSuf
   > "outputdir"                     setOutputDir
@@ -537,11 +536,10 @@ setupLinkerState newPackages = do
   > "pgmlc"                         alterSettings
   > "pgmlibtool"                    alterSettings
   > "pgmlo"                         alterSettings
-  > "pgmm"                          <<warning only>>
   > "pgms"                          alterSettings
   > "pgmwindres"                    alterSettings
   > "prof"                          addWay
-  > "rdynamic"                      <<does nothing>>
+  > "rdynamic"                      addOptl
   > "recomp"                        unSetGeneralFlag
   > "relative-dynlib-paths"         setGeneralFlag
   > "rtsopts"                       setRtsOptsEnabled
@@ -549,13 +547,14 @@ setupLinkerState newPackages = do
   > "rtsopts=none"                  setRtsOptsEnabled
   > "rtsopts=some"                  setRtsOptsEnabled
   > "shared"                        ** sets ghcLink
+  > "sig-of"                        setSigOf
   > "smp"                           addWay
   > "split-objs"                    setGeneralFlag
   > "static"                        removeWayDyn
   > "staticlib"                     ** sets ghcLink
   > "stubdir"                       setStubDir
   > "threaded"                      addWay
-  > "ticky"                         setGeneralFlag
+  > "ticky"                         setGeneralFlag, addWay
   > "ticky-LNE"                     setGeneralFlag
   > "ticky-allocd"                  setGeneralFlag
   > "ticky-dyn-thunk"               setGeneralFlag
@@ -570,8 +569,8 @@ setupLinkerState newPackages = do
 
   The same list for package_flags:
 
-  > FLAG                           DEFINED IN TERMS OF
-  > ----------------------------------------------------------------------------
+  > FLAG                    DEFINED IN TERMS OF
+  > --------------------------------------------
   > "clear-package-db"      clearPkgConf
   > "distrust"              distrustPackage
   > "distrust-all-packages" setGeneralFlag
@@ -585,9 +584,12 @@ setupLinkerState newPackages = do
   > "package"               exposePackage
   > "package-conf"          addPkgConfRef
   > "package-db"            addPkgConfRef
+  > "package-env"           ** sets packageEnv
   > "package-id"            exposePackageId
-  > "package-name"          setPackageName
+  > "package-key"           exposePackageKey
+  > "package-name"          setPackageKey
   > "syslib"                exposePackage
+  > "this-package-key"      setPackageKey
   > "trust"                 trustPackage
   > "user-package-db"       addPkgConfRef
 
@@ -599,8 +601,6 @@ setupLinkerState newPackages = do
   distrust-all-packages). However, it doesn't "unapply" these batch flags. By
   restoring the pkgDatabase to the value it gets at server startup, we
   effectively restore these batch flags whenever we apply user settings.
-
-  TODO: This needs to be done for 7.10.
 ------------------------------------------------------------------------------}
 
 dynFlagsRef :: IORef DynFlags
@@ -624,97 +624,104 @@ restoreDynFlags = do
 -- See detailed description above.
 restoreDynFlagsFrom :: DynFlags -> DynFlags -> DynFlags
 restoreDynFlagsFrom new old = new {
-    avx                   = avx                   old
-  , avx2                  = avx2                  old
-  , avx512cd              = avx512cd              old
-  , avx512er              = avx512er              old
-  , avx512f               = avx512f               old
-  , avx512pf              = avx512pf              old
-  , cmdlineFrameworks     = cmdlineFrameworks     old
-  , cmdlineHcIncludes     = cmdlineHcIncludes     old
-  , ctxtStkDepth          = ctxtStkDepth          old
-  , depExcludeMods        = depExcludeMods        old
-  , depIncludePkgDeps     = depIncludePkgDeps     old
-  , depMakefile           = depMakefile           old
-  , depSuffixes           = depSuffixes           old
-  , dllSplit              = dllSplit              old
-  , dllSplitFile          = dllSplitFile          old
-  , dumpDir               = dumpDir               old
-  , dumpFlags             = dumpFlags             old
-  , dumpPrefixForce       = dumpPrefixForce       old
-  , dylibInstallName      = dylibInstallName      old
-  , dynHiSuf              = dynHiSuf              old
-  , dynLibLoader          = dynLibLoader          old
-  , dynObjectSuf          = dynObjectSuf          old
-  , dynOutputFile         = dynOutputFile         old
-  , enableTimeStats       = enableTimeStats       old
-  , extensionFlags        = extensionFlags        old
-  , extensions            = extensions            old
-  , extraPkgConfs         = extraPkgConfs         old
-  , floatLamArgs          = floatLamArgs          old
-  , frameworkPaths        = frameworkPaths        old
-  , generalFlags          = generalFlags          old
-  , ghcHeapSize           = ghcHeapSize           old
-  , ghcLink               = ghcLink               old
-  , ghciHistSize          = ghciHistSize          old
-  , ghciScripts           = ghciScripts           old
-  , haddockOptions        = haddockOptions        old
-  , hcSuf                 = hcSuf                 old
-  , hiDir                 = hiDir                 old
-  , hiSuf                 = hiSuf                 old
-  , historySize           = historySize           old
-  , hpcDir                = hpcDir                old
-  , hscTarget             = hscTarget             old
-  , importPaths           = importPaths           old
-  , includePaths          = includePaths          old
-  , interactivePrint      = interactivePrint      old
-  , language              = language              old
-  , ldInputs              = ldInputs              old
-  , liberateCaseThreshold = liberateCaseThreshold old
-  , libraryPaths          = libraryPaths          old
-  , mainFunIs             = mainFunIs             old
-  , mainModIs             = mainModIs             old
-  , maxRelevantBinds      = maxRelevantBinds      old
-  , maxSimplIterations    = maxSimplIterations    old
-  , maxWorkerArgs         = maxWorkerArgs         old
-  , objectDir             = objectDir             old
-  , objectSuf             = objectSuf             old
-  , optLevel              = optLevel              old
-  , outputFile            = outputFile            old
-  , outputHi              = outputHi              old
-  , packageFlags          = packageFlags          old
-  , parMakeCount          = parMakeCount          old
-  , pkgDatabase           = pkgDatabase           old
-  , pkgTrustOnLoc         = pkgTrustOnLoc         old
-  , pluginModNameOpts     = pluginModNameOpts     old
-  , pluginModNames        = pluginModNames        old
-  , pprCols               = pprCols               old
-  , pprUserLength         = pprUserLength         old
-  , profAuto              = profAuto              old
-  , rtsOpts               = rtsOpts               old
-  , rtsOptsEnabled        = rtsOptsEnabled        old
-  , ruleCheck             = ruleCheck             old
-  , safeHaskell           = safeHaskell           old
-  , settings              = settings              old
-  , simplPhases           = simplPhases           old
-  , simplTickFactor       = simplTickFactor       old
-  , specConstrCount       = specConstrCount       old
-  , specConstrRecursive   = specConstrRecursive   old
-  , specConstrThreshold   = specConstrThreshold   old
-  , sseVersion            = sseVersion            old
-  , strictnessBefore      = strictnessBefore      old
-  , stubDir               = stubDir               old
-  , thisPackage           = thisPackage           old
-  , traceLevel            = traceLevel            old
-  , tyFunStkDepth         = tyFunStkDepth         old
-  , ufCreationThreshold   = ufCreationThreshold   old
-  , ufDictDiscount        = ufDictDiscount        old
-  , ufFunAppDiscount      = ufFunAppDiscount      old
-  , ufKeenessFactor       = ufKeenessFactor       old
-  , ufUseThreshold        = ufUseThreshold        old
-  , verbosity             = verbosity             old
-  , warningFlags          = warningFlags          old
-  , ways                  = ways                  old
+    avx                    = avx                   old
+  , avx2                   = avx2                  old
+  , avx512cd               = avx512cd              old
+  , avx512er               = avx512er              old
+  , avx512f                = avx512f               old
+  , avx512pf               = avx512pf              old
+  , cmdlineFrameworks      = cmdlineFrameworks     old
+  , cmdlineHcIncludes      = cmdlineHcIncludes     old
+  , ctxtStkDepth           = ctxtStkDepth          old
+  , depExcludeMods         = depExcludeMods        old
+  , depIncludePkgDeps      = depIncludePkgDeps     old
+  , depMakefile            = depMakefile           old
+  , depSuffixes            = depSuffixes           old
+  , dllSplit               = dllSplit              old
+  , dllSplitFile           = dllSplitFile          old
+  , dumpDir                = dumpDir               old
+  , dumpFlags              = dumpFlags             old
+  , dumpPrefixForce        = dumpPrefixForce       old
+  , dylibInstallName       = dylibInstallName      old
+  , dynHiSuf               = dynHiSuf              old
+  , dynLibLoader           = dynLibLoader          old
+  , dynObjectSuf           = dynObjectSuf          old
+  , dynOutputFile          = dynOutputFile         old
+  , enableTimeStats        = enableTimeStats       old
+  , extensionFlags         = extensionFlags        old
+  , extensions             = extensions            old
+  , extraPkgConfs          = extraPkgConfs         old
+  , floatLamArgs           = floatLamArgs          old
+  , frameworkPaths         = frameworkPaths        old
+  , generalFlags           = generalFlags          old
+  , ghcHeapSize            = ghcHeapSize           old
+  , ghcLink                = ghcLink               old
+  , ghciHistSize           = ghciHistSize          old
+  , ghciScripts            = ghciScripts           old
+  , haddockOptions         = haddockOptions        old
+  , hcSuf                  = hcSuf                 old
+  , hiDir                  = hiDir                 old
+  , hiSuf                  = hiSuf                 old
+  , historySize            = historySize           old
+  , hpcDir                 = hpcDir                old
+  , hscTarget              = hscTarget             old
+  , importPaths            = importPaths           old
+  , includePaths           = includePaths          old
+  , interactivePrint       = interactivePrint      old
+  , language               = language              old
+  , ldInputs               = ldInputs              old
+  , liberateCaseThreshold  = liberateCaseThreshold old
+  , libraryPaths           = libraryPaths          old
+  , mainFunIs              = mainFunIs             old
+  , mainModIs              = mainModIs             old
+  , maxInlineAllocSize     = maxInlineAllocSize    old
+  , maxInlineMemcpyInsns   = maxInlineMemcpyInsns  old
+  , maxInlineMemsetInsns   = maxInlineMemsetInsns  old
+  , maxRelevantBinds       = maxRelevantBinds      old
+  , maxSimplIterations     = maxSimplIterations    old
+  , maxWorkerArgs          = maxWorkerArgs         old
+  , objectDir              = objectDir             old
+  , objectSuf              = objectSuf             old
+  , optLevel               = optLevel              old
+  , outputFile             = outputFile            old
+  , outputHi               = outputHi              old
+  , packageEnv             = packageEnv            old
+  , packageFlags           = packageFlags          old
+  , parMakeCount           = parMakeCount          old
+  , pkgDatabase            = pkgDatabase           old
+  , pkgTrustOnLoc          = pkgTrustOnLoc         old
+  , pluginModNameOpts      = pluginModNameOpts     old
+  , pluginModNames         = pluginModNames        old
+  , pprCols                = pprCols               old
+  , pprUserLength          = pprUserLength         old
+  , profAuto               = profAuto              old
+  , rtsOpts                = rtsOpts               old
+  , rtsOptsEnabled         = rtsOptsEnabled        old
+  , ruleCheck              = ruleCheck             old
+  , safeHaskell            = safeHaskell           old
+  , safeInfer              = safeInfer             old
+  , settings               = settings              old
+  , sigOf                  = sigOf                 old
+  , simplPhases            = simplPhases           old
+  , simplTickFactor        = simplTickFactor       old
+  , specConstrCount        = specConstrCount       old
+  , specConstrRecursive    = specConstrRecursive   old
+  , specConstrThreshold    = specConstrThreshold   old
+  , sseVersion             = sseVersion            old
+  , strictnessBefore       = strictnessBefore      old
+  , stubDir                = stubDir               old
+  , thisPackage            = thisPackage           old
+  , traceLevel             = traceLevel            old
+  , trustworthyOnLoc       = trustworthyOnLoc      old
+  , tyFunStkDepth          = tyFunStkDepth         old
+  , ufCreationThreshold    = ufCreationThreshold   old
+  , ufDictDiscount         = ufDictDiscount        old
+  , ufFunAppDiscount       = ufFunAppDiscount      old
+  , ufKeenessFactor        = ufKeenessFactor       old
+  , ufUseThreshold         = ufUseThreshold        old
+  , verbosity              = verbosity             old
+  , warningFlags           = warningFlags          old
+  , ways                   = ways                  old
   }
 
 {-------------------------------------------------------------------------------
@@ -789,9 +796,6 @@ findExposedModule dflags pkgQual impMod = Maybe.listToMaybe pkgIds
 
 {------------------------------------------------------------------------------
   Traversing the AST
-
-  TODO: Needs updating for 7.10. For now commented out lots of stuff until
-  it compiled.
 ------------------------------------------------------------------------------}
 
 ifPostTc :: AstAlg m id -> a -> Maybe a
