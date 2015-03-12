@@ -215,6 +215,7 @@ module IdeSession (
   -- * For internal/debugging use only
   , getGhcExitCode
   , dumpIdInfo
+  , dumpAutocompletion
   , crashGhcServer
   , sourceExtensions
   , ideBackendApiVersion

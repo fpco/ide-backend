@@ -230,7 +230,6 @@ test_explicitPackage env = withAvailableSession' env (withGhcOpts packageOpts) $
     packageOpts = [ "-hide-all-packages"
                   , "-package base"
                   , "-package parallel"
-                  , "-package old-time"
                   ]
 
 test_ParfibMain :: TestSuiteEnv -> Assertion

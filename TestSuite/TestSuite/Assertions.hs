@@ -4,7 +4,6 @@ module TestSuite.Assertions (
     -- * General assertions
     collectErrors
   , assertSameSet
-  , assertSameList
   , assertRaises
     -- * Assertions about session state
   , assertLoadedModules
@@ -38,6 +37,7 @@ import Prelude hiding (mod, span)
 import Control.Monad
 import Data.Char
 import Data.Either
+import Data.Function (on)
 import Data.List hiding (span)
 import Test.HUnit
 import Test.HUnit.Lang
@@ -68,14 +68,20 @@ collectErrors as = do
         go acc []                    = HUnitFailure (unlines . reverse $ acc)
         go acc (HUnitFailure e : es) = go (e : acc) es
 
+-- | Compare two sets. The expected set is the _second_ set
+-- (inconsistent with the rest of the assertions but more convenient)
 assertSameSet :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
-assertSameSet header xs ys = assertSameList header (sort xs) (sort ys)
-
-assertSameList :: (Ord a, Show a) => String -> [a] -> [a] -> Assertion
-assertSameList header xs ys =
-  case diff xs ys of
-    [] -> return ()
-    ds -> assertFailure (header ++ unlines ds)
+assertSameSet header = aux `on` sort
+  where
+    aux :: (Ord a, Show a) => [a] -> [a] -> Assertion
+    aux actual expected =
+      case diff expected actual of
+        ([], []) ->
+          return ()
+        (missing, unexpected) ->
+          assertFailure $ header
+                       ++ "\nMissing: " ++ show missing
+                       ++ "\nUnexpected: " ++ show unexpected
 
 {-------------------------------------------------------------------------------
   Assertions about session state
@@ -429,15 +435,24 @@ instance IgnoreVersions PackageId where
 
 -- | Compare two lists, both assumed sorted
 --
--- @diff expected actual@ returns a list of differences between two lists,
+-- @diff expected actual@ returns two lists:
+--
+-- * The first contains the elements in the first but not the second list
+-- * The second contains the elements in the second but not the first list
+--
+-- If the first list is the "expected" list and the second list is the "actual"
+-- list then the first list of the result are the "missing" elements and the
+-- second list of the result are the "unexpected" elements.
 -- or an empty lists if the input lists are identical
-diff :: (Ord a, Show a) => [a] -> [a] -> [String]
-diff [] [] = []
-diff xs [] = map (\x -> "Missing "    ++ show x) xs
-diff [] ys = map (\y -> "Unexpected " ++ show y) ys
+diff :: Ord a => [a] -> [a] -> ([a], [a])
+diff [] [] = ([], [])
+diff xs [] = (xs, [])
+diff [] ys = ([], ys)
 diff (x:xs) (y:ys)
-  | x <  y    = ("Missing "    ++ show x) : diff xs (y:ys)
-  | x >  y    = ("Unexpected " ++ show y) : diff (x:xs) ys
+  | x <  y    = let (missing, unexpected) = diff xs (y:ys)
+                in (x:missing, unexpected)
+  | x >  y    = let (missing, unexpected) = diff (x:xs) ys
+                in (missing, y:unexpected)
   | otherwise = diff xs ys
 
 -- | Replace everything that looks like a quote by a standard single quote.

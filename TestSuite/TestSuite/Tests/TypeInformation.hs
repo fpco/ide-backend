@@ -103,7 +103,7 @@ testLocalIdentifiersAndPrelude env = withAvailableSession env $ \session -> do
     assertIdInfo session "A" (4,1,4,2) "c" VarName "Bool" "main:A" "A.hs@4:1-4:2" "" "binding occurrence"
     assertIdInfo session "A" (4,5,4,9) "True" DataName "" "ghc-prim-0.2.0.0:GHC.Types" "<wired into compiler>" "base-4.5.1.0:Data.Bool" "wired in to the compiler"
     assertIdInfo session "A" (5,1,5,2) "d" VarName "[a] -> [a]" "main:A" "A.hs@5:1-5:2" "" "binding occurrence"
-    assertIdInfo session "A" (5,5,5,12) "reverse" VarName "[a] -> [a]" "base-4.5.1.0:GHC.List" "<no location info>" "base-4.5.1.0:Data.List" "imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9"
+    assertIdInfo' session "A" (5,5,5,12) (5,5,5,12) "reverse" VarName (allVersions "[a] -> [a]") (allVersions "base-4.5.1.0:GHC.List") (allVersions "<no location info>") (from710 "base-4.5.1.0:Data.List" "base-4.8.0.0:GHC.OldList") (allVersions "imported from base-4.5.1.0:Prelude at A.hs@1:8-1:9")
 
     {- TODO: reenable
     assertEqual "Haddock link for A.b should be correct"
@@ -246,7 +246,14 @@ testExternalPkgs env = withAvailableSession' env (withGhcOpts opts) $ \session -
     assertIdInfo session "A" (12,5,12,6) "y" VarName "a" "main:A" "A.hs@12:5-12:6" "" "binding occurrence"
     assertIdInfo session "A" (12,9,12,10) "x" VarName "a" "main:A" "A.hs@9:3-9:4" "" "defined locally"
     assertIdInfo session "A" (13,1,13,2) "i" VarName "t a -> t a" "main:A" "A.hs@14:1-14:2" "" "defined locally"
-    assertIdInfo session "A" (13,13,13,26) "t" TvName "" "main:A" "A.hs@13:13-13:26" "" "binding occurrence"
+
+    -- Pre 7.10 we don't get accurate location information for type variables (instead, the location of the
+    -- entire kind signature (t :: * -> *) is reported. This is fixed in 7.10.
+    case testSuiteEnvGhcVersion env of
+      GHC_7_4  -> assertIdInfo session "A" (13,13,13,26) "t" TvName "" "main:A" "A.hs@13:13-13:26" "" "binding occurrence"
+      GHC_7_8  -> assertIdInfo session "A" (13,13,13,26) "t" TvName "" "main:A" "A.hs@13:13-13:26" "" "binding occurrence"
+      GHC_7_10 -> assertIdInfo session "A" (13,14,13,15) "t" TvName "" "main:A" "A.hs@13:13-13:26" "" "binding occurrence"
+
     assertIdInfo session "A" (13,27,13,28) "a" TvName "" "main:A" "A.hs@13:27-13:28" "" "binding occurrence"
     assertIdInfo session "A" (13,30,13,31) "t" TvName "" "main:A" "A.hs@13:13-13:26" "" "defined locally"
     assertIdInfo session "A" (13,32,13,33) "a" TvName "" "main:A" "A.hs@13:27-13:28" "" "defined locally"
@@ -262,26 +269,28 @@ testExternalPkgs env = withAvailableSession' env (withGhcOpts opts) $ \session -
            ]
 
     upd = updateSourceFile "A.hs" . L.unlines $
-            [ "module A where"
+            [ {-  1 -} "module A where"
 
-            , "import Control.Parallel"
+            , {-  2 -} "import Control.Parallel"
 
-            , "e = True `pseq` False"
+            , {-  3 -} "e = True `pseq` False"
 
-            , "f :: a -> a"
-            , "f x = x"
+            , {-  4 -} "f :: a -> a"
+            , {-  5 -} "f x = x"
 
-            , "g :: forall a. a -> a"
-            , "g x = x"
+            , {-  6 -} "g :: forall a. a -> a"
+            , {-  7 -} "g x = x"
 
-            , "h :: forall a. a -> a"
-            , "h x = y"
-            , "  where"
-            , "    y :: a"
-            , "    y = x"
+            , {-  8 -} "h :: forall a. a -> a"
+            , {-  9 -} "h x = y"
+            , {- 10 -} "  where"
+            , {- 11 -} "    y :: a"
+            , {- 12 -} "    y = x"
 
-            , "i :: forall (t :: * -> *) a. t a -> t a"
-            , "i x = x"
+                     --          1         2         3
+                     -- 123456789012345678901234567890123456789
+            , {- 13 -} "i :: forall (t :: * -> *) a. t a -> t a"
+            , {- 14 -} "i x = x"
             ]
 
 testReusingTypeVariables :: TestSuiteEnv -> Assertion
@@ -356,7 +365,7 @@ testQualifiedImports env = withAvailableSession env $ \session -> do
     assertNoErrors session
     assertIdInfo session "A" (5,1,5,4) "foo" VarName "(Maybe a -> a, Int -> [a1] -> [a1], (b -> b -> c) -> (a2 -> b) -> a2 -> a2 -> c)" "main:A" "A.hs@5:1-5:4" "" "binding occurrence"
     assertIdInfo session "A" (5,8,5,16) "fromJust" VarName "Maybe a2 -> a2" "base-4.5.1.0:Data.Maybe" "<no location info>" "base-4.5.1.0:Data.Maybe" "imported from base-4.5.1.0:Data.Maybe at A.hs@2:1-2:18"
-    assertIdInfo session "A" (5,18,5,32) "take" VarName "Int -> [a] -> [a]" "base-4.5.1.0:GHC.List" "<no location info>" "base-4.5.1.0:Data.List" "imported from base-4.5.1.0:Data.List as 'Data.List.' at A.hs@3:1-3:27"
+    assertIdInfo' session "A" (5,18,5,32) (5,18,5,32) "take" VarName (allVersions "Int -> [a] -> [a]") (allVersions "base-4.5.1.0:GHC.List") (allVersions "<no location info>") (from710 "base-4.5.1.0:Data.List" "base-4.8.0.0:GHC.OldList") (allVersions "imported from base-4.5.1.0:Data.List as 'Data.List.' at A.hs@3:1-3:27")
     assertIdInfo session "A" (5,34,5,38) "on" VarName "(b1 -> b1 -> c1) -> (a2 -> b1) -> a2 -> a2 -> c1" "base-4.5.1.0:Data.Function" "<no location info>" "base-4.5.1.0:Data.Function" "imported from base-4.5.1.0:Data.Function as 'F.' at A.hs@4:1-4:36"
   where
     upd = updateSourceFile "A.hs" . L.unlines $

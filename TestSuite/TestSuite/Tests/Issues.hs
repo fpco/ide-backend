@@ -253,10 +253,15 @@ test185 env = withAvailableSession env $ \session -> do
   where
     upd = updateGhcOpts ["-fglasgow-exts","-thisOptionDoesNotExist"]
 
-test145 :: TestSuiteEnv -> Assertion
+test145 :: TestSuiteEnv -> IO ()
 test145 env = withAvailableSession env $ \session -> do
-    updateSessionD session upd1 1
-    assertNoErrors session
+    -- Setting -O is officially no longer supported from 7.10 and up
+    -- See <https://ghc.haskell.org/trac/ghc/ticket/10052>
+    if testSuiteEnvGhcVersion env >= GHC_7_10
+      then skipTest "-O no longer supported"
+      else do
+        updateSessionD session upd1 1
+        assertNoErrors session
   where
     upd1 = (updateCodeGeneration True)
         <> (updateGhcOpts ["-XScopedTypeVariables", "-O"])

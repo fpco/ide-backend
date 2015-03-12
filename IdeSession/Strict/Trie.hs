@@ -3,6 +3,7 @@ module IdeSession.Strict.Trie (
   , submap
   , elems
   , fromListWith
+  , toList
   ) where
 
 import Data.ByteString (ByteString)
@@ -21,3 +22,6 @@ elems = Trie.elems . toLazyTrie
 
 fromListWith :: (a -> a -> a) -> [(ByteString, a)] -> Strict Trie a
 fromListWith f = force . Trie.fromListWith f
+
+toList :: Strict Trie a -> [(ByteString, a)]
+toList = Trie.toList . toLazyTrie

@@ -8,10 +8,11 @@ import System.FilePath
 import System.Process
 import Test.Tasty
 import Test.HUnit
-import qualified Data.ByteString      as S
-import qualified Data.ByteString.UTF8 as S
-import qualified Data.ByteString.Lazy as L
-import qualified Data.Text            as T
+import qualified Data.ByteString            as S
+import qualified Data.ByteString.UTF8       as S
+import qualified Data.ByteString.Lazy       as L
+import qualified Data.ByteString.Lazy.Char8 as L (unlines)
+import qualified Data.Text                  as T
 
 import IdeSession
 import TestSuite.Assertions
@@ -319,13 +320,74 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     -- the generated file changes so often
     dotCabalFromName <- getDotCabal session
     let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-    assertEqual "dotCabal" "name: libName\nversion: X.Y.Z\ncabal-version: X.Y.Z\nbuild-type: Simple\nlicense: AllRightsReserved\n\nlibrary\n    build-depends:\n        array ==X.Y.Z,\n        base ==X.Y.Z,\n        containers ==X.Y.Z,\n        deepseq ==X.Y.Z,\n        ghc-prim ==X.Y.Z,\n        integer-gmp ==X.Y.Z,\n        pretty ==X.Y.Z,\n        template-haskell ==X.Y.Z\n    exposed-modules:\n        A\n    c-sources:\n        TestSuite/inputs/FFI/life.c\n    default-language: Haskell2010\n    other-extensions: TemplateHaskell\n    install-includes:\n        life.h\n        local.h\n        life.h\n    hs-source-dirs: TestSuite/inputs/FFI\n\n"  (ignoreVersions dotCabal)
+    assertEqual "dotCabal" (expected (testSuiteEnvGhcVersion env)) (ignoreVersions dotCabal)
     let pkgDir = distDir </> "dotCabal.test"
     createDirectoryIfMissing False pkgDir
     L.writeFile (pkgDir </> "libName.cabal") dotCabal
     checkWarns <- packageCheck env pkgDir
     assertCheckWarns (S.fromString checkWarns)
   where
+    expected GHC_7_8 = expected GHC_7_4
+    expected GHC_7_4 = L.unlines [
+        "name: libName"
+      , "version: X.Y.Z"
+      , "cabal-version: X.Y.Z"
+      , "build-type: Simple"
+      , "license: AllRightsReserved"
+      , ""
+      , "library"
+      , "    build-depends:"
+      , "        array ==X.Y.Z,"
+      , "        base ==X.Y.Z,"
+      , "        containers ==X.Y.Z,"
+      , "        deepseq ==X.Y.Z,"
+      , "        ghc-prim ==X.Y.Z,"
+      , "        integer-gmp ==X.Y.Z,"
+      , "        pretty ==X.Y.Z,"
+      , "        template-haskell ==X.Y.Z"
+      , "    exposed-modules:"
+      , "        A"
+      , "    c-sources:"
+      , "        TestSuite/inputs/FFI/life.c"
+      , "    default-language: Haskell2010"
+      , "    other-extensions: TemplateHaskell"
+      , "    install-includes:"
+      , "        life.h"
+      , "        local.h"
+      , "        life.h"
+      , "    hs-source-dirs: TestSuite/inputs/FFI"
+      , ""
+      ]
+    expected GHC_7_10 = L.unlines [
+        "name: libName"
+      , "version: X.Y.Z"
+      , "cabal-version: X.Y.Z"
+      , "build-type: Simple"
+      , "license: AllRightsReserved"
+      , ""
+      , "library"
+      , "    build-depends:"
+      , "        array ==X.Y.Z,"
+      , "        base ==X.Y.Z,"
+      , "        deepseq ==X.Y.Z,"
+      , "        ghc-prim ==X.Y.Z,"
+      , "        integer-gmp ==X.Y.Z,"
+      , "        pretty ==X.Y.Z,"
+      , "        template-haskell ==X.Y.Z"
+      , "    exposed-modules:"
+      , "        A"
+      , "    c-sources:"
+      , "        TestSuite/inputs/FFI/life.c"
+      , "    default-language: Haskell2010"
+      , "    other-extensions: TemplateHaskell"
+      , "    install-includes:"
+      , "        life.h"
+      , "        local.h"
+      , "        life.h"
+      , "    hs-source-dirs: TestSuite/inputs/FFI"
+      , ""
+      ]
+
     upd = mconcat [
         updateCodeGeneration True
       , updateSourceFileFromFile "TestSuite/inputs/FFI/Main.hs"

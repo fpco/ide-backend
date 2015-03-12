@@ -41,6 +41,7 @@ module IdeSession.Query (
   , getDotCabal
     -- * Debugging (internal use only)
   , dumpIdInfo
+  , dumpAutocompletion
   ) where
 
 import Prelude hiding (mod, span)
@@ -345,7 +346,7 @@ getDotCabal session = withComputedState session
   Debugging
 ------------------------------------------------------------------------------}
 
--- | Print the id info maps to the stdout (for debugging purposes only)
+-- | Print the id info maps to stdout (for debugging purposes only)
 dumpIdInfo :: IdeSession -> IO ()
 dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
   forM_ (StrictMap.toList computedSpanInfo) $ \(mod, idMap) -> do
@@ -355,6 +356,17 @@ dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
           (StrictIntervalMap.Interval (fn, fromLine, fromCol) (_, toLine, toCol)) = i
           fn' = dereferenceFilePathPtr computedCache fn
       putStrLn $ show (fn', fromLine, fromCol, toLine, toCol)  ++ ": " ++ show idInfo'
+
+-- | Print autocompletion to stdout (for debugging purposes only)
+dumpAutocompletion :: IdeSession -> IO ()
+dumpAutocompletion session = withComputedState session $ \_ Computed{..} ->
+  forM_ (StrictMap.toList computedAutoMap) $ \(mod, autoMap) -> do
+    putStrLn $ "*** " ++ Text.unpack mod ++ " ***"
+    forM_ (StrictTrie.toList autoMap) $ \(key, idInfos) ->
+      forM_ (toLazyList idInfos) $ \idInfo -> do
+        let idInfo' :: IdInfo
+            idInfo' = removeExplicitSharing computedCache idInfo
+        putStrLn $ show key  ++ ": " ++ show idInfo'
 
 {------------------------------------------------------------------------------
   Auxiliary

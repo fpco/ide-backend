@@ -43,7 +43,7 @@ test_NamedFieldPunsCorrect env = withAvailableSession' env (withGhcOpts ["-hide-
     status <- getBuildLicensesStatus session
     assertEqual "after license build" (Just ExitSuccess) status
     licenses <- readFile $ distDir </> "licenses.txt"
-    assertBool "licenses length" $ length licenses >= 27142
+    assertBool ("licenses length (" ++ show (length licenses) ++ ")") $ length licenses >= 25000
 
 test_NamedFieldPunsErrors :: TestSuiteEnv -> Assertion
 test_NamedFieldPunsErrors env = withAvailableSession' env (withGhcOpts ["-hide-package monads-tf"]) $ \session -> do

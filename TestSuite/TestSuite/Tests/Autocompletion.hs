@@ -85,7 +85,7 @@ test_PartialModule env = withAvailableSession' env (withGhcOpts ["-XPackageImpor
       ]
     autocomplete <- getAutocompletion session
     let completeFo = autocomplete "M" "fo"
-    assertSameSet "fo: " (map idInfoQN completeFo) [
+    assertSameSet "fo: " (map idInfoQN completeFo) ([
         "foldM"
       , "foldM_"
       , "forM"
@@ -97,7 +97,9 @@ test_PartialModule env = withAvailableSession' env (withGhcOpts ["-XPackageImpor
       , "Data.List.foldr"
       , "Data.List.foldl"
       , "Data.List.foldr1"
-      ]
+      ] ++ if testSuiteEnvGhcVersion env < GHC_7_10 then [] else [
+        "foldMap"
+      ])
     let completeControlMonadFo = autocomplete "M" "Data.List.fo"
     assertSameSet "Data.List.fo: " (map idInfoQN completeControlMonadFo) [
         "Data.List.foldl'"
