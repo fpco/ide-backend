@@ -41,7 +41,6 @@ module GhcShim.GhcShim710
 import Prelude hiding (id, span)
 import Control.Monad (void, forM_, liftM)
 import Data.IORef
-import Data.Maybe (fromMaybe)
 import Data.Time (UTCTime)
 import Data.Version
 import System.IO.Unsafe (unsafePerformIO)
@@ -730,30 +729,16 @@ restoreDynFlagsFrom new old = new {
 
 type PackageQualifier = Maybe FastString
 
-lookupPackageBySourceId :: DynFlags -> Cabal.PackageId -> PackageConfig
-lookupPackageBySourceId dflags (Cabal.PackageIdentifier (Cabal.PackageName name) version) =
-    case filter matchesId (Packages.listPackageConfigMap dflags) of
-      (cfg:_)    -> cfg
-      _otherwise -> error $ "No package found with name " ++ name ++ " and version " ++ showVersion version
-  where
-    matchesId :: PackageConfig -> Bool
-    matchesId cfg = packageNameString cfg == name
-                 && packageVersion    cfg == version
-
 -- | Lookup a package by package key
 --
 -- Throws a runtime error when the package cannot be found (since these
 -- package keys from from ghc and/or haddock, we should never ever be
 -- presented with an invalid key).
---
--- HOWEVER: Since Haddock is currently inconsistent about package keys versus
--- package source IDs <https://github.com/haskell/haddock/issues/362>,
--- if we cannot find the package key we try again, re-interpreting the
--- package key as an installed package ID.
 lookupPackage :: DynFlags -> PackageKey -> PackageConfig
-lookupPackage dflags pkey = fromMaybe workaroundHaddockBug (Packages.lookupPackage dflags pkey)
-  where
-    workaroundHaddockBug = lookupPackageBySourceId dflags (parseSourceId (packageKeyString pkey))
+lookupPackage dflags pkey =
+     Maybe.fromMaybe
+       (error $ "lookupPackage: invalid key " ++ packageKeyString pkey)
+       (Packages.lookupPackage dflags pkey)
 
 -- | Translate a package key to a source ID (name and version)
 --
