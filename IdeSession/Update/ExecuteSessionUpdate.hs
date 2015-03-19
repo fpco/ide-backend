@@ -228,13 +228,14 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
                           List.++ ghcCompileErrors
                           List.++ force (fromMaybe [] optionWarnings)
         , computedLoadedModules = ghcCompileLoaded
+        , computedFileMap       = mkFileMapRelative srcDir ghcCompileFileMap
         , computedImports       = ghcCompileImports  `applyDiff` computedImports
         , computedAutoMap       = diffAuto           `applyDiff` computedAutoMap
         , computedSpanInfo      = diffSpan           `applyDiff` computedSpanInfo
         , computedExpTypes      = diffTypes          `applyDiff` computedExpTypes
         , computedUseSites      = ghcCompileUseSites `applyDiff` computedUseSites
         , computedPkgDeps       = ghcCompilePkgDeps  `applyDiff` computedPkgDeps
-        , computedCache         = mkRelative srcDir ghcCompileCache
+        , computedCache         = mkCacheRelative srcDir ghcCompileCache
         }
 
     when ideUpdateDocs      $ executeBuildDoc
@@ -250,14 +251,18 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
       , ..
       }
 
-    mkRelative :: FilePath -> ExplicitSharingCache -> ExplicitSharingCache
-    mkRelative srcDir ExplicitSharingCache{..} =
-      let aux :: BSS.ByteString -> BSS.ByteString
-          aux = BSS.pack . makeRelative srcDir . BSS.unpack
-      in ExplicitSharingCache {
-        filePathCache = IntMap.map aux filePathCache
-      , idPropCache   = idPropCache
-      }
+    mkCacheRelative :: FilePath -> ExplicitSharingCache -> ExplicitSharingCache
+    mkCacheRelative srcDir ExplicitSharingCache{..} =
+        ExplicitSharingCache {
+            filePathCache = IntMap.map aux filePathCache
+          , idPropCache   = idPropCache
+          }
+      where
+        aux :: BSS.ByteString -> BSS.ByteString
+        aux = BSS.pack . makeRelative srcDir . BSS.unpack
+
+    mkFileMapRelative :: FilePath -> Strict (Map FilePath) ModuleId -> Strict (Map FilePath) ModuleId
+    mkFileMapRelative srcDir = Map.mapKeys (makeRelative srcDir)
 
     constructAuto :: ExplicitSharingCache -> Strict [] IdInfo
                   -> Strict Trie (Strict [] IdInfo)
@@ -898,6 +903,7 @@ instance Dummy GhcCompileResult where
   dummy = GhcCompileResult {
       ghcCompileLoaded   = dummy
     , ghcCompileCache    = dummy
+    , ghcCompileFileMap  = dummy
     , ghcCompileImports  = dummy
     , ghcCompileAuto     = dummy
     , ghcCompileSpanInfo = dummy

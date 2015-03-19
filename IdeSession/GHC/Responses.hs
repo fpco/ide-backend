@@ -34,12 +34,14 @@ data GhcCompileResponse =
   | GhcCompileDone GhcCompileResult
   deriving (Typeable, Generic)
 
+-- NOTE: These fields cannot be made strict (at least, not easily)
 data GhcCompileResult = GhcCompileResult {
     ghcCompileErrors   :: Strict [] SourceError
   , ghcCompileLoaded   :: Strict [] ModuleName
   , ghcCompileCache    :: ExplicitSharingCache
   -- Computed from the GhcSummary (independent of the plugin, and hence
   -- available even when the plugin does not run)
+  , ghcCompileFileMap  :: Strict (Map FilePath) ModuleId
   , ghcCompileImports  :: Strict (Map ModuleName) (Diff (Strict [] Import))
   , ghcCompileAuto     :: Strict (Map ModuleName) (Diff (Strict [] IdInfo))
   -- Computed by the plugin
@@ -88,6 +90,7 @@ instance Binary GhcCompileResult where
     put ghcCompileErrors
     put ghcCompileLoaded
     put ghcCompileCache
+    put ghcCompileFileMap
     put ghcCompileImports
     put ghcCompileAuto
     put ghcCompileSpanInfo
@@ -97,7 +100,7 @@ instance Binary GhcCompileResult where
 
   get = GhcCompileResult <$> get <*> get <*> get
                          <*> get <*> get <*> get
-                         <*> get <*> get <*> get
+                         <*> get <*> get <*> get <*> get
 
 instance Binary GhcRunResponse where
   put (GhcRunOutp bs) = putWord8 0 >> put bs

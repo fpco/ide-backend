@@ -32,6 +32,7 @@ module IdeSession.Query (
     -- * Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
+  , getFileMap
   , getSpanInfo
   , getExpTypes
   , getImports
@@ -42,6 +43,7 @@ module IdeSession.Query (
     -- * Debugging (internal use only)
   , dumpIdInfo
   , dumpAutocompletion
+  , dumpFileMap
   ) where
 
 import Prelude hiding (mod, span)
@@ -221,6 +223,12 @@ getLoadedModules :: Query [ModuleName]
 getLoadedModules = computedQuery $ \Computed{..} ->
   toLazyList $ computedLoadedModules
 
+-- | Get the mapping from filenames to modules (as computed by GHC)
+getFileMap :: Query (FilePath -> Maybe ModuleId)
+getFileMap = computedQuery $ \Computed{..} path ->
+  fmap (removeExplicitSharing computedCache) $
+    StrictMap.lookup path computedFileMap
+
 -- | Get information about an identifier at a specific location
 getSpanInfo :: Query (ModuleName -> SourceSpan -> [(SourceSpan, SpanInfo)])
 getSpanInfo = computedQuery $ \computed@Computed{..} mod span ->
@@ -368,6 +376,13 @@ dumpAutocompletion session = withComputedState session $ \_ Computed{..} ->
             idInfo' = removeExplicitSharing computedCache idInfo
         putStrLn $ show key  ++ ": " ++ show idInfo'
 
+-- | Print file mapping to stdout (for debugging purposes only)
+dumpFileMap :: IdeSession -> IO ()
+dumpFileMap session = withComputedState session $ \_ Computed{..} ->
+  forM_ (StrictMap.toList computedFileMap) $ \(path, mod) -> do
+    let mod' = removeExplicitSharing computedCache mod
+    putStrLn $ path ++ ": " ++ show mod'
+
 {------------------------------------------------------------------------------
   Auxiliary
 ------------------------------------------------------------------------------}
@@ -402,6 +417,7 @@ withIdleState IdeSession{ideState} f =
     emptyComputed = Computed {
         computedErrors        = StrictList.nil
       , computedLoadedModules = StrictList.nil
+      , computedFileMap       = StrictMap.empty
       , computedSpanInfo      = StrictMap.empty
       , computedExpTypes      = StrictMap.empty
       , computedUseSites      = StrictMap.empty

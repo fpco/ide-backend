@@ -315,7 +315,7 @@ ghcHandleCompile RpcConversation{..}
     -- during compilation to avoid stray messages, e.g. from the linker.
     --
     -- TODO: Should we log the suppressed messages?
-    (_suppressed, (errs, loadedModules)) <-
+    (_suppressed, (errs, loadedModules, fileMap)) <-
       captureGhcOutput $ compileInGhc configSourcesDir
                                       ideGenerateCode
                                       targets
@@ -324,6 +324,7 @@ ghcHandleCompile RpcConversation{..}
     let initialResponse = GhcCompileResult {
             ghcCompileErrors   = errs
           , ghcCompileLoaded   = force $ loadedModules
+          , ghcCompileFileMap  = fileMap
           , ghcCompileCache    = error "ghcCompileCache set last"
           -- We construct the diffs incrementally
           , ghcCompileImports  = StrictMap.empty

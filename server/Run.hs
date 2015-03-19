@@ -109,6 +109,7 @@ import IdeSession.Util
 import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
 import qualified IdeSession.Strict.List as StrictList
+import qualified IdeSession.Strict.Map  as StrictMap
 
 import HsWalk (idInfoForName)
 import Haddock
@@ -151,11 +152,17 @@ ghandleJust p handler a = ghandle handler' a
                    Nothing -> liftIO $ Ex.throwIO e
                    Just b  -> handler b
 
+-- | Compile a set of targets
+--
+-- Returns the errors, loaded modules, and mapping from filenames to modules
 compileInGhc :: FilePath            -- ^ target directory
              -> Bool                -- ^ should we generate code
              -> Targets             -- ^ targets
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
-             -> Ghc (Strict [] SourceError, [ModuleName])
+             -> Ghc ( Strict [] SourceError
+                    , [ModuleName]
+                    , Strict (Map FilePath) ModuleId
+                    )
 compileInGhc configSourcesDir generateCode mTargets errsRef = do
     -- Reset errors storage.
     liftIO $ writeIORef errsRef StrictList.nil
@@ -183,12 +190,30 @@ compileInGhc configSourcesDir generateCode mTargets errsRef = do
         void $ load LoadAllTargets
 
     -- Collect info
-    errs   <- liftIO $ readIORef errsRef
-    loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
+    errs    <- liftIO $ readIORef errsRef
+    loaded  <- getLoaded
+    fileMap <- getFileMap
     return ( StrictList.reverse errs
-           , map (Text.pack . moduleNameString) loaded
+           , loaded
+           , StrictMap.fromList $ fileMap
            )
   where
+    getLoaded :: Ghc [ModuleName]
+    getLoaded = do
+      graph <- getModuleGraph
+      names <- filterM isLoaded $ map ms_mod_name graph
+      return $ map (Text.pack . moduleNameString) names
+
+    getFileMap :: Ghc [(FilePath, ModuleId)]
+    getFileMap = do
+        dflags <- getSessionDynFlags
+        let aux :: ModSummary -> Maybe (FilePath, ModuleId)
+            aux summary = do
+              hs <- ml_hs_file $ ms_location summary
+              return (hs, importModuleId dflags (ms_mod summary))
+        graph <- getModuleGraph
+        return $ catMaybes $ map aux graph
+
     computeTargets :: Ghc [Target]
     computeTargets = do
       targetIds <- case mTargets of
@@ -582,4 +607,3 @@ _debugPpContext flags msg = do
   context <- getContext
   liftIO $ debug dVerbosity
     $ msg ++ ": " ++ showSDocDebug flags (GHC.ppr context)
-
