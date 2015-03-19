@@ -78,7 +78,7 @@ library
                       utf8-string          >= 0.3     && < 0.4,
                       template-haskell,
                       -- our own private fork:
-                      Cabal-ide-backend    >= 1.22,
+                      Cabal-ide-backend    >= 1.23,
                       ghc-prim,
                       pretty-show
 

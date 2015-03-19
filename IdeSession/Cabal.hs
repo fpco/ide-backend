@@ -682,14 +682,9 @@ getYear = do
 generateMacros :: PackageDBStack -> [FilePath] -> IO String
 generateMacros configPackageDBStack configExtraPathDirs = do
   let verbosity = silent
-  (ghcPkg, _) <- requireProgram verbosity ghcPkgProgram
+  (_ghcPkg, ghcConf) <- requireProgram verbosity ghcPkgProgram
                                 (defaultProgramConfiguration configExtraPathDirs)
-  let hcPkgInfo = HcPkg.HcPkgInfo {
-          hcPkgProgram    = ghcPkg
-        , noPkgDbStack    = False
-        , noVerboseFlag   = False
-        , flagPackageConf = True  -- a `False` value here breaks everything!
-        }
+  let hcPkgInfo = GHC.hcPkgInfo ghcConf
   pkgidss <- mapM (HcPkg.list hcPkgInfo verbosity) configPackageDBStack
   let newestPkgs = map last . groupBy ((==) `on` Package.packageName) . sort . concat $ pkgidss
   return $ generatePackageVersionMacros newestPkgs
