@@ -25,7 +25,7 @@ executable ide-backend-server
                       unix                 >= 2.5     && < 2.8,
                       text                 >= 0.11    && < 1.3,
                       directory            >= 1.1     && < 1.3,
-                      filepath             >= 1.3     && < 1.4,
+                      filepath             >= 1.3     && < 1.5,
                       crypto-api           >= 0.12    && < 0.14,
                       pureMD5              >= 2.1     && < 2.2,
                       tagged               >= 0.4     && < 0.8,
@@ -47,7 +47,7 @@ executable ide-backend-server
                       ghc-prim
 
   -- The standard macros don't give us 7.6.x granularity
-  -- We _could_ add support for 7.6, 7.6.1 specifically is broken (#7548) 
+  -- We _could_ add support for 7.6, 7.6.1 specifically is broken (#7548)
   if impl(ghc == 7.6.1)
     cpp-options: -DGHC_761
 
@@ -61,7 +61,7 @@ executable ide-backend-server
     build-depends: time        == 1.4.*,
                    haddock-api == 2.15.*,
                    -- use whatever version came with ghc
-                   Cabal 
+                   Cabal
     cpp-options: -DGHC_78
     ghc-options: -dynamic
   if impl(ghc == 7.10.*)

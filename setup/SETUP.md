@@ -582,18 +582,9 @@ Setting up snippet sandboxes for running the tests
 --------------------------------------------------
 
 There are lots of ways you could do this; I find this way convenient. Create
-directories
+a directory `snippet-dbs`, and then for each patched version of `ghc` run
 
-```
-snippet-dbs/7.4.2
-snippet-dbs/7.8.4
-snippet-dbs/7.10
-```
-
-Then for each directory activate the corresponding **patched** version of `ghc` and run
-
-```
-cabal sandbox init --sandbox=.
+cabal sandbox init --sandbox=./.cabal-sandbox/<ghc version>
 echo "documentation: True" >cabal.config
 cabal install parallel
 cabal install mtl
@@ -618,9 +609,9 @@ dist/build/TestSuite/TestSuite: \
   --extra-paths-74  ~/path/to/patched/ghc/7.4.2:~/path/to/7.4.2/ide-backend-server \
   --extra-paths-78  ~/path/to/patched/ghc/7.8.4:~/path/to/7.8.4/ide-backend-server \
   --extra-paths-710 ~/path/to/patched/ghc/7.10:~/path/to/7.10/ide-backend-server \
-  --package-db-74  ~/path/to/snippet-dbs/7.4.2/x86_64-osx-ghc-7.4.2.20140729-packages.conf.d \
-  --package-db-78  ~/path/to/snippet-dbs/7.8.4/x86_64-osx-ghc-7.8.4.20141229-packages.conf.d \
-  --package-db-710 ~/path/to/snippet-dbs/7.10/x86_64-osx-ghc-7.10.0.20150131-packages.conf.d \
+  --package-db-74  ~/path/to/snippet-dbs/.cabal-sandbox/7.4.2/x86_64-osx-ghc-*-packages.conf.d \
+  --package-db-78  ~/path/to/snippet-dbs/.cabal-sandbox/7.8.4/x86_64-osx-ghc-*-packages.conf.d \
+  --package-db-710 ~/path/to/snippet-dbs/.cabal-sandbox/7.10/x86_64-osx-ghc-*-packages.conf.d \
   --test-74  \
   --test-78  \
   --test-710 \
