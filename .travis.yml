@@ -15,4 +15,4 @@ install:
  - travis_retry cabal update
 
 script:
- - cabal-meta install --run-tests ./ide-backend ./ide-backend-rts ./ide-backend-server ./ide-backend-common
+ - cabal install --run-tests ./ide-backend ./ide-backend-rts ./ide-backend-server ./ide-backend-common
