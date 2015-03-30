@@ -34,7 +34,7 @@ testAfter1sec env = withAvailableSession env $ \session -> do
     interrupt runActionsExe
     resOrEx <- runWait runActionsExe
     case resOrEx of
-      Right result -> assertEqual "after runExe" (ExitFailure 2) result
+      Right result -> assertEqual "after runExe" (ExitFailure (-2)) result -- SIGINT
       _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
   where
     upd = (updateCodeGeneration True)
@@ -56,7 +56,7 @@ testImmediately env = withAvailableSession env $ \session -> do
     interrupt runActionsExe
     resOrEx <- runWait runActionsExe
     case resOrEx of
-      Right result -> assertEqual "after runExe" (ExitFailure 2) result
+      Right result -> assertEqual "after runExe" (ExitFailure (-2)) result -- SIGINT
       _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
   where
     upd = (updateCodeGeneration True)
@@ -103,7 +103,7 @@ testManyTimes env = withAvailableSession env $ \session -> do
       runActionsExe <- runExe session m
       interrupt runActionsExe
       (_output, result) <- runWaitAll runActionsExe
-      assertEqual "" (ExitFailure 2) result
+      assertEqual "" (ExitFailure (-2)) result -- SIGINT
 
     -- This doesn't work, because the updateStdoutBufferMode above
     -- is void for runExe.

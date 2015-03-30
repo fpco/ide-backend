@@ -253,10 +253,15 @@ test185 env = withAvailableSession env $ \session -> do
   where
     upd = updateGhcOpts ["-fglasgow-exts","-thisOptionDoesNotExist"]
 
-test145 :: TestSuiteEnv -> Assertion
+test145 :: TestSuiteEnv -> IO ()
 test145 env = withAvailableSession env $ \session -> do
-    updateSessionD session upd1 1
-    assertNoErrors session
+    -- Setting -O is officially no longer supported from 7.10 and up
+    -- See <https://ghc.haskell.org/trac/ghc/ticket/10052>
+    if testSuiteEnvGhcVersion env >= GHC_7_10
+      then skipTest "-O no longer supported"
+      else do
+        updateSessionD session upd1 1
+        assertNoErrors session
   where
     upd1 = (updateCodeGeneration True)
         <> (updateGhcOpts ["-XScopedTypeVariables", "-O"])
@@ -366,12 +371,14 @@ test213 :: TestSuiteEnv -> Assertion
 test213 env = withAvailableSession env $ \session -> do
     updateSessionD session upd 1
     version <- getGhcVersion session
-    case version of
-      GHC742 -> -- 7.4.2 just reports the first module error
+    if version < GHC_7_8
+      then
+        -- 7.4.2 just reports the first module error
         assertSourceErrors session [
             [(Just "Main.hs", "Could not find module")]
           ]
-      GHC78 -> -- 7.8 reports both; make sure we have location info (#213)
+      else
+        -- 7.8 and up report both; make sure we have location info (#213)
         assertSourceErrors session [
             [(Just "Main.hs", "Could not find module")]
           , [(Just "Main.hs", "Could not find module")]
@@ -569,7 +576,7 @@ test229 env = withAvailableSession env $ \session -> do
 
 test191 :: TestSuiteEnv -> Assertion
 test191 env = withAvailableSession env $ \session -> do
-    when (testSuiteEnvGhcVersion env == GHC742) $
+    when (testSuiteEnvGhcVersion env == GHC_7_4) $
       skipTest "Known failure on 7.4.2 (#191)"
 
     updateSessionD session upd 1
@@ -590,7 +597,9 @@ test191 env = withAvailableSession env $ \session -> do
          _ -> assertFailure $ "Unexpected run result " ++ show result
 
     -- But after we change the stack size, test2 too will crash:
-    updateSessionD session (updateRtsOpts ["-K128K"]) 1
+    -- (Note that we cannot set this value _too_ low otherwise the main server
+    -- itself, rather than the snippet, will crash. See Issue #266.)
+    updateSessionD session (updateRtsOpts ["-K256K"]) 1
     do runActions <- runStmt session "Main" "test2"
        (_output, result) <- runWaitAll runActions
        case result of

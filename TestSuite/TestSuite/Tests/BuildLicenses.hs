@@ -31,9 +31,9 @@ test_NamedFieldPunsCorrect env = withAvailableSession' env (withGhcOpts ["-hide-
     let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
         update2 = updateGhcOpts punOpts
     updateSessionD session update2 0
-    loadModulesFrom session "test/Puns"
+    loadModulesFrom session "TestSuite/inputs/Puns"
     assertNoErrors session
-    cabalsPath <- canonicalizePath "test/Puns/cabals"
+    cabalsPath <- canonicalizePath "TestSuite/inputs/Puns/cabals"
     let upd = buildLicenses cabalsPath
     updateSessionD session upd 99
     assertNoErrors session
@@ -43,13 +43,13 @@ test_NamedFieldPunsCorrect env = withAvailableSession' env (withGhcOpts ["-hide-
     status <- getBuildLicensesStatus session
     assertEqual "after license build" (Just ExitSuccess) status
     licenses <- readFile $ distDir </> "licenses.txt"
-    assertBool "licenses length" $ length licenses >= 27142
+    assertBool ("licenses length (" ++ show (length licenses) ++ ")") $ length licenses >= 25000
 
 test_NamedFieldPunsErrors :: TestSuiteEnv -> Assertion
 test_NamedFieldPunsErrors env = withAvailableSession' env (withGhcOpts ["-hide-package monads-tf"]) $ \session -> do
-    loadModulesFrom session "test/Puns"
+    loadModulesFrom session "TestSuite/inputs/Puns"
     assertMoreErrors session
-    cabalsPath <- canonicalizePath "test/Puns/cabals"
+    cabalsPath <- canonicalizePath "TestSuite/inputs/Puns/cabals"
     let upd = buildLicenses cabalsPath
     updateSessionD session upd 99
     assertMoreErrors session
@@ -61,9 +61,9 @@ test_NamedFieldPunsErrors env = withAvailableSession' env (withGhcOpts ["-hide-p
 
 test_wrongCabalFile :: TestSuiteEnv -> Assertion
 test_wrongCabalFile env = withAvailableSession' env (withGhcOpts ["-hide-package monads-tf"]) $ \session -> do
-    loadModulesFrom session "test/Puns"
+    loadModulesFrom session "TestSuite/inputs/Puns"
     assertMoreErrors session
-    cabalsPath <- canonicalizePath "test/Puns/cabals/parse_error"
+    cabalsPath <- canonicalizePath "TestSuite/inputs/Puns/cabals/parse_error"
     let updL = buildLicenses cabalsPath
         punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
         upd = updL <> updateGhcOpts punOpts
@@ -74,7 +74,7 @@ test_wrongCabalFile env = withAvailableSession' env (withGhcOpts ["-hide-package
     distDir <- getDistDir session
     licensesErr <- readFile $ distDir </> "licenses.stderr"
     assertEqual "licensesErr length" 18 (length $ lines licensesErr)
-    cabalsPath2 <- canonicalizePath "test/Puns/cabals/no_text_error"
+    cabalsPath2 <- canonicalizePath "TestSuite/inputs/Puns/cabals/no_text_error"
     let upd2 = buildLicenses cabalsPath2
     updateSessionD session upd2 99
     status2 <- getBuildLicensesStatus session
@@ -84,10 +84,10 @@ test_wrongCabalFile env = withAvailableSession' env (withGhcOpts ["-hide-package
 
 test_ParFib :: TestSuiteEnv -> Assertion
 test_ParFib env = withAvailableSession env $ \session -> do
-    withCurrentDirectory "test/MainModule" $ do
+    withCurrentDirectory "TestSuite/inputs/MainModule" $ do
       loadModulesFrom session "."
       assertNoErrors session
-    cabalsPath <- canonicalizePath "test/MainModule/cabals"
+    cabalsPath <- canonicalizePath "TestSuite/inputs/MainModule/cabals"
     let upd = buildLicenses cabalsPath
     updateSessionD session upd 6
     distDir <- getDistDir session
@@ -96,14 +96,14 @@ test_ParFib env = withAvailableSession env $ \session -> do
     status <- getBuildLicensesStatus session
     assertEqual "after license build" (Just ExitSuccess) status
     licenses <- readFile $ distDir </> "licenses.txt"
-    assertBool "licenses length" $ length licenses >= 21409
+    assertBool ("licenses length (" ++ show (length licenses) ++ ")") $ length licenses >= 14165
 
 test_Cabal :: TestSuiteEnv -> Assertion
 test_Cabal env = withAvailableSession env $ \session -> do
-    withCurrentDirectory "test/Cabal" $ do
+    withCurrentDirectory (testInputPathCabal env) $ do
       loadModulesFrom session "."
       assertNoErrors session
-    cabalsPath <- canonicalizePath "test/Puns/cabals"  -- 7 packages missing
+    cabalsPath <- canonicalizePath "TestSuite/inputs/Puns/cabals"  -- 7 packages missing
     let upd = buildLicenses cabalsPath
     updateSessionD session upd 99
     distDir <- getDistDir session
@@ -147,6 +147,7 @@ test_1000_noLicense env = withAvailableSession env $ \session -> do
     pkgs = map (\(name, _) ->
                  PackageId{ packageName    = T.pack name
                           , packageVersion = Just "1.0"
+                          , packageKey     = T.pack name -- ?? TODO
                           }
                ) lics
 
@@ -176,19 +177,20 @@ test_1000_noUsefulInfo env = withAvailableSession env $ \session -> do
                                   , (Maybe License, Maybe FilePath, Maybe String)
                                   )]
     licenseFixedConfig 0 = []
-    licenseFixedConfig n = ("p" ++ show n, (Just BSD3, Just "test/BSD_TEST", Nothing))
+    licenseFixedConfig n = ("p" ++ show n, (Just BSD3, Just "TestSuite/inputs/BSD_TEST", Nothing))
                          : licenseFixedConfig (n - 1)
 
     lics = licenseFixedConfig 1000
     pkgs = map (\(name, _) ->
                  PackageId{ packageName    = T.pack name
                           , packageVersion = Just "1.0"
+                          , packageKey     = T.pack name -- ?? TODO
                           }
                ) lics
 
 test_TH :: TestSuiteEnv -> Assertion
 test_TH env = withAvailableSession' env (withGhcOpts ["-XTemplateHaskell"]) $ \session -> do
-    withCurrentDirectory "test" $ do
+    withCurrentDirectory "TestSuite/inputs" $ do
       (originalUpdate, lm) <- getModulesFrom "TH"
       let update = originalUpdate <> updateCodeGeneration True
       updateSessionD session update (length lm)

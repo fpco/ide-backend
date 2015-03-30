@@ -173,6 +173,7 @@ module IdeSession (
     -- ** Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
+  , getFileMap
   , getBuildExeStatus
   , getBuildDocStatus
   , getBuildLicensesStatus
@@ -215,6 +216,8 @@ module IdeSession (
   -- * For internal/debugging use only
   , getGhcExitCode
   , dumpIdInfo
+  , dumpAutocompletion
+  , dumpFileMap
   , crashGhcServer
   , sourceExtensions
   , ideBackendApiVersion

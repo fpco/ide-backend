@@ -66,7 +66,9 @@ import System.IO.Unsafe (unsafePerformIO)
 -- http://hackage.haskell.org/trac/ghc/ticket/7548
 -- is not fixed in this version. Compilation should fail,
 -- because the problem is not minor and not easy to spot otherwise.
-#else
+#error "GHC 7.6.1 is broken (#7548) and not supported"
+#endif
+
 import Bag (bagToList)
 import DynFlags (defaultDynFlags)
 import Exception (ghandle)
@@ -79,9 +81,8 @@ import GHC hiding (
   , getBreak
   )
 import GhcMonad (liftIO)
-import Module (mainPackageId)
 import OccName (occEnvElts)
-import Outputable (PprStyle, qualName, qualModule, mkUserStyle)
+import Outputable (PprStyle, mkUserStyle)
 import RdrName (GlobalRdrEnv, GlobalRdrElt, gre_name)
 import RnNames (rnImports)
 import TcRnMonad (initTc)
@@ -93,7 +94,7 @@ import qualified Config        as GHC
 import qualified Outputable    as GHC
 import qualified ByteCodeInstr as GHC
 import qualified Id            as GHC
-#endif
+
 #if __GLASGOW_HASKELL__ >= 706
 import ErrUtils   ( MsgDoc )
 #else
@@ -108,6 +109,7 @@ import IdeSession.Util
 import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
 import qualified IdeSession.Strict.List as StrictList
+import qualified IdeSession.Strict.Map  as StrictMap
 
 import HsWalk (idInfoForName)
 import Haddock
@@ -150,11 +152,17 @@ ghandleJust p handler a = ghandle handler' a
                    Nothing -> liftIO $ Ex.throwIO e
                    Just b  -> handler b
 
+-- | Compile a set of targets
+--
+-- Returns the errors, loaded modules, and mapping from filenames to modules
 compileInGhc :: FilePath            -- ^ target directory
              -> Bool                -- ^ should we generate code
              -> Targets             -- ^ targets
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
-             -> Ghc (Strict [] SourceError, [ModuleName])
+             -> Ghc ( Strict [] SourceError
+                    , [ModuleName]
+                    , Strict (Map FilePath) ModuleId
+                    )
 compileInGhc configSourcesDir generateCode mTargets errsRef = do
     -- Reset errors storage.
     liftIO $ writeIORef errsRef StrictList.nil
@@ -182,12 +190,30 @@ compileInGhc configSourcesDir generateCode mTargets errsRef = do
         void $ load LoadAllTargets
 
     -- Collect info
-    errs   <- liftIO $ readIORef errsRef
-    loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
+    errs    <- liftIO $ readIORef errsRef
+    loaded  <- getLoaded
+    fileMap <- getFileMap
     return ( StrictList.reverse errs
-           , map (Text.pack . moduleNameString) loaded
+           , loaded
+           , StrictMap.fromList $ fileMap
            )
   where
+    getLoaded :: Ghc [ModuleName]
+    getLoaded = do
+      graph <- getModuleGraph
+      names <- filterM isLoaded $ map ms_mod_name graph
+      return $ map (Text.pack . moduleNameString) names
+
+    getFileMap :: Ghc [(FilePath, ModuleId)]
+    getFileMap = do
+        dflags <- getSessionDynFlags
+        let aux :: ModSummary -> Maybe (FilePath, ModuleId)
+            aux summary = do
+              hs <- ml_hs_file $ ms_location summary
+              return (hs, importModuleId dflags (ms_mod summary))
+        graph <- getModuleGraph
+        return $ catMaybes $ map aux graph
+
     computeTargets :: Ghc [Target]
     computeTargets = do
       targetIds <- case mTargets of
@@ -240,10 +266,22 @@ importList summary = do
   let unLIE :: LIE RdrName -> Text
       unLIE (L _ name) = Text.pack $ pretty dflags GHC.defaultUserStyle name
 
+#if __GLASGOW_HASKELL__ >= 710
+  let unLocNames :: Located [LIE name] -> [LIE name]
+      unLocNames (L _ names) = names
+#else
+  let unLocNames :: [LIE name] -> [LIE name]
+      unLocNames names = names
+#endif
+
+#if __GLASGOW_HASKELL__ >= 710
+  let mkImportEntities :: Maybe (Bool, Located [LIE RdrName]) -> ImportEntities
+#else
   let mkImportEntities :: Maybe (Bool, [LIE RdrName]) -> ImportEntities
+#endif
       mkImportEntities Nothing               = ImportAll
-      mkImportEntities (Just (True, names))  = ImportHiding (force $ map unLIE names)
-      mkImportEntities (Just (False, names)) = ImportOnly   (force $ map unLIE names)
+      mkImportEntities (Just (True, names))  = ImportHiding (force $ map unLIE (unLocNames names))
+      mkImportEntities (Just (False, names)) = ImportOnly   (force $ map unLIE (unLocNames names))
 
   let goImp :: Located (ImportDecl RdrName) -> Import
       goImp (L _ decl) = Import {
@@ -410,7 +448,7 @@ breakFromSpan modName span newValue = runMaybeT $ do
       else Nothing
 
     mod :: Module
-    mod = mkModule mainPackageId (mkModuleName . Text.unpack $ modName)
+    mod = mkModule mainPackageKey (mkModuleName . Text.unpack $ modName)
 
 importBreakInfo :: Maybe GHC.BreakInfo
                 -> [Name]
@@ -478,7 +516,7 @@ collectSrcError errsRef handlerOutput handlerRemaining flags
    ++ "  SrcSpan: "  ++ show srcspan
 -- ++ "  PprStyle: " ++ show style
    ++ "  MsgDoc: "
-   ++ showSDocForUser flags (qualName style,qualModule style) msg
+   ++ showSDocForUser flags (queryQual style) msg
    ++ "\n"
   -- Actually collect errors.
   collectSrcError'
@@ -495,16 +533,16 @@ collectSrcError' errsRef _ _ flags severity srcspan style msg
                       SevError   -> Just KindError
                       SevFatal   -> Just KindError
                       _          -> Nothing
-  = do let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+  = do let msgstr = showSDocForUser flags (queryQual style) msg
        sp <- extractSourceSpan srcspan
        modifyIORef errsRef (StrictList.cons $ SourceError errKind sp (Text.pack msgstr))
 
 collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
-  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+  = let msgstr = showSDocForUser flags (queryQual style) msg
      in handlerOutput msgstr
 
 collectSrcError' _errsRef _ handlerRemaining flags _severity _srcspan style msg
-  = let msgstr = showSDocForUser flags (qualName style,qualModule style) msg
+  = let msgstr = showSDocForUser flags (queryQual style) msg
      in handlerRemaining msgstr
 
 -- TODO: perhaps make a honest SrcError from the first span from the first
@@ -551,6 +589,14 @@ showSDocDebug  flags msg = GHC.showSDocDebug flags msg
 #else
 showSDocDebug _flags msg = GHC.showSDocDebug        msg
 #endif
+
+queryQual :: PprStyle -> PrintUnqualified
+#if __GLASGOW_HASKELL__ >= 710
+queryQual = GHC.queryQual
+#else
+queryQual style = (GHC.qualName style, GHC.qualModule style)
+#endif
+
 
 -----------------------
 -- Debug

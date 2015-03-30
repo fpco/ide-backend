@@ -21,11 +21,15 @@ module TestSuite.State (
   , dontReuse
   , skipTest
   , ifTestingExe
+  , ifTestingIntegration
     -- * Constructing tests
   , stdTest
   , withOK
   , docTests
   , exeTests
+  , integrationTests
+    -- * Paths
+  , testInputPathCabal
     -- * Test suite global state
   , withCurrentDirectory
   , findExe
@@ -76,11 +80,17 @@ data TestSuiteConfig = TestSuiteConfig {
     -- | Skip buildExe tests
   , testSuiteConfigNoExe :: Bool
 
+    -- | Skip integration tests
+  , testSuiteConfigNoIntegration :: Bool
+
     -- | Package DB stack for GHC 7.4
   , testSuiteConfigPackageDb74 :: Maybe String
 
     -- | Package DB stack for GHC 7.8
   , testSuiteConfigPackageDb78 :: Maybe String
+
+    -- | Package DB stack for GHC 7.10
+  , testSuiteConfigPackageDb710 :: Maybe String
 
     -- | Extra paths for GHC 7.4
   , testSuiteConfigExtraPaths74 :: String
@@ -88,11 +98,17 @@ data TestSuiteConfig = TestSuiteConfig {
     -- | Extra paths for GHC 7.8
   , testSuiteConfigExtraPaths78 :: String
 
+    -- | Extra paths for GHC 7.10
+  , testSuiteConfigExtraPaths710 :: String
+
     -- | Should we test against GHC 7.4?
   , testSuiteConfigTest74 :: Bool
 
     -- | Should we test against GHC 7.8?
   , testSuiteConfigTest78 :: Bool
+
+    -- | Should we test against GHC 7.10?
+  , testSuiteConfigTest710 :: Bool
   }
   deriving (Eq, Show)
 
@@ -261,6 +277,13 @@ ifTestingExe TestSuiteEnv{..} act =
   where
     TestSuiteConfig{..} = testSuiteEnvConfig
 
+-- | Skip this if --no-integration
+ifTestingIntegration :: TestSuiteEnv -> Assertion -> Assertion
+ifTestingIntegration TestSuiteEnv{..} act = do
+    unless testSuiteConfigNoIntegration act
+  where
+    TestSuiteConfig{..} = testSuiteEnvConfig
+
 {-------------------------------------------------------------------------------
   Constructing tests
 
@@ -269,14 +292,14 @@ ifTestingExe TestSuiteEnv{..} act =
 -------------------------------------------------------------------------------}
 
 data TestCase =
-    StdTest Assertion
+    StdTest TestName Assertion
     -- Tests that report more than just "OK"
-  | WithOK (IO String)
+  | WithOK TestName (IO String)
   deriving Typeable
 
 runTestCase :: TestCase -> IO Result
-runTestCase (StdTest t) = registerTest t >> return (testPassed "")
-runTestCase (WithOK  t) = registerTest t >>= return . testPassed
+runTestCase (StdTest nm t) = registerTest nm t >> return (testPassed "")
+runTestCase (WithOK  nm t) = registerTest nm t >>= return . testPassed
 
 instance IsTest TestCase where
   -- TODO: Measure time and use for testPassed in normal case
@@ -295,11 +318,11 @@ instance Exception SkipTest
 
 -- | Construct a standard test case
 stdTest :: TestSuiteEnv -> TestName -> (TestSuiteEnv -> Assertion) -> TestTree
-stdTest st name = singleTest name . StdTest . ($ st)
+stdTest st name = singleTest name . StdTest name . ($ st)
 
 -- | Construct a test case that reports OK with a non-standard string
 withOK :: TestSuiteEnv -> TestName -> (TestSuiteEnv -> IO String) -> TestTree
-withOK st name = singleTest name . WithOK . ($ st)
+withOK st name = singleTest name . WithOK name . ($ st)
 
 -- | Lists of tests that should be run only if Haddocks are installed
 docTests :: TestSuiteEnv -> [TestTree] -> [TestTree]
@@ -314,6 +337,14 @@ exeTests :: TestSuiteEnv -> [TestTree] -> [TestTree]
 exeTests TestSuiteEnv{..} ts
     | testSuiteConfigNoExe = []
     | otherwise            = ts
+  where
+    TestSuiteConfig{..} = testSuiteEnvConfig
+
+-- | Lists of tests that should be run only of --no-integration is not passed
+integrationTests :: TestSuiteEnv -> [TestTree] -> [TestTree]
+integrationTests TestSuiteEnv{..} ts
+    | testSuiteConfigNoIntegration = []
+    | otherwise                    = ts
   where
     TestSuiteConfig{..} = testSuiteEnvConfig
 
@@ -364,14 +395,16 @@ deriveSessionConfig TestSuiteServerConfig{..} = defaultSessionConfig {
             testSuiteServerPackageDBStack
           `mplus`
             do packageDb <- case testSuiteServerGhcVersion of
-                              GHC742 -> testSuiteConfigPackageDb74
-                              GHC78  -> testSuiteConfigPackageDb78
+                              GHC_7_4  -> testSuiteConfigPackageDb74
+                              GHC_7_8  -> testSuiteConfigPackageDb78
+                              GHC_7_10 -> testSuiteConfigPackageDb710
                return [GlobalPackageDB, SpecificPackageDB packageDb]
           )
     , configExtraPathDirs =
         splitSearchPath $ case testSuiteServerGhcVersion of
-                            GHC742 -> testSuiteConfigExtraPaths74
-                            GHC78  -> testSuiteConfigExtraPaths78
+                            GHC_7_4  -> testSuiteConfigExtraPaths74
+                            GHC_7_8  -> testSuiteConfigExtraPaths78
+                            GHC_7_10 -> testSuiteConfigExtraPaths710
     , configGenerateModInfo =
         fromMaybe (configGenerateModInfo defaultSessionConfig) $
           testSuiteServerGenerateModInfo
@@ -403,17 +436,25 @@ newtype TestSuiteOptionNoHaddocks = TestSuiteOptionNoHaddocks Bool
   deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionNoExe = TestSuiteOptionNoExe Bool
   deriving (Eq, Ord, Typeable)
+newtype TestSuiteOptionNoIntegration = TestSuiteOptionNoIntegration Bool
+  deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionPackageDb74 = TestSuiteOptionPackageDb74 (Maybe String)
   deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionPackageDb78 = TestSuiteOptionPackageDb78 (Maybe String)
+  deriving (Eq, Ord, Typeable)
+newtype TestSuiteOptionPackageDb710 = TestSuiteOptionPackageDb710 (Maybe String)
   deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionExtraPaths74 = TestSuiteOptionExtraPaths74 String
   deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionExtraPaths78 = TestSuiteOptionExtraPaths78 String
   deriving (Eq, Ord, Typeable)
+newtype TestSuiteOptionExtraPaths710 = TestSuiteOptionExtraPaths710 String
+  deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionTest74 = TestSuiteOptionTest74 Bool
   deriving (Eq, Ord, Typeable)
 newtype TestSuiteOptionTest78 = TestSuiteOptionTest78 Bool
+  deriving (Eq, Ord, Typeable)
+newtype TestSuiteOptionTest710 = TestSuiteOptionTest710 Bool
   deriving (Eq, Ord, Typeable)
 
 instance IsOption TestSuiteOptionKeepTempFiles where
@@ -444,6 +485,13 @@ instance IsOption TestSuiteOptionNoExe where
   optionHelp     = return "Skip buildExe tests"
   optionCLParser = flagCLParser Nothing (TestSuiteOptionNoExe True)
 
+instance IsOption TestSuiteOptionNoIntegration where
+  defaultValue   = TestSuiteOptionNoIntegration False
+  parseValue     = fmap TestSuiteOptionNoIntegration . safeRead
+  optionName     = return "no-integration"
+  optionHelp     = return "Skip integration tests"
+  optionCLParser = flagCLParser Nothing (TestSuiteOptionNoIntegration True)
+
 instance IsOption TestSuiteOptionPackageDb74 where
   defaultValue   = TestSuiteOptionPackageDb74 Nothing
   parseValue     = Just . TestSuiteOptionPackageDb74 . Just . expandHomeDir
@@ -456,6 +504,12 @@ instance IsOption TestSuiteOptionPackageDb78 where
   optionName     = return "package-db-78"
   optionHelp     = return "Package DB stack for GHC 7.8"
 
+instance IsOption TestSuiteOptionPackageDb710 where
+  defaultValue   = TestSuiteOptionPackageDb710 Nothing
+  parseValue     = Just . TestSuiteOptionPackageDb710 . Just . expandHomeDir
+  optionName     = return "package-db-710"
+  optionHelp     = return "Package DB stack for GHC 7.10"
+
 instance IsOption TestSuiteOptionExtraPaths74 where
   defaultValue   = TestSuiteOptionExtraPaths74 ""
   parseValue     = Just . TestSuiteOptionExtraPaths74 . expandHomeDir
@@ -467,6 +521,12 @@ instance IsOption TestSuiteOptionExtraPaths78 where
   parseValue     = Just . TestSuiteOptionExtraPaths78 . expandHomeDir
   optionName     = return "extra-paths-78"
   optionHelp     = return "Package DB stack for GHC 7.8"
+
+instance IsOption TestSuiteOptionExtraPaths710 where
+  defaultValue   = TestSuiteOptionExtraPaths710 ""
+  parseValue     = Just . TestSuiteOptionExtraPaths710 . expandHomeDir
+  optionName     = return "extra-paths-710"
+  optionHelp     = return "Package DB stack for GHC 7.10"
 
 instance IsOption TestSuiteOptionTest74 where
   defaultValue   = TestSuiteOptionTest74 False
@@ -482,18 +542,29 @@ instance IsOption TestSuiteOptionTest78 where
   optionHelp     = return "Run tests against GHC 7.8"
   optionCLParser = flagCLParser Nothing (TestSuiteOptionTest78 True)
 
+instance IsOption TestSuiteOptionTest710 where
+  defaultValue   = TestSuiteOptionTest710 False
+  parseValue     = fmap TestSuiteOptionTest710 . safeRead
+  optionName     = return "test-710"
+  optionHelp     = return "Run tests against GHC 7.10"
+  optionCLParser = flagCLParser Nothing (TestSuiteOptionTest710 True)
+
 testSuiteCommandLineOptions :: [OptionDescription]
 testSuiteCommandLineOptions = [
     Option (Proxy :: Proxy TestSuiteOptionKeepTempFiles)
   , Option (Proxy :: Proxy TestSuiteOptionNoSessionReuse)
   , Option (Proxy :: Proxy TestSuiteOptionNoHaddocks)
   , Option (Proxy :: Proxy TestSuiteOptionNoExe)
+  , Option (Proxy :: Proxy TestSuiteOptionNoIntegration)
   , Option (Proxy :: Proxy TestSuiteOptionPackageDb74)
   , Option (Proxy :: Proxy TestSuiteOptionPackageDb78)
+  , Option (Proxy :: Proxy TestSuiteOptionPackageDb710)
   , Option (Proxy :: Proxy TestSuiteOptionExtraPaths74)
   , Option (Proxy :: Proxy TestSuiteOptionExtraPaths78)
+  , Option (Proxy :: Proxy TestSuiteOptionExtraPaths710)
   , Option (Proxy :: Proxy TestSuiteOptionTest74)
   , Option (Proxy :: Proxy TestSuiteOptionTest78)
+  , Option (Proxy :: Proxy TestSuiteOptionTest710)
   ]
 
 parseOptions :: (TestSuiteConfig -> TestTree) -> TestTree
@@ -502,12 +573,16 @@ parseOptions f =
   askOption $ \(TestSuiteOptionNoSessionReuse testSuiteConfigNoSessionReuse) ->
   askOption $ \(TestSuiteOptionNoHaddocks     testSuiteConfigNoHaddocks)     ->
   askOption $ \(TestSuiteOptionNoExe          testSuiteConfigNoExe)          ->
+  askOption $ \(TestSuiteOptionNoIntegration  testSuiteConfigNoIntegration)  ->
   askOption $ \(TestSuiteOptionPackageDb74    testSuiteConfigPackageDb74)    ->
   askOption $ \(TestSuiteOptionPackageDb78    testSuiteConfigPackageDb78)    ->
+  askOption $ \(TestSuiteOptionPackageDb710   testSuiteConfigPackageDb710)   ->
   askOption $ \(TestSuiteOptionExtraPaths74   testSuiteConfigExtraPaths74)   ->
   askOption $ \(TestSuiteOptionExtraPaths78   testSuiteConfigExtraPaths78)   ->
+  askOption $ \(TestSuiteOptionExtraPaths710  testSuiteConfigExtraPaths710)  ->
   askOption $ \(TestSuiteOptionTest74         testSuiteConfigTest74)         ->
   askOption $ \(TestSuiteOptionTest78         testSuiteConfigTest78)         ->
+  askOption $ \(TestSuiteOptionTest710        testSuiteConfigTest710)        ->
   f TestSuiteConfig{..}
 
 {-------------------------------------------------------------------------------
@@ -535,8 +610,9 @@ findExe TestSuiteEnv{..} name = do
   where
     extraPathDirs =
       case testSuiteEnvGhcVersion of
-        GHC742 -> testSuiteConfigExtraPaths74 testSuiteEnvConfig
-        GHC78  -> testSuiteConfigExtraPaths78 testSuiteEnvConfig
+        GHC_7_4  -> testSuiteConfigExtraPaths74  testSuiteEnvConfig
+        GHC_7_8  -> testSuiteConfigExtraPaths78  testSuiteEnvConfig
+        GHC_7_10 -> testSuiteConfigExtraPaths710 testSuiteEnvConfig
 
     searchPath :: OurCabal.ProgramSearchPath
     searchPath = OurCabal.ProgramSearchPathDefault
@@ -554,19 +630,12 @@ withInstalledPackage env pkgDir act =
 -- This should not be used in isolation because it changes test global state.
 packageInstall :: TestSuiteEnv -> FilePath -> IO ()
 packageInstall env@TestSuiteEnv{..} pkgDir = do
-  cabalExe <- findExe env "cabal"
-  oldEnv   <- System.Environment.getEnvironment
-  let oldEnvMap          = Map.fromList oldEnv
-      adjustPATH oldPATH = extraPathDirs ++ ":" ++ oldPATH
-      newEnvMap          = Map.adjust adjustPATH "PATH" oldEnvMap
-      newEnv             = Map.toList newEnvMap
-  forM_ [ ["clean"]
-        , ["configure", "--package-db=" ++ packageDb, "--disable-library-profiling"]
-        , ["build"]
-        , ["copy"]
-        , ["register"]
-        ] $ \cmd -> do
-    let opts = cmd ++ ["-v0"]
+    cabalExe <- findExe env "cabal"
+    oldEnv   <- System.Environment.getEnvironment
+    let oldEnvMap          = Map.fromList oldEnv
+        adjustPATH oldPATH = extraPathDirs ++ ":" ++ oldPATH
+        newEnvMap          = Map.adjust adjustPATH "PATH" oldEnvMap
+        newEnv             = Map.toList newEnvMap
     (_,_,_,r2) <- createProcess (proc cabalExe opts)
                     { cwd = Just pkgDir
                     , env = Just newEnv
@@ -575,12 +644,22 @@ packageInstall env@TestSuiteEnv{..} pkgDir = do
   where
     extraPathDirs =
       case testSuiteEnvGhcVersion of
-        GHC742 -> testSuiteConfigExtraPaths74 testSuiteEnvConfig
-        GHC78  -> testSuiteConfigExtraPaths78 testSuiteEnvConfig
+        GHC_7_4  -> testSuiteConfigExtraPaths74  testSuiteEnvConfig
+        GHC_7_8  -> testSuiteConfigExtraPaths78  testSuiteEnvConfig
+        GHC_7_10 -> testSuiteConfigExtraPaths710 testSuiteEnvConfig
     packageDb = fromMaybe "" $
       case testSuiteEnvGhcVersion of
-        GHC742 -> testSuiteConfigPackageDb74 testSuiteEnvConfig
-        GHC78  -> testSuiteConfigPackageDb78 testSuiteEnvConfig
+        GHC_7_4  -> testSuiteConfigPackageDb74  testSuiteEnvConfig
+        GHC_7_8  -> testSuiteConfigPackageDb78  testSuiteEnvConfig
+        GHC_7_10 -> testSuiteConfigPackageDb710 testSuiteEnvConfig
+
+    opts = [ "--no-require-sandbox"
+           , "install"
+           , "--package-db=" ++ packageDb
+           , "--disable-library-profiling"
+           , "-v0"
+           ]
+
 
 -- | Used only in the definition of 'withInstalledPackage'
 --
@@ -596,8 +675,9 @@ packageDelete env@TestSuiteEnv{..} pkgDir = do
   where
     packageDb = fromMaybe "" $
       case testSuiteEnvGhcVersion of
-        GHC742 -> testSuiteConfigPackageDb74 testSuiteEnvConfig
-        GHC78  -> testSuiteConfigPackageDb78 testSuiteEnvConfig
+        GHC_7_4  -> testSuiteConfigPackageDb74  testSuiteEnvConfig
+        GHC_7_8  -> testSuiteConfigPackageDb78  testSuiteEnvConfig
+        GHC_7_10 -> testSuiteConfigPackageDb710 testSuiteEnvConfig
 
     opts = [ "--package-conf=" ++ packageDb, "-v0", "unregister"
            , takeFileName pkgDir
@@ -650,8 +730,8 @@ testSuiteThreadsTVar :: TVar TestSuiteThreads
 testSuiteThreadsTVar = unsafePerformIO $ newTVarIO $ NormalExecution [] []
 
 -- | Every test execution should be wrapped in registerTest
-registerTest :: IO a -> IO a
-registerTest act = do
+registerTest :: TestName -> IO a -> IO a
+registerTest _name act = do
     tid <- myThreadId
     bracket_ (register tid) (unregister tid) act
   where
@@ -728,6 +808,20 @@ requireExclusiveAccess act = do
           ExclusiveExecution _ ->
             -- Some other thread currently needs exclusive access.. Wait.
             retry
+
+{-------------------------------------------------------------------------------
+  Paths
+
+  TODO: Currently all tests hardcode the "TestSuite/inputs" path. We should
+  define testInputPath here and use it throughout.
+-------------------------------------------------------------------------------}
+
+testInputPathCabal :: TestSuiteEnv -> FilePath
+testInputPathCabal env =
+    case testSuiteEnvGhcVersion env of
+      GHC_7_4  -> "TestSuite/inputs/Cabal-1.14.0"
+      GHC_7_8  -> "TestSuite/inputs/Cabal-1.18.1.5"
+      GHC_7_10 -> "TestSuite/inputs/Cabal-1.22.0.0"
 
 {-------------------------------------------------------------------------------
   Auxiliary

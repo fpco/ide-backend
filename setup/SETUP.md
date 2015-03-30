@@ -162,8 +162,16 @@ we use for ide-backend-server). For now we will assume it's a stock 7.4.
   - Standard installation of ghc 7.4.2
   - ide-backend/vendor/cabal/Cabal (Cabal-ide-backend) and
     ide-backend/vendor/binary (binary-ide-backend)
-    (make sure to ghc-pkg hide these packages)
   - ide-backend and dependencies
+
+NOTE on installing Cabal-ide-backend: Cabal-ide-backend relies on
+binary-ide-backend; this is just for compatibility with the rest ide-backend,
+and it can build against the standard binary, but it does need binary >= 0.7 in
+order to build. If you are building Cabal in an environment with, say,
+binary-0.5 and binary-ide-backend-0.7.3.0, then calling configure on Cabal will
+fail because configuring cabal builds all of cabal (this is a quick of cabal --
+bootstrapping problem). To fix this, temporarily hide binary and expose
+binary-ide-backend when building Cabal.
 
 The fpco-patched-7.4 and fpco-patched-7.8 sandboxes
 ---------------------------------------------------
@@ -197,11 +205,10 @@ only a few minor differences, explained when they come up.
   (See http://www.edsko.net/2013/02/10/comprehensive-haskell-sandboxes/ , the
   last section, "Known Limitations".)
 
-* Install 
+* Install
 
   - The appropriate branch of ghc (see below)
   - ide-backend/vendor/binary (binary-ide-backend)
-    (make sure to ghc-pkg hide binary-ide-backend)
   - ide-backend-server and dependencies (including alex/happy)
 
 * Create package DB for snippets (the "snippet DB")
@@ -237,7 +244,7 @@ only a few minor differences, explained when they come up.
   - the test suite requires the following packages (you might of course want to
     use a separate snippet DB for the test suite:)
 
-    * parallel (tested with 3.2.0.4; necessary also for 7.8 now)
+    * parallel (tested with 3.2.0.4, 3.2.0.6; necessary also for 7.8 now)
     * mtl (tested with 2.1.3.1, 2.2.1)
     * monads-tf (testd with 0.1.0.1, 0.1.0.2)
     * yesod-1.2.4 (optional; only required for one test; install with
@@ -265,14 +272,17 @@ The most conversative way to run the test suite is:
 
     PATH=/bin:/usr/bin \
     dist/build/TestSuite/TestSuite \
-      --extra-paths-74 ~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
-      --extra-paths-78 ~/env/fpco-patched-7.8/local/bin:~/env/fpco-patched-7.8/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
-      --package-db-74 ~/env/fpco-patched-7.4/dot-ghc/snippet-db \
-      --package-db-78 ~/env/fpco-patched-7.8/dot-ghc/snippet-db \
-      --test-74 \
-      --test-78 \
+      --extra-paths-74  ~/env/fpco-patched-7.4/local/bin:~/env/fpco-patched-7.4/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin   \
+      --extra-paths-78  ~/env/fpco-patched-7.8/local/bin:~/env/fpco-patched-7.8/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin   \
+      --extra-paths-710 ~/env/fpco-patched-7.10/local/bin:~/env/fpco-patched-7.10/dot-cabal/bin:~/env/fpco-stock-7.4/dot-cabal/bin \
+      --package-db-74  ~/env/fpco-patched-7.4/dot-ghc/snippet-db  \
+      --package-db-78  ~/env/fpco-patched-7.8/dot-ghc/snippet-db  \
+      --package-db-710 ~/env/fpco-patched-7.10/dot-ghc/snippet-db \
+      --test-74  \
+      --test-78  \
+      --test-710 \
       --no-session-reuse \
-      -j1 
+      -j1
 
 The test suite runs the tests against both 7.4 and 7.8, and configures the
 sessions correspondingly given the above command line options. In this example
@@ -327,7 +337,7 @@ ghc 7.4
 
   in the section for the "quick" build flavour (make sure there are no trailing
   spaces in your build.mk).
-  
+
   NOTE: This assumes wanting to do ghc dev. For performance builds you should
   pick a different build flavour.
 
@@ -372,7 +382,7 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 
 * Get the corresponding version of the core libraries:
 
-      ./sync-all --no-dph -r git://git.haskell.org get -b ghc-7.8 
+      ./sync-all --no-dph -r git://git.haskell.org get -b ghc-7.8
 
   WARNING: There are no ghc-7.8.4-release tags for these libraries, so this
   checks out the "latest" 7.8 branch for each dependency. This may or may not
@@ -413,14 +423,14 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
       haddock          -> ../src/ghc/inplace/bin/haddock
       hsc2hs           -> ../src/ghc/inplace/bin/hsc2hs
 
-  (<date> will vary). 
+  (<date> will vary).
 
 * You will probably also want to install the bundled Haddock (in the new
   sandbox): run
 
       cabal install
 
-  in utils/haddock. 
+  in utils/haddock.
 
 ghc 7.10
 --------
@@ -439,7 +449,7 @@ sure we have the right version of all the dependencies.
 * Get the corresponding version of the core libraries:
 
       git submodule init
-      git sobmodule update
+      git submodule update
 
 * Create build.mk
 
@@ -475,7 +485,7 @@ sure we have the right version of all the dependencies.
       haddock           -> ../src/ghc/inplace/bin/haddock
       hsc2hs            -> ../src/ghc/inplace/bin/hsc2hs
 
-  (<date> will vary). 
+  (<date> will vary).
 
 * You will probably also want to install the bundled Haddock (in the new
   sandbox): run
@@ -485,8 +495,136 @@ sure we have the right version of all the dependencies.
   in utils/haddock/haddock-library, utils/haddock/haddock-api and utils/haddock
   (in that order).
 
+Using cabal sandboxes
+=====================
+
+We need to build one instance of ide-backend-server per ghc version we want to
+support; for ghc 7.4.2 we need a patched ghc to do this; for ghc 7.8 and 7.10
+patches are optional. In this section we describe how to build
+ide-backend-server against all versions of ghc. When we say a particular version
+of ghc is "active" we simply mean that it's in the path; we will build
+everything in their own sandbox. See [Comprehensive Haskell Sandboxes,
+Revisted](http://www.edsko.net/2015/03/09/sandboxes-revisited/) for some details
+on using sandboxes with multiple versions of ghc.
+
+Sandbox for building the server
+-------------------------------
+
+### For ghc 7.4.2 and 7.8.4
+
+With the patched compiler active, create the new sandbox in
+`~/path/to/ide-backend/server`:
+
+```
+cabal sandbox init --sandbox ./.cabal-sandbox/7.8.4
+cabal sandbox add-source ../vendor/binary
+cabal install
+```
+
+Or, if you want to hack on `ide-backend-server`, replace that last line with
+
+```
+cabal install --only-dependencies
+cabal configure
+cabal build
+cabal install --only
+```
+
+TODO: Would be nicer if we could remove the need for ide-backend-binary, but
+this would mean dropping support for ghc 7.4.2.
+
+### For ghc 7.10
+
+This works pretty much as it does for `ghc` 7.8.4, but we need to install the
+Haddock bundled with `ghc`:
+
+```
+cabal sandbox init --sandbox ./.cabal-sandbox/7.10
+cabal sandbox add-source ../vendor/binary
+cabal sandbox add-source ~/path/to/ghc/7.10/utils/haddock/haddock-{library,api}
+cabal install
+```
+
+Or, if you want to hack on `ide-backend-server`, replace that last line with
+
+```
+cabal install --only-dependencies
+cabal configure
+cabal build
+cabal install --only
+```
+
+(Currently this relies on a patched version of `bytestring-trie`; hopefully this
+will be resolved before the official release.)
+
+Sandbox for building the library
+--------------------------------
+
+With either a patched or a stock ghc, run in `~/path/to/ide-backend`:
+
+```
+cabal sandbox init
+cabal sandbox add-source vendor/binary
+cabal sandbox add-source vendor/cabal/Cabal
+cabal install
+```
+
+Or, if you want to hack on `ide-backend-server`, replace that last line with
+
+```
+cabal install --only-dependencies --enable-tests
+cabal configure --enable-tests
+cabal build
+cabal install --only
+```
+
+Setting up snippet sandboxes for running the tests
+--------------------------------------------------
+
+There are lots of ways you could do this; I find this way convenient. Create
+a directory `snippet-dbs`, and then for each patched version of `ghc` run
+
+cabal sandbox init --sandbox=./.cabal-sandbox/<ghc version>
+echo "documentation: True" >cabal.config
+cabal install parallel
+cabal install mtl
+cabal install monads-tf
+cabal install ~/path/to/ide-backend/rts
+```
+
+and optionally also install `yesod` and `parsec` (this is only necessary for a
+few tests). It is important to install `parallel`, `mtl` and `monads-tf` in this
+order (issue #95). It is also important to use the patched version of `ghc`
+here, not because we need those patches but because the version used to compile
+these snippets must match the version used by the `ide-backend-server`.
+
+Running the tests
+-----------------
+
+The safest way to run the test suite is to do:
+
+```
+PATH=/bin:/usr/bin:~/path/to/ide-backend/.cabal-sandbox/bin:~/path/to/cabal \
+dist/build/TestSuite/TestSuite: \
+  --extra-paths-74  ~/path/to/patched/ghc/7.4.2:~/path/to/7.4.2/ide-backend-server \
+  --extra-paths-78  ~/path/to/patched/ghc/7.8.4:~/path/to/7.8.4/ide-backend-server \
+  --extra-paths-710 ~/path/to/patched/ghc/7.10:~/path/to/7.10/ide-backend-server \
+  --package-db-74  ~/path/to/snippet-dbs/.cabal-sandbox/7.4.2/x86_64-osx-ghc-*-packages.conf.d \
+  --package-db-78  ~/path/to/snippet-dbs/.cabal-sandbox/7.8.4/x86_64-osx-ghc-*-packages.conf.d \
+  --package-db-710 ~/path/to/snippet-dbs/.cabal-sandbox/7.10/x86_64-osx-ghc-*-packages.conf.d \
+  --test-74  \
+  --test-78  \
+  --test-710 \
+  --no-session-reuse \
+  -j1
+```
+
+If you want to speed up the tests you can leave out `--no-session-reuse` and
+`-j1`; this _should_ work equally well but may not. If it doesn't, this may
+either indicate a bug in the test suite or in `ide-backend` itself.
+
 DEBUGGING
----------
+=========
 
 * If ide-backend complains about being unable to open dynamic libraries (even
   with ghc 7.4, or with ghc 7.8 NOT configured for dynamic libraries), such as

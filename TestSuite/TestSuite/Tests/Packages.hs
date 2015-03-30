@@ -63,7 +63,7 @@ test_Register_NoRestart env = withAvailableSession env $ \session -> do
     -- Session is started successfully, because we haven't referenced the
     -- package yet.
 
-    withInstalledPackage env "test/simple-lib17" $ do
+    withInstalledPackage env "TestSuite/inputs/simple-lib17" $ do
       -- Package is now installed, but the session not restarted, so we cannot
       -- reference the new package
       updateSessionD session upd 1
@@ -81,7 +81,7 @@ test_Register_Restart env = withAvailableSession env $ \session -> do
     -- Session is started successfully, because we haven't referenced the
     -- package yet.
 
-    withInstalledPackage env "test/simple-lib17" $ do
+    withInstalledPackage env "TestSuite/inputs/simple-lib17" $ do
       -- After restarting the session the new package should be visible
       restartSession session
       updateSessionD session upd 1
@@ -301,6 +301,7 @@ test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withGhcOpts packageOpts) $
           , modulePackage = PackageId {
                 packageName    = "base"
               , packageVersion = Just "X.Y.Z"
+              , packageKey     = "base" -- ignoreVersions sets key == name
               }
           }
         monads_tf mod = ModuleId {
@@ -308,6 +309,7 @@ test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withGhcOpts packageOpts) $
           , modulePackage = PackageId {
                 packageName    = "monads-tf"
               , packageVersion = Just "X.Y.Z"
+              , packageKey     = "monads-tf"
               }
           }
     assertSameSet "imports: " (ignoreVersions . fromJust . imports $ "A") $ [
@@ -331,7 +333,7 @@ test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withGhcOpts packageOpts) $
 
     -- TODO: We expect the scope "imported from monads-tf-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:38"
     -- but we cannot guarantee it (#95)
-    assertIdInfo' session "A" (4,5,4,12) (4,5,4,12) "runCont" VarName (allVersions "Cont r1 a1 -> (a1 -> r1) -> r1") "transformers-X.Y.Z:Control.Monad.Trans.Cont" (allVersions "<no location info>") "monads-tf-X.Y.Z:Control.Monad.Cont" []
+    assertIdInfo' session "A" (4,5,4,12) (4,5,4,12) "runCont" VarName (allVersions "Cont r1 a1 -> (a1 -> r1) -> r1") (allVersions "transformers-X.Y.Z:Control.Monad.Trans.Cont") (allVersions "<no location info>") (allVersions "monads-tf-X.Y.Z:Control.Monad.Cont") []
   where
     packageOpts = [ "-hide-all-packages"
                   , "-package base"
@@ -357,6 +359,7 @@ test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withGhcOpts packageOpts) $
           , modulePackage = PackageId {
                 packageName    = "base"
               , packageVersion = Just "X.Y.Z"
+              , packageKey     = "base" -- ignoreVersions sets key == name
               }
           }
         mtl mod = ModuleId {
@@ -364,6 +367,7 @@ test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withGhcOpts packageOpts) $
           , modulePackage = PackageId {
                 packageName    = "mtl"
               , packageVersion = Just "X.Y.Z"
+              , packageKey     = "mtl"
               }
           }
     assertSameSet "imports: " (ignoreVersions . fromJust . imports $ "A") $ [
@@ -387,7 +391,7 @@ test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withGhcOpts packageOpts) $
 
     -- TODO: We expect the scope "imported from mtl-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:38"
     -- but we cannot guarantee it (#95)
-    assertIdInfo' session "A" (4,5,4,12) (4,5,4,12) "runCont" VarName (allVersions "Cont r1 a1 -> (a1 -> r1) -> r1") "transformers-X.Y.Z:Control.Monad.Trans.Cont" (allVersions "<no location info>") "mtl-X.Y.Z:Control.Monad.Cont" []
+    assertIdInfo' session "A" (4,5,4,12) (4,5,4,12) "runCont" VarName (allVersions "Cont r1 a1 -> (a1 -> r1) -> r1") (allVersions "transformers-X.Y.Z:Control.Monad.Trans.Cont") (allVersions "<no location info>") (allVersions "mtl-X.Y.Z:Control.Monad.Cont") []
   where
     packageOpts = [ "-hide-all-packages"
                   , "-package base"
@@ -457,15 +461,16 @@ test_UnhideHide env = withAvailableSession env $ \session -> do
           (output, result) <- runWaitAll runActions
           assertEqual "" RunOk result
           case testSuiteEnvGhcVersion env of
-            GHC742 -> assertEqual "" "7.4\n" output
-            GHC78  -> assertEqual "" "7.8\n" output
+            GHC_7_4  -> assertEqual "" "7.4.\n" output
+            GHC_7_8  -> assertEqual "" "7.8.\n" output
+            GHC_7_10 -> assertEqual "" "7.10\n" output
 
     -- First, check that we cannot import from the ghc package
     do let upd = (updateSourceFile "A.hs" $ L.unlines [
                      "module A (test) where"
                    , "import Config"
                    , "test :: IO ()"
-                   , "test = putStrLn (take 3 cProjectVersion)"
+                   , "test = putStrLn (take 4 cProjectVersion)"
                    ])
               <> (updateCodeGeneration True)
        updateSessionD session upd 1

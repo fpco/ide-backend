@@ -76,11 +76,13 @@ main :: IO ()
 main =
     defaultMainWithIngredients ings $ testSuite $ \env ->
       let TestSuiteConfig{..} = testSuiteEnvConfig env
-          env74 = env { testSuiteEnvGhcVersion = GHC742 }
-          env78 = env { testSuiteEnvGhcVersion = GHC78  }
+          env74  = env { testSuiteEnvGhcVersion = GHC_7_4  }
+          env78  = env { testSuiteEnvGhcVersion = GHC_7_8  }
+          env710 = env { testSuiteEnvGhcVersion = GHC_7_10 }
       in testGroup "IDE backend tests" $
-           (if testSuiteConfigTest74 then [allTests "GHC 7.4.2" env74] else [])
-        ++ (if testSuiteConfigTest78 then [allTests "GHC 7.8.3" env78] else [])
+           (if testSuiteConfigTest74  then [allTests "GHC 7.4"  env74]  else [])
+        ++ (if testSuiteConfigTest78  then [allTests "GHC 7.8"  env78]  else [])
+        ++ (if testSuiteConfigTest710 then [allTests "GHC 7.10" env710] else [])
   where
     ings = includingOptions testSuiteCommandLineOptions
          : defaultIngredients

@@ -85,7 +85,7 @@ test_PartialModule env = withAvailableSession' env (withGhcOpts ["-XPackageImpor
       ]
     autocomplete <- getAutocompletion session
     let completeFo = autocomplete "M" "fo"
-    assertSameSet "fo: " (map idInfoQN completeFo) [
+    assertSameSet "fo: " (map idInfoQN completeFo) ([
         "foldM"
       , "foldM_"
       , "forM"
@@ -97,7 +97,9 @@ test_PartialModule env = withAvailableSession' env (withGhcOpts ["-XPackageImpor
       , "Data.List.foldr"
       , "Data.List.foldl"
       , "Data.List.foldr1"
-      ]
+      ] ++ if testSuiteEnvGhcVersion env < GHC_7_10 then [] else [
+        "foldMap"
+      ])
     let completeControlMonadFo = autocomplete "M" "Data.List.fo"
     assertSameSet "Data.List.fo: " (map idInfoQN completeControlMonadFo) [
         "Data.List.foldl'"
@@ -122,11 +124,13 @@ test_PartialModule env = withAvailableSession' env (withGhcOpts ["-XPackageImpor
       , "foo ="
       ])
 
+    -- ignoreVersions sets the key to be equal to the name
     base mod = ModuleId {
         moduleName    = T.pack mod
       , modulePackage = PackageId {
             packageName    = "base"
           , packageVersion = Just "X.Y.Z"
+          , packageKey     = "base"
           }
       }
     par mod = ModuleId {
@@ -134,6 +138,7 @@ test_PartialModule env = withAvailableSession' env (withGhcOpts ["-XPackageImpor
       , modulePackage = PackageId {
             packageName    = "parallel"
           , packageVersion = Just "X.Y.Z"
+          , packageKey     = "parallel"
           }
       }
 

@@ -57,6 +57,8 @@ data Computed = Computed {
     computedErrors :: !(Strict [] SourceError)
     -- | Modules that got loaded okay
   , computedLoadedModules :: !(Strict [] ModuleName)
+    -- | Mapping from filepaths to the modules they define
+  , computedFileMap :: !(Strict (Map FilePath) ModuleId)
     -- | Import information. This is (usually) available even for modules
     -- with parsing or type errors
   , computedImports :: !(Strict (Map ModuleName) (Strict [] Import))

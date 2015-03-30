@@ -42,17 +42,17 @@ testGroupCompilation env = testGroup "Compilation" [
 
 test_AdependsB_errorA :: TestSuiteEnv -> Assertion
 test_AdependsB_errorA env = withAvailableSession env $ \session -> do
-    loadModulesFrom session "test/AerrorB"
+    loadModulesFrom session "TestSuite/inputs/AerrorB"
     assertSourceErrors session [[(Just "A.hs", "No instance for (Num (IO ()))")]]
 
 test_AdependsB_errorB :: TestSuiteEnv -> Assertion
 test_AdependsB_errorB env = withAvailableSession env $ \session -> do
-    loadModulesFrom session "test/ABerror"
+    loadModulesFrom session "TestSuite/inputs/ABerror"
     assertSourceErrors session [[(Just "B.hs", "No instance for (Num (IO ()))")]]
 
 test_lhs :: TestSuiteEnv -> Assertion
 test_lhs env = withAvailableSession env $ \session -> do
-    loadModulesFrom session "test/compiler/utils"
+    loadModulesFrom session "TestSuite/inputs/compiler/utils"
     assertNoErrors session
     let update2 = updateCodeGeneration True
     updateSessionD session update2 4
@@ -63,8 +63,8 @@ test_lhs env = withAvailableSession env $ \session -> do
     assertEqual "" output "False\n"
 
 test_recursiveModules :: TestSuiteEnv -> Assertion
-test_recursiveModules env = withAvailableSession' env (withIncludes ["test/bootMods"]) $ \session -> do
-    loadModulesFrom session "test/bootMods"
+test_recursiveModules env = withAvailableSession' env (withIncludes ["TestSuite/inputs/bootMods"]) $ \session -> do
+    loadModulesFrom session "TestSuite/inputs/bootMods"
     assertNoErrors session
 
     ifTestingExe env $ do
@@ -87,11 +87,11 @@ test_recursiveModules env = withAvailableSession' env (withIncludes ["test/bootM
 
 test_dynamicIncludePathChange :: TestSuiteEnv -> Assertion
 test_dynamicIncludePathChange env = withAvailableSession env $ \session -> do
-    loadModulesFrom session "test/bootMods"
+    loadModulesFrom session "TestSuite/inputs/bootMods"
     assertOneError session
 
     updateSessionD session
-                   (updateRelativeIncludes ["test/bootMods"])
+                   (updateRelativeIncludes ["TestSuite/inputs/bootMods"])
                    4
     assertNoErrors session
 
@@ -146,7 +146,7 @@ test_rejectWrongCPP env = withAvailableSession' env (withGhcOpts ["-XCPP"]) $ \s
 
 test_NamedFieldPuns :: TestSuiteEnv -> Assertion
 test_NamedFieldPuns env = withAvailableSession' env (withGhcOpts ["-hide-package monads-tf"]) $ \session -> do
-    withCurrentDirectory "test/Puns" $ do
+    withCurrentDirectory "TestSuite/inputs/Puns" $ do
       loadModulesFrom session "."
       assertMoreErrors session
       let punOpts = ["-XNamedFieldPuns", "-XRecordWildCards"]
@@ -401,15 +401,15 @@ test_HsBoot_SubDir_InclPathChange env = withAvailableSession env $ \session -> d
           <> updateCodeGeneration True
 
 test_RelInclPath :: TestSuiteEnv -> Assertion
-test_RelInclPath env = withAvailableSession' env (withIncludes ["test/ABnoError"]) $ \session -> do
+test_RelInclPath env = withAvailableSession' env (withIncludes ["TestSuite/inputs/ABnoError"]) $ \session -> do
     -- Since we set the target explicitly, ghc will need to be able to find
     -- the other module (B) on its own; that means it will need an include
-    -- path to <ideSourcesDir>/test/ABnoError
-    loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
+    -- path to <ideSourcesDir>/TestSuite/inputs/ABnoError
+    loadModulesFrom' session "TestSuite/inputs/ABnoError" (TargetsInclude ["TestSuite/inputs/ABnoError/A.hs"])
     assertNoErrors session
 
     ifTestingExe env $ do
-       let updE = buildExe [] [(T.pack "Main", "test/ABnoError/A.hs")]
+       let updE = buildExe [] [(T.pack "Main", "TestSuite/inputs/ABnoError/A.hs")]
        updateSessionD session updE 3
        status <- getBuildExeStatus session
        assertEqual "after exe build" (Just ExitSuccess) status
@@ -423,17 +423,17 @@ test_RelInclPath_InclPathChange :: TestSuiteEnv -> Assertion
 test_RelInclPath_InclPathChange env = withAvailableSession env $ \session -> do
     -- Since we set the target explicitly, ghc will need to be able to find
     -- the other module (B) on its own; that means it will need an include
-    -- path to <ideSourcesDir>/test/ABnoError
-    loadModulesFrom' session "test/ABnoError" (TargetsInclude ["test/ABnoError/A.hs"])
+    -- path to <ideSourcesDir>/TestSuite/inputs/ABnoError
+    loadModulesFrom' session "TestSuite/inputs/ABnoError" (TargetsInclude ["TestSuite/inputs/ABnoError/A.hs"])
     assertOneError session
 
     updateSessionD session
-                   (updateRelativeIncludes ["test/ABnoError"])
+                   (updateRelativeIncludes ["TestSuite/inputs/ABnoError"])
                    2  -- note the recompilation
     assertNoErrors session
 
     ifTestingExe env $ do
-       let updE = buildExe [] [(T.pack "Main", "test/ABnoError/A.hs")]
+       let updE = buildExe [] [(T.pack "Main", "TestSuite/inputs/ABnoError/A.hs")]
        updateSessionD session updE 1
        status <- getBuildExeStatus session
        -- Path "" no longer in include paths here!

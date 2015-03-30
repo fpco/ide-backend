@@ -30,7 +30,7 @@ test_fromLhsFiles relativeIncludes env = withAvailableSession env
       updateSessionD session (updateRelativeIncludes ["", "Subdir"]) 0
     status0 <- getBuildDocStatus session
     when relativeIncludes $ assertEqual "before module loading" Nothing status0
-    withCurrentDirectory "test/compiler/utils" $ loadModulesFrom session "."
+    withCurrentDirectory "TestSuite/inputs/compiler/utils" $ loadModulesFrom session "."
     assertNoErrors session
     let upd = buildDoc
     updateSessionD session upd 1
@@ -48,7 +48,7 @@ test_fromLhsFiles relativeIncludes env = withAvailableSession env
 
 test_fail :: TestSuiteEnv -> Assertion
 test_fail env = withAvailableSession env $ \session -> do
-    withCurrentDirectory "test/ABerror" $ loadModulesFrom session "."
+    withCurrentDirectory "TestSuite/inputs/ABerror" $ loadModulesFrom session "."
     assertOneError session
     let upd = buildDoc
     -- Note that the stderr log file here is empty, but exit code is 1:
@@ -66,9 +66,9 @@ test_ParFib relativeIncludes env = withAvailableSession env $ \session -> do
       updateSessionD session
                      (updateRelativeIncludes ["", "../compiler/utils/Subdir"])
                      0
-    withCurrentDirectory "test/MainModule" $ loadModulesFrom session "."
+    withCurrentDirectory "TestSuite/inputs/MainModule" $ loadModulesFrom session "."
     when relativeIncludes $
-      withCurrentDirectory "test/MainModule" $
+      withCurrentDirectory "TestSuite/inputs/MainModule" $
         loadModulesFrom session "../compiler/utils/Subdir"
     assertNoErrors session
     let upd = buildDoc

@@ -5,6 +5,7 @@ module IdeSession.Types.Translation (
   , ExplicitSharing(..)
   , IntroduceSharing(..)
   , showNormalized
+  , dereferenceFilePathPtr
   ) where
 
 import Prelude hiding (mod, span)
@@ -120,6 +121,7 @@ instance ExplicitSharing Public.IdInfo where
       unknownPackage = Public.PackageId {
          packageName    = Text.pack "<<unknown package>>"
        , packageVersion = Nothing
+       , packageKey     = Text.pack "<<unknown package>>"
        }
 
 instance ExplicitSharing Public.ModuleId where
@@ -132,6 +134,7 @@ instance ExplicitSharing Public.PackageId where
   removeExplicitSharing _cache Private.PackageId{..} = Public.PackageId {
       Public.packageName    = packageName
     , Public.packageVersion = toLazyMaybe packageVersion
+    , Public.packageKey     = packageKey
     }
 
 instance ExplicitSharing Public.IdScope where
@@ -147,18 +150,12 @@ instance ExplicitSharing Public.IdScope where
 
 instance ExplicitSharing Public.SourceSpan where
   removeExplicitSharing cache Private.SourceSpan{..} = Public.SourceSpan {
-      Public.spanFilePath   = BSSC.unpack $
-                                StrictIntMap.findWithDefault
-                                  unknownFilePath
-                                  (Private.filePathPtr spanFilePath)
-                                  (Private.filePathCache cache)
+      Public.spanFilePath   = dereferenceFilePathPtr cache spanFilePath
     , Public.spanFromLine   = spanFromLine
     , Public.spanFromColumn = spanFromColumn
     , Public.spanToLine     = spanToLine
     , Public.spanToColumn   = spanToColumn
     }
-    where
-      unknownFilePath = BSSC.pack "<<unknown filepath>>"
 
 instance ExplicitSharing Public.EitherSpan where
   removeExplicitSharing cache eitherSpan = case eitherSpan of
@@ -220,6 +217,20 @@ instance ExplicitSharing Public.BreakInfo where
     }
 
 {------------------------------------------------------------------------------
+  Low-level API
+------------------------------------------------------------------------------}
+
+dereferenceFilePathPtr :: Private.ExplicitSharingCache
+                       -> Private.FilePathPtr -> FilePath
+dereferenceFilePathPtr cache ptr = BSSC.unpack $
+    StrictIntMap.findWithDefault
+      unknownFilePath
+      (Private.filePathPtr ptr)
+      (Private.filePathCache cache)
+  where
+    unknownFilePath = BSSC.pack "<<unknown filepath>>"
+
+{------------------------------------------------------------------------------
   Introducing explicit sharing
 ------------------------------------------------------------------------------}
 
@@ -242,4 +253,3 @@ instance IntroduceSharing Public.SourceSpan where
       , Private.spanToLine     = spanToLine
       , Private.spanToColumn   = spanToColumn
       }
-

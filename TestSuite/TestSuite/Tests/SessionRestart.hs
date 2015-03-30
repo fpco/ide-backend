@@ -30,15 +30,14 @@ test_WellBehaved env =
                  , "import Control.Concurrent (threadDelay)"
                  , "loop :: IO ()"
                  , "loop = threadDelay 10000 >> loop"
-                 ] ExitSuccess
+                 ] (ExitFailure (-9)) -- SIGKILL
 
 test_Blackhole_DontSwallow :: TestSuiteEnv -> Assertion
 test_Blackhole_DontSwallow env =
   restartRun env [ "module M where"
                  , "loop :: IO ()"
                  , "loop = loop"
-                 ] ExitSuccess
-
+                 ] (ExitFailure (-9)) -- SIGKILL
 
 test_Swallow :: TestSuiteEnv -> Assertion
 test_Swallow env =
@@ -52,7 +51,7 @@ test_Swallow env =
                  , ""
                  , "loop :: IO ()"
                  , "loop = Ex.catch innerLoop $ \\e -> let _ = e :: Ex.SomeException in loop"
-                 ] ExitSuccess
+                 ] (ExitFailure (-9)) -- SIGKILL
 
 test_Blackhole_Swallow :: TestSuiteEnv -> Assertion
 test_Blackhole_Swallow env =
@@ -66,7 +65,7 @@ test_Blackhole_Swallow env =
                  , ""
                  , "loop :: IO ()"
                  , "loop = Ex.catch innerLoop $ \\e -> let _ = e :: Ex.SomeException in loop"
-                 ] ExitSuccess
+                 ] (ExitFailure (-9)) -- SIGKILL
 
 test_Evil :: TestSuiteEnv -> Assertion
 test_Evil env =
@@ -76,7 +75,7 @@ test_Evil env =
                  , ""
                  , "loop :: IO ()"
                  , "loop = Ex.catch loop $ \\e -> let _ = e :: Ex.SomeException in loop"
-                 ] ExitSuccess
+                 ] (ExitFailure (-9)) -- SIGKILL
 
 test_EnvRestored :: TestSuiteEnv -> Assertion
 test_EnvRestored env = withAvailableSession env $ \session -> do
@@ -112,7 +111,7 @@ test_EnvRestored env = withAvailableSession env $ \session -> do
 
     -- Make sure the old server exited
     exitCodeBefore <- getGhcExitCode serverBefore
-    assertEqual "exitCodeBefore" (Just ExitSuccess) exitCodeBefore
+    assertEqual "exitCodeBefore" (Just (ExitFailure (-9))) exitCodeBefore
 
     -- Make sure the new server is still alive
     serverAfter <- getGhcServer session

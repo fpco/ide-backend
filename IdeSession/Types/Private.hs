@@ -123,6 +123,7 @@ data ModuleId = ModuleId
 data PackageId = PackageId
   { packageName    :: !Text
   , packageVersion :: !(Strict Maybe Text)
+  , packageKey     :: !Text
   }
   deriving (Show, Eq, Ord, Generic)
 
@@ -270,8 +271,11 @@ instance Binary ModuleId where
   get = ModuleId <$> get <*> get
 
 instance Binary PackageId where
-  put PackageId{..} = put packageName >> put packageVersion
-  get = PackageId <$> get <*> get
+  put PackageId{..} = do
+    put packageName
+    put packageVersion
+    put packageKey
+  get = PackageId <$> get <*> get <*> get
 
 instance Binary IdProp where
   put IdProp{..} = do

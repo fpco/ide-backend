@@ -1,9 +1,10 @@
+{-# LANGUAGE MultiParamTypeClasses, GADTs, FlexibleInstances #-}
 module GhcShim.API (
     -- * Traversing the AST
     IsBinder(..)
   , AstAlg(..)
-  , FoldId(..)
   , Fold(..)
+  , FoldPhase(..)
   ) where
 
 import Type   (Type)
@@ -20,7 +21,7 @@ data IsBinder =
 -- | The "algebra" that we use while traversing the AST.
 --
 -- This is not a general purpose fold; we look for identifiers and types.
-data AstAlg m = AstAlg {
+data AstAlg m id = AstAlg {
     -- | Mark a branch point in the AST
     astMark :: Maybe SrcSpan -> String -> m (Maybe Type) -> m (Maybe Type)
     -- | Throw a runtime error
@@ -28,14 +29,23 @@ data AstAlg m = AstAlg {
     -- | Found a subexpression type
   , astExpType :: SrcSpan -> Maybe Type -> m (Maybe Type)
     -- | Found a 'Name' (i.e., pre type checking)
-  , astName :: Located Name -> IsBinder -> m (Maybe Type)
-    -- | Found a 'Var' (i.e., post type checking)
-  , astVar :: Located Var  -> IsBinder -> m (Maybe Type)
+  , astId :: IsBinder -> Located id -> m (Maybe Type)
+    -- | Are we running pre or post type checking?
+  , astPhase :: FoldPhase id
   }
 
-class FoldId a where
-  foldId   :: AstAlg m -> Located a -> IsBinder -> m (Maybe Type)
-  ifPostTc :: a -> b -> Maybe b
+class Fold id a where
+  fold :: Monad m => AstAlg m id -> a -> m (Maybe Type)
 
-class Fold a where
-  fold :: Monad m => AstAlg m -> a -> m (Maybe Type)
+data FoldPhase id where
+  FoldPreTc  :: FoldPhase Name
+  FoldPostTc :: FoldPhase Var
+
+instance Fold id a => Fold id [a] where
+  fold alg xs = do
+    mapM_ (fold alg) xs
+    return Nothing
+
+instance Fold id a => Fold id (Maybe a) where
+  fold _alg Nothing  = return Nothing
+  fold  alg (Just x) = fold alg x

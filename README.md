@@ -23,6 +23,15 @@ ide-backend. The changelog is the place where we will point out:
 Changelog
 ---------
 
+ *  Version 0.10
+
+    * Updated private dependencies: binary-ide-backend 0.7.3.0,
+      Cabal-ide-backend 1.22
+
+    * Added support for ghc 7.10
+
+    TODO: Release notes not yet complete.
+
  *  Version 0.9
 
     * Required ghc patch levels:
@@ -136,7 +145,7 @@ Changelog
       - Added updateRtsOpts to the API and set default stack size to 8MB (#191).
         However, limiting stack size does not seem to work for ghc 7.4. ghci
         manages it so there must be a way, but simply starting the server with
-        +RTS -K.. -RTS does is not sufficient (#258). 
+        +RTS -K.. -RTS does is not sufficient (#258).
 
       - configRelativeIncludes taken into account when building C files (#212).
 
@@ -251,7 +260,7 @@ Changelog
       - The debugging API is **disabled** in this release, as it needs to be
         updated to work with the separate server (forkProcess) for running
         snippets.
-      - Limiting stack size does not work for 7.4 (#258). 
+      - Limiting stack size does not work for 7.4 (#258).
 
  *  Version 0.8.
 

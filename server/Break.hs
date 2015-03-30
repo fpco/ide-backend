@@ -1,5 +1,5 @@
 -- | This is a modified copy of compiler/ghci/Debugger.hs
-{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE MagicHash, CPP #-}
 module Break (
     evaluateIds
   , resolveNames
@@ -88,6 +88,10 @@ evaluateIds bindThings force ids = do
 -- | Give names, and bind in the interactive environment, to all the suspensions
 --   included (inductively) in a term
 bindSuspensions :: GhcMonad m => Term -> m Term
+#if __GLASGOW_HASKELL__ >= 710
+-- TODO: Not implemented for 7.10 and up
+bindSuspensions _ = undefined
+#else
 bindSuspensions t = do
       hsc_env <- getSession
       inScope <- GHC.getBindings
@@ -129,6 +133,7 @@ bindSuspensions t = do
           name <- atomicModifyIORef freeNames (\x->(tail x, head x))
           n <- newGrimName name
           return (Suspension ct ty hval (Just n), [(n,ty,hval)])
+#endif
 
 --    Create new uniques and give them sequentially numbered names
 newGrimName :: MonadIO m => String -> m Name

@@ -34,12 +34,14 @@ data GhcCompileResponse =
   | GhcCompileDone GhcCompileResult
   deriving (Typeable, Generic)
 
+-- NOTE: These fields cannot be made strict (at least, not easily)
 data GhcCompileResult = GhcCompileResult {
     ghcCompileErrors   :: Strict [] SourceError
   , ghcCompileLoaded   :: Strict [] ModuleName
   , ghcCompileCache    :: ExplicitSharingCache
   -- Computed from the GhcSummary (independent of the plugin, and hence
   -- available even when the plugin does not run)
+  , ghcCompileFileMap  :: Strict (Map FilePath) ModuleId
   , ghcCompileImports  :: Strict (Map ModuleName) (Diff (Strict [] Import))
   , ghcCompileAuto     :: Strict (Map ModuleName) (Diff (Strict [] IdInfo))
   -- Computed by the plugin
@@ -56,8 +58,10 @@ data GhcRunResponse =
   deriving (Typeable, Generic)
 
 -- | GHC version
-data GhcVersion = GHC742 | GHC78
-  deriving (Typeable, Show, Eq, Generic)
+--
+-- NOTE: Defined in such a way that the Ord instance makes sense.
+data GhcVersion = GHC_7_4 | GHC_7_8 | GHC_7_10
+  deriving (Typeable, Show, Eq, Ord, Generic)
 
 instance PrettyVal GhcInitResponse
 instance PrettyVal GhcCompileResponse
@@ -86,6 +90,7 @@ instance Binary GhcCompileResult where
     put ghcCompileErrors
     put ghcCompileLoaded
     put ghcCompileCache
+    put ghcCompileFileMap
     put ghcCompileImports
     put ghcCompileAuto
     put ghcCompileSpanInfo
@@ -95,7 +100,7 @@ instance Binary GhcCompileResult where
 
   get = GhcCompileResult <$> get <*> get <*> get
                          <*> get <*> get <*> get
-                         <*> get <*> get <*> get
+                         <*> get <*> get <*> get <*> get
 
 instance Binary GhcRunResponse where
   put (GhcRunOutp bs) = putWord8 0 >> put bs
@@ -109,12 +114,14 @@ instance Binary GhcRunResponse where
       _ -> fail "GhcRunResponse.get: invalid header"
 
 instance Binary GhcVersion where
-  put GHC742 = putWord8 0
-  put GHC78  = putWord8 1
+  put GHC_7_4  = putWord8 0
+  put GHC_7_8  = putWord8 1
+  put GHC_7_10 = putWord8 2
 
   get = do
     header <- getWord8
     case header of
-      0 -> return GHC742
-      1 -> return GHC78
+      0 -> return GHC_7_4
+      1 -> return GHC_7_8
+      2 -> return GHC_7_10
       _ -> fail "GhcVersion.get: invalid header"

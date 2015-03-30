@@ -48,7 +48,7 @@ testDuplicateShutdown env =
 testNestedSessions :: TestSuiteEnv -> Assertion
 testNestedSessions env =
     withSession (defaultServerConfig env) $ \session -> do
-      loadModulesFrom session "test/ABnoError"
+      loadModulesFrom session "TestSuite/inputs/ABnoError"
 
       withSession (defaultServerConfig env) $ \s2 -> do
        withSession (defaultServerConfig env) $ \s3 -> do
@@ -298,10 +298,10 @@ test_runWait_AfterTermination_Int env = withAvailableSession env $ \session -> d
        interrupt runActionsExe
        resOrEx <- runWait runActionsExe
        case resOrEx of
-         Right result -> assertEqual "after runExe" (ExitFailure 2) result
+         Right result -> assertEqual "after runExe" (ExitFailure (-2)) result -- SIGINT
          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
        result' <- runWait runActionsExe
-       assertEqual "" result' (Right $ ExitFailure 2)
+       assertEqual "" result' (Right $ ExitFailure (-2)) -- SIGINT
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $
@@ -345,10 +345,10 @@ test_runWait_AfterTermination_Restarted env = withAvailableSession env $ \sessio
        interrupt runActionsExe
        resOrEx <- runWait runActionsExe
        case resOrEx of
-         Right result -> assertEqual "after runExe" (ExitFailure 2) result
+         Right result -> assertEqual "after runExe" (ExitFailure (-2)) result -- SIGKILL
          _ -> assertFailure $ "Unexpected run result: " ++ show resOrEx
        result' <- runWait runActionsExe
-       assertEqual "" result' (Right $ ExitFailure 2)
+       assertEqual "" result' (Right $ ExitFailure (-2)) -- SIGKILL
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "M.hs" . L.unlines $

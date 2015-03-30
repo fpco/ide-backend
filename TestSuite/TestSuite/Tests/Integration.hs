@@ -15,11 +15,11 @@ import TestSuite.Session
 import TestSuite.State
 
 testGroupIntegration :: TestSuiteEnv -> TestTree
-testGroupIntegration env = testGroup "Integration" [
-    integrationTest env "Overwrite with error"                                       test_overwriteWithError
+testGroupIntegration env = testGroup "Integration" $ integrationTests env [
+    integrationTest env "Run the sample code; succeed or raise an exception"         test_runSampleCode
+  , integrationTest env "Overwrite with error"                                       test_overwriteWithError
   , integrationTest env "Overwrite with the same module name in all files"           test_overwriteWithSameModuleName
   , integrationTest env "Overwrite modules many times"                               test_overwriteModulesManyTimes
-  , integrationTest env "Run the sample code; succeed or raise an exception"         test_runSampleCode
   , integrationTest env "Overwrite all with exception-less code and run it"          test_overwriteWithExceptionFreeCode
   , integrationTest env "Make sure deleting modules removes them from the directory" test_deletingModulesRemovesFiles
   , integrationTest env "Make sure restartSession does not lose source files"        test_dontLoseFilesInRestart
@@ -33,7 +33,7 @@ type IntegrationTest = IdeSession -> IdeSessionUpdate -> [String] -> Assertion
 
 integrationTest :: TestSuiteEnv -> String -> IntegrationTest -> TestTree
 integrationTest env name test = testGroup name $
-  map (testWithProject env test) projects
+  map (testWithProject env test) (projects env)
 
 testWithProject :: TestSuiteEnv -> IntegrationTest -> Project -> TestTree
 testWithProject env test Project{..} = do
@@ -51,21 +51,21 @@ data Project = Project {
    }
 
 -- Set of projects and options to use for them.
-projects :: [Project]
-projects = [
+projects :: TestSuiteEnv -> [Project]
+projects env = [
     Project {
         projectName       = "A depends on B, throws exception"
-      , projectSourcesDir = "test/ABnoError"
+      , projectSourcesDir = "TestSuite/inputs/ABnoError"
       , projectOptions    = []
       }
   , Project {
         projectName       = "Cabal code"
-      , projectSourcesDir = "test/Cabal"
+      , projectSourcesDir = testInputPathCabal env
       , projectOptions    = []
       }
   , Project {
         projectName       = "A single file with a code to run in parallel"
-      , projectSourcesDir = "test/MainModule"
+      , projectSourcesDir = "TestSuite/inputs/MainModule"
       , projectOptions    = []
       }
   ]
@@ -89,7 +89,7 @@ test_overwriteWithSameModuleName :: IntegrationTest
 test_overwriteWithSameModuleName session originalUpdate lm = do
     updateSessionD session update 2
     if length lm >= 2
-      then assertSourceErrors' session ["module `main:Wrong' is defined in multiple files"]
+      then assertSourceErrors' session ["defined in multiple files"]
       else assertNoErrors session
   where
     upd m  = updateSourceFile m "module Wrong where\na = 1"
@@ -186,7 +186,7 @@ test_dontLoseFilesInRestart session originalUpdate lm = do
     assertNoErrors session
     updateSessionD session update3 0  -- 0: nothing to generate code from
     exitCodeBefore <- getGhcExitCode serverBefore
-    assertEqual "exitCodeBefore" (Just ExitSuccess) exitCodeBefore
+    assertEqual "exitCodeBefore" (Just (ExitFailure (-9))) exitCodeBefore -- SIGKILL
   where
     update  = originalUpdate <> updateCodeGeneration True
     update2 = mconcat $ map updateSourceFileDelete lm

@@ -32,6 +32,7 @@ module IdeSession.Query (
     -- * Queries that rely on computed state
   , getSourceErrors
   , getLoadedModules
+  , getFileMap
   , getSpanInfo
   , getExpTypes
   , getImports
@@ -41,6 +42,8 @@ module IdeSession.Query (
   , getDotCabal
     -- * Debugging (internal use only)
   , dumpIdInfo
+  , dumpAutocompletion
+  , dumpFileMap
   ) where
 
 import Prelude hiding (mod, span)
@@ -220,6 +223,12 @@ getLoadedModules :: Query [ModuleName]
 getLoadedModules = computedQuery $ \Computed{..} ->
   toLazyList $ computedLoadedModules
 
+-- | Get the mapping from filenames to modules (as computed by GHC)
+getFileMap :: Query (FilePath -> Maybe ModuleId)
+getFileMap = computedQuery $ \Computed{..} path ->
+  fmap (removeExplicitSharing computedCache) $
+    StrictMap.lookup path computedFileMap
+
 -- | Get information about an identifier at a specific location
 getSpanInfo :: Query (ModuleName -> SourceSpan -> [(SourceSpan, SpanInfo)])
 getSpanInfo = computedQuery $ \computed@Computed{..} mod span ->
@@ -345,15 +354,34 @@ getDotCabal session = withComputedState session
   Debugging
 ------------------------------------------------------------------------------}
 
--- | Print the id info maps to the stdout (for debugging purposes only)
+-- | Print the id info maps to stdout (for debugging purposes only)
 dumpIdInfo :: IdeSession -> IO ()
 dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
   forM_ (StrictMap.toList computedSpanInfo) $ \(mod, idMap) -> do
     putStrLn $ "*** " ++ Text.unpack mod ++ " ***"
     forM_ (StrictIntervalMap.toList (Private.idMapToMap idMap)) $ \(i, idInfo) -> do
       let idInfo' = removeExplicitSharing computedCache idInfo
-          (StrictIntervalMap.Interval (_, fromLine, fromCol) (_, toLine, toCol)) = i
-      putStrLn $ show (fromLine, fromCol, toLine, toCol)  ++ ": " ++ show idInfo'
+          (StrictIntervalMap.Interval (fn, fromLine, fromCol) (_, toLine, toCol)) = i
+          fn' = dereferenceFilePathPtr computedCache fn
+      putStrLn $ show (fn', fromLine, fromCol, toLine, toCol)  ++ ": " ++ show idInfo'
+
+-- | Print autocompletion to stdout (for debugging purposes only)
+dumpAutocompletion :: IdeSession -> IO ()
+dumpAutocompletion session = withComputedState session $ \_ Computed{..} ->
+  forM_ (StrictMap.toList computedAutoMap) $ \(mod, autoMap) -> do
+    putStrLn $ "*** " ++ Text.unpack mod ++ " ***"
+    forM_ (StrictTrie.toList autoMap) $ \(key, idInfos) ->
+      forM_ (toLazyList idInfos) $ \idInfo -> do
+        let idInfo' :: IdInfo
+            idInfo' = removeExplicitSharing computedCache idInfo
+        putStrLn $ show key  ++ ": " ++ show idInfo'
+
+-- | Print file mapping to stdout (for debugging purposes only)
+dumpFileMap :: IdeSession -> IO ()
+dumpFileMap session = withComputedState session $ \_ Computed{..} ->
+  forM_ (StrictMap.toList computedFileMap) $ \(path, mod) -> do
+    let mod' = removeExplicitSharing computedCache mod
+    putStrLn $ path ++ ": " ++ show mod'
 
 {------------------------------------------------------------------------------
   Auxiliary
@@ -389,6 +417,7 @@ withIdleState IdeSession{ideState} f =
     emptyComputed = Computed {
         computedErrors        = StrictList.nil
       , computedLoadedModules = StrictList.nil
+      , computedFileMap       = StrictMap.empty
       , computedSpanInfo      = StrictMap.empty
       , computedExpTypes      = StrictMap.empty
       , computedUseSites      = StrictMap.empty

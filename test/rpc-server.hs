@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell, ScopedTypeVariables, ExistentialQuantification, DeriveDataTypeable #-}
+-- | Test suite for the RPC infrastructure
 module Main where
 
 import Control.Applicative ((<$>), (<*>))
