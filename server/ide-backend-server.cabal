@@ -2,11 +2,11 @@ name:                 ide-backend-server
 version:              0.9.0
 synopsis:             An IDE backend server
 -- description:
-license:              AllRightsReserved
-license-file:         ../LICENSE
+license:              MIT
+license-file:         LICENSE
 author:               Duncan Coutts, Mikolaj Konarski, Edsko de Vries
 maintainer:           Duncan Coutts <duncan@well-typed.com>
-copyright:            (c) 2012 Well-Typed LLP
+copyright:            (c) 2015 FP Complete
 category:             Development
 build-type:           Simple
 cabal-version:        >=1.10

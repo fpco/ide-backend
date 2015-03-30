@@ -2,11 +2,11 @@ name:                 ide-backend
 version:              0.9.0
 synopsis:             An IDE backend library
 -- description:
-license:              AllRightsReserved
+license:              MIT
 license-file:         LICENSE
 author:               Duncan Coutts, Mikolaj Konarski, Edsko de Vries
 maintainer:           Duncan Coutts <duncan@well-typed.com>
-copyright:            (c) 2012 Well-Typed LLP
+copyright:            (c) 2015 FP Complete
 data-files:           CoreLicenses.txt
 category:             Development
 build-type:           Simple
