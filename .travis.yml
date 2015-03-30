@@ -1,6 +1,6 @@
 env:
  - CABALVER=1.20 GHCVER=7.8.4
- - CABALVER=1.22 GHCVER=7.10.1
+ #- CABALVER=1.22 GHCVER=7.10.1 # bytestring-trie not yet fixed
  #- CABALVER=head GHCVER=head   # see section about GHC HEAD snapshots
 
 before_install:
