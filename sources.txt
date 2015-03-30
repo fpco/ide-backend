@@ -1,4 +1,3 @@
 .
 ./rts
 ./server
-./vendor/cabal/Cabal
