@@ -70,7 +70,7 @@ Changelog
         introduced in that change: #225); RPC conversations with the split off
         processes happen over named pipes. This uses 'forkProcess', for which
         we have identified and fixed a number of ghc RTS bugs (#9377, #9347,
-        #9296, #9295, #9284). The use of a separate process is necessary
+        \#9296, #9295, #9284). The use of a separate process is necessary
         because we need to be able to change process global state for the
         snippet (buffering, current working directory, value of getArgs, etc.).
         Issue #206 was partly related to these ghc bugs.  One consequence of
@@ -156,7 +156,7 @@ Changelog
 
       - Make sure that runStmt can safely be interrupted without putting the
         main session in an inconsistent state or leading to deadlock (#219,
-        #220) and that it will terminate the server if it does get interrupted
+        \#220) and that it will terminate the server if it does get interrupted
         (#231).
 
       - Make sure server terminates when client does (#194).
