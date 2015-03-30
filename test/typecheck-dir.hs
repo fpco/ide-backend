@@ -55,7 +55,7 @@ main = do
           error "usage: typecheck-dir [source-dir [ghc-options]]"
         [dir] -> (dir, defOpts)
         dir : optsArg -> (dir, optsArg)
-        [] -> ("test/Cabal",
+        [] -> ("TestSuite/inputs/Cabal-1.18.1.5",
                defOpts)
   slashTmp <- getTemporaryDirectory
   withTempDirectory slashTmp "typecheck-dir."
