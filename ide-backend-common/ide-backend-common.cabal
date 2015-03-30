@@ -1,7 +1,7 @@
 name:                 ide-backend-common
 version:              0.9.0
 synopsis:             Shared library used be ide-backend and ide-backend-server
--- description:
+description:          Should not be used by end users
 license:              MIT
 license-file:         LICENSE
 author:               Duncan Coutts, Mikolaj Konarski, Edsko de Vries

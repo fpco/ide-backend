@@ -1,7 +1,7 @@
 name:                 ide-backend-server
 version:              0.9.0
 synopsis:             An IDE backend server
--- description:
+description:          Server executable used internally by the ide-backend library.
 license:              MIT
 license-file:         LICENSE
 author:               Duncan Coutts, Mikolaj Konarski, Edsko de Vries
@@ -28,7 +28,7 @@ executable ide-backend-server
                       GhcShim.GhcShim78
                       GhcShim.GhcShim710
                       GhcShim
-  build-depends:      base,
+  build-depends:      base < 10,
                       ghc                  == 7.4.* || == 7.8.* || == 7.10.*,
                       bytestring-trie      >= 0.2     && < 0.3,
                       containers           >= 0.4.1   && < 1,
