@@ -13,8 +13,6 @@ install:
  - cabal --version
  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
  - travis_retry cabal update
- - cabal install cabal-src cabal-meta alex happy
 
 script:
- - cabal-meta install --only-dependencies --enable-tests --enable-benchmarks --force-reinstalls
- - cabal-meta install --run-tests
+ - cabal-meta install --run-tests ./ide-backend ./ide-backend-rts ./ide-backend-server ./ide-backend-common
