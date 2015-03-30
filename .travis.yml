@@ -16,4 +16,5 @@ install:
  - cabal install cabal-src cabal-meta alex happy
 
 script:
- - cabal-meta install --only-dependencies --run-tests --enable-benchmarks --force-reinstalls
+ - cabal-meta install --only-dependencies --enable-tests --enable-benchmarks --force-reinstalls
+ - cabal-meta install --run-tests
