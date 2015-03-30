@@ -71,7 +71,6 @@ library
   ghc-options:        -Wall -fno-warn-unused-do-bind
 
 executable ide-backend-exe-cabal
-  hs-source-dirs:     .
   main-is:            ide-backend-exe-cabal.hs
   build-depends:      ide-backend,
                       ide-backend-common,
@@ -204,7 +203,7 @@ test-suite TestSuite
 test-suite rpc-server
   type:               exitcode-stdio-1.0
   main-is:            rpc-server.hs
-  hs-source-dirs:     . server test
+  hs-source-dirs:     . test
   build-depends:      base                 ==4.*,
                       directory            ==1.*,
                       filemanip            >= 0.3.6.2 && < 0.4,
