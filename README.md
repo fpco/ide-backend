@@ -1,6 +1,8 @@
 ide-backend
 ===========
 
+[![Build Status](https://travis-ci.org/fpco/ide-backend.svg?branch=master)](https://travis-ci.org/fpco/ide-backend)
+
 Versions and releases
 ---------------------
 
