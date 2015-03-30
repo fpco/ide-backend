@@ -194,6 +194,7 @@ test-suite TestSuite
                       TestSuite.Tests.TH
                       TestSuite.Tests.TypeInformation
                       TestSuite.Tests.UpdateTargets
+                      TestTools
   build-depends:      base,
                       ide-backend,
                       tasty,
@@ -255,3 +256,4 @@ test-suite rpc-server
   other-extensions:   CPP, TemplateHaskell, ScopedTypeVariables,
                       DeriveDataTypeable
   ghc-options:        -Wall -fno-warn-unused-do-bind
+  other-modules:      IdeSession.RPC.Server
