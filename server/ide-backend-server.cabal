@@ -39,7 +39,7 @@ executable ide-backend-server
                       filemanip            >= 0.3.6.2 && < 0.4,
                       attoparsec           >= 0.10    && < 0.13,
                       array                >= 0.4     && < 0.6,
-                      binary-ide-backend   >= 0.7.1.0 && < 0.8,
+                      binary               >= 0.7.1.0 && < 0.8,
                       utf8-string          >= 0.3     && < 0.4,
                       pretty-show          >= 1.6     && < 1.7,
                       temporary            >= 1.1.2.4 && < 1.3,
