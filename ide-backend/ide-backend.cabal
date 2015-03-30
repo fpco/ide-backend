@@ -1,5 +1,5 @@
 name:                 ide-backend
-version:              0.9.0.2
+version:              0.9.0.4
 synopsis:             An IDE backend library
 description:          See README.md for more details
 license:              MIT
@@ -72,6 +72,7 @@ library
 
 executable ide-backend-exe-cabal
   main-is:            ide-backend-exe-cabal.hs
+  other-modules:      IdeSession.ExeCabalServer
   build-depends:      ide-backend,
                       ide-backend-common,
                       base                 ==4.*,
