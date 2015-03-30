@@ -24,30 +24,8 @@ library
                       IdeSession.Update,
                       IdeSession.Update.IdeSessionUpdate,
                       IdeSession.Update.ExecuteSessionUpdate,
-                      IdeSession.RPC.Client,
-                      IdeSession.RPC.API,
-                      IdeSession.RPC.Stream,
-                      IdeSession.Types.Public,
-                      IdeSession.Types.Private,
-                      IdeSession.Types.Translation,
-                      IdeSession.Types.Progress,
-                      IdeSession.GHC.API,
-                      IdeSession.GHC.Requests,
-                      IdeSession.GHC.Responses,
-                      IdeSession.GHC.Client,
-                      IdeSession.Util,
-                      IdeSession.Util.BlockingOps,
-                      IdeSession.Util.PrettyVal,
-                      IdeSession.Strict.Container,
-                      IdeSession.Strict.IntMap,
-                      IdeSession.Strict.List,
-                      IdeSession.Strict.Map,
-                      IdeSession.Strict.Maybe,
-                      IdeSession.Strict.Trie,
-                      IdeSession.Strict.IntervalMap
-                      IdeSession.Strict.MVar
-                      IdeSession.Strict.IORef
-                      IdeSession.Strict.StateT
+                      IdeSession.GHC.Client
+                      IdeSession.RPC.Client
 
   build-depends:      base                 ==4.*,
                       filemanip            >= 0.3.6.2 && < 0.4,
@@ -77,6 +55,7 @@ library
                       time                 >= 1.4     && < 1.6,
                       attoparsec           >= 0.10    && < 0.13,
                       utf8-string          >= 0.3     && < 1.1,
+                      ide-backend-common   >= 0.9     && < 0.10,
                       template-haskell,
                       -- our own private fork:
                       Cabal-ide-backend    >= 1.23,
@@ -103,6 +82,7 @@ executable ide-backend-exe-cabal
   hs-source-dirs:     .
   main-is:            ide-backend-exe-cabal.hs
   build-depends:      ide-backend,
+                      ide-backend-common,
                       base                 ==4.*,
                       filemanip            >= 0.3.6.2 && < 0.4,
                       process              >= 1.1     && < 1.3,
@@ -147,7 +127,7 @@ test-suite typecheck-dir
   type:               exitcode-stdio-1.0
   main-is:            typecheck-dir.hs
   hs-source-dirs:     test
-  build-depends:      base, ide-backend, temporary, filemanip, directory, time, text
+  build-depends:      base, ide-backend, ide-backend-common, temporary, filemanip, directory, time, text
 
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,
@@ -198,6 +178,7 @@ test-suite TestSuite
                       TestTools
   build-depends:      base,
                       ide-backend,
+                      ide-backend-common,
                       tasty,
                       HUnit,
                       tagged,

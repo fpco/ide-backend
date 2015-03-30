@@ -13,7 +13,21 @@ cabal-version:        >=1.10
 
 executable ide-backend-server
   main-is:            ide-backend-server.hs
-  hs-source-dirs:     . ..
+  other-modules:      IdPropCaching
+                      Server
+                      Debug
+                      HsWalk
+                      Break
+                      FilePathCaching
+                      Run
+                      Conv
+                      TraceMonad
+                      Haddock
+                      GhcShim.GhcShim742
+                      GhcShim.API
+                      GhcShim.GhcShim78
+                      GhcShim.GhcShim710
+                      GhcShim
   build-depends:      base,
                       ghc                  == 7.4.* || == 7.8.* || == 7.10.*,
                       bytestring-trie      >= 0.2     && < 0.3,
@@ -43,6 +57,7 @@ executable ide-backend-server
                       utf8-string          >= 0.3     && < 0.4,
                       pretty-show          >= 1.6     && < 1.7,
                       temporary            >= 1.1.2.4 && < 1.3,
+                      ide-backend-common   >= 0.9     && < 0.10,
                       template-haskell,
                       ghc-prim
 
