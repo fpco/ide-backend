@@ -19,6 +19,7 @@ import Data.Function (on)
 import Data.List hiding (find)
 import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Monoid (Monoid(..))
+import Data.Proxy
 import Data.Time
 import Data.Typeable (Typeable)
 import Data.Version (Version (..), parseVersion)
@@ -640,7 +641,7 @@ buildDeps mcomputed = do
       let loadedMs = toLazyList computedLoadedModules
           imp m = do
             let mdeps =
-                  fmap (toLazyList . StrictList.map (removeExplicitSharing
+                  fmap (toLazyList . StrictList.map (removeExplicitSharing Proxy
                                                        computedCache)) $
                     StrictMap.lookup m computedPkgDeps
                 missing = fail $ "Module '" ++ Text.unpack m ++ "' not loaded."
