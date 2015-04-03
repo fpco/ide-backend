@@ -435,65 +435,9 @@ a bit awkward by the fact that ghc does not make proper use of git subrepos).
 ghc 7.10
 --------
 
-From version 7.10 ghc uses proper submodules which makes it much easier to make
-sure we have the right version of all the dependencies.
-
-* Get ghc from fpco; in ~/env/fpco-patched-7.8/local/src, run
-
-      git clone git@github.com:fpco/ghc
-
-* Go to the ghc directory, and checkout the ide-backend branch of 7.10:
-
-      git checkout ide-backend-7.10
-
-* Get the corresponding version of the core libraries:
-
-      git submodule init
-      git submodule update
-
-* Create build.mk
-
-      cp mk/build.mk.sample mk/build.mk
-
-  select the quick BuildFlavour
-
-      BuildFlavour = quick
-
-  and make sure haddocks get built by setting
-
-      HADDOCK_DOCS = YES
-
-  in the section for the "quick" build flavour (make sure there are no trailing
-  spaces in your build.mk).
-
-  NOTE: This assumes wanting to do ghc dev. For performance builds you should
-  pick a different build flavour.
-
-* Build as usual
-
-      perl boot && ./configure && make -j8
-
-  (OSX Mavericks: Unlike 7.4, ghc 7.8 can build with clang so you don't need to
-  do anything special.)
-
-* Make the in-place compiler available as normal; i.e. create the following
-  symlinks in ~/env/fpco-patched-7.8/local/bin:
-
-      ghc               -> ../src/ghc/inplace/bin/ghc-stage2
-      ghc-7.10.0.<date> -> ../src/ghc/inplace/bin/ghc-stage2
-      ghc-pkg           -> ../src/ghc/inplace/bin/ghc-pkg
-      haddock           -> ../src/ghc/inplace/bin/haddock
-      hsc2hs            -> ../src/ghc/inplace/bin/hsc2hs
-
-  (<date> will vary).
-
-* You will probably also want to install the bundled Haddock (in the new
-  sandbox): run
-
-      cabal install
-
-  in utils/haddock/haddock-library, utils/haddock/haddock-api and utils/haddock
-  (in that order).
+There are no changes to ghc necessary. Just run `cabal install` from
+the `ide-backend` directory or `cabal install ide-backend` to install
+from hackage.
 
 Using cabal sandboxes
 =====================
