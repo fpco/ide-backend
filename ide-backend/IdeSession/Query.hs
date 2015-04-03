@@ -52,6 +52,7 @@ import Control.Monad (forM_)
 import Data.Accessor ((^.), (^:), getVal)
 import Data.List (isInfixOf, sortBy)
 import Data.Maybe (listToMaybe, maybeToList)
+import Data.Proxy
 import Data.Text (Text)
 import Data.Typeable (Typeable)
 import Data.Version (Version)
@@ -216,7 +217,7 @@ getBreakInfo = simpleQuery $ toLazyMaybe . getVal ideBreakInfo
 -- makes a big difference.
 getSourceErrors :: Query [SourceError]
 getSourceErrors = computedQuery $ \Computed{..} ->
-  toLazyList $ StrictList.map (removeExplicitSharing computedCache) computedErrors
+  toLazyList $ StrictList.map (removeExplicitSharing Proxy computedCache) computedErrors
 
 -- | Get the list of correctly compiled modules, as reported by the compiler
 getLoadedModules :: Query [ModuleName]
@@ -226,14 +227,14 @@ getLoadedModules = computedQuery $ \Computed{..} ->
 -- | Get the mapping from filenames to modules (as computed by GHC)
 getFileMap :: Query (FilePath -> Maybe ModuleId)
 getFileMap = computedQuery $ \Computed{..} path ->
-  fmap (removeExplicitSharing computedCache) $
+  fmap (removeExplicitSharing Proxy computedCache) $
     StrictMap.lookup path computedFileMap
 
 -- | Get information about an identifier at a specific location
 getSpanInfo :: Query (ModuleName -> SourceSpan -> [(SourceSpan, SpanInfo)])
 getSpanInfo = computedQuery $ \computed@Computed{..} mod span ->
-  let aux (a, b) = ( removeExplicitSharing computedCache a
-                   , removeExplicitSharing computedCache b
+  let aux (a, b) = ( removeExplicitSharing Proxy computedCache a
+                   , removeExplicitSharing Proxy computedCache b
                    )
   in map aux . maybeToList $ internalGetSpanInfo computed mod span
 
@@ -266,7 +267,7 @@ getExpTypes = computedQuery $ \Computed{..} mod span ->
       mExpMap = StrictMap.lookup mod computedExpTypes
   in case (mSpan, mExpMap) of
     (Just span', Just (Private.ExpMap expMap)) ->
-      let aux (a, b) = ( removeExplicitSharing computedCache a
+      let aux (a, b) = ( removeExplicitSharing Proxy computedCache a
                        , b
                        )
           doms = map aux $ Private.dominators span' expMap
@@ -279,7 +280,7 @@ getExpTypes = computedQuery $ \Computed{..} mod span ->
 -- This information is available even for modules with parse/type errors
 getImports :: Query (ModuleName -> Maybe [Import])
 getImports = computedQuery $ \Computed{..} mod ->
-  fmap (toLazyList . StrictList.map (removeExplicitSharing computedCache)) $
+  fmap (toLazyList . StrictList.map (removeExplicitSharing Proxy computedCache)) $
     StrictMap.lookup mod computedImports
 
 -- | Autocompletion
@@ -298,7 +299,7 @@ getAutocompletion = computedQuery $ \Computed{..} ->
         let name' = BSSC.pack name
             n     = last (BSSC.split '.' name')
         in filter (\idInfo -> name `isInfixOf` idInfoQN idInfo)
-             $ concatMap (toLazyList . StrictList.map (removeExplicitSharing cache))
+             $ concatMap (toLazyList . StrictList.map (removeExplicitSharing Proxy cache))
              . StrictTrie.elems
              . StrictTrie.submap n
              $ StrictMap.findWithDefault StrictTrie.empty modName mapOfTries
@@ -308,7 +309,7 @@ getAutocompletion = computedQuery $ \Computed{..} ->
 -- These are only available for modules that got compiled successfully.
 getPkgDeps :: Query (ModuleName -> Maybe [PackageId])
 getPkgDeps = computedQuery $ \Computed{..} mod ->
-  fmap (toLazyList . StrictList.map (removeExplicitSharing computedCache)) $
+  fmap (toLazyList . StrictList.map (removeExplicitSharing Proxy computedCache)) $
     StrictMap.lookup mod computedPkgDeps
 
 -- | Use sites
@@ -322,7 +323,7 @@ getUseSites = computedQuery $ \computed@Computed{..} mod span ->
                             Private.SpanId       idInfo -> return idInfo
                             Private.SpanQQ       _      -> Nothing
                             Private.SpanInSplice idInfo -> return idInfo
-    return $ map (removeExplicitSharing computedCache)
+    return $ map (removeExplicitSharing Proxy computedCache)
            . concatMap (maybeListToList . StrictMap.lookup idProp)
            $ StrictMap.elems computedUseSites
   where
@@ -360,7 +361,7 @@ dumpIdInfo session = withComputedState session $ \_ Computed{..} ->
   forM_ (StrictMap.toList computedSpanInfo) $ \(mod, idMap) -> do
     putStrLn $ "*** " ++ Text.unpack mod ++ " ***"
     forM_ (StrictIntervalMap.toList (Private.idMapToMap idMap)) $ \(i, idInfo) -> do
-      let idInfo' = removeExplicitSharing computedCache idInfo
+      let idInfo' = removeExplicitSharing (Proxy :: Proxy SpanInfo) computedCache idInfo
           (StrictIntervalMap.Interval (fn, fromLine, fromCol) (_, toLine, toCol)) = i
           fn' = dereferenceFilePathPtr computedCache fn
       putStrLn $ show (fn', fromLine, fromCol, toLine, toCol)  ++ ": " ++ show idInfo'
@@ -373,14 +374,14 @@ dumpAutocompletion session = withComputedState session $ \_ Computed{..} ->
     forM_ (StrictTrie.toList autoMap) $ \(key, idInfos) ->
       forM_ (toLazyList idInfos) $ \idInfo -> do
         let idInfo' :: IdInfo
-            idInfo' = removeExplicitSharing computedCache idInfo
+            idInfo' = removeExplicitSharing Proxy computedCache idInfo
         putStrLn $ show key  ++ ": " ++ show idInfo'
 
 -- | Print file mapping to stdout (for debugging purposes only)
 dumpFileMap :: IdeSession -> IO ()
 dumpFileMap session = withComputedState session $ \_ Computed{..} ->
   forM_ (StrictMap.toList computedFileMap) $ \(path, mod) -> do
-    let mod' = removeExplicitSharing computedCache mod
+    let mod' = removeExplicitSharing (Proxy :: Proxy ModuleId) computedCache mod
     putStrLn $ path ++ ": " ++ show mod'
 
 {------------------------------------------------------------------------------

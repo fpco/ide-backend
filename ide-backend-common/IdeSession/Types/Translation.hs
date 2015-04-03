@@ -9,6 +9,7 @@ module IdeSession.Types.Translation (
   ) where
 
 import Prelude hiding (mod, span)
+import Data.Proxy
 import qualified Data.ByteString.Char8 as BSSC
 import qualified Data.Text as Text
 import Data.Binary (Binary)
@@ -76,32 +77,32 @@ type instance MShared Private.BreakInfo      = Public.BreakInfo
 -- is there for technical reasons only (it convinces GHC that the @XShared@
 -- type family is a bijection).
 class (MShared (XShared a) ~ a, Binary (XShared a)) => ExplicitSharing a where
-  removeExplicitSharing :: Private.ExplicitSharingCache -> XShared a -> a
+  removeExplicitSharing :: Proxy a -> Private.ExplicitSharingCache -> XShared a -> a
 
-showNormalized :: forall a. (Show a, ExplicitSharing a)
-               => Private.ExplicitSharingCache -> XShared a -> String
-showNormalized cache x = show (removeExplicitSharing cache x :: a)
+showNormalized :: forall a. (Show a, ExplicitSharing a, MShared (XShared a) ~ a)
+               => Proxy a -> Private.ExplicitSharingCache -> XShared a -> String
+showNormalized _ cache x = show (removeExplicitSharing Proxy cache x :: a)
 
 instance ExplicitSharing Public.IdProp where
-  removeExplicitSharing cache Private.IdProp{..} = Public.IdProp {
+  removeExplicitSharing _ cache Private.IdProp{..} = Public.IdProp {
       Public.idName       = idName
     , Public.idSpace      = idSpace
     , Public.idType       = toLazyMaybe idType
-    , Public.idDefSpan    = removeExplicitSharing cache idDefSpan
-    , Public.idDefinedIn  = removeExplicitSharing cache idDefinedIn
+    , Public.idDefSpan    = removeExplicitSharing Proxy cache idDefSpan
+    , Public.idDefinedIn  = removeExplicitSharing Proxy cache idDefinedIn
     , Public.idHomeModule = StrictMaybe.maybe
                               Nothing
-                              (Just . removeExplicitSharing cache)
+                              (Just . removeExplicitSharing Proxy cache)
                               idHomeModule
     }
 
 instance ExplicitSharing Public.IdInfo where
-  removeExplicitSharing cache Private.IdInfo{..} = Public.IdInfo {
+  removeExplicitSharing _ cache Private.IdInfo{..} = Public.IdInfo {
       Public.idProp  = case StrictIntMap.lookup (Private.idPropPtr idProp)
                                                 (Private.idPropCache cache)
-                         of Just idProp' -> removeExplicitSharing cache idProp'
+                         of Just idProp' -> removeExplicitSharing Proxy cache idProp'
                             Nothing      -> unknownProp
-    , Public.idScope = removeExplicitSharing cache idScope
+    , Public.idScope = removeExplicitSharing Proxy cache idScope
     }
     where
       unknownProp = Public.IdProp {
@@ -125,31 +126,31 @@ instance ExplicitSharing Public.IdInfo where
        }
 
 instance ExplicitSharing Public.ModuleId where
-  removeExplicitSharing cache Private.ModuleId{..} = Public.ModuleId {
+  removeExplicitSharing _ cache Private.ModuleId{..} = Public.ModuleId {
       Public.moduleName    = moduleName
-    , Public.modulePackage = removeExplicitSharing cache modulePackage
+    , Public.modulePackage = removeExplicitSharing Proxy cache modulePackage
     }
 
 instance ExplicitSharing Public.PackageId where
-  removeExplicitSharing _cache Private.PackageId{..} = Public.PackageId {
+  removeExplicitSharing _ _cache Private.PackageId{..} = Public.PackageId {
       Public.packageName    = packageName
     , Public.packageVersion = toLazyMaybe packageVersion
     , Public.packageKey     = packageKey
     }
 
 instance ExplicitSharing Public.IdScope where
-  removeExplicitSharing cache idScope = case idScope of
+  removeExplicitSharing _ cache idScope = case idScope of
     Private.Binder -> Public.Binder
     Private.Local  -> Public.Local
     Private.Imported {..} -> Public.Imported {
-        Public.idImportedFrom = removeExplicitSharing cache idImportedFrom
-      , Public.idImportSpan   = removeExplicitSharing cache idImportSpan
+        Public.idImportedFrom = removeExplicitSharing Proxy cache idImportedFrom
+      , Public.idImportSpan   = removeExplicitSharing Proxy cache idImportSpan
       , Public.idImportQual   = idImportQual
       }
     Private.WiredIn -> Public.WiredIn
 
 instance ExplicitSharing Public.SourceSpan where
-  removeExplicitSharing cache Private.SourceSpan{..} = Public.SourceSpan {
+  removeExplicitSharing _ cache Private.SourceSpan{..} = Public.SourceSpan {
       Public.spanFilePath   = dereferenceFilePathPtr cache spanFilePath
     , Public.spanFromLine   = spanFromLine
     , Public.spanFromColumn = spanFromColumn
@@ -158,16 +159,16 @@ instance ExplicitSharing Public.SourceSpan where
     }
 
 instance ExplicitSharing Public.EitherSpan where
-  removeExplicitSharing cache eitherSpan = case eitherSpan of
+  removeExplicitSharing _ cache eitherSpan = case eitherSpan of
     Private.ProperSpan sourceSpan ->
-      Public.ProperSpan (removeExplicitSharing cache sourceSpan)
+      Public.ProperSpan (removeExplicitSharing Proxy cache sourceSpan)
     Private.TextSpan str ->
       Public.TextSpan str
 
 instance ExplicitSharing Public.SourceError where
-  removeExplicitSharing cache Private.SourceError{..} = Public.SourceError {
+  removeExplicitSharing _ cache Private.SourceError{..} = Public.SourceError {
       Public.errorKind = errorKind
-    , Public.errorSpan = removeExplicitSharing cache errorSpan
+    , Public.errorSpan = removeExplicitSharing Proxy cache errorSpan
     , Public.errorMsg  = errorMsg
     }
 
@@ -187,31 +188,31 @@ instance ExplicitSharing Public.LoadedModules where
 -}
 
 instance ExplicitSharing Public.ImportEntities where
-  removeExplicitSharing _cache entities = case entities of
+  removeExplicitSharing _ _cache entities = case entities of
     Private.ImportAll          -> Public.ImportAll
     Private.ImportHiding names -> Public.ImportHiding (toLazyList names)
     Private.ImportOnly   names -> Public.ImportOnly (toLazyList names)
 
 instance ExplicitSharing Public.Import where
-  removeExplicitSharing cache Private.Import{..} = Public.Import {
-      Public.importModule     = removeExplicitSharing cache $ importModule
+  removeExplicitSharing _ cache Private.Import{..} = Public.Import {
+      Public.importModule     = removeExplicitSharing Proxy cache $ importModule
     , Public.importPackage    = toLazyMaybe importPackage
     , Public.importQualified  = importQualified
     , Public.importImplicit   = importImplicit
     , Public.importAs         = toLazyMaybe importAs
-    , Public.importEntities   = removeExplicitSharing cache $ importEntities
+    , Public.importEntities   = removeExplicitSharing Proxy cache $ importEntities
     }
 
 instance ExplicitSharing Public.SpanInfo where
-  removeExplicitSharing cache spanInfo = case spanInfo of
-    Private.SpanId       idInfo -> Public.SpanId (removeExplicitSharing cache idInfo)
-    Private.SpanQQ       idInfo -> Public.SpanQQ (removeExplicitSharing cache idInfo)
-    Private.SpanInSplice idInfo -> Public.SpanId (removeExplicitSharing cache idInfo)
+  removeExplicitSharing _ cache spanInfo = case spanInfo of
+    Private.SpanId       idInfo -> Public.SpanId (removeExplicitSharing Proxy cache idInfo)
+    Private.SpanQQ       idInfo -> Public.SpanQQ (removeExplicitSharing Proxy cache idInfo)
+    Private.SpanInSplice idInfo -> Public.SpanId (removeExplicitSharing Proxy cache idInfo)
 
 instance ExplicitSharing Public.BreakInfo where
-  removeExplicitSharing cache Private.BreakInfo{..} = Public.BreakInfo {
+  removeExplicitSharing _ cache Private.BreakInfo{..} = Public.BreakInfo {
       Public.breakInfoModule      = breakInfoModule
-    , Public.breakInfoSpan        = removeExplicitSharing cache breakInfoSpan
+    , Public.breakInfoSpan        = removeExplicitSharing Proxy cache breakInfoSpan
     , Public.breakInfoResultType  = breakInfoResultType
     , Public.breakInfoVariableEnv = breakInfoVariableEnv
     }
