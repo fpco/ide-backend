@@ -1,5 +1,5 @@
 name:                 ide-backend
-version:              0.9.0.4
+version:              0.9.0.5
 synopsis:             An IDE backend library
 description:          See README.md for more details
 license:              MIT
@@ -98,7 +98,7 @@ executable ide-backend-exe-cabal
                       data-accessor-mtl    >= 0.2     && < 0.3,
                       crypto-api           >= 0.12    && < 0.14,
                       pureMD5              >= 2.1     && < 2.2,
-                      tagged               >= 0.4     && < 0.8,
+                      tagged               >= 0.4     && < 0.9,
                       transformers         >= 0.3     && < 0.5,
                       time                 >= 1.4     && < 1.6,
                       attoparsec           >= 0.10    && < 0.13,
