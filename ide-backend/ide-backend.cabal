@@ -1,5 +1,5 @@
 name:                 ide-backend
-version:              0.9.0.5
+version:              0.9.0.6
 synopsis:             An IDE backend library
 description:          See README.md for more details
 license:              MIT
@@ -47,7 +47,7 @@ library
                       time                 >= 1.4     && < 1.6,
                       attoparsec           >= 0.10    && < 0.13,
                       utf8-string          >= 0.3     && < 1.1,
-                      ide-backend-common   >= 0.9     && < 0.10,
+                      ide-backend-common   >= 0.9.1   && < 0.10,
                       template-haskell,
                       -- our own private fork:
                       Cabal-ide-backend    >= 1.23,
