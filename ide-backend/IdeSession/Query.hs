@@ -297,7 +297,8 @@ getAutocompletion = computedQuery $ \Computed{..} ->
                  -> [IdInfo]
     autocomplete cache mapOfTries modName name =
         let name' = BSSC.pack name
-            n     = last (BSSC.split '.' name')
+            ns    = BSSC.split '.' name'
+            n     = if null ns then BSSC.empty else last ns
         in filter (\idInfo -> name `isInfixOf` idInfoQN idInfo)
              $ concatMap (toLazyList . StrictList.map (removeExplicitSharing Proxy cache))
              . StrictTrie.elems
