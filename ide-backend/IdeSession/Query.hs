@@ -30,6 +30,7 @@ module IdeSession.Query (
   , getBuildLicensesStatus
   , getBreakInfo
     -- * Queries that rely on computed state
+  , getComputed
   , getSourceErrors
   , getLoadedModules
   , getFileMap
@@ -69,6 +70,7 @@ import IdeSession.GHC.API
 import IdeSession.RPC.Client (ExternalException(..))
 import IdeSession.State
 import IdeSession.Strict.Container
+import IdeSession.Types.Private (Computed(..))
 import IdeSession.Types.Public
 import IdeSession.Types.Translation
 import IdeSession.Util.BlockingOps
@@ -202,6 +204,10 @@ getBreakInfo = simpleQuery $ toLazyMaybe . getVal ideBreakInfo
 {------------------------------------------------------------------------------
   Queries that rely on computed state
 ------------------------------------------------------------------------------}
+
+-- | Gets all state computed from the code in the session.
+getComputed :: Query Computed
+getComputed = computedQuery id
 
 -- | Get any compilation errors or warnings in the current state of the
 -- session, meaning errors that GHC reports for the current state of all the
@@ -399,9 +405,12 @@ withIdleState IdeSession{ideState} f =
       IdeSessionServerDied e idleState -> f (reportExAsErr e idleState)
       IdeSessionShutdown               -> fail "Session already shut down."
   where
+    -- TODO: Do we really want an empty computed here? This means that if the
+    -- user does not check getSourceErrors they might get nil/empty rather
+    -- than an error.
     reportExAsErr :: ExternalException -> IdeIdleState -> IdeIdleState
     reportExAsErr e = ideComputed ^:
-      StrictMaybe.just . updateComputed e . StrictMaybe.fromMaybe emptyComputed
+      StrictMaybe.just . updateComputed e . StrictMaybe.fromMaybe Private.emptyComputed
 
     updateComputed :: ExternalException -> Computed -> Computed
     updateComputed (ExternalException remote _local) c =
@@ -411,26 +420,6 @@ withIdleState IdeSession{ideState} f =
             , Private.errorMsg  = Text.pack remote
             }
       in c { computedErrors = StrictList.singleton err }
-
-    -- TODO: Do we really want an empty computed here? This means that if the
-    -- user does not check getSourceErrors they might get nil/empty rather
-    -- than an error.
-    emptyComputed :: Computed
-    emptyComputed = Computed {
-        computedErrors        = StrictList.nil
-      , computedLoadedModules = StrictList.nil
-      , computedFileMap       = StrictMap.empty
-      , computedSpanInfo      = StrictMap.empty
-      , computedExpTypes      = StrictMap.empty
-      , computedUseSites      = StrictMap.empty
-      , computedImports       = StrictMap.empty
-      , computedAutoMap       = StrictMap.empty
-      , computedPkgDeps       = StrictMap.empty
-      , computedCache         = Private.ExplicitSharingCache {
-            Private.filePathCache = StrictIntMap.empty
-          , Private.idPropCache   = StrictIntMap.empty
-          }
-      }
 
 withComputedState :: IdeSession -> (IdeIdleState -> Computed -> IO a) -> IO a
 withComputedState session f = withIdleState session $ \idleState ->

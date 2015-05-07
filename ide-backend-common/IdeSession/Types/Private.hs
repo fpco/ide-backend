@@ -7,6 +7,7 @@ module IdeSession.Types.Private (
   , IdPropPtr(..)
   , UseSites
     -- * Types with a public counterpart
+  , Computed(..)
   , Public.IdNameSpace(..)
   , IdInfo(..)
   , IdProp(..)
@@ -33,6 +34,7 @@ module IdeSession.Types.Private (
   , mkIdMap
   , mkExpMap
   , dominators
+  , emptyComputed
   ) where
 
 import Prelude hiding (span, mod)
@@ -47,8 +49,10 @@ import GHC.Generics (Generic)
 import qualified IdeSession.Types.Public as Public
 import IdeSession.Strict.Container
 import IdeSession.Strict.IntervalMap (StrictIntervalMap, Interval(..))
-import qualified IdeSession.Strict.IntervalMap as IntervalMap
-import qualified IdeSession.Strict.IntMap      as IntMap
+import qualified IdeSession.Strict.IntervalMap as StrictIntervalMap
+import qualified IdeSession.Strict.IntMap      as StrictIntMap
+import qualified IdeSession.Strict.List        as StrictList
+import qualified IdeSession.Strict.Map         as StrictMap
 import IdeSession.Util.PrettyVal
 
 newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
@@ -56,6 +60,39 @@ newtype FilePathPtr = FilePathPtr { filePathPtr :: Int }
 
 newtype IdPropPtr = IdPropPtr { idPropPtr :: Int }
   deriving (Eq, Ord, Show, Generic)
+
+-- | This isn't used by the Binary protocol, but is useful for external
+-- users of the Private types (yes, I realize that's a bit of an
+-- oxymoron).
+data Computed = Computed {
+    -- | Last compilation and run errors
+    computedErrors :: !(Strict [] SourceError)
+    -- | Modules that got loaded okay
+  , computedLoadedModules :: !(Strict [] Public.ModuleName)
+    -- | Mapping from filepaths to the modules they define
+  , computedFileMap :: !(Strict (Map FilePath) ModuleId)
+    -- | Import information. This is (usually) available even for modules
+    -- with parsing or type errors
+  , computedImports :: !(Strict (Map Public.ModuleName) (Strict [] Import))
+    -- | Autocompletion map
+    --
+    -- Mapping, per module, from prefixes to fully qualified names
+    -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
+    -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
+    -- was imported qualified as @M@).
+  , computedAutoMap :: !(Strict (Map Public.ModuleName) (Strict Trie (Strict [] IdInfo)))
+    -- | Information about identifiers/quasi-quotes
+  , computedSpanInfo :: !(Strict (Map Public.ModuleName) IdMap)
+    -- | Type information about subexpressions
+  , computedExpTypes :: !(Strict (Map Public.ModuleName) ExpMap)
+    -- | Use sites
+  , computedUseSites :: !(Strict (Map Public.ModuleName) UseSites)
+    -- | (Transitive) package dependencies
+  , computedPkgDeps :: !(Strict (Map Public.ModuleName) (Strict [] PackageId))
+    -- | We access IdProps indirectly through this cache
+  , computedCache :: !ExplicitSharingCache
+  }
+  deriving (Show, Typeable, Generic)
 
 data IdInfo = IdInfo {
     idProp  :: {-# UNPACK #-} !IdPropPtr
@@ -201,8 +238,8 @@ data ExplicitSharingCache = ExplicitSharingCache {
 
 unionCache :: ExplicitSharingCache -> ExplicitSharingCache -> ExplicitSharingCache
 unionCache a b = ExplicitSharingCache {
-    filePathCache = IntMap.union (filePathCache a) (filePathCache b)
-  , idPropCache   = IntMap.union (idPropCache   a) (idPropCache   b)
+    filePathCache = StrictIntMap.union (filePathCache a) (filePathCache b)
+  , idPropCache   = StrictIntMap.union (idPropCache   a) (idPropCache   b)
   }
 
 {------------------------------------------------------------------------------
@@ -391,15 +428,15 @@ instance PrettyVal ExplicitSharingCache
 ------------------------------------------------------------------------------}
 
 mkIdMap :: IdList -> IdMap
-mkIdMap = IdMap . IntervalMap.fromList . map (first spanToInterval)
+mkIdMap = IdMap . StrictIntervalMap.fromList . map (first spanToInterval)
 
 mkExpMap :: [(SourceSpan, Text)] -> ExpMap
-mkExpMap = ExpMap . IntervalMap.fromList . map (first spanToInterval)
+mkExpMap = ExpMap . StrictIntervalMap.fromList . map (first spanToInterval)
 
 dominators :: SourceSpan -> StrictIntervalMap (FilePathPtr, Int, Int) a -> [(SourceSpan, a)]
 dominators span ivalmap =
     map (\(ival, idInfo) -> (intervalToSpan ival, idInfo))
-        (IntervalMap.dominators (spanToInterval span) ivalmap)
+        (StrictIntervalMap.dominators (spanToInterval span) ivalmap)
 
 spanToInterval :: SourceSpan -> Interval (FilePathPtr, Int, Int)
 spanToInterval SourceSpan{..} =
@@ -410,3 +447,20 @@ intervalToSpan :: Interval (FilePathPtr, Int, Int) -> SourceSpan
 intervalToSpan (Interval (spanFilePath, spanFromLine, spanFromColumn)
                          (_,            spanToLine, spanToColumn)) =
   SourceSpan{..}
+
+emptyComputed :: Computed
+emptyComputed = Computed {
+    computedErrors        = StrictList.nil
+  , computedLoadedModules = StrictList.nil
+  , computedFileMap       = StrictMap.empty
+  , computedSpanInfo      = StrictMap.empty
+  , computedExpTypes      = StrictMap.empty
+  , computedUseSites      = StrictMap.empty
+  , computedImports       = StrictMap.empty
+  , computedAutoMap       = StrictMap.empty
+  , computedPkgDeps       = StrictMap.empty
+  , computedCache         = ExplicitSharingCache {
+        filePathCache = StrictIntMap.empty
+      , idPropCache   = StrictIntMap.empty
+      }
+  }

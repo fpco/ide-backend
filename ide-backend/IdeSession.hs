@@ -172,6 +172,7 @@ module IdeSession (
   , getManagedFiles
   , getBreakInfo
     -- ** Queries that rely on computed state
+  , getComputed
   , getSourceErrors
   , getLoadedModules
   , getFileMap
