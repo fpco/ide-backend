@@ -3,8 +3,7 @@
 -- This uses the internal types only.
 module IdeSession.State
   ( -- * Types
-    Computed(..)
-  , IdeSession(..)
+    IdeSession(..)
   , IdeStaticInfo(..)
   , IdeSessionState(..)
   , LogicalTimestamp
@@ -51,36 +50,6 @@ import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
 import IdeSession.Types.Private hiding (RunResult)
 import qualified IdeSession.Types.Public as Public
-
-data Computed = Computed {
-    -- | Last compilation and run errors
-    computedErrors :: !(Strict [] SourceError)
-    -- | Modules that got loaded okay
-  , computedLoadedModules :: !(Strict [] ModuleName)
-    -- | Mapping from filepaths to the modules they define
-  , computedFileMap :: !(Strict (Map FilePath) ModuleId)
-    -- | Import information. This is (usually) available even for modules
-    -- with parsing or type errors
-  , computedImports :: !(Strict (Map ModuleName) (Strict [] Import))
-    -- | Autocompletion map
-    --
-    -- Mapping, per module, from prefixes to fully qualified names
-    -- I.e., @fo@ might map to @Control.Monad.forM@, @Control.Monad.forM_@
-    -- etc. (or possibly to @M.forM@, @M.forM_@, etc when Control.Monad
-    -- was imported qualified as @M@).
-  , computedAutoMap :: !(Strict (Map ModuleName) (Strict Trie (Strict [] IdInfo)))
-    -- | Information about identifiers/quasi-quotes
-  , computedSpanInfo :: !(Strict (Map ModuleName) IdMap)
-    -- | Type information about subexpressions
-  , computedExpTypes :: !(Strict (Map ModuleName) ExpMap)
-    -- | Use sites
-  , computedUseSites :: !(Strict (Map ModuleName) UseSites)
-    -- | (Transitive) package dependencies
-  , computedPkgDeps :: !(Strict (Map ModuleName) (Strict [] PackageId))
-    -- | We access IdProps indirectly through this cache
-  , computedCache :: !ExplicitSharingCache
-  }
-  deriving Show
 
 -- | This type is a handle to a session state. Values of this type
 -- point to the non-persistent parts of the session state in memory

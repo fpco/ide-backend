@@ -76,6 +76,7 @@ import IdeSession.Licenses ( bsd3, gplv2, gplv3, lgpl2, lgpl3, apache20 )
 import IdeSession.State
 import IdeSession.Strict.Container
 import IdeSession.Strict.Maybe (just)
+import IdeSession.Types.Private (Computed(..))
 import IdeSession.Types.Progress
 import IdeSession.Types.Public
 import IdeSession.Types.Translation
