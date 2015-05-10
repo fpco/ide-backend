@@ -186,13 +186,13 @@ data Import = Import {
   }
   deriving (Show, Eq, Ord, Generic)
 
--- | Returned then the IDE asks "what's at this particular location?"
+-- | Returned when the IDE asks "what's at this particular location?"
 data SpanInfo =
     -- | Identifier
     SpanId IdInfo
     -- | Quasi-quote. The 'IdInfo' field gives the quasi-quoter
   | SpanQQ IdInfo
-  deriving (Generic)
+  deriving (Eq, Generic)
 
 -- | Buffer modes for running code
 --
