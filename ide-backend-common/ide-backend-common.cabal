@@ -1,5 +1,5 @@
 name:                 ide-backend-common
-version:              0.9.1
+version:              0.9.1.1
 synopsis:             Shared library used be ide-backend and ide-backend-server
 description:          Should not be used by end users
 license:              MIT
@@ -57,7 +57,7 @@ library
                       pureMD5              >= 2.1     && < 2.2,
                       tagged               >= 0.4     && < 0.9,
                       transformers         >= 0.3     && < 0.5,
-                      attoparsec           >= 0.10    && < 0.13,
+                      attoparsec           >= 0.10    && < 0.14,
                       template-haskell,
                       pretty-show
 
