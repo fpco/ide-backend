@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, CPP, ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell, CPP, ScopedTypeVariables, RecursiveDo #-}
 module IdeSession.RPC.Client (
     RpcServer
   , RpcConversation(..)
@@ -16,7 +16,7 @@ module IdeSession.RPC.Client (
 
 import Control.Concurrent.MVar (MVar, newMVar, tryTakeMVar)
 import Control.Monad (void, unless)
-import Data.Binary (Binary, encode, decode)
+import Data.Binary (Binary, encode, decodeOrFail)
 import Data.IORef (writeIORef, readIORef, newIORef)
 import Data.Typeable (Typeable)
 import Prelude hiding (take)
@@ -37,6 +37,7 @@ import System.Process
 import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
 import qualified Control.Exception as Ex
 import qualified System.Directory  as Dir
+import Data.Typeable (typeOf)
 
 import IdeSession.Util.BlockingOps
 import IdeSession.RPC.API
@@ -203,9 +204,20 @@ rpcConversation server handler = withRpcServer server $ \st ->
                    let msg = encode $ Request (IncBS $ encode req)
                    hPutFlush (rpcRequestW server) msg
       , get = do verifyScope
-                 mapIOToExternal server $ do
+                 mapIOToExternal server $ mdo
                    Response resp <- nextInStream (rpcResponseR server)
-                   Ex.evaluate $ decode (unIncBS resp)
+                   eres <- Ex.evaluate $ decodeOrFail (unIncBS resp)
+                   res <- case eres of
+                     Left (_, _, err) -> fail $
+                       "Could not decode rpcConversation response " ++
+                       --FIXME: truncate resp?
+                       show resp ++
+                       ", with type " ++
+                       show (typeOf res) ++
+                       ". Error: " ++
+                       err
+                     Right (_, _, x) -> return x
+                   return res
       }
 
 illscopedConversationException :: Ex.IOException
@@ -321,4 +333,3 @@ mapIOToExternal server p = Ex.catch p $ \ex -> do
   if null merr
     then Ex.throwIO (serverKilledException (Just ex))
     else Ex.throwIO (ExternalException merr (Just ex))
-
