@@ -80,6 +80,7 @@ data RunCmd =
       , runCmdFunction :: String
       , runCmdStdout   :: RunBufferMode
       , runCmdStderr   :: RunBufferMode
+      , runCmdPty      :: Bool
       }
   | Resume
   deriving (Typeable, Generic, Show)
@@ -166,19 +167,22 @@ instance Binary GhcRequest where
 
 instance Binary RunCmd where
   put (RunStmt {..}) = do
-    putWord8 0
+    putWord8 2
     put runCmdModule
     put runCmdFunction
     put runCmdStdout
     put runCmdStderr
+    put runCmdPty
   put Resume = do
     putWord8 1
 
   get = do
     header <- getWord8
     case header of
-      0 -> RunStmt <$> get <*> get <*> get <*> get
+      -- Still respond to requests that use the old binary format.
+      0 -> RunStmt <$> get <*> get <*> get <*> get <*> return False
       1 -> return Resume
+      2 -> RunStmt <$> get <*> get <*> get <*> get <*> get
       _ -> fail "RunCmd.get: invalid header"
 
 instance Binary GhcRunRequest where

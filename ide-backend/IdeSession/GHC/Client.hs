@@ -311,7 +311,7 @@ rpcRun server cmd translateResult =
         }
 
     sendRequests :: (GhcRunRequest -> IO ()) -> Chan GhcRunRequest -> IO ()
-    sendRequests put reqChan = forever $ put =<< $readChan reqChan
+    sendRequests put reqChan = printExceptions "sendRequests" $ forever $ put =<< $readChan reqChan
 
     -- TODO: should we restart the session when ghc crashes?
     -- Maybe recommend that the session is started on GhcExceptions?
@@ -359,3 +359,8 @@ ignoreIOExceptions :: IO () -> IO ()
 ignoreIOExceptions = let handler :: Ex.IOException -> IO ()
                          handler _ = return ()
                      in Ex.handle handler
+
+printExceptions :: String -> IO a -> IO a
+printExceptions msg f = f `Ex.catch` \ex -> do
+  print (msg, ex :: Ex.SomeException)
+  Ex.throwIO ex

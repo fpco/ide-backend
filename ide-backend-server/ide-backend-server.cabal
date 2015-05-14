@@ -28,6 +28,7 @@ executable ide-backend-server
                       GhcShim.GhcShim78
                       GhcShim.GhcShim710
                       GhcShim
+                      Posix
   build-depends:      base < 10,
                       ghc                  == 7.4.* || == 7.8.* || == 7.10.*,
                       containers           >= 0.4.1   && < 1,

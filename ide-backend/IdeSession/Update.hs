@@ -34,6 +34,7 @@ module IdeSession.Update (
   , buildLicenses
     -- * Running code
   , runStmt
+  , runStmtPty
   , runExe
   , resume
   , setBreakpoint
@@ -479,6 +480,17 @@ runStmt ideSession m fun = runCmd ideSession $ \idleState -> RunStmt {
   , runCmdFunction = fun
   , runCmdStdout   = idleState ^. ideStdoutBufferMode
   , runCmdStderr   = idleState ^. ideStderrBufferMode
+  , runCmdPty      = False
+  }
+
+-- | Like 'runStmt', but runs the statement in a pseudoterminal.
+runStmtPty :: IdeSession -> String -> String -> IO (RunActions Public.RunResult)
+runStmtPty ideSession m fun = runCmd ideSession $ \idleState -> RunStmt {
+    runCmdModule   = m
+  , runCmdFunction = fun
+  , runCmdStdout   = idleState ^. ideStdoutBufferMode
+  , runCmdStderr   = idleState ^. ideStderrBufferMode
+  , runCmdPty      = True
   }
 
 -- | Run the main function from the last compiled executable.

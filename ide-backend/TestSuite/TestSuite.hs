@@ -25,6 +25,7 @@ import TestSuite.Tests.InterruptRunStmt
 import TestSuite.Tests.Issues
 import TestSuite.Tests.Packages
 import TestSuite.Tests.Performance
+import TestSuite.Tests.Pseudoterminal
 import TestSuite.Tests.SessionRestart
 import TestSuite.Tests.SessionState
 import TestSuite.Tests.SnippetEnvironment
@@ -70,6 +71,7 @@ allTests name env = testGroup name [
   , testGroupDebugger           env
   , testGroupConcurrency        env
   , testGroupPerformance        env
+  , testGroupPseudoterminal     env
   ]
 
 main :: IO ()

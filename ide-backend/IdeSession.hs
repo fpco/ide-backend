@@ -143,6 +143,7 @@ module IdeSession (
   , RunBufferMode(..)
   , BreakInfo(..)
   , runStmt
+  , runStmtPty
   , runExe
   , resume
   , runWaitAll
