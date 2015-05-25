@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor, DeriveGeneric, StandaloneDeriving, GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module IdeSession.Util (
@@ -312,6 +313,7 @@ captureOutput act = do
   Orphans
 -------------------------------------------------------------------------------}
 
+#if !MIN_VERSION_text(1,2,1)
 instance Binary Text where
   get   = do units <- Bin.get
              Bin.readNWith (units * 2) $ \ptr ->
@@ -321,5 +323,6 @@ instance Binary Text where
              Bin.putBuilder $
                Bin.writeN (Text.lengthWord16 t * 2)
                           (\p -> Text.unsafeCopyToPtr t (castPtr p))
+#endif
 
 deriving instance Binary CPid
