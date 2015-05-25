@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, FlexibleContexts, RecordWildCards #-}
 -- | Translation from the private to the public types
 module IdeSession.Types.Translation (
     XShared

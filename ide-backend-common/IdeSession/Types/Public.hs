@@ -1,4 +1,5 @@
-{-# LANGUAGE TemplateHaskell, DeriveDataTypeable, DeriveGeneric #-}
+{-# LANGUAGE TemplateHaskell, DeriveDataTypeable, DeriveGeneric, NamedFieldPuns, RecordWildCards #-}
+
 -- | The public types
 module IdeSession.Types.Public (
     -- * Types

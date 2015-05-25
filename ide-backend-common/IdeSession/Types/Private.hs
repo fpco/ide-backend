@@ -1,4 +1,5 @@
-{-# LANGUAGE TemplateHaskell, GeneralizedNewtypeDeriving, DeriveDataTypeable, DeriveGeneric #-}
+{-# LANGUAGE TemplateHaskell, GeneralizedNewtypeDeriving, DeriveDataTypeable, DeriveGeneric, RecordWildCards #-}
+
 -- | The private types
 module IdeSession.Types.Private (
     -- * Types without a public counterpart

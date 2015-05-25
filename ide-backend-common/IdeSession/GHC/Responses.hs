@@ -1,7 +1,8 @@
+{-# LANGUAGE DeriveDataTypeable, DeriveGeneric, RecordWildCards #-}
+
 -- | Responses from the GHC server
 --
 -- The server responds with "IdeSession.Types.Private" types
-{-# LANGUAGE DeriveDataTypeable, DeriveGeneric #-}
 module IdeSession.GHC.Responses (
     GhcInitResponse(..)
   , GhcCompileResponse(..)

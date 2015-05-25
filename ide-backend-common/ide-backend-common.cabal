@@ -62,17 +62,24 @@ library
                       pretty-show
 
   default-language:   Haskell2010
-  default-extensions: MonoLocalBinds
-                      BangPatterns
-                      RecordWildCards
+  other-extensions:   CPP
+                      DeriveDataTypeable
+                      DeriveFoldable
+                      DeriveFunctor
+                      DeriveGeneric
+                      DeriveTraversable
+                      FlexibleContexts
+                      FlexibleInstances
+                      GADTs
+                      GeneralizedNewtypeDeriving
+                      MultiParamTypeClasses
                       NamedFieldPuns
                       RankNTypes
-                      MultiParamTypeClasses
-                      ExistentialQuantification
-                      FlexibleContexts
-                      DeriveDataTypeable
-  other-extensions:   CPP
+                      RecordWildCards
+                      ScopedTypeVariables
+                      StandaloneDeriving
                       TemplateHaskell
-                      ScopedTypeVariables,
-                      GeneralizedNewtypeDeriving
+                      TypeFamilies
+                      TypeSynonymInstances
+
   ghc-options:        -Wall -fno-warn-unused-do-bind

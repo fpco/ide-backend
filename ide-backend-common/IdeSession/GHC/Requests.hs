@@ -1,7 +1,8 @@
+{-# LANGUAGE DeriveDataTypeable, DeriveGeneric, RecordWildCards #-}
+
 -- | GHC requests
 --
 -- GHC requests use "IdeSession.Types.Public" types.
-{-# LANGUAGE DeriveDataTypeable, DeriveGeneric #-}
 module IdeSession.GHC.Requests (
     GhcInitRequest(..)
   , GhcRequest(..)
