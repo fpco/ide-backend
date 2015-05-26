@@ -526,8 +526,9 @@ Setting up snippet sandboxes for running the tests
 --------------------------------------------------
 
 There are lots of ways you could do this; I find this way convenient. Create
-a directory `snippet-dbs`, and then for each patched version of `ghc` run
+a directory `snippet-dbs`, and then for each patched version of `ghc` run,
 
+```
 cabal sandbox init --sandbox=./.cabal-sandbox/<ghc version>
 echo "documentation: True" >cabal.config
 cabal install parallel
