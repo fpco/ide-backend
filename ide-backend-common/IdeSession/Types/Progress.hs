@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric, RecordWildCards #-}
 module IdeSession.Types.Progress (
     Progress(..)
   ) where
