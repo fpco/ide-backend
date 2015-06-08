@@ -11,7 +11,7 @@ data-files:           CoreLicenses.txt
 category:             Development
 build-type:           Simple
 cabal-version:        >=1.10
-extra-source-files:   README.md ChangeLog.md
+extra-source-files:   README.md
 
 library
   exposed-modules:    IdeSession
