@@ -67,7 +67,6 @@ executable ide-backend-server
                    -- use whatever version came with ghc
                    Cabal
     cpp-options: -DGHC_78
-    ghc-options: -dynamic
   if impl(ghc == 7.10.*)
     build-depends: time        == 1.5.*,
                    haddock-api == 2.16.*,
@@ -76,7 +75,6 @@ executable ide-backend-server
                    -- parsing functionality; use whatever version came with ghc
                    Cabal
     cpp-options: -DGHC_710
-    ghc-options: -dynamic
 
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,
