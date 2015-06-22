@@ -35,7 +35,7 @@ invokeExeCabal ideStaticInfo@IdeStaticInfo{..} args callback = do
       env <- envWithPathOverride configExtraPathDirs
       let cwd = case args of
             ReqExeDoc{} -> ideSessionDir
-            _ -> getDataDirInternal ideStaticInfo
+            _ -> ideDataDir ideStaticInfo
       server <- forkRpcServer prog [] (Just cwd) env
       exitCode <- rpcRunExeCabal server args callback
       shutdown server  -- not long-running

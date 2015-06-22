@@ -36,8 +36,8 @@ module IdeSession.State
   , managedSource
   , managedData
   -- * To allow for non-server environments
-  , getSourceDir
-  , getDataDirInternal
+  , ideSourceDir
+  , ideDataDir
   ) where
 
 import Control.Concurrent (ThreadId)
@@ -267,16 +267,16 @@ managedData   = accessor _managedData   $ \x s -> s { _managedData   = x }
   To allow for non-server(local) environments
 ------------------------------------------------------------------------------}
 
--- | get the directory that holds source files
-getSourceDir :: IdeStaticInfo -> FilePath
-getSourceDir IdeStaticInfo{..} =
+-- | Get the directory that holds source files.
+ideSourceDir :: IdeStaticInfo -> FilePath
+ideSourceDir IdeStaticInfo{..} =
   case configLocalWorkingDir ideConfig of
     Just path -> path
     Nothing   -> ideSessionDir </> "src"
 
--- | get the directory that holds data files
-getDataDirInternal :: IdeStaticInfo -> FilePath
-getDataDirInternal IdeStaticInfo{..} =
+-- | Get the directory that holds data files.
+ideDataDir :: IdeStaticInfo -> FilePath
+ideDataDir IdeStaticInfo{..} =
   case configLocalWorkingDir ideConfig of
     Just path -> path
     Nothing   -> ideSessionDir </> "data"

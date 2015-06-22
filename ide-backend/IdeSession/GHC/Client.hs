@@ -68,10 +68,9 @@ forkGhcServer :: [String]      -- ^ Initial ghc options
               -> [String]      -- ^ RTS options
               -> IdeStaticInfo -- ^ Session setup info
               -> IO (Either ExternalException (GhcServer, GhcVersion))
-forkGhcServer ghcOpts relIncls rtsOpts ideStaticInfo@IdeStaticInfo{ideConfig, ideSessionDir} = do
+forkGhcServer ghcOpts relIncls rtsOpts ideStaticInfo = do
   when configInProcess $
     fail "In-process ghc server not currently supported"
-  -- let ideSessionDir = getSessionDir
   mLoc <- findProgramOnSearchPath normal searchPath "ide-backend-server"
   case mLoc of
     Nothing ->
@@ -81,7 +80,7 @@ forkGhcServer ghcOpts relIncls rtsOpts ideStaticInfo@IdeStaticInfo{ideConfig, id
       server  <- OutProcess <$> forkRpcServer
                    prog
                    (["+RTS"] ++ rtsOpts ++ ["-RTS"])
-                   (Just $ getDataDirInternal ideStaticInfo)
+                   (Just $ ideDataDir ideStaticInfo)
                    env
       version <- Ex.try $ do
         GhcInitResponse{..} <- rpcInit server GhcInitRequest {
@@ -90,25 +89,24 @@ forkGhcServer ghcOpts relIncls rtsOpts ideStaticInfo@IdeStaticInfo{ideConfig, id
           , ghcInitOpts               = opts
           , ghcInitUserPackageDB      = userDB
           , ghcInitSpecificPackageDBs = specificDBs
-          , ghcInitSessionDir         = ideSessionDir
+          , ghcInitSourceDir          = ideSourceDir ideStaticInfo
+          , ghcInitSessionDir         = ideSessionDir ideStaticInfo
           }
         return ghcInitVersion
       return ((server,) <$> version)
   where
     (userDB, specificDBs) = splitPackageDBStack configPackageDBStack
 
-    -- It's important for the sourceDir to be the last element in this list
     opts :: [String]
     opts = "-XHaskell2010"  -- see #190
-                 : ghcOpts
-       ++ relInclToOpts (getSourceDir ideStaticInfo) relIncls
-       ++ [(getSourceDir ideStaticInfo)]
+         : ghcOpts
+        ++ relInclToOpts (ideSourceDir ideStaticInfo) relIncls
 
     searchPath :: ProgramSearchPath
     searchPath = map ProgramSearchPathDir configExtraPathDirs
               ++ [ProgramSearchPathDefault]
 
-    SessionConfig{..} = ideConfig
+    SessionConfig{..} = ideConfig ideStaticInfo
 
 {- TODO: Reenable in-process
 forkGhcServer configGenerateModInfo opts workingDir True = do

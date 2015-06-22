@@ -219,7 +219,7 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
     when needsRecompile $ local (incrementNumSteps numActions) $ do
       GhcCompileResult{..} <- rpcCompile
       oldComputed <- Acc.get ideComputed
-      srcDir      <- asks $ getSourceDir . ideUpdateStaticInfo
+      srcDir      <- asks $ ideSourceDir . ideUpdateStaticInfo
 
       let applyDiff :: Strict (Map ModuleName) (Diff v)
                     -> (Computed -> Strict (Map ModuleName) v)
@@ -450,7 +450,7 @@ recompileCFiles cFiles = do
   ideStaticInfo <- asks ideUpdateStaticInfo
 
   let srcDir, objDir :: FilePath
-      srcDir = getSourceDir   ideStaticInfo
+      srcDir = ideSourceDir ideStaticInfo
       objDir = ideSessionObjDir sessionDir
 
   errorss <- forM (zip cFiles [1..]) $ \(relC, i) -> do
@@ -514,18 +514,14 @@ runGcc absC absObj pref = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     callback                        <- asks ideUpdateCallback
     relIncl                         <- Acc.get ideRelativeIncludes
-
+    let ideDistDir = ideSessionDistDir ideSessionDir
     -- Pass GHC options so that ghc can pass the relevant options to gcc
     ghcOpts <- Acc.get ideGhcOpts
-
-    let ideDistDir   = ideSessionDistDir ideSessionDir
-        ideSourceDir = getSourceDir    ideStaticInfo
-
     exceptionFree $ do
      let SessionConfig{..} = ideConfig
          stdoutLog   = ideDistDir </> "ide-backend-cc.stdout"
          stderrLog   = ideDistDir </> "ide-backend-cc.stderr"
-         includeDirs = map (ideSourceDir </>) relIncl
+         includeDirs = map (ideSourceDir ideStaticInfo </>) relIncl
          runCcArgs   = RunCcArgs{ rcPackageDBStack = configPackageDBStack
                                 , rcExtraPathDirs  = configExtraPathDirs
                                 , rcDistDir        = ideDistDir
@@ -567,11 +563,11 @@ runGcc absC absObj pref = do
 -- TODO: Should we update data files here too?
 markAsUpdated :: (FilePath -> Bool) -> ExecuteSessionUpdate ()
 markAsUpdated shouldMark = do
-  IdeStaticInfo{..} <- asks ideUpdateStaticInfo
+  ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
   sources  <- Acc.get (ideManagedFiles .> managedSource)
   sources' <- forM sources $ \(path, (digest, oldTS)) ->
     if shouldMark path
-      then do newTS <- updateFileTimes (getSourceDir IdeStaticInfo {ideSessionDir = (ideSessionDir </> path)})
+      then do newTS <- updateFileTimes (ideSourceDir ideStaticInfo)
               return (path, (digest, newTS))
       else return (path, (digest, oldTS))
   Acc.set (ideManagedFiles .> managedSource) sources'
@@ -638,8 +634,7 @@ executeBuildExe :: [String] -> [(ModuleName, FilePath)] -> ExecuteSessionUpdate 
 executeBuildExe extraOpts ms = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{..} = ideConfig
-    let ideDistDir   = ideSessionDistDir   ideSessionDir
-        ideSourceDir = getSourceDir ideStaticInfo
+    let ideDistDir = ideSessionDistDir ideSessionDir
 
     callback          <- asks ideUpdateCallback
     mcomputed         <- Acc.get ideComputed
@@ -670,7 +665,7 @@ executeBuildExe extraOpts ms = do
                 let beArgs =
                       BuildExeArgs{ bePackageDBStack   = configPackageDBStack
                                   , beExtraPathDirs    = configExtraPathDirs
-                                  , beSourcesDir       = ideSourceDir
+                                  , beSourcesDir       = ideSourceDir ideStaticInfo
                                   , beDistDir          = ideDistDir
                                   , beRelativeIncludes = relativeIncludes
                                   , beGhcOpts          = ghcOpts'
@@ -701,8 +696,8 @@ executeBuildDoc :: ExecuteSessionUpdate ()
 executeBuildDoc = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{..} = ideConfig
-    let ideDistDir   = ideSessionDistDir   ideSessionDir
-        ideSourceDir = getSourceDir ideStaticInfo
+    let ideDistDir = ideSessionDistDir ideSessionDir
+        srcDir = ideSourceDir ideStaticInfo
 
     callback          <- asks ideUpdateCallback
     mcomputed         <- Acc.get ideComputed
@@ -743,7 +738,7 @@ executeBuildDoc = do
                         BuildExeArgs{ bePackageDBStack   = configPackageDBStack
                                     , beExtraPathDirs    = configExtraPathDirs
                                     , beSourcesDir       =
-                                        makeRelative ideSessionDir ideSourceDir
+                                        makeRelative ideSessionDir srcDir
                                     , beDistDir          =
                                         makeRelative ideSessionDir ideDistDir
                                     , beRelativeIncludes = relativeIncludes
@@ -821,7 +816,7 @@ rpcCompile :: ExecuteSessionUpdate GhcCompileResult
 rpcCompile = do
     IdeIdleState{..} <- get
     callback         <- asks ideUpdateCallback
-    sourceDir        <- asks $ getSourceDir . ideUpdateStaticInfo
+    sourceDir        <- asks $ ideSourceDir . ideUpdateStaticInfo
 
     -- We need to translate the targets to absolute paths
     let targets = case _ideTargets of
@@ -843,7 +838,7 @@ rpcSetArgs = do
 rpcSetGhcOpts :: ExecuteSessionUpdate [SourceError]
 rpcSetGhcOpts = do
     IdeIdleState{..} <- get
-    srcDir <- asks $ getSourceDir . ideUpdateStaticInfo
+    srcDir <- asks $ ideSourceDir . ideUpdateStaticInfo
     -- relative include path is part of the state rather than the
     -- config as of c0bf0042
     let relOpts = relInclToOpts srcDir _ideRelativeIncludes

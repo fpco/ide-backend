@@ -15,9 +15,17 @@ type InProcess = Bool
 data SessionConfig = SessionConfig {
     -- | The directory to use for all session files.
     configDir        :: FilePath
-    -- | The directory from which to use the data and source files from
-    -- when set to Just "<filepath>" it uses them from the directory <filepath>
-    -- when set to Nothing it copies them to the session.* directory
+    -- | When set to Just "<filepath>", we'll use the files in that
+    -- directory as source and datafiles.  This means that the
+    -- ide-backend is no longer directly managing the files, and
+    -- file updates like 'updateSourceFile' will fail.
+    --
+    -- Note that this feature is experimental and does not have a
+    -- suite of tests.
+    --
+    -- Since this is likely used with an existing cabal project, which
+    -- might have multiple source directories, you'll likely want to
+    -- use 'TargetsInclude' instead of 'TargetsExclude'.
   , configLocalWorkingDir :: Maybe FilePath
     -- | Extra directories in which to look for programs, including ghc
     -- and other tools. Note that the @$PATH@ is still searched /first/, these

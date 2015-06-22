@@ -75,9 +75,8 @@ ghcServer = rpcServer ghcServerEngine
 ghcServerEngine :: FilePath -> RpcConversation -> IO ()
 ghcServerEngine errorLog conv@RpcConversation{..} = do
   -- The initial handshake with the client
-  (configGenerateModInfo, initOpts, sessionDir) <- handleInit conv
-  let distDir   = ideSessionDistDir   sessionDir
-      sourceDir = last initOpts
+  (configGenerateModInfo, initOpts, sourceDir, sessionDir) <- handleInit conv
+  let distDir = ideSessionDistDir sessionDir
 
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts initOpts
@@ -288,7 +287,7 @@ data ModSummary = ModSummary {
   }
 
 -- | Client handshake
-handleInit :: RpcConversation -> IO (Bool, [String], FilePath)
+handleInit :: RpcConversation -> IO (Bool, [String], FilePath, FilePath)
 handleInit RpcConversation{..} = do
   GhcInitRequest{..} <- get
 
@@ -308,6 +307,7 @@ handleInit RpcConversation{..} = do
   return ( ghcInitGenerateModInfo
          , ghcInitOpts ++
            packageDBFlags ghcInitUserPackageDB ghcInitSpecificPackageDBs
+         , ghcInitSourceDir
          , ghcInitSessionDir
          )
 

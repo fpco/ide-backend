@@ -188,10 +188,10 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
   case configLocalWorkingDir of
     Just _  -> return ()
     Nothing -> do
-      Dir.createDirectoryIfMissing True (getSourceDir       ideStaticInfo)
-      Dir.createDirectoryIfMissing True (getDataDirInternal ideStaticInfo)
-  Dir.createDirectoryIfMissing True (ideSessionDistDir   ideSessionDir)
-  Dir.createDirectoryIfMissing True (ideSessionObjDir    ideSessionDir)
+      Dir.createDirectoryIfMissing True (ideSourceDir  ideStaticInfo)
+      Dir.createDirectoryIfMissing True (ideDataDir    ideStaticInfo)
+  Dir.createDirectoryIfMissing True (ideSessionDistDir ideSessionDir)
+  Dir.createDirectoryIfMissing True (ideSessionObjDir  ideSessionDir)
   -- Local initialization
   execInitParams ideStaticInfo initParams
 

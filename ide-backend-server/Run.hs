@@ -155,7 +155,7 @@ ghandleJust p handler a = ghandle handler' a
 -- | Compile a set of targets
 --
 -- Returns the errors, loaded modules, and mapping from filenames to modules
-compileInGhc :: FilePath            -- ^ target directory
+compileInGhc :: FilePath            -- ^ target directory, only used for 'TargetsExclude'
              -> Bool                -- ^ should we generate code
              -> Targets             -- ^ targets
              -> StrictIORef (Strict [] SourceError) -- ^ the IORef where GHC stores errors
