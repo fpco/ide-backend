@@ -77,7 +77,7 @@ ghcServerEngine errorLog conv@RpcConversation{..} = do
   -- The initial handshake with the client
   (configGenerateModInfo, initOpts, sessionDir) <- handleInit conv
   let distDir   = ideSessionDistDir   sessionDir
-      sourceDir = ideSessionSourceDir sessionDir
+      sourceDir = last initOpts
 
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts initOpts

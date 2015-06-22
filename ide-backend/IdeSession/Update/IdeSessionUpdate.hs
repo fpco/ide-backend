@@ -138,7 +138,7 @@ instance Monoid IdeSessionUpdate where
     }
 
 data FileInfo = FileInfo {
-    fileInfoRemoteDir  :: FilePath -> FilePath
+    fileInfoRemoteDir  :: IdeStaticInfo -> FilePath
   , fileInfoRemoteFile :: FilePath
   , fileInfoAccessor   :: Accessor ManagedFilesInternal [ManagedFile]
   }
@@ -178,7 +178,7 @@ updateSourceFile fp bs = mempty { ideUpdateFileCmds = [FileWrite fileInfo bs] }
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = fp
-      , fileInfoRemoteDir  = ideSessionSourceDir
+      , fileInfoRemoteDir  = getSourceDir
       , fileInfoAccessor   = managedSource
       }
 
@@ -189,7 +189,7 @@ updateSourceFileFromFile fp = mempty { ideUpdateFileCmds = [FileCopy fileInfo fp
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = fp
-      , fileInfoRemoteDir  = ideSessionSourceDir
+      , fileInfoRemoteDir  = getSourceDir
       , fileInfoAccessor   = managedSource
       }
 
@@ -199,7 +199,7 @@ updateSourceFileDelete fp = mempty { ideUpdateFileCmds = [FileDelete fileInfo] }
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = fp
-      , fileInfoRemoteDir  = ideSessionSourceDir
+      , fileInfoRemoteDir  = getSourceDir
       , fileInfoAccessor   = managedSource
       }
 
@@ -210,7 +210,7 @@ updateDataFile fp bs = mempty { ideUpdateFileCmds = [FileWrite fileInfo bs] }
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = fp
-      , fileInfoRemoteDir  = ideSessionDataDir
+      , fileInfoRemoteDir  = getDataDirInternal
       , fileInfoAccessor   = managedData
       }
 
@@ -224,7 +224,7 @@ updateDataFileFromFile remoteFile localFile = mempty {
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = remoteFile
-      , fileInfoRemoteDir  = ideSessionDataDir
+      , fileInfoRemoteDir  = getDataDirInternal
       , fileInfoAccessor   = managedData
       }
 
@@ -235,7 +235,7 @@ updateDataFileDelete fp = mempty { ideUpdateFileCmds = [FileDelete fileInfo] }
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = fp
-      , fileInfoRemoteDir  = ideSessionDataDir
+      , fileInfoRemoteDir  = getDataDirInternal
       , fileInfoAccessor   = managedData
       }
 

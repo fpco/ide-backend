@@ -35,6 +35,9 @@ module IdeSession.State
   , ideRtsOpts
   , managedSource
   , managedData
+  -- * To allow for non-server environments
+  , getSourceDir
+  , getDataDirInternal
   ) where
 
 import Control.Concurrent (ThreadId)
@@ -51,6 +54,8 @@ import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
 import IdeSession.Types.Private hiding (RunResult)
 import qualified IdeSession.Types.Public as Public
+
+import System.FilePath ((</>))
 
 data Computed = Computed {
     -- | Last compilation and run errors
@@ -257,3 +262,21 @@ managedData   :: Accessor ManagedFilesInternal [ManagedFile]
 
 managedSource = accessor _managedSource $ \x s -> s { _managedSource = x }
 managedData   = accessor _managedData   $ \x s -> s { _managedData   = x }
+
+{------------------------------------------------------------------------------
+  To allow for non-server(local) environments
+------------------------------------------------------------------------------}
+
+-- | get the directory that holds source files
+getSourceDir :: IdeStaticInfo -> FilePath
+getSourceDir IdeStaticInfo{..} =
+  case configLocalWorkingDir ideConfig of
+    Just path -> path
+    Nothing   -> ideSessionDir </> "src"
+
+-- | get the directory that holds data files
+getDataDirInternal :: IdeStaticInfo -> FilePath
+getDataDirInternal IdeStaticInfo{..} =
+  case configLocalWorkingDir ideConfig of
+    Just path -> path
+    Nothing   -> ideSessionDir </> "data"

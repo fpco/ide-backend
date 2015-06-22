@@ -15,6 +15,10 @@ type InProcess = Bool
 data SessionConfig = SessionConfig {
     -- | The directory to use for all session files.
     configDir        :: FilePath
+    -- | The directory from which to use the data and source files from
+    -- when set to Just "<filepath>" it uses them from the directory <filepath>
+    -- when set to Nothing it copies them to the session.* directory
+  , configLocalWorkingDir :: Maybe FilePath
     -- | Extra directories in which to look for programs, including ghc
     -- and other tools. Note that the @$PATH@ is still searched /first/, these
     -- directories are extra.
@@ -50,6 +54,7 @@ data SessionConfig = SessionConfig {
 --
 -- > defaultSessionConfig = SessionConfig {
 -- >     configDir              = "."
+-- >   , configLocalWorkingDir  = Nothing
 -- >   , configExtraPathDirs    = []
 -- >   , configInProcess        = False
 -- >   , configGenerateModInfo  = True
@@ -69,6 +74,7 @@ data SessionConfig = SessionConfig {
 defaultSessionConfig :: SessionConfig
 defaultSessionConfig = SessionConfig {
     configDir              = "."
+  , configLocalWorkingDir  = Nothing
   , configExtraPathDirs    = []
   , configInProcess        = False
   , configGenerateModInfo  = True

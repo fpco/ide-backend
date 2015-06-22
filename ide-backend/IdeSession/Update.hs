@@ -185,11 +185,13 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
 
   -- Create the common subdirectories of session.nnnn so that we don't have to
   -- worry about creating these elsewhere
-  Dir.createDirectoryIfMissing True (ideSessionSourceDir ideSessionDir)
-  Dir.createDirectoryIfMissing True (ideSessionDataDir   ideSessionDir)
+  case configLocalWorkingDir of
+    Just _  -> return ()
+    Nothing -> do
+      Dir.createDirectoryIfMissing True (getSourceDir       ideStaticInfo)
+      Dir.createDirectoryIfMissing True (getDataDirInternal ideStaticInfo)
   Dir.createDirectoryIfMissing True (ideSessionDistDir   ideSessionDir)
   Dir.createDirectoryIfMissing True (ideSessionObjDir    ideSessionDir)
-
   -- Local initialization
   execInitParams ideStaticInfo initParams
 
