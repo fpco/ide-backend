@@ -33,6 +33,7 @@ data GhcInitRequest = GhcInitRequest {
   , ghcInitSpecificPackageDBs :: [String]
   , ghcInitSessionDir         :: FilePath
   , ghcInitSourceDir          :: FilePath
+  , ghcInitDistDir            :: !FilePath
   }
   deriving (Typeable, Generic)
 
@@ -107,8 +108,10 @@ instance Binary GhcInitRequest where
     put ghcInitSpecificPackageDBs
     put ghcInitSourceDir
     put ghcInitSessionDir
+    put ghcInitDistDir
 
   get = GhcInitRequest <$> get
+                       <*> get
                        <*> get
                        <*> get
                        <*> get

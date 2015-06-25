@@ -102,14 +102,15 @@ data IdeSession = IdeSession {
 
 data IdeStaticInfo = IdeStaticInfo {
     -- | Configuration
-    ideConfig     :: SessionConfig
+    ideConfig     :: !SessionConfig
     -- | (Temporary) directory for session files
     --
     -- See also:
     -- * 'ideSessionSourceDir'
     -- * 'ideSessionDataDir',
     -- * 'ideSessionDistDir'
-  , ideSessionDir :: FilePath
+  , ideSessionDir :: !FilePath
+  , ideDistDir :: !FilePath
   }
 
 data IdeSessionState =

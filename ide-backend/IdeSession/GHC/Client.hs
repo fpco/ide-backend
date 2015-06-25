@@ -91,6 +91,7 @@ forkGhcServer ghcOpts relIncls rtsOpts ideStaticInfo = do
           , ghcInitSpecificPackageDBs = specificDBs
           , ghcInitSourceDir          = ideSourceDir ideStaticInfo
           , ghcInitSessionDir         = ideSessionDir ideStaticInfo
+          , ghcInitDistDir            = ideDistDir ideStaticInfo
           }
         return ghcInitVersion
       return ((server,) <$> version)

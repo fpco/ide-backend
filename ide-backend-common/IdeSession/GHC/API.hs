@@ -18,7 +18,6 @@ module IdeSession.GHC.API (
     -- * Paths
   , ideSessionSourceDir
   , ideSessionDataDir
-  , ideSessionDistDir
   , ideSessionObjDir
   ) where
 
@@ -82,10 +81,6 @@ ideSessionSourceDir sessionDir = sessionDir </> "src"
 ideSessionDataDir :: FilePath -> FilePath
 ideSessionDataDir sessionDir = sessionDir </> "data"
 {-# WARNING ideSessionDataDir "If configLocalWorkingDir is set, then this does not yield the proper source directory" #-}
-
--- | Cabal "dist" prefix.
-ideSessionDistDir :: FilePath -> FilePath
-ideSessionDistDir sessionDir = sessionDir </> "dist"
 
 -- | Directory where we store compiled C files (objects)
 ideSessionObjDir :: FilePath -> FilePath

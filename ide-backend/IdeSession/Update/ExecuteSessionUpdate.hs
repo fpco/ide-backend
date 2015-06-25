@@ -514,7 +514,6 @@ runGcc absC absObj pref = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     callback                        <- asks ideUpdateCallback
     relIncl                         <- Acc.get ideRelativeIncludes
-    let ideDistDir = ideSessionDistDir ideSessionDir
     -- Pass GHC options so that ghc can pass the relevant options to gcc
     ghcOpts <- Acc.get ideGhcOpts
     exceptionFree $ do
@@ -634,7 +633,6 @@ executeBuildExe :: [String] -> [(ModuleName, FilePath)] -> ExecuteSessionUpdate 
 executeBuildExe extraOpts ms = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{..} = ideConfig
-    let ideDistDir = ideSessionDistDir ideSessionDir
 
     callback          <- asks ideUpdateCallback
     mcomputed         <- Acc.get ideComputed
@@ -696,8 +694,7 @@ executeBuildDoc :: ExecuteSessionUpdate ()
 executeBuildDoc = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{..} = ideConfig
-    let ideDistDir = ideSessionDistDir ideSessionDir
-        srcDir = ideSourceDir ideStaticInfo
+    let srcDir = ideSourceDir ideStaticInfo
 
     callback          <- asks ideUpdateCallback
     mcomputed         <- Acc.get ideComputed
@@ -755,7 +752,6 @@ executeBuildLicenses :: FilePath -> ExecuteSessionUpdate ()
 executeBuildLicenses cabalsDir = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{configGenerateModInfo} = ideConfig
-    let ideDistDir = ideSessionDistDir ideSessionDir
 
     callback  <- asks ideUpdateCallback
     mcomputed <- Acc.get ideComputed

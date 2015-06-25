@@ -119,7 +119,7 @@ getDataDir = staticQuery $ return . ideDataDir
 -- Executables compiled in this session end up in a subdirectory @build@,
 -- haddocks in @doc@, concatenated licenses in file @licenses@, etc.
 getDistDir :: Query FilePath
-getDistDir = staticQuery $ return . ideSessionDistDir . ideSessionDir
+getDistDir = staticQuery $ return . ideDistDir
 
 -- | Read the current value of one of the source modules.
 getSourceModule :: FilePath -> Query BSL.ByteString
@@ -138,8 +138,8 @@ getAllDataFiles = staticQuery $ \ideStaticInfo ->
             (ideDataDir ideStaticInfo)
 
 getCabalMacros :: Query BSL.ByteString
-getCabalMacros = staticQuery $ \IdeStaticInfo{ideSessionDir} ->
-  BSL.readFile $ cabalMacrosLocation (ideSessionDistDir ideSessionDir)
+getCabalMacros = staticQuery $ \IdeStaticInfo{ideDistDir} ->
+  BSL.readFile $ cabalMacrosLocation ideDistDir
 
 {------------------------------------------------------------------------------
   Queries that do not rely on computed state
