@@ -1,5 +1,5 @@
 name:                 ide-backend
-version:              0.9.0.10
+version:              0.9.0.11
 synopsis:             An IDE backend library
 description:          See README.md for more details
 license:              MIT
@@ -146,6 +146,7 @@ test-suite TestSuite
                       TestSuite.Tests.Issues
                       TestSuite.Tests.Packages
                       TestSuite.Tests.Performance
+                      TestSuite.Tests.Pseudoterminal
                       TestSuite.Tests.SessionRestart
                       TestSuite.Tests.SessionState
                       TestSuite.Tests.SnippetEnvironment
