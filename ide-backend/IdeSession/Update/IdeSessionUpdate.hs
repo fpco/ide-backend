@@ -38,7 +38,6 @@ import Data.Accessor (Accessor)
 import Data.Monoid (Monoid(..))
 import qualified Data.ByteString.Lazy.Char8 as BSL
 
-import IdeSession.GHC.API
 import IdeSession.State
 import IdeSession.Types.Private hiding (RunResult(..))
 import IdeSession.Types.Public (RunBufferMode(..))
@@ -138,7 +137,7 @@ instance Monoid IdeSessionUpdate where
     }
 
 data FileInfo = FileInfo {
-    fileInfoRemoteDir  :: FilePath -> FilePath
+    fileInfoRemoteDir  :: IdeStaticInfo -> FilePath
   , fileInfoRemoteFile :: FilePath
   , fileInfoAccessor   :: Accessor ManagedFilesInternal [ManagedFile]
   }
@@ -178,7 +177,7 @@ updateSourceFile fp bs = mempty { ideUpdateFileCmds = [FileWrite fileInfo bs] }
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = fp
-      , fileInfoRemoteDir  = ideSessionSourceDir
+      , fileInfoRemoteDir  = ideSourceDir
       , fileInfoAccessor   = managedSource
       }
 
@@ -189,7 +188,7 @@ updateSourceFileFromFile fp = mempty { ideUpdateFileCmds = [FileCopy fileInfo fp
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = fp
-      , fileInfoRemoteDir  = ideSessionSourceDir
+      , fileInfoRemoteDir  = ideSourceDir
       , fileInfoAccessor   = managedSource
       }
 
@@ -199,7 +198,7 @@ updateSourceFileDelete fp = mempty { ideUpdateFileCmds = [FileDelete fileInfo] }
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = fp
-      , fileInfoRemoteDir  = ideSessionSourceDir
+      , fileInfoRemoteDir  = ideSourceDir
       , fileInfoAccessor   = managedSource
       }
 
@@ -210,7 +209,7 @@ updateDataFile fp bs = mempty { ideUpdateFileCmds = [FileWrite fileInfo bs] }
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = fp
-      , fileInfoRemoteDir  = ideSessionDataDir
+      , fileInfoRemoteDir  = ideDataDir
       , fileInfoAccessor   = managedData
       }
 
@@ -224,7 +223,7 @@ updateDataFileFromFile remoteFile localFile = mempty {
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = remoteFile
-      , fileInfoRemoteDir  = ideSessionDataDir
+      , fileInfoRemoteDir  = ideDataDir
       , fileInfoAccessor   = managedData
       }
 
@@ -235,7 +234,7 @@ updateDataFileDelete fp = mempty { ideUpdateFileCmds = [FileDelete fileInfo] }
   where
     fileInfo = FileInfo {
         fileInfoRemoteFile = fp
-      , fileInfoRemoteDir  = ideSessionDataDir
+      , fileInfoRemoteDir  = ideDataDir
       , fileInfoAccessor   = managedData
       }
 

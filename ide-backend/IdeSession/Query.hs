@@ -109,39 +109,37 @@ getSessionConfig = staticQuery $ return . ideConfig
 
 -- | Obtain the source files directory for this session.
 getSourcesDir :: Query FilePath
-getSourcesDir = staticQuery $ return . ideSessionSourceDir . ideSessionDir
+getSourcesDir = staticQuery $ return . ideSourceDir
 
 -- | Obtain the data files directory for this session.
 getDataDir :: Query FilePath
-getDataDir = staticQuery $ return . ideSessionDataDir . ideSessionDir
+getDataDir = staticQuery $ return . ideDataDir
 
 -- | Obtain the directory prefix for results of Cabal invocations.
 -- Executables compiled in this session end up in a subdirectory @build@,
 -- haddocks in @doc@, concatenated licenses in file @licenses@, etc.
 getDistDir :: Query FilePath
-getDistDir = staticQuery $ return . ideSessionDistDir . ideSessionDir
+getDistDir = staticQuery $ return . ideDistDir
 
 -- | Read the current value of one of the source modules.
 getSourceModule :: FilePath -> Query BSL.ByteString
-getSourceModule path = staticQuery $ \IdeStaticInfo{ideSessionDir} ->
-  BSL.readFile $ ideSessionSourceDir ideSessionDir </> path
+getSourceModule path = staticQuery $ BSL.readFile . (</> path) . ideSourceDir
 
 -- | Read the current value of one of the data files.
 getDataFile :: FilePath -> Query BSL.ByteString
-getDataFile path = staticQuery $ \IdeStaticInfo{ideSessionDir} ->
-  BSL.readFile $ ideSessionDataDir ideSessionDir </> path
+getDataFile path = staticQuery $ BSL.readFile . (</> path) . ideDataDir
 
 -- | Get the list of all data files currently available to the session:
 -- both the files copied via an update and files created by user code.
 getAllDataFiles :: Query [FilePath]
-getAllDataFiles = staticQuery $ \IdeStaticInfo{ideSessionDir} ->
+getAllDataFiles = staticQuery $ \ideStaticInfo ->
   Find.find Find.always
             (Find.fileType Find.==? Find.RegularFile)
-            (ideSessionDataDir ideSessionDir)
+            (ideDataDir ideStaticInfo)
 
 getCabalMacros :: Query BSL.ByteString
-getCabalMacros = staticQuery $ \IdeStaticInfo{ideSessionDir} ->
-  BSL.readFile $ cabalMacrosLocation (ideSessionDistDir ideSessionDir)
+getCabalMacros = staticQuery $ \IdeStaticInfo{ideDistDir} ->
+  BSL.readFile $ cabalMacrosLocation ideDistDir
 
 {------------------------------------------------------------------------------
   Queries that do not rely on computed state
@@ -347,7 +345,7 @@ getUseSites = computedQuery $ \computed@Computed{..} mod span ->
 getDotCabal :: Query (String -> Version -> BSL.ByteString)
 getDotCabal session = withComputedState session
                       $ \idleState computed@Computed{..} -> do
-  let sourcesDir       = ideSessionSourceDir . ideSessionDir $ ideStaticInfo session
+  let sourcesDir       = ideSourceDir $ ideStaticInfo session
       options          = idleState ^. ideGhcOpts
       relativeIncludes = idleState ^. ideRelativeIncludes
   buildDotCabal sourcesDir relativeIncludes options computed

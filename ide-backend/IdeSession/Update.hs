@@ -125,6 +125,9 @@ data SessionInitParams = SessionInitParams {
     --
     -- Defaults to @-K8M@
   , sessionInitRtsOpts :: [String]
+
+    -- | dist/ directory.
+  , sessionInitDistDir :: !(Maybe FilePath)
   }
   deriving Show
 
@@ -135,6 +138,7 @@ defaultSessionInitParams = SessionInitParams {
   , sessionInitRelativeIncludes = [""]
   , sessionInitTargets          = Public.TargetsExclude []
   , sessionInitRtsOpts          = ["-K8M"]
+  , sessionInitDistDir          = Nothing
   }
 
 -- | Session initialization parameters for an existing session.
@@ -151,6 +155,7 @@ sessionRestartParams st IdeSessionUpdate{..} = SessionInitParams {
   , sessionInitRelativeIncludes = fromMaybe (st ^. ideRelativeIncludes) ideUpdateRelIncls
   , sessionInitTargets          = fromMaybe (st ^. ideTargets)          ideUpdateTargets
   , sessionInitRtsOpts          = fromMaybe (st ^. ideRtsOpts)          ideUpdateRtsOpts
+  , sessionInitDistDir          = Nothing
   }
 
 -- | Set up the initial state of the session according to the given parameters
@@ -165,7 +170,7 @@ writeMacros IdeStaticInfo{ideConfig = SessionConfig {..}, ..}
   macros <- case configCabalMacros of
               Nothing     -> generateMacros configPackageDBStack configExtraPathDirs
               Just macros -> return (BSL.UTF8.toString macros)
-  writeFile (cabalMacrosLocation (ideSessionDistDir ideSessionDir)) macros
+  writeFile (cabalMacrosLocation ideDistDir) macros
 
 {-------------------------------------------------------------------------------
   Session startup
@@ -181,15 +186,19 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
 
   configDirCanon <- Dir.canonicalizePath configDir
   ideSessionDir  <- createTempDirectory configDirCanon "session."
+  let ideDistDir = fromMaybe (ideSessionDir </> "dist/") sessionInitDistDir
+
   let ideStaticInfo = IdeStaticInfo{..}
 
   -- Create the common subdirectories of session.nnnn so that we don't have to
   -- worry about creating these elsewhere
-  Dir.createDirectoryIfMissing True (ideSessionSourceDir ideSessionDir)
-  Dir.createDirectoryIfMissing True (ideSessionDataDir   ideSessionDir)
-  Dir.createDirectoryIfMissing True (ideSessionDistDir   ideSessionDir)
-  Dir.createDirectoryIfMissing True (ideSessionObjDir    ideSessionDir)
-
+  case configLocalWorkingDir of
+    Just _  -> return ()
+    Nothing -> do
+      Dir.createDirectoryIfMissing True (ideSourceDir  ideStaticInfo)
+      Dir.createDirectoryIfMissing True (ideDataDir    ideStaticInfo)
+  Dir.createDirectoryIfMissing True ideDistDir
+  Dir.createDirectoryIfMissing True (ideSessionObjDir  ideSessionDir)
   -- Local initialization
   execInitParams ideStaticInfo initParams
 

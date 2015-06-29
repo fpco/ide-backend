@@ -26,7 +26,7 @@ import IdeSession.Util
 -- the machinery of the cabal library.
 invokeExeCabal :: IdeStaticInfo -> ExeCabalRequest -> (Progress -> IO ())
                -> IO ExitCode
-invokeExeCabal IdeStaticInfo{..} args callback = do
+invokeExeCabal ideStaticInfo@IdeStaticInfo{..} args callback = do
   mLoc <- findProgramOnSearchPath normal searchPath "ide-backend-exe-cabal"
   case mLoc of
     Nothing ->
@@ -35,7 +35,7 @@ invokeExeCabal IdeStaticInfo{..} args callback = do
       env <- envWithPathOverride configExtraPathDirs
       let cwd = case args of
             ReqExeDoc{} -> ideSessionDir
-            _ -> ideSessionDataDir ideSessionDir
+            _ -> ideDataDir ideStaticInfo
       server <- forkRpcServer prog [] (Just cwd) env
       exitCode <- rpcRunExeCabal server args callback
       shutdown server  -- not long-running

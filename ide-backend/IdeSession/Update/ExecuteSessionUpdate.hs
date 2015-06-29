@@ -190,10 +190,15 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
     -- - We do this _after_ setting ghc because because some ghc options are
     --   passed to the C compiler (#218)
     -- - Similarly, when the ghc options have changed, we conversatively
-    --   recompile (and, importantly, relink -- #218) _all_ C files.
+    --   recompile (and, importantly, relink -- #218) _all_ C files.
     (numActions, cErrors) <- updateObjectFiles ghcOptionsChanged
     let cFilesChanged :: Bool
         cFilesChanged = numActions > 0
+
+    IdeStaticInfo{ideConfig} <- asks ideUpdateStaticInfo
+    let hasLocalWorkingDir = case configLocalWorkingDir ideConfig of
+                               Just _ -> True
+                               _      -> False
 
     let needsRecompile =
              -- We recompile both when source code and when data files change
@@ -208,11 +213,13 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
              -- If we just restarted we have to recompile even if the files
              -- didn't change
           || justRestarted
+             -- Recompile when we move to having a local working directory.
+          || hasLocalWorkingDir
 
     when needsRecompile $ local (incrementNumSteps numActions) $ do
       GhcCompileResult{..} <- rpcCompile
       oldComputed <- Acc.get ideComputed
-      srcDir      <- asks $ ideSessionSourceDir . ideSessionDir . ideUpdateStaticInfo
+      srcDir      <- asks $ ideSourceDir . ideUpdateStaticInfo
 
       let applyDiff :: Strict (Map ModuleName) (Diff v)
                     -> (Computed -> Strict (Map ModuleName) v)
@@ -440,10 +447,11 @@ recompileCFiles :: [FilePath] -> ExecuteSessionUpdate [SourceError]
 recompileCFiles cFiles = do
   callback   <- asks ideUpdateCallback
   sessionDir <- asks $ ideSessionDir . ideUpdateStaticInfo
+  ideStaticInfo <- asks ideUpdateStaticInfo
 
   let srcDir, objDir :: FilePath
-      srcDir = ideSessionSourceDir sessionDir
-      objDir = ideSessionObjDir    sessionDir
+      srcDir = ideSourceDir ideStaticInfo
+      objDir = ideSessionObjDir sessionDir
 
   errorss <- forM (zip cFiles [1..]) $ \(relC, i) -> do
     let relObj = replaceExtension relC ".o"
@@ -506,18 +514,13 @@ runGcc absC absObj pref = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     callback                        <- asks ideUpdateCallback
     relIncl                         <- Acc.get ideRelativeIncludes
-
     -- Pass GHC options so that ghc can pass the relevant options to gcc
     ghcOpts <- Acc.get ideGhcOpts
-
-    let ideDistDir   = ideSessionDistDir   ideSessionDir
-        ideSourceDir = ideSessionSourceDir ideSessionDir
-
     exceptionFree $ do
      let SessionConfig{..} = ideConfig
          stdoutLog   = ideDistDir </> "ide-backend-cc.stdout"
          stderrLog   = ideDistDir </> "ide-backend-cc.stderr"
-         includeDirs = map (ideSourceDir </>) relIncl
+         includeDirs = map (ideSourceDir ideStaticInfo </>) relIncl
          runCcArgs   = RunCcArgs{ rcPackageDBStack = configPackageDBStack
                                 , rcExtraPathDirs  = configExtraPathDirs
                                 , rcDistDir        = ideDistDir
@@ -559,11 +562,11 @@ runGcc absC absObj pref = do
 -- TODO: Should we update data files here too?
 markAsUpdated :: (FilePath -> Bool) -> ExecuteSessionUpdate ()
 markAsUpdated shouldMark = do
-  IdeStaticInfo{..} <- asks ideUpdateStaticInfo
+  ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
   sources  <- Acc.get (ideManagedFiles .> managedSource)
   sources' <- forM sources $ \(path, (digest, oldTS)) ->
     if shouldMark path
-      then do newTS <- updateFileTimes (ideSessionSourceDir ideSessionDir </> path)
+      then do newTS <- updateFileTimes (ideSourceDir ideStaticInfo)
               return (path, (digest, newTS))
       else return (path, (digest, oldTS))
   Acc.set (ideManagedFiles .> managedSource) sources'
@@ -579,37 +582,40 @@ markAsUpdated shouldMark = do
 -- TODO: We should verify each use of exceptionFree here.
 executeFileCmd :: FileCmd -> ExecuteSessionUpdate Bool
 executeFileCmd cmd = do
-  IdeStaticInfo{..} <- asks ideUpdateStaticInfo
+  ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
 
   let remotePath :: FilePath
-      remotePath = fileInfoRemoteDir info ideSessionDir </> fileInfoRemoteFile info
+      remotePath = fileInfoRemoteDir info ideStaticInfo </> fileInfoRemoteFile info
 
-  case cmd of
-    FileWrite _ bs -> do
-      old <- Acc.get cachedInfo
-      -- We always overwrite the file, and then later set the timestamp back
-      -- to what it was if it turns out the hash was the same. If we compute
-      -- the hash first, we would force the entire lazy bytestring into memory
-      newHash <- exceptionFree $ writeFileAtomic remotePath bs
-      case old of
-        Just (oldHash, oldTS) | oldHash == newHash -> do
-          exceptionFree $ setFileTimes remotePath oldTS oldTS
-          return False
-        _ -> do
-          newTS <- updateFileTimes remotePath
-          Acc.set cachedInfo (Just (newHash, newTS))
-          return True
-    FileCopy _ localFile -> do
-      -- We just call 'FileWrite' because we need to read the file anyway to
-      -- compute the hash. Note that `localPath` is interpreted relative to the
-      -- current directory
-      bs <- exceptionFree $ BSL.readFile localFile
-      executeFileCmd (FileWrite info bs)
-    FileDelete _ -> do
-      exceptionFree $ ignoreDoesNotExist $ Dir.removeFile remotePath
-      Acc.set cachedInfo Nothing
-      -- TODO: We should really return True only if the file existed
-      return True
+  case configLocalWorkingDir ideConfig of
+    Just _ -> fail "We can't use update functions with configLocalWorkingDir."
+    Nothing -> case cmd of
+                 FileWrite _ bs -> do
+                   old <- Acc.get cachedInfo
+                   -- We always overwrite the file, and then later set the timestamp back
+                   -- to what it was if it turns out the hash was the same. If we compute
+                   -- the hash first, we would force the entire lazy bytestring into memory
+                   newHash <- exceptionFree $ writeFileAtomic remotePath bs
+                   case old of
+                     Just (oldHash, oldTS) | oldHash == newHash -> do
+                       exceptionFree $ setFileTimes remotePath oldTS oldTS
+                       return False
+                     _ -> do
+                       newTS <- updateFileTimes remotePath
+                       Acc.set cachedInfo (Just (newHash, newTS))
+                       return True
+                 FileCopy _ localFile -> do
+                   -- We just call 'FileWrite' because we need to read the file anyway to
+                   -- compute the hash. Note that `localPath` is interpreted relative to the
+                   -- current directory
+                   bs <- exceptionFree $ BSL.readFile localFile
+                   executeFileCmd (FileWrite info bs)
+                 FileDelete _ -> do
+                   exceptionFree $ ignoreDoesNotExist $ Dir.removeFile remotePath
+                   Acc.set cachedInfo Nothing
+                   -- TODO: We should really return True only if the file existed
+                   return True
+
   where
     info :: FileInfo
     info = case cmd of FileWrite  i _ -> i
@@ -627,8 +633,6 @@ executeBuildExe :: [String] -> [(ModuleName, FilePath)] -> ExecuteSessionUpdate 
 executeBuildExe extraOpts ms = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{..} = ideConfig
-    let ideDistDir   = ideSessionDistDir   ideSessionDir
-        ideSourceDir = ideSessionSourceDir ideSessionDir
 
     callback          <- asks ideUpdateCallback
     mcomputed         <- Acc.get ideComputed
@@ -659,7 +663,7 @@ executeBuildExe extraOpts ms = do
                 let beArgs =
                       BuildExeArgs{ bePackageDBStack   = configPackageDBStack
                                   , beExtraPathDirs    = configExtraPathDirs
-                                  , beSourcesDir       = ideSourceDir
+                                  , beSourcesDir       = ideSourceDir ideStaticInfo
                                   , beDistDir          = ideDistDir
                                   , beRelativeIncludes = relativeIncludes
                                   , beGhcOpts          = ghcOpts'
@@ -690,8 +694,7 @@ executeBuildDoc :: ExecuteSessionUpdate ()
 executeBuildDoc = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{..} = ideConfig
-    let ideDistDir   = ideSessionDistDir   ideSessionDir
-        ideSourceDir = ideSessionSourceDir ideSessionDir
+    let srcDir = ideSourceDir ideStaticInfo
 
     callback          <- asks ideUpdateCallback
     mcomputed         <- Acc.get ideComputed
@@ -732,7 +735,7 @@ executeBuildDoc = do
                         BuildExeArgs{ bePackageDBStack   = configPackageDBStack
                                     , beExtraPathDirs    = configExtraPathDirs
                                     , beSourcesDir       =
-                                        makeRelative ideSessionDir ideSourceDir
+                                        makeRelative ideSessionDir srcDir
                                     , beDistDir          =
                                         makeRelative ideSessionDir ideDistDir
                                     , beRelativeIncludes = relativeIncludes
@@ -749,7 +752,6 @@ executeBuildLicenses :: FilePath -> ExecuteSessionUpdate ()
 executeBuildLicenses cabalsDir = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{configGenerateModInfo} = ideConfig
-    let ideDistDir = ideSessionDistDir ideSessionDir
 
     callback  <- asks ideUpdateCallback
     mcomputed <- Acc.get ideComputed
@@ -810,7 +812,7 @@ rpcCompile :: ExecuteSessionUpdate GhcCompileResult
 rpcCompile = do
     IdeIdleState{..} <- get
     callback         <- asks ideUpdateCallback
-    sourceDir        <- asks $ ideSessionSourceDir . ideSessionDir . ideUpdateStaticInfo
+    sourceDir        <- asks $ ideSourceDir . ideUpdateStaticInfo
 
     -- We need to translate the targets to absolute paths
     let targets = case _ideTargets of
@@ -832,7 +834,7 @@ rpcSetArgs = do
 rpcSetGhcOpts :: ExecuteSessionUpdate [SourceError]
 rpcSetGhcOpts = do
     IdeIdleState{..} <- get
-    srcDir <- asks $ ideSessionSourceDir . ideSessionDir . ideUpdateStaticInfo
+    srcDir <- asks $ ideSourceDir . ideUpdateStaticInfo
     -- relative include path is part of the state rather than the
     -- config as of c0bf0042
     let relOpts = relInclToOpts srcDir _ideRelativeIncludes

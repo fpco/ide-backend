@@ -18,7 +18,6 @@ module IdeSession.GHC.API (
     -- * Paths
   , ideSessionSourceDir
   , ideSessionDataDir
-  , ideSessionDistDir
   , ideSessionObjDir
   ) where
 
@@ -75,15 +74,13 @@ cabalMacrosLocation ideDistDir = ideDistDir </> "cabal_macros.h"
 -- | The directory to use for managing source files.
 ideSessionSourceDir :: FilePath -> FilePath
 ideSessionSourceDir sessionDir = sessionDir </> "src"
+{-# WARNING ideSessionSourceDir "If configLocalWorkingDir is set, then this does not yield the proper source directory" #-}
 
 -- | The directory to use for data files that may be accessed by the
 -- running program. The running program will have this as its CWD.
 ideSessionDataDir :: FilePath -> FilePath
 ideSessionDataDir sessionDir = sessionDir </> "data"
-
--- | Cabal "dist" prefix.
-ideSessionDistDir :: FilePath -> FilePath
-ideSessionDistDir sessionDir = sessionDir </> "dist"
+{-# WARNING ideSessionDataDir "If configLocalWorkingDir is set, then this does not yield the proper source directory" #-}
 
 -- | Directory where we store compiled C files (objects)
 ideSessionObjDir :: FilePath -> FilePath
