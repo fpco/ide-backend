@@ -29,6 +29,7 @@ import System.Environment (lookupEnv)
 import System.Exit (ExitCode)
 import System.IO (Handle, hClose)
 import System.IO.Temp (openTempFile)
+-- import System.Posix.Signals (signalProcess, sigKILL)
 import System.Process
   ( createProcess
   , proc
@@ -36,6 +37,7 @@ import System.Process
   , waitForProcess
   , CreateProcess(cwd, env)
   , getProcessExitCode
+  , terminateProcess
   )
 import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
 import qualified Control.Exception as Ex
@@ -272,7 +274,9 @@ forceTerminate server =
             ClosedHandle _ ->
               leaveHandleAsIs p_
             OpenHandle pID -> do
-              signalProcess sigKILL pID
+              -- signalProcess sigKILL pID
+              -- TODO is this a valid replacement for sigKILL?
+              terminateProcess ph
               leaveHandleAsIs p_
       Nothing ->
         Ex.throwIO $ userError "forceTerminate: parallel connection"

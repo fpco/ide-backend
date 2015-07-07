@@ -334,8 +334,9 @@ configureAndBuild BuildExeArgs{ bePackageDBStack   = configPackageDBStack
         -- when/if we construct @lbi@ without @configure@).
         Build.build (BuildInfo.localPkgDescr lbi) lbi buildFlags preprocessors
   -- Handle various exceptions and stderr printouts.
-  exitCode :: Either ExitCode () <- redirectStderr beStderrLog $
-    Ex.try $ catchIOError confAndBuild $ \e ->
+  -- TODO make redirect work again
+  -- exitCode :: Either ExitCode () <- redirectStderr beStderrLog $
+  exitCode :: Either ExitCode () <- Ex.try $ catchIOError confAndBuild $ \e ->
       if isUserError e
         then do
           -- In the new cabal code some exceptions are handled with 'die',
@@ -400,8 +401,9 @@ configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
         Haddock.haddock (BuildInfo.localPkgDescr lbi) lbi preprocessors haddockFlags
   -- Handle various exceptions and stderr printouts.
-  exitCode :: Either ExitCode () <- redirectStderr beStderrLog $
-    Ex.try $ catchIOError confAndBuild $ \e ->
+  -- TODO make redirect work again
+  -- exitCode :: Either ExitCode () <- redirectStderr beStderrLog $
+  exitCode :: Either ExitCode () <- Ex.try $ catchIOError confAndBuild $ \e ->
       if isUserError e
         then do
           -- In the new cabal code some exceptions are handled with 'die',
@@ -753,8 +755,9 @@ runComponentCc RunCcArgs{ rcPackageDBStack = configPackageDBStack
     rcStderrLogExists <- doesFileExist rcStderrLog
     when rcStderrLogExists $ removeFile rcStderrLog
 
-    exitCode <- redirectStderr rcStderrLog $
-      Ex.try $ do
+    -- TODO make redirect work again
+    -- exitCode <- redirectStderr rcStderrLog $
+    exitCode <- Ex.try $ do
         createDirectoryIfMissingVerbose verbosity True odir
         (ghcProg, _) <- requireProgram
                           verbosity Cabal.Program.ghcProgram (BuildInfo.withPrograms lbi)
