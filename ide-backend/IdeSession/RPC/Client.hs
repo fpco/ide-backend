@@ -29,9 +29,6 @@ import System.Environment (lookupEnv)
 import System.Exit (ExitCode)
 import System.IO (Handle, hClose)
 import System.IO.Temp (openTempFile)
-import System.Posix.IO (createPipe, closeFd, fdToHandle)
-import System.Posix.Signals (signalProcess, sigKILL)
-import System.Posix.Types (Fd)
 import System.Process
   ( createProcess
   , proc
@@ -54,6 +51,9 @@ import IdeSession.Util.BlockingOps
 import IdeSession.Util.Logger
 import IdeSession.RPC.API
 import IdeSession.RPC.Stream
+import IdeSession.RPC.Sockets
+
+import Network
 
 --------------------------------------------------------------------------------
 -- Client-side API                                                            --
@@ -109,19 +109,17 @@ forkRpcServer :: FilePath        -- ^ Filename of the executable
               -> Maybe [(String, String)] -- ^ Environment
               -> IO RpcServer
 forkRpcServer path args workingDir menv = do
-  (requestR,  requestW)  <- createPipe
-  (responseR, responseW) <- createPipe
+  request <- makeSocket
+  response <- makeSocket
 
   tmpDir <- Dir.getTemporaryDirectory
   (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc-server-.log"
   hClose errorLogHandle
 
-  let showFd :: Fd -> String
-      showFd fd = show (fromIntegral fd :: Int)
-
+  ports <- mapM socketPort [request, response]
   let args' = args
            ++ [errorLogPath]
-           ++ map showFd [requestR, requestW, responseR, responseW]
+           ++ map portToString ports
 
   fullPath <- pathToExecutable path
   (Nothing, Nothing, Nothing, ph) <- createProcess (proc fullPath args') {
@@ -129,17 +127,13 @@ forkRpcServer path args workingDir menv = do
                                          env = menv
                                        }
 
-  -- Close the ends of the pipes that we're not using, and convert the rest
-  -- to handles
-  closeFd requestR
-  closeFd responseW
-  requestW'  <- fdToHandle requestW
-  responseR' <- fdToHandle responseR
+  request'  <- acceptHandle request
+  response' <- acceptHandle response
 
   st    <- newMVar RpcRunning
-  input <- newStream responseR'
+  input <- newStream response'
   return RpcServer {
-      rpcRequestW  = requestW'
+      rpcRequestW  = request'
     , rpcErrorLog  = errorLogPath
     , rpcProc      = Just ph
     , rpcState     = st
@@ -159,27 +153,24 @@ forkRpcServer path args workingDir menv = do
 --
 -- It is the responsibility of the caller to make sure that each triplet
 -- of named pipes is only used for RPC connection.
-connectToRpcServer :: FilePath   -- ^ stdin named pipe
-                   -> FilePath   -- ^ stdout named pipe
+connectToRpcServer :: WriteChannel   -- ^ stdin
+                   -> ReadChannel   -- ^ stdout
                    -> FilePath   -- ^ logfile for storing exceptions
                    -> (RpcServer -> IO a)
                    -> IO a
-connectToRpcServer requestW responseR errorLog act =
-  Ex.bracket (openPipeForWriting requestW  timeout) hClose $ \requestW'  ->
-  Ex.bracket (openPipeForReading responseR timeout) hClose $ \responseR' -> do
+connectToRpcServer (WriteChannel request) (ReadChannel response) errorLog act =
+  Ex.bracket (connectToPort request) hClose $ \request'  ->
+  Ex.bracket (connectToPort response) hClose $ \response' -> do
     st    <- newMVar RpcRunning
-    input <- newStream responseR'
+    input <- newStream response'
     act $ RpcServer {
-        rpcRequestW  = requestW'
+        rpcRequestW  = request'
       , rpcErrorLog  = errorLog
       , rpcProc      = Nothing
       , rpcState     = st
       , rpcResponseR = input
-      , rpcIdentity  = requestW
+      , rpcIdentity  = (show request) -- TODO is it possible to make a better identifier?
       }
-  where
-    timeout :: Int
-    timeout = 1000000 -- 1sec
 
 -- | Specialized form of 'rpcConversation' to do single request and wait for
 -- a single response.
