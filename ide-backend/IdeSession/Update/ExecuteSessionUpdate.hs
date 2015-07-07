@@ -21,7 +21,7 @@ import Data.Monoid (Monoid(..))
 import System.Exit (ExitCode(..))
 import System.FilePath (makeRelative, (</>), takeExtension, replaceExtension, dropFileName)
 import System.FilePath.Find (find, always, extension, (&&?), (||?), fileType, (==?), FileType (RegularFile))
-import System.Posix.Files (setFileTimes, getFileStatus, modificationTime)
+import System.PosixCompat.Files (setFileTimes, getFileStatus, modificationTime)
 import qualified Control.Exception             as Ex
 import qualified Data.Accessor.Monad.MTL.State as Acc
 import qualified Data.ByteString.Char8         as BSS
