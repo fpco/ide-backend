@@ -41,7 +41,7 @@ import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import GHC.Generics (Generic)
 import GHC.IO (unsafeUnmask)
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
-import System.Environment (getEnvironment)
+import System.Environment (getEnvironment, setEnv, unsetEnv)
 import System.FilePath (splitFileName, (<.>), (</>))
 import System.FilePath (splitSearchPath, searchPathSeparator)
 import System.IO
