@@ -23,6 +23,7 @@ library
                       IdeSession.RPC.API
                       IdeSession.RPC.Server
                       IdeSession.RPC.Stream
+                      IdeSession.RPC.PortablePipes
                       IdeSession.Strict.Container
                       IdeSession.Strict.IntMap
                       IdeSession.Strict.List
