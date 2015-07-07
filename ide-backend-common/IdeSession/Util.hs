@@ -17,10 +17,12 @@ module IdeSession.Util (
   , Diff(..)
   , applyMapDiff
     -- * Manipulating stdout and stderr
+#ifdef VERSION_unix
   , swizzleStdout
   , swizzleStderr
   , redirectStderr
   , captureOutput
+#endif
   ) where
 
 import Control.Applicative ((<$>))
@@ -37,7 +39,7 @@ import Data.Tagged (Tagged, untag)
 import Data.Text (Text)
 import Data.Typeable (typeOf)
 import Foreign.C.Types (CFile)
-import Foreign.Ptr (Ptr, castPtr, nullPtr)
+import Foreign.Ptr (Ptr, castPtr, )
 import GHC.Generics (Generic)
 import GHC.IO (unsafeUnmask)
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
@@ -46,11 +48,17 @@ import System.FilePath (splitFileName, (<.>), (</>))
 import System.FilePath (splitSearchPath, searchPathSeparator)
 import System.IO
 import System.IO.Error (isDoesNotExistError)
-import System.IO.Temp (withSystemTempFile)
+
+#ifdef VERSION_unix
+import Foreign.Ptr (nullPtr)
+-- the unix package is not available on Windows
 import System.Posix (Fd)
-import System.Posix.Env (setEnv, unsetEnv)
 import System.Posix.IO
-import System.Posix.Types (CPid(..))
+import System.IO.Temp (withSystemTempFile)
+import qualified System.Posix.Files           as Files
+#endif
+
+import System.PosixCompat.Types (CPid(..))
 import Text.Show.Pretty
 import qualified Control.Exception            as Ex
 import qualified Data.Attoparsec.Text         as Att
@@ -62,7 +70,6 @@ import qualified Data.ByteString              as BSS
 import qualified Data.ByteString.Lazy         as BSL
 import qualified Data.Text                    as Text
 import qualified Data.Text.Foreign            as Text
-import qualified System.Posix.Files           as Files
 
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map as StrictMap
@@ -170,12 +177,14 @@ setupEnv initEnv overrides = do
   forM_ curEnv $ \(var, _val) -> unsetEnv var
 
   -- Restore initial environment
-  forM_ initEnv $ \(var, val) -> setEnv var val True
+  forM_ initEnv $ \(var, val) -> setEnv var val
+  -- previously used the Posix setEnv, which had an explicit flag for overwrites (set to True)
+  -- not sure about the behavior of the portable version
 
   -- Apply overrides
   forM_ overrides $ \(var, mVal) ->
     case mVal of
-      Just val -> setEnv var val True
+      Just val -> setEnv var val -- see comment about setEnv above
       Nothing  -> unsetEnv var
 
 relInclToOpts :: FilePath -> [FilePath] -> [String]
@@ -258,7 +267,7 @@ applyMapDiff diff = foldr (.) id (map aux $ StrictMap.toList diff)
 {-------------------------------------------------------------------------------
   Manipulations with stdout and stderr.
 -------------------------------------------------------------------------------}
-
+#ifndef mingw32_HOST_OS
 swizzleStdout :: Fd -> IO a -> IO a
 swizzleStdout = swizzleHandle (stdout, stdOutput)
 
@@ -308,6 +317,7 @@ captureOutput act = do
     closeFd fd
     suppressed <- readFile fp
     return (suppressed, a)
+#endif
 
 {-------------------------------------------------------------------------------
   Orphans
