@@ -15,7 +15,6 @@ import System.Environment.Executable (getExecutablePath)
 import System.FilePath ((</>))
 import System.IO (hClose)
 import System.IO.Temp (withTempDirectory, openTempFile)
-import System.Posix.Files (createNamedPipe)
 import System.Posix.Signals (sigKILL)
 import qualified Control.Concurrent.Async as Async
 import qualified Control.Exception        as Ex
@@ -26,8 +25,10 @@ import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertEqual)
 
+import Network
 import IdeSession.RPC.Client
 import IdeSession.RPC.Server
+import IdeSession.RPC.Sockets
 import TestTools
 
 --------------------------------------------------------------------------------
@@ -497,26 +498,22 @@ testConcurrentServer _errorLog RpcConversation{..} = go
           put str
           go
         ConcurrentServerSpawn -> do
-          pipes <- newEmptyMVar :: IO (MVar (String, String, String))
+          pipes <- newEmptyMVar :: IO (MVar (WriteChannel, ReadChannel, String))
           forkIO $ do
-            withTempDirectory "." "rpc" $ \tempDir -> do
-              let stdin  = tempDir </> "stdin"
-                  stdout = tempDir </> "stdout"
-                  stderr = tempDir </> "stderr"
+            stdin <- makeSocket
+            stdout <- makeSocket
 
-              createNamedPipe stdin  0o600
-              createNamedPipe stdout 0o600
+            tmpDir <- Dir.getTemporaryDirectory
+            (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc.log"
+            hClose errorLogHandle
 
-              tmpDir <- Dir.getTemporaryDirectory
-              (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc.log"
-              hClose errorLogHandle
+            [stdinPort, stdoutPort] <- mapM socketPort [stdin, stdout]
+            -- Once we have created the sockets we can tell the client
+            putMVar pipes (WriteChannel stdinPort, ReadChannel stdoutPort, errorLogPath)
+            concurrentConversation stdin stdout errorLogPath testConversationServer
 
-              -- Once we have created the pipes we can tell the client
-              putMVar pipes (stdin, stdout, errorLogPath)
-              concurrentConversation stdin stdout stderr testConversationServer
-
-          (stdin, stdout, errorLogPath) <- readMVar pipes
-          put (stdin, stdout, errorLogPath)
+          (stdinPort, stdoutPort, errorLogPath) <- readMVar pipes
+          put (stdinPort, stdoutPort, errorLogPath)
           go
         ConcurrentServerTerminate -> do
           put ()

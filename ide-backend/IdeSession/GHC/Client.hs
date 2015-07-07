@@ -52,6 +52,8 @@ import qualified IdeSession.Types.Public as Public
 
 import Distribution.Simple (PackageDB(..), PackageDBStack)
 
+import IdeSession.RPC.Sockets
+
 {------------------------------------------------------------------------------
   Starting and stopping the server
 ------------------------------------------------------------------------------}
@@ -248,6 +250,10 @@ rpcRun server cmd translateResult =
   where
     aux :: ProcessID -> FilePath -> FilePath -> FilePath -> IO (RunActions a)
     aux pid stdin stdout errorLog = do
+    -- aux :: ProcessID -> FilePath -> FilePath -> FilePath -> IO (RunActions a)
+    -- aux pid stdin stdout errorLog = do
+    aux :: WriteChannel -> ReadChannel -> FilePath -> IO (RunActions a)
+    aux stdin stdout errorLog = do
       runWaitChan <- newChan :: IO (Chan SnippetAction)
       reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
