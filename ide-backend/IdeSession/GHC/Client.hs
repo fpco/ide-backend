@@ -35,7 +35,6 @@ import Data.Typeable (Typeable)
 import Data.Binary (Binary)
 import System.Directory (removeFile)
 import System.Exit (ExitCode)
--- import System.Posix (ProcessID, sigKILL, signalProcess)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString.Char8      as BSS
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -48,6 +47,7 @@ import IdeSession.Types.Private (RunResult(..))
 import IdeSession.Types.Progress
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
+import IdeSession.Util.PortableProcess
 import qualified IdeSession.Types.Public as Public
 
 import Distribution.Simple (PackageDB(..), PackageDBStack)
@@ -231,7 +231,6 @@ rpcRun :: forall a.
                                     -- @Nothing@ indicates force cancellation
        -> IO (RunActions a)
 rpcRun server cmd translateResult =
--- TODO return sigKILL of the process being run
     Ex.mask_ $ do
       -- Communicate with the snippet using an independent, concurrent, conversation
       --
@@ -243,18 +242,14 @@ rpcRun server cmd translateResult =
       -- TODO: This is of course a tad dangerous, because if for whatever reason
       -- the communication with the main server stalls we cannot interrupt it.
       -- Perhaps we should introduce a separate timeout for that?
-      (stdin, stdout, errorLog) <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
-      -- (pid, stdin, stdout, errorLog) <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
+      (pid, stdin, stdout, errorLog) <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
 
       -- Unmask exceptions only once we've installed an exception handler to
       -- cleanup the process again
-      -- interruptible (aux pid stdin stdout errorLog) `Ex.onException` signalProcess sigKILL pid
-      interruptible (aux stdin stdout errorLog)
+      interruptible (aux pid stdin stdout errorLog) `Ex.onException` sigKillProcess pid
   where
-    -- aux :: ProcessID -> FilePath -> FilePath -> FilePath -> IO (RunActions a)
-    -- aux pid stdin stdout errorLog = do
-    aux :: WriteChannel -> ReadChannel -> FilePath -> IO (RunActions a)
-    aux stdin stdout errorLog = do
+    aux :: Pid -> WriteChannel -> ReadChannel -> FilePath -> IO (RunActions a)
+    aux pid stdin stdout errorLog = do
       runWaitChan <- newChan :: IO (Chan SnippetAction)
       reqChan     <- newChan :: IO (Chan GhcRunRequest)
 
@@ -311,8 +306,7 @@ rpcRun server cmd translateResult =
         , supplyStdin = writeChan reqChan . GhcRunInput
         , forceCancel = do
             cancel respThread
-            -- TODO replace with portable alternative
-            -- ignoreIOExceptions $ signalProcess sigKILL pid
+            ignoreIOExceptions $ sigKillProcess pid
             ignoreIOExceptions $ removeFile errorLog
             writeChan runWaitChan SnippetForceTerminated
         }

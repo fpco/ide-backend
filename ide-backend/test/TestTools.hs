@@ -3,8 +3,7 @@ module TestTools where
 
 import qualified Control.Exception as Ex
 import Data.Typeable (typeOf)
--- TODO fix signals on Windows
--- import System.Posix.Signals (Signal, raiseSignal)
+import IdeSession.Util.PortableProcess
 import Test.HUnit (Assertion, assertBool, assertFailure)
 
 -- | Check that the given IO action raises the specified exception
@@ -32,3 +31,7 @@ exceptionType (Ex.SomeException ex) =  show (typeOf ex)
 -- | Like 'raiseSignal', but with a more general type
 -- throwSignal :: Signal -> IO a
 -- throwSignal signal = raiseSignal signal >> undefined
+
+-- | Like 'raiseSigKill', but with a more general type
+throwSigKill :: IO a
+throwSigKill  = raiseSigKill >> undefined
