@@ -45,7 +45,6 @@ executable ide-backend-server
                       data-accessor        >= 0.2     && < 0.3,
                       data-accessor-mtl    >= 0.2     && < 0.3,
                       async                >= 2.0     && < 2.1,
-                      unix                 >= 2.5     && < 2.8,
                       text                 >= 0.11    && < 1.3,
                       directory            >= 1.1     && < 1.3,
                       filepath             >= 1.3     && < 1.5,
@@ -60,7 +59,13 @@ executable ide-backend-server
                       tar                  >= 0.3     && < 0.5,
                       zlib                 >= 0.5.3   && < 0.7,
                       file-embed           >= 0.0     && < 0.1,
-                      ide-backend-common   >= 0.10    && < 0.11
+                      ide-backend-common   >= 0.10    && < 0.11,
+                      network
+
+  if os(windows)
+     build-depends: unix-compat
+  if !os(windows)
+     build-depends: unix
 
   -- The standard macros don't give us 7.6.x granularity
   -- We _could_ add support for 7.6, 7.6.1 specifically is broken (#7548)
@@ -80,8 +85,9 @@ executable ide-backend-server
                    -- use whatever version came with ghc
                    Cabal
     cpp-options: -DGHC_78
-    ghc-options: -dynamic
     other-modules: GhcShim.GhcShim78
+    if !os(windows)
+      ghc-options: -dynamic
   if impl(ghc == 7.10.*) || impl(ghc == 7.11.*)
     build-depends: time        == 1.5.*,
                    haddock-api == 2.16.*,
@@ -90,11 +96,12 @@ executable ide-backend-server
                    -- parsing functionality; use whatever version came with ghc
                    Cabal
     cpp-options: -DGHC_710
-    ghc-options: -dynamic
     other-modules: GhcShim.GhcShim710
+  if !os(windows)
+    ghc-options: -dynamic
   if impl(ghc > 7.10.1)
     cpp-options: -DGHC_AFTER_710_1
-  if flag(pty-support)
+  if flag(pty-support) && !os(windows)
     cpp-options: -DPTY_SUPPORT
     other-modules: Posix
 

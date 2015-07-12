@@ -21,18 +21,24 @@ import System.FilePath ((</>))
 import System.IO (Handle, hFlush, hClose)
 import System.IO.Temp (createTempDirectory, openTempFile, withSystemTempDirectory)
 import System.Mem (performGC)
-import System.Posix (Fd, createSession)
-import System.Posix.IO
-import System.Posix.Files (createNamedPipe)
-import System.Posix.Process (forkProcess, getProcessStatus)
-import System.Posix.Terminal (openPseudoTerminal)
-import System.Posix.Signals (signalProcess, sigKILL, sigTERM)
-import System.Posix.Types (ProcessID)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString   as BSS
 import qualified Data.List         as List
 import qualified Data.Text         as Text
 import qualified System.Directory  as Dir
+
+#ifdef mingw32_HOST_OS
+import System.Posix.Types (Fd)
+import System.Posix.Types (ProcessID)
+#else
+import System.Posix (Fd, createSession)
+import System.Posix.IO
+import System.Posix.Files (createNamedPipe)
+import System.Posix.Process (forkProcess, getProcessStatus)
+import System.Posix.Terminal (openPseudoTerminal)
+import System.Posix.Signals (signalProcess, sigTERM)
+import System.Posix.Types (ProcessID)
+#endif
 
 import IdeSession.GHC.API
 import IdeSession.RPC.Server
@@ -61,6 +67,7 @@ import RTS
 #ifdef PTY_SUPPORT
 import qualified Posix
 #endif
+import Network.Socket
 
 foreign import ccall "fflush" fflush :: Ptr CFile -> IO ()
 
@@ -156,8 +163,8 @@ ghcServerEngine rtsInfo errorLog conv@RpcConversation{..} = do
             ReqBreakpoint mod span value -> do
               ghcHandleBreak conv mod span value
               return args
-            ReqPrint vars bind forceEval -> do
-              ghcHandlePrint conv vars bind forceEval
+            ReqPrint vars bind' forceEval -> do
+              ghcHandlePrint conv vars bind' forceEval
               return args
             ReqLoad objects -> do
               ghcHandleLoad errorLog conv objects
@@ -190,7 +197,6 @@ ghcServerEngine rtsInfo errorLog conv@RpcConversation{..} = do
         _ ->
           -- Ignore messages we cannot parse
           return ()
-
 -- Register startup options and perhaps our plugin in dynamic flags.
 --
 -- This is the only place where the @packageDbArgs@ options are used
@@ -245,6 +251,7 @@ initSession distDir modInfo dOpts rtsInfo errsRef stRef pluginRef callback = do
 #endif
       }
 
+#if !mingw32_HOST_OS
 startConcurrentConversation
   :: FilePath
   -> (FilePath -> FilePath -> FilePath -> Ghc ())
@@ -287,6 +294,53 @@ startConcurrentConversation sessionDir inner = do
     void $ getProcessStatus True False processId
 
   return (processId, stdin, stdout, errorLog)
+
+startConcurrentConversation'
+  :: FilePath
+  -> (Socket -> Socket -> FilePath -> Ghc ())
+  -> Ghc (ProcessID, FilePath, FilePath, FilePath)
+startConcurrentConversation' sessionDir inner = do
+  -- Ideally, we'd have the child process create the temp directory and
+  -- communicate the name back to us, so that the child process can remove the
+  -- directories again when it's done with it. However, this means we need some
+  -- interprocess communication, which is awkward. So we create the temp
+  -- directory here; I suppose we could still delegate the responsibility of
+  -- deleting the directory to the child, but instead we'll just remove the
+  -- directory along with the rest of the session temp dirs on session exit.
+  (stdin, stdout, errorLog) <- liftIO $ do
+    tempDir <- createTempDirectory sessionDir "rpc."
+    let stdin  = tempDir </> "stdin"
+        stdout = tempDir </> "stdout"
+
+    createNamedPipe stdin  0o600
+    createNamedPipe stdout 0o600
+
+    tmpDir <- Dir.getTemporaryDirectory
+    (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc-snippet-.log"
+    hClose errorLogHandle
+
+    return (stdin, stdout, errorLogPath)
+
+  -- Start the concurrent conversion. We use forkGhcProcess rather than forkGhc
+  -- because we need to change global state in the child process; in particular,
+  -- we need to redirect stdin, stdout, and stderr (as well as some other global
+  -- state, including withArgs).
+  liftIO performGC
+  -- processId <- forkGhcProcess $ inner stdin stdout errorLog
+  -- This is a placeholder socket
+  sock <- liftIO $ socket AF_INET Stream defaultProtocol
+  processId <- forkGhcProcess $ inner sock sock errorLog
+
+  -- We wait for the process to finish in a separate thread so that we do not
+  -- accumulate zombies
+  --
+  -- FIXME(mgs): I didn't write this, and I'm not sure I see the point
+  -- of doing this.
+  liftIO $ void $ forkIO $
+    void $ getProcessStatus True False processId
+
+  return (processId, stdin, stdout, errorLog)
+#endif
 
 -- | We cache our own "module summaries" in between compile requests
 data ModSummary = ModSummary {
@@ -522,8 +576,8 @@ ghcHandleBreak RpcConversation{..} modName span value = do
 
 -- | Handle a print request
 ghcHandlePrint :: RpcConversation -> Public.Name -> Bool -> Bool -> Ghc ()
-ghcHandlePrint RpcConversation{..} var bind forceEval = do
-  vals <- printVars (Text.unpack var) bind forceEval
+ghcHandlePrint RpcConversation{..} var bind' forceEval = do
+  vals <- printVars (Text.unpack var) bind' forceEval
   liftIO $ put vals
 
 -- | Handle a load object request
@@ -557,6 +611,10 @@ runPtyMaster :: (Fd, Fd) -> (ProcessID, FilePath, FilePath, FilePath) -> IO ()
 runPtyMaster (masterFd, slaveFd) (processId, stdin, stdout, errorLog) = do
   -- Since we're in the master process, close the slave FD.
   closeFd slaveFd
+
+  -- Placeholder socket
+  sock <- socket AF_INET Stream defaultProtocol
+
   let readOutput :: RpcConversation -> IO RunResult
       readOutput conv = fix $ \loop -> do
         bs <- Posix.readChunk masterFd `Ex.catch` \ex ->
@@ -580,12 +638,15 @@ runPtyMaster (masterFd, slaveFd) (processId, stdin, stdout, errorLog) = do
       -- Turn a GHC exception into a RunResult
       ghcException :: GhcException -> IO RunResult
       ghcException = return . RunGhcException . show
+
+
   void $ forkIO $
-    concurrentConversation stdin stdout errorLog $ \_ conv -> do
+    concurrentConversation sock sock errorLog $ \_ conv -> do
       result <- Ex.handle ghcException $
         withAsync (handleRequests conv) $ \_ ->
         readOutput conv
       put conv (GhcRunDone result)
+
 
 ghcHandleRunPtySlave :: (Fd, Fd) -> RunCmd -> Ghc ()
 ghcHandleRunPtySlave (masterFd, slaveFd) runCmd = do
@@ -804,9 +865,22 @@ forkGhcProcess = unsafeLiftIO forkProcess
 
 -- | Lifted version of concurrentConversation
 ghcConcurrentConversation :: (FilePath -> RpcConversation -> Ghc ())
-                          -> FilePath
-                          -> FilePath
+                          -> Socket
+                          -> Socket
                           -> FilePath
                           -> Ghc ()
 ghcConcurrentConversation f requestR responseW errorLog =
   unsafeLiftIO2 (concurrentConversation requestR responseW errorLog) f
+
+-- Bad.
+#if mingw32_HOST_OS
+dupTo = error "Not on windows."
+dup = error "Not on windows."
+closeFd = error "Not on windows."
+stdError = error "Not on windows."
+stdOutput = error "Not on windows."
+stdInput  = error "Not on windows."
+fdToHandle = error "Not on windows."
+createPipe = error "Not on windows."
+forkProcess = error "Not on windows."
+#endif
