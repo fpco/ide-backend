@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP, RecordWildCards #-}
 module IdeSession.Util.PortableIO where
 
-import System.IO (Handle, IOMode)
+import System.IO (Handle, IOMode(..))
 
 #ifdef VERSION_unix
 import System.Posix.Types (Fd)
@@ -10,15 +10,15 @@ import System.Posix.Files
 #else
 import Foreign.C.Error (throwErrnoIfMinus1_, throwErrnoIfMinus1)
 import Foreign.C.Types (CInt(..), CUInt(..))
-import Foreign.C.String
 import Foreign.Ptr (Ptr)
 import Foreign.Marshal.Array (allocaArray)
 import Foreign.Storable (peek, peekElemOff)
 import GHC.IO.FD (mkFD)
 import GHC.IO.Device (IODeviceType(Stream))
 import GHC.IO.Handle.FD (mkHandleFromFD)
+import System.IO (openFile)
 
--- for the reimplementation of handleToFd from System.Posix.IO
+{- For the reimplementation of handleToFd from System.Posix.IO -}
 import System.IO.Error
 import GHC.IO.Handle.Internals
 import GHC.IO.Handle.Types hiding (Handle)
@@ -41,6 +41,7 @@ closeFd :: FileDescriptor -> IO ()
 dup :: FileDescriptor -> IO FileDescriptor
 dupTo :: FileDescriptor -> FileDescriptor -> IO FileDescriptor
 
+-- Opens, and possibly creates, the given file for writing
 openWritableFile :: FilePath -> IO FileDescriptor
 
 stdOutput, stdError :: FileDescriptor
@@ -80,13 +81,14 @@ dup = throwErrnoIfMinus1 "_dup" . c__dup
 
 dupTo fd1 fd2 = throwErrnoIfMinus1 "_dup2" $ c__dup2 fd1 fd2
 
-openWritableFile fp = throwErrnoIfMinus1 "_open" $ withCString fp $ \c_fp ->
-  c__open c_fp _O_RDWR _S_IWRITE
+-- Previously this was a ccall to '_open' in 'io.h'
+-- TODO could this implementation work for the Unix version?
+openWritableFile fp = openFile fp WriteMode >>= handleToFd
 
 stdOutput = 1
 stdError = 2
 
--- Copied from System.Posix.IO
+{- Copied from System.Posix.IO -}
 handleToFd h@(FileHandle _ m) =
   withHandle' "handleToFd" h m $ handleToFd' h
 handleToFd h@(DuplexHandle _ r w) = do
@@ -116,16 +118,10 @@ foreign import ccall "io.h _pipe" c__pipe ::
 foreign import ccall "io.h _close" c__close ::
     CInt -> IO CInt
 
-foreign import ccall unsafe "io.h _open" c__open ::
-    CString -> CInt -> CInt -> IO CInt
-
 foreign import ccall "io.h _dup" c__dup ::
     CInt -> IO CInt
 
 foreign import ccall "io.h _dup2" c__dup2 ::
     CInt -> CInt -> IO CInt
 
-_O_RDWR, _S_IWRITE :: CInt
-_O_RDWR = 0x0002 -- from fcntl.h
-_S_IWRITE = 0x0080 -- from stat.h
 #endif
