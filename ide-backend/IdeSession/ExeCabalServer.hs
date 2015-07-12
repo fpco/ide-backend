@@ -17,7 +17,7 @@ import IdeSession.Cabal
 import IdeSession.RPC.Server
 import IdeSession.Types.Progress
 import IdeSession.Util
-import IdeSession.RPC.PortablePipes
+import IdeSession.Util.PortableIO
 
 -- | Handle RPC requests by calling Cabal functions, keeping track
 -- of progress and passing the results.

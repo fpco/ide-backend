@@ -1,5 +1,4 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE ForeignFunctionInterface #-}
 module IdeSession.Util.PortableProcess where
 
 #ifdef VERSION_unix
