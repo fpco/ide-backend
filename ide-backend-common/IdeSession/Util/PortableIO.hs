@@ -44,7 +44,7 @@ dupTo :: FileDescriptor -> FileDescriptor -> IO FileDescriptor
 -- Opens, and possibly creates, the given file for writing
 openWritableFile :: FilePath -> IO FileDescriptor
 
-stdOutput, stdError :: FileDescriptor
+stdInput, stdOutput, stdError :: FileDescriptor
 
 #ifdef VERSION_unix
 
@@ -60,6 +60,7 @@ openWritableFile fp = Posix.openFd fp Posix.WriteOnly (Just mode) Posix.defaultF
   where
     mode = unionFileModes ownerReadMode ownerWriteMode
 
+stdInput = Posix.stdInput
 stdOutput = Posix.stdOutput
 stdError = Posix.stdError
 
@@ -85,6 +86,7 @@ dupTo fd1 fd2 = throwErrnoIfMinus1 "_dup2" $ c__dup2 fd1 fd2
 -- TODO could this implementation work for the Unix version?
 openWritableFile fp = openFile fp WriteMode >>= handleToFd
 
+stdInput = 0
 stdOutput = 1
 stdError = 2
 
