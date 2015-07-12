@@ -17,13 +17,11 @@ module IdeSession.Util (
   , Diff(..)
   , applyMapDiff
     -- * Manipulating stdout and stderr
-#ifdef VERSION_unix
   , swizzleStdout
   , swizzleStderr
   , redirectStderr
   , captureOutput
-#endif
-  ) where
+) where
 
 import Control.Applicative ((<$>))
 import Control.Monad (void, forM_, mplus)
@@ -49,14 +47,9 @@ import System.FilePath (splitSearchPath, searchPathSeparator)
 import System.IO
 import System.IO.Error (isDoesNotExistError)
 
-#ifdef VERSION_unix
 import Foreign.Ptr (nullPtr)
--- the unix package is not available on Windows
-import System.Posix (Fd)
-import System.Posix.IO
 import System.IO.Temp (withSystemTempFile)
-import qualified System.Posix.Files           as Files
-#endif
+import IdeSession.Util.PortableIO
 
 import System.PosixCompat.Types (CPid(..))
 import Text.Show.Pretty
@@ -267,18 +260,17 @@ applyMapDiff diff = foldr (.) id (map aux $ StrictMap.toList diff)
 {-------------------------------------------------------------------------------
   Manipulations with stdout and stderr.
 -------------------------------------------------------------------------------}
-#ifndef mingw32_HOST_OS
-swizzleStdout :: Fd -> IO a -> IO a
+swizzleStdout :: FileDescriptor -> IO a -> IO a
 swizzleStdout = swizzleHandle (stdout, stdOutput)
 
-swizzleStderr :: Fd -> IO a -> IO a
+swizzleStderr :: FileDescriptor -> IO a -> IO a
 swizzleStderr = swizzleHandle (stderr, stdError)
 
-swizzleHandle :: (Handle, Fd) -> Fd -> IO a -> IO a
+swizzleHandle :: (Handle, FileDescriptor) -> FileDescriptor -> IO a -> IO a
 swizzleHandle (targetHandle, targetFd) fd act =
     Ex.bracket swizzle unswizzle (\_ -> act)
   where
-    swizzle :: IO Fd
+    swizzle :: IO FileDescriptor
     swizzle = do
       -- Flush existing handles
       hFlush targetHandle
@@ -290,7 +282,7 @@ swizzleHandle (targetHandle, targetFd) fd act =
 
       return backup
 
-    unswizzle :: Fd -> IO ()
+    unswizzle :: FileDescriptor -> IO ()
     unswizzle backup = do
       -- Flush handles again
       hFlush targetHandle
@@ -302,12 +294,10 @@ swizzleHandle (targetHandle, targetFd) fd act =
 
 redirectStderr :: FilePath -> IO a -> IO a
 redirectStderr fp act = do
-  Ex.bracket (openFd fp WriteOnly (Just mode) defaultFileFlags)
+  Ex.bracket (openWritableFile fp)
              closeFd $ \errorLogFd ->
     swizzleStderr errorLogFd $
       act
-  where
-    mode = Files.unionFileModes Files.ownerReadMode Files.ownerWriteMode
 
 captureOutput :: IO a -> IO (String, a)
 captureOutput act = do
@@ -317,7 +307,6 @@ captureOutput act = do
     closeFd fd
     suppressed <- readFile fp
     return (suppressed, a)
-#endif
 
 {-------------------------------------------------------------------------------
   Orphans
