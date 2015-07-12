@@ -29,7 +29,7 @@ import System.Environment (lookupEnv)
 import System.Exit (ExitCode)
 import System.IO (Handle, hClose)
 import System.IO.Temp (openTempFile)
--- import System.Posix.Signals (signalProcess, sigKILL)
+
 import System.Process
   ( createProcess
   , proc
@@ -37,9 +37,8 @@ import System.Process
   , waitForProcess
   , CreateProcess(cwd, env)
   , getProcessExitCode
-  , terminateProcess
   )
-import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
+import IdeSession.Util.PortableProcess
 import qualified Control.Exception as Ex
 import qualified System.Directory  as Dir
 import Distribution.Verbosity (normal)
@@ -268,25 +267,9 @@ terminate server = do
 forceTerminate :: RpcServer -> IO ()
 forceTerminate server =
     case rpcProc server of
-      Just ph ->
-        withProcessHandle ph $ \p_ ->
-          case p_ of
-            ClosedHandle _ ->
-              leaveHandleAsIs p_
-            OpenHandle pID -> do
-              -- signalProcess sigKILL pID
-              -- TODO is this a valid replacement for sigKILL?
-              terminateProcess ph
-              leaveHandleAsIs p_
+      Just ph -> killProcessHandle ph
       Nothing ->
         Ex.throwIO $ userError "forceTerminate: parallel connection"
-  where
-    leaveHandleAsIs _p =
-#if MIN_VERSION_process(1,2,0)
-      return ()
-#else
-      return (_p, ())
-#endif
 
 -- | Like modifyMVar, but terminate the server on exceptions
 withRpcServer :: RpcServer
