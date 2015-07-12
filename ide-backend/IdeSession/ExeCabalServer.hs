@@ -39,9 +39,7 @@ runExeCabal conv req = do
   (stdOutputRd, stdOutputWr) <- createPipe
 
   -- Backup stdout, then replace stdout with the pipe's write end
-  -- TODO fix swizzleStdout
-  -- (exitCode, stdoutThread) <- swizzleStdout stdOutputWr $ do
-  (exitCode, stdoutThread) <- do
+  (exitCode, stdoutThread) <- swizzleStdout stdOutputWr $ do
     -- Convert the read end to a handle
     stdOutputRdHandle <- fdToHandle stdOutputRd ReadMode
     IO.hSetBuffering stdOutputRdHandle IO.LineBuffering
