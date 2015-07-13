@@ -19,6 +19,7 @@ library
                       IdeSession.Util.PrettyVal
                       IdeSession.Util.PortableProcess
                       IdeSession.Util.PortableIO
+                      IdeSession.Util.PortableFiles
                       IdeSession.GHC.API
                       IdeSession.GHC.Requests
                       IdeSession.GHC.Responses
