@@ -71,7 +71,7 @@ forkGhcServer :: [String]      -- ^ Initial ghc options
 forkGhcServer ghcOpts relIncls rtsOpts ideStaticInfo = do
   when configInProcess $
     fail "In-process ghc server not currently supported"
-  mLoc <- findProgramOnSearchPath normal searchPath "ide-backend-server"
+  mLoc <- findProgramOnSearchPath normal searchPath ide_backend_server
   case mLoc of
     Nothing ->
       fail $ "Could not find ide-backend-server"
@@ -103,9 +103,7 @@ forkGhcServer ghcOpts relIncls rtsOpts ideStaticInfo = do
          : ghcOpts
         ++ relInclToOpts (ideSourceDir ideStaticInfo) relIncls
 
-    searchPath :: ProgramSearchPath
-    searchPath = map ProgramSearchPathDir configExtraPathDirs
-              ++ [ProgramSearchPathDefault]
+    (searchPath, ide_backend_server) = configIdeBackendServer
 
     SessionConfig{..} = ideConfig ideStaticInfo
 
