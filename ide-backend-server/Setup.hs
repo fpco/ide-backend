@@ -6,6 +6,8 @@ import Distribution.Simple.Utils ( notice, die )
 
 import Control.Exception ( bracket )
 import Control.Monad ( join, when, forM_, liftM2 )
+import Data.Bits ( xor )
+import Data.Word ( Word )
 import System.Directory ( getCurrentDirectory, setCurrentDirectory
                         , removeDirectoryRecursive, removeFile
                         , doesDirectoryExist, doesFileExist
@@ -17,6 +19,7 @@ import qualified Codec.Archive.Tar as Tar
 import qualified Codec.Compression.GZip as GZip
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.List as List
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 
@@ -40,7 +43,7 @@ mainWith cmdLineArgs cwd = defaultMainWithHooksArgs hooks cmdLineArgs
            (buildHook simpleUserHooks) pd lbi hs flags
 
     , preClean = \args flags ->
-        do onRtsDir $ runSetup "clean"
+        do onRtsDir $ runSetupClean
            (preClean simpleUserHooks) args flags
     }
 
@@ -50,14 +53,28 @@ mainWith cmdLineArgs cwd = defaultMainWithHooksArgs hooks cmdLineArgs
 
     onRtsDir = withCurrentDirectory "ide-backend-rts"
 
-    rawRunSetup args     = defaultMainArgs (args ++ ["--builddir=dist"])
-    runSetup cmd         = rawRunSetup [cmd]
-    rerunSetupWith flags = rawRunSetup (cmdLineArgs ++ flags)
+    rawRunSetup    args  lbi = defaultMainArgs $ args ++ [rtsBuildDirArg lbi]
+    runSetup       cmd   lbi = rawRunSetup [cmd] lbi
+    rerunSetupWith flags lbi = rawRunSetup (cmdLineArgs ++ flags) lbi
       -- NB. we must set builddir explicitly (and as the final arg)
       -- since when rerunning the command during configuration, the default
       -- builddir may be changed by a flag (e.g. as "stack" does), and if we
       -- are not aware of the right builddir on the subsequent calls, we won't
       -- find the configuration info and fail.
+
+    rtsBuildDirArg lbi = "--builddir=dist/buildinfo-" ++ show (hashString $ show lbi)
+      -- NB. We make the builddir a function of the compiler being used
+      -- (approximated by the local build info). This is only relevant for
+      -- people hacking on this library: we are trying to avoid the scenario
+      -- where one first builds the server using compiler A and then, on the same
+      -- directory, rebuilds the server using compiler B, but the "Setup build" step
+      -- on the rts directory finds that the rts is already built (but with compiler A!),
+      -- leaves it as is, and one ends up with a server for B with an embedded rts for A.
+      -- Using a different builddir for A and B, this won't happen.
+      -- Note also that we put all the local build dirs under the same root dist, so we
+      -- know what to remove during cleanup
+
+    runSetupClean = defaultMainArgs ["clean", "--builddir=dist"]
 
 
     -- Run "Setup configure" on the directory of the rts.
@@ -85,7 +102,7 @@ mainWith cmdLineArgs cwd = defaultMainWithHooksArgs hooks cmdLineArgs
           , "--htmldir="    ++ (dirToEmbedFullPath </> "doc")
           , "--haddockdir=" ++ (dirToEmbedFullPath </> "doc")
           , "--enable-library-for-ghci"
-          ]
+          ] lbi
 
 
     -- Builds the rts, which will end up in embedded-rts, and
@@ -95,12 +112,12 @@ mainWith cmdLineArgs cwd = defaultMainWithHooksArgs hooks cmdLineArgs
       notice verbosity "building rts..."
 
       onRtsDir $ do
-        runSetup "build"
+        runSetup "build" lbi
 
       notice verbosity "locally registering rts..."
       onRtsDir $ do
-        runSetup "copy"
-        runSetup "register"
+        runSetup "copy" lbi
+        runSetup "register" lbi
 
     -- This hack is a workaround to Cabal not having yet (as of 1.22)
     -- a clear story regarding relocatable packages. We just replace
@@ -165,3 +182,11 @@ outOfTheWay fileOrDir = do
 makeTarball :: FilePath -> FilePath -> [FilePath] -> IO ()
 makeTarball tarball base contents =
   LBS.writeFile tarball . GZip.compress . Tar.write =<< Tar.pack base contents
+
+
+-- Based on the Hashable String instance
+hashString :: String -> Word
+hashString = List.foldl' (\salt x -> salt `combine` hashChar x) 0x087fc72c
+  where
+    hashChar = fromIntegral . fromEnum
+    combine h1 h2 = (h1 * 16777619) `xor` h2
