@@ -1,43 +1,20 @@
-{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, CPP #-}
+{-# LANGUAGE ScopedTypeVariables, CPP #-}
 -- | Implementation of the server that controls the long-running GHC instance.
 -- This interacts with the ide-backend library through serialized data only.
 module Server (ghcServer) where
 
 import Prelude hiding (mod, span)
-import Control.Concurrent (ThreadId, throwTo, forkIO, myThreadId, threadDelay)
-import Control.Concurrent.Async (async, withAsync)
-import Control.Concurrent.MVar (MVar, newEmptyMVar)
-import Control.Monad (void, unless, when, forever)
+import Control.Concurrent (throwTo, forkIO, myThreadId, threadDelay)
+import Control.Monad (void, unless, when)
 import Control.Monad.State (StateT, runStateT)
 import Control.Monad.Trans.Class (lift)
 import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
-import Data.Function (on, fix)
-import Foreign.C.Types (CFile)
-import Foreign.Ptr (Ptr, nullPtr)
-import GHC.IO.Exception (IOException(..), IOErrorType(..))
-import System.Environment (withArgs, getEnvironment, setEnv)
-import System.FilePath ((</>))
-import System.IO (Handle, hFlush, hClose)
-import System.IO.Temp (createTempDirectory, openTempFile, withSystemTempDirectory)
-import System.Mem (performGC)
+import Data.Function (on)
+import System.Environment (getEnvironment)
 import qualified Control.Exception as Ex
-import qualified Data.ByteString   as BSS
 import qualified Data.List         as List
 import qualified Data.Text         as Text
-import qualified System.Directory  as Dir
-
-#ifdef VERSION_unix
-import System.Posix (createSession)
-import System.Posix.IO
-import System.Posix.Files (createNamedPipe)
-import System.Posix.Process (forkProcess, getProcessStatus)
-import System.Posix.Terminal (openPseudoTerminal)
-#endif
-
-import IdeSession.Util.PortableProcess
-import IdeSession.Util.PortableIO
-import System.IO (IOMode(..))
 
 import IdeSession.GHC.API
 import IdeSession.RPC.Server
@@ -46,29 +23,21 @@ import IdeSession.Strict.IORef
 import IdeSession.Types.Private
 import IdeSession.Types.Progress
 import IdeSession.Util
-import IdeSession.Util.BlockingOps
 import qualified IdeSession.Strict.List  as StrictList
 import qualified IdeSession.Strict.Map   as StrictMap
 import qualified IdeSession.Types.Public as Public
 
 import qualified GHC
-import GhcMonad(Ghc(..))
-import qualified ObjLink as ObjLink
-import qualified Linker  as Linker
+import qualified ObjLink
+import qualified Linker
 import Hooks
 
 import Run
 import HsWalk
-import Debug
 import GhcShim
 import RTS
-
-#ifdef PTY_SUPPORT
-import qualified Posix
-#endif
-import Network.Socket
-
-foreign import ccall "fflush" fflush :: Ptr CFile -> IO ()
+import Auxiliary
+import RequestRunning
 
 --------------------------------------------------------------------------------
 -- Server-side operations                                                     --
@@ -93,30 +62,24 @@ ghcServerEngine :: RtsInfo -> FilePath -> RpcConversation -> IO ()
 ghcServerEngine rtsInfo errorLog conv@RpcConversation{..} = do
   -- The initial handshake with the client
   (configGenerateModInfo, initOpts, sourceDir, sessionDir, distDir) <- handleInit conv
-
   -- Submit static opts and get back leftover dynamic opts.
   dOpts <- submitStaticOpts initOpts
-
   -- Set up references for the current session of Ghc monad computations.
   pluginRef  <- newIORef StrictMap.empty
   importsRef <- newIORef StrictMap.empty
   stRef      <- newIORef initExtractIdsSuspendedState
   errsRef    <- liftIO $ newIORef StrictList.nil
-
   -- Get environment on server startup so that we can restore it
   initEnv <- getEnvironment
-
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
     -- Register startup options and perhaps our plugin in dynamic flags.
-    initSession distDir configGenerateModInfo dOpts rtsInfo errsRef stRef pluginRef progressCallback
-
+    initSession distDir configGenerateModInfo dOpts errsRef stRef pluginRef progressCallback
     -- We store the DynFlags _after_ setting the "static" options, so that
     -- we restore to this state before every call to updateDynamicOpts
     -- Note that this happens _after_ we have called setSessionDynFlags
     -- and hence after the package DB has been initialized.
     storeDynFlags
-
     -- Make sure that the dynamic linker has been initialized. This is done
     -- implicitly deep in the bowels of GhcMake.load, but if we attempt to load
     -- C object files before calling GhcMake.load (i.e., before attempting to
@@ -124,7 +87,6 @@ ghcServerEngine rtsInfo errorLog conv@RpcConversation{..} = do
     -- they rely on linker flags such as @-lz@ (#214).
     do dflags <- getSessionDynFlags
        liftIO $ Linker.initDynLinker dflags
-
     -- Start handling RPC calls
     let go args = do
           req <- liftIO get
@@ -134,25 +96,7 @@ ghcServerEngine rtsInfo errorLog conv@RpcConversation{..} = do
                 conv pluginRef importsRef errsRef sourceDir
                 genCode targets configGenerateModInfo
               return args
-            ReqRun runCmd
-              | runCmdPty runCmd -> do
-#if PTY_SUPPORT
-                fds <- liftIO openPseudoTerminal
-                conversationTuple <- startConcurrentConversation sessionDir $ \_ _ _ ->
-                  ghcWithArgs args $ ghcHandleRunPtySlave fds runCmd
-                liftIO $ runPtyMaster fds conversationTuple
-                liftIO $ put conversationTuple
-                return args
-#else
-                --TODO: fail more gracefully than this?
-                fail "ide-backend-server not build with -DPTY_SUPPORT / pty-support cabal flag"
-#endif
-              | otherwise -> do
-                conversationTuple <- startConcurrentConversation sessionDir $
-                  ghcConcurrentConversation $ \_errorLog' conv' ->
-                    ghcWithArgs args $ ghcHandleRun conv' runCmd
-                liftIO $ put conversationTuple
-                return args
+            ReqRun runCmd -> runCommand args sessionDir runCmd
             ReqSetEnv env -> do
               ghcHandleSetEnv conv initEnv env
               return args
@@ -178,7 +122,6 @@ ghcServerEngine rtsInfo errorLog conv@RpcConversation{..} = do
               ghcHandleCrash delay
               return args
           go args'
-
     go []
 
   where
@@ -187,7 +130,7 @@ ghcServerEngine rtsInfo errorLog conv@RpcConversation{..} = do
       let ghcMsg' = Text.pack ghcMsg
       case parseProgressMessage ghcMsg' of
         Right (step, numSteps, msg) ->
-          put $ GhcCompileProgress $ Progress {
+          put $ GhcCompileProgress Progress {
                progressStep      = step
              , progressNumSteps  = numSteps
              , progressParsedMsg = Just msg
@@ -249,97 +192,6 @@ initSession distDir modInfo dOpts rtsInfo errsRef stRef pluginRef callback = do
         GHC.log_action = collectSrcError errsRef callback (\_ -> return ()) dflags
 #endif
       }
-
-#if !mingw32_HOST_OS
-startConcurrentConversation
-  :: FilePath
-  -> (FilePath -> FilePath -> FilePath -> Ghc ())
-  -> Ghc (ProcessID, FilePath, FilePath, FilePath)
-startConcurrentConversation sessionDir inner = do
-  -- Ideally, we'd have the child process create the temp directory and
-  -- communicate the name back to us, so that the child process can remove the
-  -- directories again when it's done with it. However, this means we need some
-  -- interprocess communication, which is awkward. So we create the temp
-  -- directory here; I suppose we could still delegate the responsibility of
-  -- deleting the directory to the child, but instead we'll just remove the
-  -- directory along with the rest of the session temp dirs on session exit.
-  (stdin, stdout, errorLog) <- liftIO $ do
-    tempDir <- createTempDirectory sessionDir "rpc."
-    let stdin  = tempDir </> "stdin"
-        stdout = tempDir </> "stdout"
-
-    createNamedPipe stdin  0o600
-    createNamedPipe stdout 0o600
-
-    tmpDir <- Dir.getTemporaryDirectory
-    (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc-snippet-.log"
-    hClose errorLogHandle
-
-    return (stdin, stdout, errorLogPath)
-
-  -- Start the concurrent conversion. We use forkGhcProcess rather than forkGhc
-  -- because we need to change global state in the child process; in particular,
-  -- we need to redirect stdin, stdout, and stderr (as well as some other global
-  -- state, including withArgs).
-  liftIO performGC
-  processId <- forkGhcProcess $ inner stdin stdout errorLog
-
-  -- We wait for the process to finish in a separate thread so that we do not
-  -- accumulate zombies
-  --
-  -- FIXME(mgs): I didn't write this, and I'm not sure I see the point
-  -- of doing this.
-  liftIO $ void $ forkIO $
-    void $ getProcessStatus True False processId
-
-  return (processId, stdin, stdout, errorLog)
-
-startConcurrentConversation'
-  :: FilePath
-  -> (Socket -> Socket -> FilePath -> Ghc ())
-  -> Ghc (ProcessID, FilePath, FilePath, FilePath)
-startConcurrentConversation' sessionDir inner = do
-  -- Ideally, we'd have the child process create the temp directory and
-  -- communicate the name back to us, so that the child process can remove the
-  -- directories again when it's done with it. However, this means we need some
-  -- interprocess communication, which is awkward. So we create the temp
-  -- directory here; I suppose we could still delegate the responsibility of
-  -- deleting the directory to the child, but instead we'll just remove the
-  -- directory along with the rest of the session temp dirs on session exit.
-  (stdin, stdout, errorLog) <- liftIO $ do
-    tempDir <- createTempDirectory sessionDir "rpc."
-    let stdin  = tempDir </> "stdin"
-        stdout = tempDir </> "stdout"
-
-    createNamedPipe stdin  0o600
-    createNamedPipe stdout 0o600
-
-    tmpDir <- Dir.getTemporaryDirectory
-    (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc-snippet-.log"
-    hClose errorLogHandle
-
-    return (stdin, stdout, errorLogPath)
-
-  -- Start the concurrent conversion. We use forkGhcProcess rather than forkGhc
-  -- because we need to change global state in the child process; in particular,
-  -- we need to redirect stdin, stdout, and stderr (as well as some other global
-  -- state, including withArgs).
-  liftIO performGC
-  -- processId <- forkGhcProcess $ inner stdin stdout errorLog
-  -- This is a placeholder socket
-  sock <- liftIO $ socket AF_INET Stream defaultProtocol
-  processId <- forkGhcProcess $ inner sock sock errorLog
-
-  -- We wait for the process to finish in a separate thread so that we do not
-  -- accumulate zombies
-  --
-  -- FIXME(mgs): I didn't write this, and I'm not sure I see the point
-  -- of doing this.
-  liftIO $ void $ forkIO $
-    void $ getProcessStatus True False processId
-
-  return (processId, stdin, stdout, errorLog)
-#endif
 
 -- | We cache our own "module summaries" in between compile requests
 data ModSummary = ModSummary {
@@ -412,7 +264,7 @@ ghcHandleCompile RpcConversation{..}
 
     let initialResponse = GhcCompileResult {
             ghcCompileErrors   = errs
-          , ghcCompileLoaded   = force $ loadedModules
+          , ghcCompileLoaded   = force loadedModules
           , ghcCompileFileMap  = fileMap
           , ghcCompileCache    = error "ghcCompileCache set last"
           -- We construct the diffs incrementally
@@ -536,7 +388,7 @@ ghcHandleCompile RpcConversation{..}
         (newSummaries, finalResponse) <- flip runStateT initialResponse $ do
           sendPluginResult (StrictMap.toList pluginIdMaps)
 
-          graph <- lift $ getModuleGraph
+          graph <- lift getModuleGraph
           let name s      = Text.pack (moduleNameString (ms_mod_name s))
               namedGraph  = map (\s -> (name s, s)) graph
               sortedGraph = List.sortBy (compare `on` fst) namedGraph
@@ -546,7 +398,7 @@ ghcHandleCompile RpcConversation{..}
         liftIO $ writeIORef modsRef (StrictMap.fromList newSummaries)
         return finalResponse
 
-    cache <- liftIO $ constructExplicitSharingCache
+    cache <- liftIO constructExplicitSharingCache
     let fullResponse = response { ghcCompileCache = cache }
 
     -- TODO: Should we clear the link env caches here?
@@ -591,7 +443,7 @@ ghcHandleLoad errorLog RpcConversation{..} objects =
 
     -- Although resolveObjs does _not_ fail quite so spectacularly, it still
     -- writes its error messages to stdout.
-    (suppressed, success) <- captureOutput $ ObjLink.resolveObjs
+    (suppressed, success) <- captureOutput ObjLink.resolveObjs
     let response :: Maybe String
         response =
           case success of
@@ -604,203 +456,6 @@ ghcHandleUnload :: RpcConversation -> [FilePath] -> Ghc ()
 ghcHandleUnload RpcConversation{..} objects = liftIO $ do
   mapM_ ObjLink.unloadObj objects
   put ()
-
-#if PTY_SUPPORT
-runPtyMaster :: (Fd, Fd) -> (ProcessID, FilePath, FilePath, FilePath) -> IO ()
-runPtyMaster (masterFd, slaveFd) (processId, stdin, stdout, errorLog) = do
-  -- Since we're in the master process, close the slave FD.
-  closeFd slaveFd
-
-  -- Placeholder socket
-  sock <- socket AF_INET Stream defaultProtocol
-
-  let readOutput :: RpcConversation -> IO RunResult
-      readOutput conv = fix $ \loop -> do
-        bs <- Posix.readChunk masterFd `Ex.catch` \ex ->
-          -- Ignore HardwareFaults as they seem to always happen when
-          -- process exits..
-          if ioe_type ex == HardwareFault
-            then return BSS.empty
-            else Ex.throwIO ex
-        if BSS.null bs
-          then return RunOk
-          else do
-            put conv (GhcRunOutp bs)
-            loop
-      handleRequests :: RpcConversation -> IO ()
-      handleRequests conv = forever $ do
-        request <- get conv
-        case request of
-          GhcRunInput bs -> Posix.write masterFd bs
-          -- Fork a new thread because this could throw exceptions.
-          GhcRunInterrupt -> void $ forkIO $ signalProcess sigTERM processId
-      -- Turn a GHC exception into a RunResult
-      ghcException :: GhcException -> IO RunResult
-      ghcException = return . RunGhcException . show
-
-
-  void $ forkIO $
-    concurrentConversation sock sock errorLog $ \_ conv -> do
-      result <- Ex.handle ghcException $
-        withAsync (handleRequests conv) $ \_ ->
-        readOutput conv
-      put conv (GhcRunDone result)
-
-
-ghcHandleRunPtySlave :: (Fd, Fd) -> RunCmd -> Ghc ()
-ghcHandleRunPtySlave (masterFd, slaveFd) runCmd = do
-  liftIO $ do
-    -- Since we're in the slave process, close the master FD.
-    closeFd masterFd
-    -- Create a new session with a controlling terminal.
-    void createSession
-    Posix.setControllingTerminal slaveFd
-    -- Redirect standard IO to the terminal FD.
-    void $ dupTo slaveFd stdInput
-    void $ dupTo slaveFd stdOutput
-    void $ dupTo slaveFd stdError
-    closeFd slaveFd
-    -- Set TERM env variable
-    setEnv "TERM" "xterm-256color"
-  --FIXME: Properly pass the run result to the client as a GhcRunDone
-  --value. Instead, we write it to standard output, which gets sent to
-  --the terminal.
-  result <- runInGhc runCmd
-  case result of
-    -- A successful result will be sent by runPtyMaster - only send
-    -- failures.
-    RunOk -> return ()
-    _ -> liftIO $ putStrLn $ "\r\nProcess done: " ++ show result ++ "\r\n"
-#endif
-
--- | Handle a run request
-ghcHandleRun :: RpcConversation -> RunCmd -> Ghc ()
-ghcHandleRun RpcConversation{..} runCmd = do
-    (stdOutputRd, stdOutputBackup, stdErrorBackup) <- redirectStdout
-    (stdInputWr,  stdInputBackup)                  <- redirectStdin
-
-    -- We don't need to keep a reference to the reqThread: when the snippet
-    -- terminates, the whole server process terminates with it and hence
-    -- so does the reqThread. If we wanted to reuse this server process we
-    -- would need to have some sort of handshake so make sure that the client
-    -- and the server both agree that further requests are no longer accepted
-    -- (we used to do that when we ran snippets inside the main server process).
-    ghcThread    <- liftIO newEmptyMVar :: Ghc (MVar (Maybe ThreadId))
-    _reqThread   <- liftIO . async $ readRunRequests ghcThread stdInputWr
-    stdoutThread <- liftIO . async $ readStdout stdOutputRd
-
-    -- This is a little tricky. We only want to deliver the UserInterrupt
-    -- exceptions when we are running 'runInGhc'. If the UserInterrupt arrives
-    -- before we even get a chance to call 'runInGhc' the exception should not
-    -- be delivered until we are in a position to catch it; after 'runInGhc'
-    -- completes we should just ignore any further 'GhcRunInterrupt' requests.
-    --
-    -- We achieve this by
-    --
-    -- 1. The thread ID is stored in an MVar ('ghcThread'). Initially this
-    --    MVar is empty, so if a 'GhcRunInterrupt' arrives before we are ready
-    --    to deal with it the 'reqThread' will block
-    -- 2. We install an exception handler before putting the thread ID into
-    --    the MVar
-    -- 3. We override the MVar with Nothing before leaving the exception handler
-    -- 4. In the 'reqThread' we ignore GhcRunInterrupts once the 'MVar' is
-    --    'Nothing'
-
-    runOutcome <- ghandle ghcException . ghandleJust isUserInterrupt return $
-      GHC.gbracket
-        (liftIO (myThreadId >>= $putMVar ghcThread . Just))
-        (\() -> liftIO $ $modifyMVar_ ghcThread (\_ -> return Nothing))
-        (\() -> runInGhc runCmd)
-
-    liftIO $ do
-      -- Make sure the C buffers are also flushed before swapping the handles
-      fflush nullPtr
-
-      -- Restore stdin and stdout
-      dupTo stdOutputBackup stdOutput >> closeFd stdOutputBackup
-      dupTo stdErrorBackup  stdError  >> closeFd stdErrorBackup
-      dupTo stdInputBackup  stdInput  >> closeFd stdInputBackup
-
-      -- Closing the write end of the stdout pipe will cause the stdout
-      -- thread to terminate after it processed all remaining output;
-      -- wait for this to happen
-      $wait stdoutThread
-
-      -- Report the final result
-      liftIO $ debug dVerbosity $ "returned from ghcHandleRun with "
-                                  ++ show runOutcome
-      put $ GhcRunDone runOutcome
-  where
-    -- Wait for and execute run requests from the client
-    readRunRequests :: MVar (Maybe ThreadId) -> Handle -> IO ()
-    readRunRequests ghcThread stdInputWr =
-      let go = do request <- get
-                  case request of
-                    GhcRunInterrupt -> do
-                      $withMVar ghcThread $ \mTid -> do
-                        case mTid of
-                          Just tid -> throwTo tid Ex.UserInterrupt
-                          Nothing  -> return () -- See above
-                      go
-                    GhcRunInput bs -> do
-                      BSS.hPut stdInputWr bs
-                      hFlush stdInputWr
-                      go
-      in go
-
-    -- Wait for the process to output something or terminate
-    readStdout :: Handle -> IO ()
-    readStdout stdOutputRd =
-      let go = do bs <- BSS.hGetSome stdOutputRd blockSize
-                  unless (BSS.null bs) $ put (GhcRunOutp bs) >> go
-      in go
-
-    -- Turn an asynchronous exception into a RunResult
-    isUserInterrupt :: Ex.AsyncException -> Maybe RunResult
-    isUserInterrupt ex@Ex.UserInterrupt =
-      Just . RunProgException . showExWithClass . Ex.toException $ ex
-    isUserInterrupt _ =
-      Nothing
-
-    -- Turn a GHC exception into a RunResult
-    ghcException :: GhcException -> Ghc RunResult
-    ghcException = return . RunGhcException . show
-
-    -- TODO: What is a good value here?
-    blockSize :: Int
-    blockSize = 4096
-
-    -- Setup loopback pipe so we can capture runStmt's stdout/stderr
-    redirectStdout :: Ghc (Handle, FileDescriptor, FileDescriptor)
-    redirectStdout = liftIO $ do
-      -- Create pipe
-      (stdOutputRd, stdOutputWr) <- liftIO createPipe
-
-      -- Backup stdout, then replace stdout and stderr with the pipe's write end
-      stdOutputBackup <- liftIO $ dup stdOutput
-      stdErrorBackup  <- liftIO $ dup stdError
-      _ <- dupTo stdOutputWr stdOutput
-      _ <- dupTo stdOutputWr stdError
-      closeFd stdOutputWr
-
-      -- Convert to the read end to a handle and return
-      stdOutputRd' <- fdToHandle stdOutputRd ReadMode
-      return (stdOutputRd', stdOutputBackup, stdErrorBackup)
-
-    -- Setup loopback pipe so we can write to runStmt's stdin
-    redirectStdin :: Ghc (Handle, FileDescriptor)
-    redirectStdin = liftIO $ do
-      -- Create pipe
-      (stdInputRd, stdInputWr) <- liftIO createPipe
-
-      -- Swizzle stdin
-      stdInputBackup <- liftIO $ dup stdInput
-      _ <- dupTo stdInputRd stdInput
-      closeFd stdInputRd
-
-      -- Convert the write end to a handle and return
-      stdInputWr' <- fdToHandle stdInputWr WriteMode
-      return (stdInputWr', stdInputBackup)
 
 -- | Handle a set-environment request
 ghcHandleSetEnv :: RpcConversation -> [(String, String)] -> [(String, Maybe String)] -> Ghc ()
@@ -823,55 +478,3 @@ ghcHandleCrash delay = liftIO $ do
                     void . forkIO $ threadDelay i >> throwTo tid crash
   where
     crash = userError "Intentional crash"
-
---------------------------------------------------------------------------------
--- Auxiliary                                                                  --
---------------------------------------------------------------------------------
-
--- | Generalization of captureOutput
-captureGhcOutput :: Ghc a -> Ghc (String, a)
-captureGhcOutput = unsafeLiftIO captureOutput
-
--- | Lift operations on `IO` to the `Ghc` monad. This is unsafe as it makes
--- operations possible in the `Ghc` monad that weren't possible before
--- (for instance, @unsafeLiftIO forkIO@ is probably a bad idea!).
-unsafeLiftIO :: (IO a -> IO b) -> Ghc a -> Ghc b
-unsafeLiftIO f (Ghc ghc) = Ghc $ \session -> f (ghc session)
-
--- | Generalization of 'unsafeLiftIO'
-_unsafeLiftIO1 :: ((c -> IO a) -> IO b) -> (c -> Ghc a) -> Ghc b
-_unsafeLiftIO1 f g = Ghc $ \session ->
-  f $ \c -> case g c of Ghc ghc -> ghc session
-
--- | Generalization of 'unsafeLiftIO'
---
--- TODO: Is there a more obvious way to define this progression?
-unsafeLiftIO2 :: ((c -> d -> IO a) -> IO b) -> (c -> d -> Ghc a) -> Ghc b
-unsafeLiftIO2 f g = Ghc $ \session ->
-  f $ \c d -> case g c d of Ghc ghc -> ghc session
-
--- | Lift `withArgs` to the `Ghc` monad. Relies on `unsafeLiftIO`.
-ghcWithArgs :: [String] -> Ghc a -> Ghc a
-ghcWithArgs = unsafeLiftIO . withArgs
-
--- | Fork within the `Ghc` monad. Use with caution.
-_forkGhc :: Ghc () -> Ghc ThreadId
-_forkGhc = unsafeLiftIO forkIO
-
--- | forkProcess within the `Ghc` monad. Use with extreme caution.
-forkGhcProcess :: Ghc () -> Ghc Pid
-forkGhcProcess = unsafeLiftIO forkProcess
-
--- | Lifted version of concurrentConversation
-ghcConcurrentConversation :: (FilePath -> RpcConversation -> Ghc ())
-                          -> Socket
-                          -> Socket
-                          -> FilePath
-                          -> Ghc ()
-ghcConcurrentConversation f requestR responseW errorLog =
-  unsafeLiftIO2 (concurrentConversation requestR responseW errorLog) f
-
--- Bad.
-#if mingw32_HOST_OS
-forkProcess = error "Not on windows."
-#endif

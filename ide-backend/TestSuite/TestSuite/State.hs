@@ -65,6 +65,7 @@ import qualified Distribution.Simple.Program.Find as OurCabal
 import qualified Data.ByteString.Lazy             as L
 
 import IdeSession
+import IdeSession.Util (UnsupportedOnNonUnix(..))
 
 {-------------------------------------------------------------------------------
   Test suite top-level
@@ -307,8 +308,9 @@ runTestCase (WithOK  nm t) = registerTest nm t >>= return . testPassed
 instance IsTest TestCase where
   -- TODO: Measure time and use for testPassed in normal case
   run _ test _ = runTestCase test `catches` [
-      Handler $ \(HUnitFailure msg) -> return (testFailed msg)
-    , Handler $ \(SkipTest msg)     -> return (testPassed ("Skipped (" ++ msg ++ ")"))
+      Handler $ \(HUnitFailure msg)         -> return (testFailed msg)
+    , Handler $ \(SkipTest msg)             -> return (testPassed ("Skipped (" ++ msg ++ ")"))
+    , Handler $ \(UnsupportedOnNonUnix msg) -> return (testPassed ("Skipped, unsupported on non-Unix (" ++ msg ++ ")"))
     ]
 
   -- TODO: Should this reflect testCaseEnabled?
