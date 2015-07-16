@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor, DeriveGeneric, StandaloneDeriving, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor, DeriveGeneric, DeriveDataTypeable, StandaloneDeriving, GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module IdeSession.Util (
     -- * Misc util
@@ -21,8 +21,10 @@ module IdeSession.Util (
   , swizzleStderr
   , redirectStderr
   , captureOutput
+  , UnsupportedOnNonUnix(..)
 ) where
 
+import Control.Exception
 import Control.Applicative ((<$>))
 import Control.Monad (void, forM_, mplus)
 import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
@@ -46,6 +48,7 @@ import System.FilePath (splitFileName, (<.>), (</>))
 import System.FilePath (splitSearchPath, searchPathSeparator)
 import System.IO
 import System.IO.Error (isDoesNotExistError)
+import Data.Typeable (Typeable)
 
 import Foreign.Ptr (nullPtr)
 import System.IO.Temp (withSystemTempFile)
@@ -307,6 +310,14 @@ captureOutput act = do
     closeFd fd
     suppressed <- readFile fp
     return (suppressed, a)
+
+{-------------------------------------------------------------------------------
+  Non-Unix compatibility
+-------------------------------------------------------------------------------}
+
+newtype UnsupportedOnNonUnix = UnsupportedOnNonUnix String
+    deriving (Typeable, Show)
+instance Exception UnsupportedOnNonUnix
 
 {-------------------------------------------------------------------------------
   Orphans
