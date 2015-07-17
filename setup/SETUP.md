@@ -16,7 +16,6 @@ Firstly, let us look at the IDE backend components:
 
  * ide-backend: a library, linked into the isolation-runner
  * ide-backend-server: an exe, invoked by the ide-backend library
- * ide-backend-rts: a library, loaded at runtime by the ide-backend-server
 
 The other important components here are ghc itself (various versions, some
 patches), and the many library packages available to the end users (stackage
@@ -82,9 +81,6 @@ in this environment.
 Building ide-backend-server does require the patched ghc instance. So this
 implies the full environment must be built with this patched ghc instance, not
 a stock ghc 7.4.
-
-An instance of ide-backend-rts must be available in this environment so that
-the ide-backend-server instance can use it.
 
 However, the build-time dependencies of ide-backend-server do not need be
 present in the environment at runtime. In practice this means that while it
@@ -240,7 +236,6 @@ only a few minor differences, explained when they come up.
 
   You will want to install
 
-  - ide-backend/rts (required)
   - the test suite requires the following packages (you might of course want to
     use a separate snippet DB for the test suite:)
 
@@ -534,7 +529,6 @@ echo "documentation: True" >cabal.config
 cabal install parallel
 cabal install mtl
 cabal install monads-tf
-cabal install ~/path/to/ide-backend/rts
 ```
 
 and optionally also install `yesod` and `parsec` (this is only necessary for a
@@ -567,26 +561,3 @@ dist/build/TestSuite/TestSuite: \
 If you want to speed up the tests you can leave out `--no-session-reuse` and
 `-j1`; this _should_ work equally well but may not. If it doesn't, this may
 either indicate a bug in the test suite or in `ide-backend` itself.
-
-DEBUGGING
-=========
-
-* If ide-backend complains about being unable to open dynamic libraries (even
-  with ghc 7.4, or with ghc 7.8 NOT configured for dynamic libraries), such as
-  when running the test-suite:
-
-        Capture stdout (single putStrLn): [Failed]
-        Unexpected errors: SourceError {errorKind = KindError, errorSpan = <from GhcException>, errorMsg = "<command line>: can't load .so/.DLL for: libHSide-backend-rts-0.1.3.dylib (dlopen(libHSide-backend-rts-0.1.3.dylib, 9): image not found)"}
-
-  it is possible that cross-sandbox references are not absolute; for example, check the output of
-
-        ghc-pkg --package-conf=/Users/dev/env/fpco-patched-7.4/dot-ghc/snippet-db describe ide-backend-rts
-
-  all paths there should be absolute. See section about "install-dirs user" above.
-
-  Note that this error is not about dynamic libraries _per se_, which is why
-  this is so confusing. ghc looks for the RTS (ide-backend-rts) and it looks
-  for it in a number of places; the .dylib is simply the last place (or perhaps
-  the first, not 100% sure) and that just happens to be the error message that
-  is generated, even if it also checked elsewhere (in particular, even if it
-  also tried to load static libraries).

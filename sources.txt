@@ -1,4 +1,3 @@
 ./ide-backend
-./ide-backend-rts
 ./ide-backend-server
 ./ide-backend-common
