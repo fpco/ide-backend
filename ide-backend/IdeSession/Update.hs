@@ -87,7 +87,6 @@ import IdeSession.Update.IdeSessionUpdate
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
 import IdeSession.Util.Logger
-import IdeSession.RPC.PortablePipes
 import IdeSession.Util.PortableIO
 import qualified IdeSession.Query         as Query
 import qualified IdeSession.Strict.List   as List
