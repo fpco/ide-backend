@@ -38,6 +38,7 @@ executable ide-backend-server
                       GhcShim.API
                       GhcShim
                       RTS
+
   build-depends:      base < 10,
                       ghc                  == 7.4.* || == 7.8.* || == 7.10.* || == 7.11.*,
                       containers           >= 0.4.1   && < 1,

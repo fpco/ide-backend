@@ -12,6 +12,7 @@ import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
 import Data.Function (on)
 import System.Environment (getEnvironment)
+import System.IO.Temp (withSystemTempDirectory)
 import qualified Control.Exception as Ex
 import qualified Data.List         as List
 import qualified Data.Text         as Text
@@ -74,7 +75,7 @@ ghcServerEngine rtsInfo errorLog conv@RpcConversation{..} = do
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
     -- Register startup options and perhaps our plugin in dynamic flags.
-    initSession distDir configGenerateModInfo dOpts errsRef stRef pluginRef progressCallback
+    initSession distDir configGenerateModInfo dOpts rtsInfo errsRef stRef pluginRef progressCallback
     -- We store the DynFlags _after_ setting the "static" options, so that
     -- we restore to this state before every call to updateDynamicOpts
     -- Note that this happens _after_ we have called setSessionDynFlags
