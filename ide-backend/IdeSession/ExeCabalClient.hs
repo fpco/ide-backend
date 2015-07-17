@@ -27,7 +27,7 @@ import IdeSession.Util
 invokeExeCabal :: IdeStaticInfo -> ExeCabalRequest -> (Progress -> IO ())
                -> IO ExitCode
 invokeExeCabal ideStaticInfo@IdeStaticInfo{..} args callback = do
-  mLoc <- findProgramOnSearchPath normal searchPath "ide-backend-exe-cabal"
+  mLoc <- findProgramOnSearchPath normal searchPath ide_backend_exe_cabal
   case mLoc of
     Nothing ->
       fail $ "Could not find ide-backend-exe-cabal"
@@ -41,9 +41,7 @@ invokeExeCabal ideStaticInfo@IdeStaticInfo{..} args callback = do
       shutdown server  -- not long-running
       return exitCode
   where
-    searchPath :: ProgramSearchPath
-    searchPath = ProgramSearchPathDefault
-               : map ProgramSearchPathDir configExtraPathDirs
+    (searchPath,ide_backend_exe_cabal) = configIdeBackendExeCabal
 
     SessionConfig{..} = ideConfig
 

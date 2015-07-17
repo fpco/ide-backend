@@ -6,6 +6,7 @@ module IdeSession.Config (
 
 import Distribution.License (License (..))
 import Distribution.Simple (PackageDB (..), PackageDBStack)
+import Distribution.Simple.Program.Find (ProgramSearchPath,defaultProgramSearchPath)
 
 type InProcess = Bool
 
@@ -53,6 +54,14 @@ data SessionConfig = SessionConfig {
     -- | Delete temporary files when session finishes?
     -- (Defaults to True; mostly for internal debugging purposes)
   , configDeleteTempFiles :: Bool
+    -- | The name of the ide-backend-server program to use, and where to find it.
+    --   The default is @(defaultProgramSearchPath,"ide-backend-server")@,
+    --   that is, to look for a program called ide-backend-server on the system
+    --   search path only.
+  , configIdeBackendServer :: (ProgramSearchPath,FilePath)
+    -- | The name of the ide-backend-exe-cabal program to use, and where to find it.
+    --   The default is @(defaultProgramSearchPath,"ide-backend-exe-cabal")@.
+  , configIdeBackendExeCabal :: (ProgramSearchPath,FilePath)
   }
 
 -- | Default session configuration
@@ -78,6 +87,8 @@ data SessionConfig = SessionConfig {
 -- >       ]
 -- >   , configLog              = const $ return ()
 -- >   , configDeleteTempFiles  = True
+-- >   , configIdeBackendServer = (defaultProgramSearchPath,"ide-backend-server")
+-- >   , configIdeBackendExeCabal = (defaultProgramSearchPath,"ide-backend-exe-cabal")
 -- >   }
 defaultSessionConfig :: SessionConfig
 defaultSessionConfig = SessionConfig {
@@ -98,4 +109,6 @@ defaultSessionConfig = SessionConfig {
       ]
   , configLog              = const $ return ()
   , configDeleteTempFiles  = True
+  , configIdeBackendServer = (defaultProgramSearchPath,"ide-backend-server")
+  , configIdeBackendExeCabal = (defaultProgramSearchPath,"ide-backend-exe-cabal")
   }
