@@ -53,9 +53,12 @@ mainWith cmdLineArgs cwd = defaultMainWithHooksArgs hooks cmdLineArgs
 
     onRtsDir = withCurrentDirectory "ide-backend-rts"
 
-    rawRunSetup    args  lbi = defaultMainArgs $ args ++ [rtsBuildDirArg lbi]
-    runSetup       cmd   lbi = rawRunSetup [cmd] lbi
-    rerunSetupWith flags lbi = rawRunSetup (cmdLineArgs ++ flags) lbi
+    rawRunSetup    args  lbi verbosity = do
+      let args' = args ++ [rtsBuildDirArg lbi]
+      notice verbosity $ "Running cabal with " ++ show args'
+      defaultMainArgs args'
+    runSetup       cmd   lbi verbosity = rawRunSetup [cmd] lbi verbosity
+    rerunSetupWith flags lbi verbosity = rawRunSetup (cmdLineArgs ++ flags) lbi verbosity
       -- NB. we must set builddir explicitly (and as the final arg)
       -- since when rerunning the command during configuration, the default
       -- builddir may be changed by a flag (e.g. as "stack" does), and if we
@@ -102,7 +105,7 @@ mainWith cmdLineArgs cwd = defaultMainWithHooksArgs hooks cmdLineArgs
           , "--htmldir="    ++ (dirToEmbedFullPath </> "doc")
           , "--haddockdir=" ++ (dirToEmbedFullPath </> "doc")
           , "--enable-library-for-ghci"
-          ] lbi
+          ] lbi verbosity
 
 
     -- Builds the rts, which will end up in embedded-rts, and
@@ -112,12 +115,12 @@ mainWith cmdLineArgs cwd = defaultMainWithHooksArgs hooks cmdLineArgs
       notice verbosity "building rts..."
 
       onRtsDir $ do
-        runSetup "build" lbi
+        runSetup "build" lbi verbosity
 
       notice verbosity "locally registering rts..."
       onRtsDir $ do
-        runSetup "copy" lbi
-        runSetup "register" lbi
+        runSetup "copy" lbi verbosity
+        runSetup "register" lbi verbosity
 
     -- This hack is a workaround to Cabal not having yet (as of 1.22)
     -- a clear story regarding relocatable packages. We just replace
