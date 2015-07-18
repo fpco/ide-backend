@@ -1,5 +1,5 @@
 import Distribution.Simple
-import Distribution.Simple.LocalBuildInfo ( withPrograms )
+import Distribution.Simple.LocalBuildInfo ( withPrograms, compiler )
 import Distribution.Simple.Program ( runProgram, lookupProgram, ghcPkgProgram )
 import Distribution.Simple.Setup ( fromFlag, configVerbosity, buildVerbosity )
 import Distribution.Simple.Utils ( notice, die )
@@ -65,7 +65,7 @@ mainWith cmdLineArgs cwd = defaultMainWithHooksArgs hooks cmdLineArgs
       -- are not aware of the right builddir on the subsequent calls, we won't
       -- find the configuration info and fail.
 
-    rtsBuildDirArg lbi = "--builddir=dist/buildinfo-" ++ show (hashString $ show lbi)
+    rtsBuildDirArg lbi = "--builddir=dist/buildinfo-" ++ show (hashString $ show (compiler lbi))
       -- NB. We make the builddir a function of the compiler being used
       -- (approximated by the local build info). This is only relevant for
       -- people hacking on this library: we are trying to avoid the scenario
