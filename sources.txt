@@ -1,3 +1,0 @@
-./ide-backend
-./ide-backend-server
-./ide-backend-common
