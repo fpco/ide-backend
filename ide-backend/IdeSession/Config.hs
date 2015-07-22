@@ -1,12 +1,13 @@
 module IdeSession.Config (
     SessionConfig(..)
   , InProcess
+  , ProgramSearchPath, ProgramSearchPathEntry(..)
   , defaultSessionConfig
   ) where
 
 import Distribution.License (License (..))
 import Distribution.Simple (PackageDB (..), PackageDBStack)
-import Distribution.Simple.Program.Find (ProgramSearchPath,defaultProgramSearchPath)
+import Distribution.Simple.Program.Find (ProgramSearchPath,ProgramSearchPathEntry(..),defaultProgramSearchPath)
 
 type InProcess = Bool
 
