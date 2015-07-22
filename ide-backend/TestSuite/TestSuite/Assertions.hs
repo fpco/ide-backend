@@ -386,7 +386,7 @@ instance IgnoreVersions String where
   ignoreVersions s = subRegex (mkRegex versionRegexp) s "X.Y.Z"
     where
       versionRegexp :: String
-      versionRegexp = "[0-9]+(\\.[0-9]+)+"
+      versionRegexp = "[0-9]+(\\.[0-9]+)+(-[0-9a-z]+)?"
 
 instance IgnoreVersions a => IgnoreVersions [a] where
   ignoreVersions = map ignoreVersions
