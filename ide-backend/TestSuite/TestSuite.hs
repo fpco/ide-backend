@@ -1,5 +1,8 @@
 module Main where
 
+import Data.List (isPrefixOf)
+import System.Process (readProcess)
+import System.Environment
 import Test.HUnit
 import Test.Tasty
 
@@ -75,8 +78,33 @@ allTests name env = testGroup name [
   ]
 
 main :: IO ()
-main =
-    defaultMainWithIngredients ings $ testSuite $ \env ->
+main = do
+    -- Yes, this is hacky, but I couldn't figure out how to easily do
+    -- this with tasty's API...
+    args <- getArgs
+    let noGhcSpecified =
+           "--test-74"  `notElem` args &&
+           "--test-78"  `notElem` args &&
+           "--test-710" `notElem` args
+    args' <-
+      if noGhcSpecified
+        then do
+          putStrLn "No GHC version specified (--test-74, --test-78, --test-710)."
+          putStrLn "Asking local GHC for its version, and defaulting to that."
+          output <- readProcess "ghc" ["--version"] ""
+          putStrLn output
+          let version = last (words output)
+              versionCode =
+                if "7.4"  `isPrefixOf` version then "74"  else
+                if "7.8"  `isPrefixOf` version then "78"  else
+                if "7.10" `isPrefixOf` version then "710" else
+                error ("No tests for GHC version " ++ version)
+          -- GHC_PACKAGE_PATH is set by stack, and needs to be cleared.
+          unsetEnv "GHC_PACKAGE_PATH"
+          putStrLn $ "Assuming --test-" ++ versionCode
+          return (("--test-" ++ versionCode) : args)
+        else return args
+    withArgs args' $ defaultMainWithIngredients ings $ testSuite $ \env ->
       let TestSuiteConfig{..} = testSuiteEnvConfig env
           env74  = env { testSuiteEnvGhcVersion = GHC_7_4  }
           env78  = env { testSuiteEnvGhcVersion = GHC_7_8  }
