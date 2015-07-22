@@ -25,20 +25,23 @@ newStream h = do
   return $ Stream h st
 
 nextInStream :: forall a. Stream a -> IO a
-nextInStream (Stream h st) = readIORef st >>= go
+nextInStream (Stream h st) = readIORef st >>= go False
   where
-    go :: Binary.Decoder a -> IO a
-    go decoder = case decoder of
+    go :: Bool -> Binary.Decoder a -> IO a
+    go atEnd decoder = case decoder of
       Binary.Fail _ _ err -> do
         writeIORef st decoder
-        Ex.throwIO (userError err)
+        Ex.throwIO $ userError $
+          if atEnd
+            then "IdeSession.RPC.Stream ended, causing " ++ err
+            else "IdeSession.RPC.Stream decode failure: " ++ err
       Binary.Partial k -> do
         mchunk <- Ex.try $ BSS.hGetSome h BSL.defaultChunkSize
         case mchunk of
           Left ex -> do writeIORef st decoder
                         Ex.throwIO (ex :: Ex.SomeException)
-          Right chunk | BSS.null chunk -> go . k $ Nothing
-                      | otherwise      -> go . k $ Just chunk
+          Right chunk | BSS.null chunk -> go True . k $ Nothing
+                      | otherwise      -> go False . k $ Just chunk
       Binary.Done unused _numConsumed a -> do
         writeIORef st $ contDecoder unused
         return a
