@@ -106,8 +106,8 @@ instance Binary GhcInitRequest where
     put ghcInitOpts
     put ghcInitUserPackageDB
     put ghcInitSpecificPackageDBs
-    put ghcInitSourceDir
     put ghcInitSessionDir
+    put ghcInitSourceDir
     put ghcInitDistDir
 
   get = GhcInitRequest <$> get
