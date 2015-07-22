@@ -99,8 +99,6 @@ main = do
                 if "7.8"  `isPrefixOf` version then "78"  else
                 if "7.10" `isPrefixOf` version then "710" else
                 error ("No tests for GHC version " ++ version)
-          -- GHC_PACKAGE_PATH is set by stack, and needs to be cleared.
-          unsetEnv "GHC_PACKAGE_PATH"
           putStrLn $ "Assuming --test-" ++ versionCode
           return (("--test-" ++ versionCode) : args)
         else return args

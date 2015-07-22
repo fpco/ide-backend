@@ -55,7 +55,7 @@ import Data.List (elemIndices, isPrefixOf)
 import Data.Maybe (fromMaybe)
 import Data.Monoid (Monoid(..), (<>))
 import Distribution.Simple (PackageDBStack, PackageDB(..))
-import System.Environment (getEnv, getEnvironment)
+import System.Environment (getEnvironment, unsetEnv)
 import System.Exit (ExitCode(..))
 import System.FilePath ((</>))
 import System.IO.Temp (createTempDirectory)
@@ -182,6 +182,11 @@ writeMacros IdeStaticInfo{ideConfig = SessionConfig {..}, ..}
 -- is set.
 initSession :: SessionInitParams -> SessionConfig -> IO IdeSession
 initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
+  -- verifyConfig used to bail if GHC_PACKAGE_PATH was set.  Instead,
+  -- we just unset it so that cabal invocations are happy.  It's up to
+  -- the user of ide-backend to set 'configPackageDBStack' based on
+  -- this environment variable.
+  unsetEnv "GHC_PACKAGE_PATH"
   verifyConfig ideConfig
 
   configDirCanon <- Dir.canonicalizePath configDir
@@ -248,30 +253,11 @@ verifyConfig SessionConfig{..} = do
     unless (isValidPackageDB configPackageDBStack) $
       Ex.throw . userError $ "Invalid package DB stack: "
                              ++ show configPackageDBStack
-
-    checkPackageDbEnvVar
   where
     isValidPackageDB :: PackageDBStack -> Bool
     isValidPackageDB stack =
           elemIndices GlobalPackageDB stack == [0]
        && elemIndices UserPackageDB stack `elem` [[], [1]]
-
--- Copied directly from Cabal
-checkPackageDbEnvVar :: IO ()
-checkPackageDbEnvVar = do
-    hasGPP <- (getEnv "GHC_PACKAGE_PATH" >> return True)
-              `catchIO` (\_ -> return False)
-    when hasGPP $
-      die $ "Use of GHC's environment variable GHC_PACKAGE_PATH is "
-         ++ "incompatible with Cabal. Use the flag --package-db to specify a "
-         ++ "package database (it can be used multiple times)."
-  where
-    -- Definitions so that the copied code from Cabal works
-
-    die = Ex.throwIO . userError
-
-    catchIO :: IO a -> (IOError -> IO a) -> IO a
-    catchIO = Ex.catch
 
 {-------------------------------------------------------------------------------
   Session shutdown
