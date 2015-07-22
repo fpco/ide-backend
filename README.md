@@ -27,7 +27,9 @@ import           IdeSession
 main :: IO ()
 main = do
     -- Initialization and providing some code
-    sess <- initSession defaultSessionInitParams defaultSessionConfig
+    config <- sessionConfigFromEnv
+    sess <- initSession defaultSessionInitParams config
+        { configLocalWorkingDir = Nothing }
     let upd = updateSourceFile "Main.hs" "main = putStrLn \"Hello World\""
            <> updateCodeGeneration True
            <> updateGhcOpts ["-Wall"]
@@ -61,7 +63,8 @@ main = do
     print $ autoCompletion "Main" "putS"
 ```
 
-Sample output for this run:
+To run this, use `stack runghc example.hs`. The output should look
+something like:
 
 ```
 [1 of 1] Compiling Main

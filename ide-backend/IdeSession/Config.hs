@@ -2,12 +2,16 @@ module IdeSession.Config (
     SessionConfig(..)
   , InProcess
   , ProgramSearchPath, ProgramSearchPathEntry(..)
+  , sessionConfigFromEnv
   , defaultSessionConfig
   ) where
 
 import Distribution.License (License (..))
 import Distribution.Simple (PackageDB (..), PackageDBStack)
 import Distribution.Simple.Program.Find (ProgramSearchPath,ProgramSearchPathEntry(..),defaultProgramSearchPath)
+import System.FilePath (splitSearchPath)
+import System.Directory (getCurrentDirectory, getTemporaryDirectory)
+import System.Environment (lookupEnv)
 
 type InProcess = Bool
 
@@ -65,10 +69,38 @@ data SessionConfig = SessionConfig {
   , configIdeBackendExeCabal :: (ProgramSearchPath,FilePath)
   }
 
--- | Default session configuration
+-- Get the default local session configuration, pulling the following
+-- information from the environment:
 --
--- Use this instead of creating your own SessionConfig to be robust against
--- extensions of SessionConfig.
+-- * OS temporary directory (used for session.*) files
+--
+-- * Current working directory - assumed to be the project root.
+--   Instead of running
+--
+-- * GHC package database.  Like GHC, it takes the GHC_PACKAGE_PATH,
+--   and uses this list of package databases.  This allows ide-backend
+--   to do the 'right thing' when used with tools like stack.
+sessionConfigFromEnv :: IO SessionConfig
+sessionConfigFromEnv = do
+  tmpDir <- getTemporaryDirectory
+  cwd <- getCurrentDirectory
+  mpkgPath <- lookupEnv "GHC_PACKAGE_PATH"
+  let dbStack = case mpkgPath of
+        Nothing -> configPackageDBStack defaultSessionConfig
+        Just pkgPath ->
+          let dbPaths = drop 1 (reverse (splitSearchPath pkgPath))
+           in GlobalPackageDB : map SpecificPackageDB dbPaths
+  return defaultSessionConfig
+    { configDir = tmpDir
+    , configLocalWorkingDir = Just cwd
+    , configPackageDBStack = dbStack
+    }
+
+-- | Default session configuration.  Most users will probably instead
+-- want 'localSessionConfigFromEnv'.
+--
+-- Use this instead of creating your own SessionConfig to be robust
+-- against extensions of SessionConfig.
 --
 -- > defaultSessionConfig = SessionConfig {
 -- >     configDir              = "."
