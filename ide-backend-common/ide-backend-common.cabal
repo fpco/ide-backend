@@ -1,5 +1,5 @@
 name:                 ide-backend-common
-version:              0.9.1.3
+version:              0.10.0
 synopsis:             Shared library used be ide-backend and ide-backend-server
 description:          Should not be used by end users
 license:              MIT

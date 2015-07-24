@@ -1,5 +1,5 @@
 name:                 ide-backend-server
-version:              0.9.0
+version:              0.10.0
 synopsis:             An IDE backend server
 description:          Server executable used internally by the ide-backend library.
 license:              MIT
@@ -61,7 +61,7 @@ executable ide-backend-server
                       tar                  >= 0.3     && < 0.5,
                       zlib                 >= 0.5.3   && < 0.7,
                       file-embed           >= 0.0     && < 0.1,
-                      ide-backend-common   >= 0.9     && < 0.10
+                      ide-backend-common   >= 0.10    && < 0.11
 
   -- The standard macros don't give us 7.6.x granularity
   -- We _could_ add support for 7.6, 7.6.1 specifically is broken (#7548)
