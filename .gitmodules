@@ -1,0 +1,3 @@
+[submodule "vendor/cabal"]
+	path = vendor/cabal
+	url = git://github.com/fpco/cabal.git
