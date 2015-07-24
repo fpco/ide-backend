@@ -394,22 +394,9 @@ withIdleState IdeSession{ideState} f =
   $withStrictMVar ideState $ \st ->
     case st of
       IdeSessionIdle         idleState -> f idleState
-      IdeSessionServerDied e idleState -> f (reportExAsErr e idleState)
-      IdeSessionShutdown               -> fail "Session already shut down."
+      IdeSessionServerDied _ idleState -> f idleState
+      IdeSessionShutdown               -> fail "Session is shut down."
   where
-    reportExAsErr :: ExternalException -> IdeIdleState -> IdeIdleState
-    reportExAsErr e = ideComputed ^:
-      StrictMaybe.just . updateComputed e . StrictMaybe.fromMaybe emptyComputed
-
-    updateComputed :: ExternalException -> Computed -> Computed
-    updateComputed (ExternalException remote _local) c =
-      let err = Private.SourceError {
-              Private.errorKind = Private.KindServerDied
-            , Private.errorSpan = Private.TextSpan (Text.pack "<<server died>>")
-            , Private.errorMsg  = Text.pack remote
-            }
-      in c { computedErrors = StrictList.singleton err }
-
     -- TODO: Do we really want an empty computed here? This means that if the
     -- user does not check getSourceErrors they might get nil/empty rather
     -- than an error.
