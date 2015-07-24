@@ -53,10 +53,10 @@ import Control.Monad (when, unless)
 import Control.Monad.IO.Class (liftIO)
 import Data.Accessor (Accessor, (^.))
 import Data.List (elemIndices, isPrefixOf)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Monoid (Monoid(..), (<>))
 import Distribution.Simple (PackageDBStack, PackageDB(..))
-import System.Environment (getEnvironment, unsetEnv)
+import System.Environment (getEnvironment, unsetEnv, lookupEnv)
 import System.Exit (ExitCode(..))
 import System.FilePath ((</>))
 import System.IO.Temp (createTempDirectory)
@@ -197,7 +197,10 @@ initSessionWithCallbacks ideCallbacks initParams@SessionInitParams{..} ideConfig
   -- we just unset it so that cabal invocations are happy.  It's up to
   -- the user of ide-backend to set 'configPackageDBStack' based on
   -- this environment variable.
-  unsetEnv "GHC_PACKAGE_PATH"
+  mpath <- lookupEnv "GHC_PACKAGE_PATH"
+  when (isJust mpath) $ do
+    $logWarn "ide-backend doesn't pay attention to GHC_PACKAGE_PATH, but it is set in the environment"
+    unsetEnv "GHC_PACKAGE_PATH"
   verifyConfig ideConfig
 
   configDirCanon <- Dir.canonicalizePath configDir
