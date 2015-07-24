@@ -28,4 +28,4 @@ logError :: Q Exp
 logError = [| \msg -> L.runLoggingT ($(L.logError) msg) $(varE (mkName "logFunc")) |]
 
 logOther :: Text -> Q Exp
-logOther level = [| \msg -> L.runLoggingT $(L.logOther level) $(varE (mkName "logFunc")) |]
+logOther level = [| \msg -> L.runLoggingT ($(L.logOther level) msg) $(varE (mkName "logFunc")) |]
