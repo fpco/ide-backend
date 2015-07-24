@@ -1,11 +1,13 @@
-{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, TupleSections #-}
+{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, TupleSections, OverloadedStrings #-}
 -- | Invoke the executable that calls cabal functions and communicate
 -- with it via RPC.
 module IdeSession.ExeCabalClient (
     invokeExeCabal
   ) where
 
-import System.Exit (ExitCode)
+import Data.Monoid ((<>))
+import qualified Data.Text as Text
+import System.Exit (ExitCode(..))
 
 import IdeSession.Cabal
 import IdeSession.Config
@@ -13,11 +15,12 @@ import IdeSession.GHC.API
 import IdeSession.RPC.Client (RpcServer, RpcConversation(..), forkRpcServer, rpcConversation, shutdown, findProgram)
 import IdeSession.State
 import IdeSession.Types.Progress
+import IdeSession.Types.Public (UpdateStatus(..))
 import IdeSession.Util
 
 -- | Invoke the executable that processes our custom functions that use
 -- the machinery of the cabal library.
-invokeExeCabal :: IdeStaticInfo -> IdeCallbacks -> ExeCabalRequest -> (Progress -> IO ())
+invokeExeCabal :: IdeStaticInfo -> IdeCallbacks -> ExeCabalRequest -> (UpdateStatus -> IO ())
                -> IO ExitCode
 invokeExeCabal ideStaticInfo@IdeStaticInfo{..} ideCallbacks args callback = do
   let logFunc = ideCallbacksLogFunc ideCallbacks
@@ -39,7 +42,7 @@ invokeExeCabal ideStaticInfo@IdeStaticInfo{..} ideCallbacks args callback = do
 
     SessionConfig{..} = ideConfig
 
-rpcRunExeCabal :: RpcServer -> ExeCabalRequest -> (Progress -> IO ())
+rpcRunExeCabal :: RpcServer -> ExeCabalRequest -> (UpdateStatus -> IO ())
                -> IO ExitCode
 rpcRunExeCabal server req callback =
   rpcConversation server $ \RpcConversation{..} -> do
@@ -47,7 +50,15 @@ rpcRunExeCabal server req callback =
 
     let go = do response <- get
                 case response of
-                  ExeCabalProgress pcounter -> callback pcounter >> go
-                  ExeCabalDone exitCode     -> return exitCode
+                  ExeCabalProgress pcounter -> do
+                    callback (UpdateStatusProgress pcounter)
+                    go
+                  ExeCabalDone ec@ExitSuccess -> do
+                    callback UpdateStatusDone
+                    return ec
+                  ExeCabalDone ec@(ExitFailure code) -> do
+                    callback $ UpdateStatusFailed $
+                      "Cabal exited with code " <> Text.pack (show code)
+                    return ec
 
     go

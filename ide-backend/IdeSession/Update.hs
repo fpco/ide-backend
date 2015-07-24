@@ -402,25 +402,31 @@ executeRestart initParams@SessionInitParams{..} staticInfo ideCallbacks idleStat
 --
 -- The update can be a long running operation, so we support a callback which
 -- can be used to monitor progress of the operation.
-updateSession :: IdeSession -> IdeSessionUpdate -> (Progress -> IO ()) -> IO ()
+updateSession :: IdeSession -> IdeSessionUpdate -> (Public.UpdateStatus -> IO ()) -> IO ()
 updateSession = flip . updateSession'
 
-updateSession' :: IdeSession -> (Progress -> IO ()) -> IdeSessionUpdate -> IO ()
-updateSession' IdeSession{ideStaticInfo, ideState, ideCallbacks} callback = \update ->
+updateSession' :: IdeSession -> (Public.UpdateStatus -> IO ()) -> IdeSessionUpdate -> IO ()
+updateSession' IdeSession{ideStaticInfo, ideState, ideCallbacks} updateStatus = \update ->
     $modifyStrictMVar_ ideState $ go False update
   where
+    logFunc = ideCallbacksLogFunc ideCallbacks
     go :: Bool -> IdeSessionUpdate -> IdeSessionState -> IO IdeSessionState
     go justRestarted update (IdeSessionIdle idleState) =
       if not (requiresSessionRestart idleState update)
         then do
-          (idleState', mex) <- runSessionUpdate justRestarted update ideStaticInfo callback ideCallbacks idleState
+          (idleState', mex) <- runSessionUpdate justRestarted update ideStaticInfo updateStatus ideCallbacks idleState
           case mex of
             Nothing -> return $ IdeSessionIdle          idleState'
             Just ex -> return $ IdeSessionServerDied ex idleState'
         else do
+          $logInfo $ "Restarting session due to update requiring it."
+          unless justRestarted $ updateStatus Public.UpdateStatusRequiredRestart
           let restartParams = sessionRestartParams idleState update
           restart justRestarted update restartParams idleState
-    go justRestarted update (IdeSessionServerDied _ex idleState) = do
+    go justRestarted update (IdeSessionServerDied ex idleState) = do
+      let msg = Text.pack (show ex)
+      $logInfo $ "Restarting session due to server dieing: " <> msg
+      unless justRestarted $ updateStatus (Public.UpdateStatusCrashRestart msg)
       let restartParams = sessionRestartParams idleState update
       restart justRestarted update restartParams idleState
     go _ _ IdeSessionShutdown =
@@ -438,7 +444,8 @@ updateSession' IdeSession{ideStaticInfo, ideState, ideCallbacks} callback = \upd
       case restartResult of
         ServerRestarted idleState' resetSession ->
           go True (resetSession <> update) (IdeSessionIdle idleState')
-        ServerRestartFailed idleState' ->
+        ServerRestartFailed idleState' -> do
+          updateStatus (Public.UpdateStatusServerDied "Failed to restart ide-backend-server")
           return $ IdeSessionServerDied failedToRestart idleState'
 
 -- | @requiresSessionRestart st upd@ returns true if update @upd@ requires a

@@ -4,7 +4,7 @@
 --
 -- See comments for IdeSessionUpdate for a motivation of the split between the
 -- IdeSessionUpdate type and the ExecuteSessionUpdate type.
-{-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables, FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, ScopedTypeVariables, FlexibleInstances, TemplateHaskell, OverloadedStrings #-}
 module IdeSession.Update.ExecuteSessionUpdate (runSessionUpdate) where
 
 import Prelude hiding (mod, span)
@@ -39,7 +39,7 @@ import IdeSession.Strict.Container
 import IdeSession.Strict.IORef (StrictIORef)
 import IdeSession.Types.Private hiding (RunResult(..))
 import IdeSession.Types.Progress
-import IdeSession.Types.Public (RunBufferMode(..), Targets(..))
+import IdeSession.Types.Public (RunBufferMode(..), Targets(..), UpdateStatus(..))
 import IdeSession.Update.IdeSessionUpdate
 import IdeSession.Util
 import IdeSession.Util.Logger
@@ -61,12 +61,12 @@ import qualified IdeSession.Strict.Trie   as Trie
 
 data IdeSessionUpdateEnv = IdeSessionUpdateEnv {
     ideUpdateStaticInfo :: IdeStaticInfo
-  , ideUpdateCallback   :: Progress -> IO ()
+  , ideUpdateStatus :: UpdateStatus -> IO ()
     -- For the StateT instance
   , ideUpdateStateRef :: StrictIORef IdeIdleState
     -- For liftIO
   , ideUpdateExceptionRef :: StrictIORef (Maybe ExternalException)
-  , ideUpdateIdeCallbacks :: IdeCallbacks
+  , ideUpdateCallbacks :: IdeCallbacks
   }
 
 newtype ExecuteSessionUpdate a = ExecuteSessionUpdate {
@@ -76,6 +76,7 @@ newtype ExecuteSessionUpdate a = ExecuteSessionUpdate {
            , Applicative
            , Monad
            , MonadReader IdeSessionUpdateEnv
+           , MonadIO
            )
 
 -- We define MonadState using an IORef rather than StateT so that if an exception
@@ -133,7 +134,7 @@ exceptionFree = ExecuteSessionUpdate . liftIO
 runSessionUpdate :: Bool
                  -> IdeSessionUpdate
                  -> IdeStaticInfo
-                 -> (Progress -> IO ())
+                 -> (UpdateStatus -> IO ())
                  -> IdeCallbacks
                  -> IdeIdleState
                  -> IO (IdeIdleState, Maybe ExternalException)
@@ -144,10 +145,10 @@ runSessionUpdate justRestarted update staticInfo callback ideCallbacks ideIdleSt
     runReaderT (unwrapUpdate $ executeSessionUpdate justRestarted update')
                IdeSessionUpdateEnv {
                    ideUpdateStaticInfo   = staticInfo
-                 , ideUpdateCallback     = liftIO . callback
+                 , ideUpdateStatus       = liftIO . callback
                  , ideUpdateStateRef     = stRef
                  , ideUpdateExceptionRef = exRef
-                 , ideUpdateIdeCallbacks = ideCallbacks
+                 , ideUpdateCallbacks    = ideCallbacks
                  }
 
     ideIdleState' <- IORef.readIORef stRef
@@ -220,6 +221,11 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
              -- Recompile when we move to having a local working directory.
           || hasLocalWorkingDir
 
+    logFunc <- asks (ideCallbacksLogFunc . ideUpdateCallbacks)
+    $logDebug $ if needsRecompile
+      then "Recompile required, starting..."
+      else "Recompile not required, so skipping"
+
     when needsRecompile $ local (incrementNumSteps numActions) $ do
       GhcCompileResult{..} <- rpcCompile
       oldComputed <- Acc.get ideComputed
@@ -255,10 +261,12 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
   where
     incrementNumSteps :: Int -> IdeSessionUpdateEnv -> IdeSessionUpdateEnv
     incrementNumSteps count IdeSessionUpdateEnv{..} = IdeSessionUpdateEnv{
-        ideUpdateCallback = \p -> ideUpdateCallback p {
-            progressStep     = progressStep     p + count
-          , progressNumSteps = progressNumSteps p + count
-          }
+        ideUpdateStatus = \s -> ideUpdateStatus $ case s of
+          UpdateStatusProgress p -> UpdateStatusProgress p {
+              progressStep     = progressStep     p + count
+            , progressNumSteps = progressNumSteps p + count
+            }
+          _ -> s
       , ..
       }
 
@@ -449,7 +457,7 @@ removeObsoleteObjectFiles = do
 
 recompileCFiles :: [FilePath] -> ExecuteSessionUpdate [SourceError]
 recompileCFiles cFiles = do
-  callback   <- asks ideUpdateCallback
+  updateStatus <- asks ideUpdateStatus
   sessionDir <- asks $ ideSessionDir . ideUpdateStaticInfo
   ideStaticInfo <- asks ideUpdateStaticInfo
 
@@ -463,7 +471,7 @@ recompileCFiles cFiles = do
         absObj = objDir </> relObj
 
     let msg = "Compiling " ++ relC
-    exceptionFree $ callback $ Progress {
+    exceptionFree $ updateStatus $ UpdateStatusProgress $ Progress {
         progressStep      = i
       , progressNumSteps  = length cFiles
       , progressParsedMsg = Just (Text.pack msg)
@@ -516,8 +524,8 @@ outdatedObjectFiles ghcOptionsChanged = do
 runGcc :: FilePath -> FilePath -> FilePath -> ExecuteSessionUpdate [SourceError]
 runGcc absC absObj pref = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
-    callback                        <- asks ideUpdateCallback
-    ideCallbacks                    <- asks ideUpdateIdeCallbacks
+    updateStatus                    <- asks ideUpdateStatus
+    ideCallbacks                    <- asks ideUpdateCallbacks
     relIncl                         <- Acc.get ideRelativeIncludes
     -- Pass GHC options so that ghc can pass the relevant options to gcc
     ghcOpts <- Acc.get ideGhcOpts
@@ -540,7 +548,7 @@ runGcc absC absObj pref = do
      -- (_exitCode, _stdout, _stderr)
      --   <- readProcessWithExitCode _gcc _args _stdin
      -- The real deal; we call gcc via ghc via cabal functions:
-     exitCode <- invokeExeCabal ideStaticInfo ideCallbacks (ReqExeCc runCcArgs) callback
+     exitCode <- invokeExeCabal ideStaticInfo ideCallbacks (ReqExeCc runCcArgs) updateStatus
      stdout <- readFile stdoutLog
      stderr <- readFile stderrLog
      case exitCode of
@@ -638,8 +646,8 @@ executeBuildExe :: [String] -> [(ModuleName, FilePath)] -> ExecuteSessionUpdate 
 executeBuildExe extraOpts ms = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{..} = ideConfig
-    callback          <- asks ideUpdateCallback
-    ideCallbacks      <- asks ideUpdateIdeCallbacks
+    updateStatus      <- asks ideUpdateStatus
+    ideCallbacks      <- asks ideUpdateCallbacks
     mcomputed         <- Acc.get ideComputed
     ghcOpts           <- Acc.get ideGhcOpts
     relativeIncludes  <- Acc.get ideRelativeIncludes
@@ -677,7 +685,7 @@ executeBuildExe extraOpts ms = do
                                   , beStdoutLog
                                   , beStderrLog
                                   }
-                invokeExeCabal ideStaticInfo ideCallbacks (ReqExeBuild beArgs ms) callback
+                invokeExeCabal ideStaticInfo ideCallbacks (ReqExeBuild beArgs ms) updateStatus
     -- Solution 2. to #119: update timestamps of .o (and all other) files
     -- according to the session's artificial timestamp.
     newTS <- nextLogicalTimestamp
@@ -701,8 +709,8 @@ executeBuildDoc = do
     let SessionConfig{..} = ideConfig
     let srcDir = ideSourceDir ideStaticInfo
 
-    callback          <- asks ideUpdateCallback
-    ideCallbacks      <- asks ideUpdateIdeCallbacks
+    updateStatus      <- asks ideUpdateStatus
+    ideCallbacks      <- asks ideUpdateCallbacks
     mcomputed         <- Acc.get ideComputed
     ghcOpts           <- Acc.get ideGhcOpts
     relativeIncludes  <- Acc.get ideRelativeIncludes
@@ -751,7 +759,7 @@ executeBuildDoc = do
                                     , beStdoutLog
                                     , beStderrLog
                                     }
-                  invokeExeCabal ideStaticInfo ideCallbacks (ReqExeDoc beArgs) callback
+                  invokeExeCabal ideStaticInfo ideCallbacks (ReqExeDoc beArgs) updateStatus
     Acc.set ideBuildDocStatus (Just exitCode)
 
 executeBuildLicenses :: FilePath -> ExecuteSessionUpdate ()
@@ -759,8 +767,8 @@ executeBuildLicenses cabalsDir = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{configGenerateModInfo} = ideConfig
 
-    callback  <- asks ideUpdateCallback
-    ideCallbacks <- asks ideUpdateIdeCallbacks
+    updateStatus  <- asks ideUpdateStatus
+    ideCallbacks <- asks ideUpdateCallbacks
     mcomputed <- Acc.get ideComputed
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
@@ -790,7 +798,7 @@ executeBuildLicenses cabalsDir = do
                          , liCabalsDir = cabalsDir
                          , liPkgs = pkgs
                          }
-        invokeExeCabal ideStaticInfo ideCallbacks (ReqExeLic liArgs) callback
+        invokeExeCabal ideStaticInfo ideCallbacks (ReqExeLic liArgs) updateStatus
     Acc.set ideBuildLicensesStatus (Just exitCode)
 
 {-------------------------------------------------------------------------------
@@ -818,7 +826,7 @@ nextLogicalTimestamp = do
 rpcCompile :: ExecuteSessionUpdate GhcCompileResult
 rpcCompile = do
     IdeIdleState{..} <- get
-    callback         <- asks ideUpdateCallback
+    updateStatus     <- asks ideUpdateStatus
     sourceDir        <- asks $ ideSourceDir . ideUpdateStaticInfo
 
     -- We need to translate the targets to absolute paths
@@ -826,7 +834,7 @@ rpcCompile = do
           TargetsInclude l -> TargetsInclude $ map (sourceDir </>) l
           TargetsExclude l -> TargetsExclude $ map (sourceDir </>) l
 
-    tryIO $ GHC.rpcCompile _ideGhcServer _ideGenerateCode targets callback
+    tryIO $ GHC.rpcCompile _ideGhcServer _ideGenerateCode targets updateStatus
 
 rpcSetEnv :: ExecuteSessionUpdate ()
 rpcSetEnv = do

@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveGeneric, RecordWildCards #-}
+{-# LANGUAGE DeriveGeneric, RecordWildCards, TemplateHaskell #-}
 module IdeSession.Types.Progress (
     Progress(..)
   ) where
@@ -10,6 +10,7 @@ import Data.Maybe (fromJust)
 import GHC.Generics (Generic)
 import qualified Data.Text as Text
 import Text.Show.Pretty (PrettyVal)
+import Data.Aeson.TH (deriveJSON, defaultOptions)
 
 import IdeSession.Util () -- instance Binary Text
 
@@ -59,3 +60,5 @@ instance Show Progress where
     where
       pad :: Maybe Text -> Maybe String
       pad = fmap $ \t -> " " ++ Text.unpack t
+
+$(deriveJSON defaultOptions ''Progress)

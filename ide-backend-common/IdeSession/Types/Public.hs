@@ -27,6 +27,7 @@ module IdeSession.Types.Public (
   , Value
   , VariableEnv
   , Targets(..)
+  , UpdateStatus(..)
     -- * Util
   , idInfoQN
 --, idInfoAtLocation
@@ -44,6 +45,7 @@ import GHC.Generics (Generic)
 
 import IdeSession.Util () -- Binary instance for Text
 import IdeSession.Util.PrettyVal
+import IdeSession.Types.Progress
 
 {------------------------------------------------------------------------------
   Types
@@ -249,6 +251,16 @@ type Value = Text
 type VariableEnv = [(Name, Type, Value)]
 
 data Targets = TargetsInclude [FilePath] | TargetsExclude [FilePath]
+  deriving (Typeable, Generic, Eq, Show)
+
+-- | This type represents the status of the compilation from an IDE update.
+data UpdateStatus =
+    UpdateStatusFailed Text
+  | UpdateStatusRequiredRestart
+  | UpdateStatusCrashRestart Text
+  | UpdateStatusServerDied Text
+  | UpdateStatusProgress Progress
+  | UpdateStatusDone
   deriving (Typeable, Generic, Eq, Show)
 
 {------------------------------------------------------------------------------
@@ -520,6 +532,7 @@ instance PrettyVal RunBufferMode
 instance PrettyVal RunResult
 instance PrettyVal BreakInfo
 instance PrettyVal Targets
+instance PrettyVal UpdateStatus
 
 {------------------------------------------------------------------------------
   Util

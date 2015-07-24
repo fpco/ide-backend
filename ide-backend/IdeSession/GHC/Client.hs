@@ -183,19 +183,23 @@ rpcSetGhcOpts (InProcess _ _) _ =
   error "rpcSetGhcOpts not supported for in-process server"
 
 -- | Compile or typecheck
-rpcCompile :: GhcServer           -- ^ GHC server
-           -> Bool                -- ^ Should we generate code?
-           -> Public.Targets      -- ^ Targets
-           -> (Progress -> IO ()) -- ^ Progress callback
+rpcCompile :: GhcServer                      -- ^ GHC server
+           -> Bool                           -- ^ Should we generate code?
+           -> Public.Targets                 -- ^ Targets
+           -> (Public.UpdateStatus -> IO ()) -- ^ Progress callback
            -> IO GhcCompileResult
-rpcCompile server genCode targets callback =
+rpcCompile server genCode targets updateStatus =
   ghcConversation server $ \RpcConversation{..} -> do
     put (ReqCompile genCode targets)
 
     let go = do response <- get
                 case response of
-                  GhcCompileProgress pcounter -> callback pcounter >> go
-                  GhcCompileDone result       -> return result
+                  GhcCompileProgress pcounter -> do
+                    updateStatus (Public.UpdateStatusProgress pcounter)
+                    go
+                  GhcCompileDone result -> do
+                    updateStatus Public.UpdateStatusDone
+                    return result
 
     go
 

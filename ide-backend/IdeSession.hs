@@ -143,6 +143,7 @@ module IdeSession (
   , buildLicenses
     -- ** Progress
   , Progress(..)
+  , UpdateStatus(..)
     -- ** Running code
   , RunActions(..)
   , RunResult(..)
