@@ -50,13 +50,7 @@ import IdeSession.Util
 import IdeSession.Util.BlockingOps
 import qualified IdeSession.Types.Public as Public
 
-import Distribution.Verbosity (normal)
 import Distribution.Simple (PackageDB(..), PackageDBStack)
-import Distribution.Simple.Program.Find ( -- From our patched cabal
-    ProgramSearchPath
-  , findProgramOnSearchPath
-  , ProgramSearchPathEntry(..)
-  )
 
 {------------------------------------------------------------------------------
   Starting and stopping the server
@@ -67,11 +61,13 @@ forkGhcServer :: [String]      -- ^ Initial ghc options
               -> [FilePath]    -- ^ Relative includes
               -> [String]      -- ^ RTS options
               -> IdeStaticInfo -- ^ Session setup info
+              -> IdeCallbacks  -- ^ Session callbacks
               -> IO (Either ExternalException (GhcServer, GhcVersion))
-forkGhcServer ghcOpts relIncls rtsOpts ideStaticInfo = do
+forkGhcServer ghcOpts relIncls rtsOpts ideStaticInfo ideCallbacks = do
+  let logFunc = ideCallbacksLogFunc ideCallbacks
   when configInProcess $
     fail "In-process ghc server not currently supported"
-  mLoc <- findProgramOnSearchPath normal searchPath ide_backend_server
+  mLoc <- findProgram logFunc searchPath ide_backend_server
   case mLoc of
     Nothing ->
       fail $ "Could not find ide-backend-server"

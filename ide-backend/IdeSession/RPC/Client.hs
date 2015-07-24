@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, CPP, ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell, CPP, ScopedTypeVariables, OverloadedStrings #-}
 module IdeSession.RPC.Client (
     RpcServer
   , RpcConversation(..)
@@ -12,14 +12,20 @@ module IdeSession.RPC.Client (
   , illscopedConversationException
   , serverKilledException
   , getRpcExitCode
+  , findProgram
   ) where
 
 import Control.Concurrent.MVar (MVar, newMVar, tryTakeMVar)
 import Control.Monad (void, unless)
 import Data.Binary (Binary, encode, decode)
 import Data.IORef (writeIORef, readIORef, newIORef)
+import Data.List (intercalate)
+import Data.Maybe (catMaybes)
+import Data.Monoid ((<>))
+import qualified Data.Text as Text
 import Data.Typeable (Typeable)
 import Prelude hiding (take)
+import System.Environment (lookupEnv)
 import System.Exit (ExitCode)
 import System.IO (Handle, hClose)
 import System.IO.Temp (openTempFile)
@@ -37,8 +43,15 @@ import System.Process
 import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
 import qualified Control.Exception as Ex
 import qualified System.Directory  as Dir
+import Distribution.Verbosity (normal)
+import Distribution.Simple.Program.Find (
+    findProgramOnSearchPath
+  , ProgramSearchPath
+  , ProgramSearchPathEntry(..)
+  )
 
 import IdeSession.Util.BlockingOps
+import IdeSession.Util.Logger
 import IdeSession.RPC.API
 import IdeSession.RPC.Stream
 
@@ -322,3 +335,16 @@ mapIOToExternal server p = Ex.catch p $ \ex -> do
     then Ex.throwIO (serverKilledException (Just ex))
     else Ex.throwIO (ExternalException merr (Just ex))
 
+findProgram :: LogFunc -> ProgramSearchPath -> FilePath -> IO (Maybe FilePath)
+findProgram logFunc searchPath prog = do
+    shownPath <- renderPath searchPath
+    $logInfo $ "Searching for " <> Text.pack prog <> " on this path: " <> Text.pack shownPath
+    mres <- findProgramOnSearchPath normal searchPath prog
+    $logInfo $ case mres of
+      Nothing -> "Failed to find " <> Text.pack prog
+      Just res -> "Found " <> Text.pack prog <> " - using this one: " <> Text.pack res
+    return mres
+  where
+    renderPath = fmap (intercalate ":" . catMaybes) . mapM pathEntryString
+    pathEntryString (ProgramSearchPathDir fp) = return (Just fp)
+    pathEntryString ProgramSearchPathDefault = lookupEnv "PATH"

@@ -1,10 +1,11 @@
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, ScopedTypeVariables, TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, ScopedTypeVariables, TemplateHaskell, OverloadedStrings #-}
 -- | IDE session updates
 --
 -- We should only be using internal types here (explicit strictness/sharing)
 module IdeSession.Update (
     -- * Starting and stopping
     initSession
+  , initSessionWithCallbacks
   , SessionInitParams(..)
   , defaultSessionInitParams
   , shutdownSession
@@ -85,6 +86,7 @@ import IdeSession.Update.ExecuteSessionUpdate
 import IdeSession.Update.IdeSessionUpdate
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
+import IdeSession.Util.Logger
 import qualified IdeSession.Query         as Query
 import qualified IdeSession.Strict.List   as List
 import qualified IdeSession.Strict.Map    as Map
@@ -181,7 +183,16 @@ writeMacros IdeStaticInfo{ideConfig = SessionConfig {..}, ..}
 -- Throws an exception if the configuration is invalid, or if GHC_PACKAGE_PATH
 -- is set.
 initSession :: SessionInitParams -> SessionConfig -> IO IdeSession
-initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
+initSession = initSessionWithCallbacks defaultIdeCallbacks
+
+-- | Like 'initSession', but also takes a 'IdeCallbacks'.
+--
+-- Since 0.10.0
+initSessionWithCallbacks :: IdeCallbacks -> SessionInitParams -> SessionConfig -> IO IdeSession
+initSessionWithCallbacks ideCallbacks initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
+  let logFunc = ideCallbacksLogFunc ideCallbacks
+  --FIXME: add version info here.
+  $logInfo "Initializing ide-backend session"
   -- verifyConfig used to bail if GHC_PACKAGE_PATH was set.  Instead,
   -- we just unset it so that cabal invocations are happy.  It's up to
   -- the user of ide-backend to set 'configPackageDBStack' based on
@@ -191,14 +202,16 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
 
   configDirCanon <- Dir.canonicalizePath configDir
   ideSessionDir  <- createTempDirectory configDirCanon "session."
+  $logDebug $ "Session dir = " <> Text.pack ideSessionDir
   let ideDistDir = fromMaybe (ideSessionDir </> "dist/") sessionInitDistDir
+  $logDebug $ "Dist dir = " <> Text.pack ideDistDir
 
   let ideStaticInfo = IdeStaticInfo{..}
 
   -- Create the common subdirectories of session.nnnn so that we don't have to
   -- worry about creating these elsewhere
   case configLocalWorkingDir of
-    Just _  -> return ()
+    Just dir -> $logDebug $ "Local working dir = " <> Text.pack dir
     Nothing -> do
       Dir.createDirectoryIfMissing True (ideSourceDir  ideStaticInfo)
       Dir.createDirectoryIfMissing True (ideDataDir    ideStaticInfo)
@@ -212,6 +225,7 @@ initSession initParams@SessionInitParams{..} ideConfig@SessionConfig{..} = do
                            sessionInitRelativeIncludes
                            sessionInitRtsOpts
                            ideStaticInfo
+                           ideCallbacks
   let (state, server, version) = case mServer of
          Right (s, v) -> (IdeSessionIdle,         s,          v)
          Left e       -> (IdeSessionServerDied e, Ex.throw e, Ex.throw e)
@@ -326,14 +340,19 @@ data RestartResult =
 
 executeRestart :: SessionInitParams
                -> IdeStaticInfo
+               -> IdeCallbacks
                -> IdeIdleState
                -> IO RestartResult
-executeRestart initParams@SessionInitParams{..} staticInfo idleState = do
+executeRestart initParams@SessionInitParams{..} staticInfo ideCallbacks idleState = do
+  let logFunc = ideCallbacksLogFunc ideCallbacks
+  $logInfo "Restarting ide-backend-server"
   forceShutdownGhcServer $ _ideGhcServer idleState
   mServer <- forkGhcServer sessionInitGhcOptions
                            sessionInitRelativeIncludes
                            sessionInitRtsOpts
                            staticInfo
+                           ideCallbacks
+
   case mServer of
     Right (server, version) -> do
       execInitParams staticInfo initParams
@@ -384,14 +403,14 @@ updateSession :: IdeSession -> IdeSessionUpdate -> (Progress -> IO ()) -> IO ()
 updateSession = flip . updateSession'
 
 updateSession' :: IdeSession -> (Progress -> IO ()) -> IdeSessionUpdate -> IO ()
-updateSession' IdeSession{ideStaticInfo, ideState} callback = \update ->
+updateSession' IdeSession{ideStaticInfo, ideState, ideCallbacks} callback = \update ->
     $modifyStrictMVar_ ideState $ go False update
   where
     go :: Bool -> IdeSessionUpdate -> IdeSessionState -> IO IdeSessionState
     go justRestarted update (IdeSessionIdle idleState) =
       if not (requiresSessionRestart idleState update)
         then do
-          (idleState', mex) <- runSessionUpdate justRestarted update ideStaticInfo callback idleState
+          (idleState', mex) <- runSessionUpdate justRestarted update ideStaticInfo callback ideCallbacks idleState
           case mex of
             Nothing -> return $ IdeSessionIdle          idleState'
             Just ex -> return $ IdeSessionServerDied ex idleState'
@@ -412,7 +431,7 @@ updateSession' IdeSession{ideStaticInfo, ideState} callback = \update ->
       -- TODO: I wish I knew why this is necessary :(
       threadDelay 100000
 
-      restartResult <- executeRestart restartParams ideStaticInfo idleState
+      restartResult <- executeRestart restartParams ideStaticInfo ideCallbacks idleState
       case restartResult of
         ServerRestarted idleState' resetSession ->
           go True (resetSession <> update) (IdeSessionIdle idleState')

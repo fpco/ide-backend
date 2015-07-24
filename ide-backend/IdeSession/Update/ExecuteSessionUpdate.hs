@@ -42,6 +42,7 @@ import IdeSession.Types.Progress
 import IdeSession.Types.Public (RunBufferMode(..), Targets(..))
 import IdeSession.Update.IdeSessionUpdate
 import IdeSession.Util
+import IdeSession.Util.Logger
 import qualified IdeSession.GHC.Client    as GHC
 import qualified IdeSession.Strict.IORef  as IORef
 import qualified IdeSession.Strict.IntMap as IntMap
@@ -65,6 +66,7 @@ data IdeSessionUpdateEnv = IdeSessionUpdateEnv {
   , ideUpdateStateRef :: StrictIORef IdeIdleState
     -- For liftIO
   , ideUpdateExceptionRef :: StrictIORef (Maybe ExternalException)
+  , ideUpdateIdeCallbacks :: IdeCallbacks
   }
 
 newtype ExecuteSessionUpdate a = ExecuteSessionUpdate {
@@ -132,9 +134,10 @@ runSessionUpdate :: Bool
                  -> IdeSessionUpdate
                  -> IdeStaticInfo
                  -> (Progress -> IO ())
+                 -> IdeCallbacks
                  -> IdeIdleState
                  -> IO (IdeIdleState, Maybe ExternalException)
-runSessionUpdate justRestarted update staticInfo callback ideIdleState = do
+runSessionUpdate justRestarted update staticInfo callback ideCallbacks ideIdleState = do
     stRef <- IORef.newIORef ideIdleState
     exRef <- IORef.newIORef Nothing
 
@@ -144,6 +147,7 @@ runSessionUpdate justRestarted update staticInfo callback ideIdleState = do
                  , ideUpdateCallback     = liftIO . callback
                  , ideUpdateStateRef     = stRef
                  , ideUpdateExceptionRef = exRef
+                 , ideUpdateIdeCallbacks = ideCallbacks
                  }
 
     ideIdleState' <- IORef.readIORef stRef
@@ -513,6 +517,7 @@ runGcc :: FilePath -> FilePath -> FilePath -> ExecuteSessionUpdate [SourceError]
 runGcc absC absObj pref = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     callback                        <- asks ideUpdateCallback
+    ideCallbacks                    <- asks ideUpdateIdeCallbacks
     relIncl                         <- Acc.get ideRelativeIncludes
     -- Pass GHC options so that ghc can pass the relevant options to gcc
     ghcOpts <- Acc.get ideGhcOpts
@@ -535,7 +540,7 @@ runGcc absC absObj pref = do
      -- (_exitCode, _stdout, _stderr)
      --   <- readProcessWithExitCode _gcc _args _stdin
      -- The real deal; we call gcc via ghc via cabal functions:
-     exitCode <- invokeExeCabal ideStaticInfo (ReqExeCc runCcArgs) callback
+     exitCode <- invokeExeCabal ideStaticInfo ideCallbacks (ReqExeCc runCcArgs) callback
      stdout <- readFile stdoutLog
      stderr <- readFile stderrLog
      case exitCode of
@@ -633,8 +638,8 @@ executeBuildExe :: [String] -> [(ModuleName, FilePath)] -> ExecuteSessionUpdate 
 executeBuildExe extraOpts ms = do
     ideStaticInfo@IdeStaticInfo{..} <- asks ideUpdateStaticInfo
     let SessionConfig{..} = ideConfig
-
     callback          <- asks ideUpdateCallback
+    ideCallbacks      <- asks ideUpdateIdeCallbacks
     mcomputed         <- Acc.get ideComputed
     ghcOpts           <- Acc.get ideGhcOpts
     relativeIncludes  <- Acc.get ideRelativeIncludes
@@ -672,7 +677,7 @@ executeBuildExe extraOpts ms = do
                                   , beStdoutLog
                                   , beStderrLog
                                   }
-                invokeExeCabal ideStaticInfo (ReqExeBuild beArgs ms) callback
+                invokeExeCabal ideStaticInfo ideCallbacks (ReqExeBuild beArgs ms) callback
     -- Solution 2. to #119: update timestamps of .o (and all other) files
     -- according to the session's artificial timestamp.
     newTS <- nextLogicalTimestamp
@@ -697,6 +702,7 @@ executeBuildDoc = do
     let srcDir = ideSourceDir ideStaticInfo
 
     callback          <- asks ideUpdateCallback
+    ideCallbacks      <- asks ideUpdateIdeCallbacks
     mcomputed         <- Acc.get ideComputed
     ghcOpts           <- Acc.get ideGhcOpts
     relativeIncludes  <- Acc.get ideRelativeIncludes
@@ -745,7 +751,7 @@ executeBuildDoc = do
                                     , beStdoutLog
                                     , beStderrLog
                                     }
-                  invokeExeCabal ideStaticInfo (ReqExeDoc beArgs) callback
+                  invokeExeCabal ideStaticInfo ideCallbacks (ReqExeDoc beArgs) callback
     Acc.set ideBuildDocStatus (Just exitCode)
 
 executeBuildLicenses :: FilePath -> ExecuteSessionUpdate ()
@@ -754,6 +760,7 @@ executeBuildLicenses cabalsDir = do
     let SessionConfig{configGenerateModInfo} = ideConfig
 
     callback  <- asks ideUpdateCallback
+    ideCallbacks <- asks ideUpdateIdeCallbacks
     mcomputed <- Acc.get ideComputed
     when (not configGenerateModInfo) $
       -- TODO: replace the check with an inspection of state component (#87)
@@ -783,7 +790,7 @@ executeBuildLicenses cabalsDir = do
                          , liCabalsDir = cabalsDir
                          , liPkgs = pkgs
                          }
-        invokeExeCabal ideStaticInfo (ReqExeLic liArgs) callback
+        invokeExeCabal ideStaticInfo ideCallbacks (ReqExeLic liArgs) callback
     Acc.set ideBuildLicensesStatus (Just exitCode)
 
 {-------------------------------------------------------------------------------

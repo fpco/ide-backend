@@ -111,8 +111,11 @@ module IdeSession (
     -- ** Starting and stopping
   , IdeSession -- Abstract
   , initSession
+  , initSessionWithCallbacks
   , SessionInitParams(..)
   , defaultSessionInitParams
+  , IdeCallbacks(..)
+  , defaultIdeCallbacks
   , shutdownSession
   , forceShutdownSession
   , restartSession
@@ -236,7 +239,7 @@ import IdeSession.GHC.API
 import IdeSession.GHC.Client
 import IdeSession.Query
 import IdeSession.RPC.Client (ExternalException (..))
-import IdeSession.State (IdeSession)
+import IdeSession.State (IdeSession, IdeCallbacks(..), defaultIdeCallbacks)
 import IdeSession.Types.Progress
 import IdeSession.Types.Public
 import IdeSession.Update

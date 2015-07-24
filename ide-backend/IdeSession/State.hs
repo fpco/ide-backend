@@ -13,6 +13,7 @@ module IdeSession.State
   , ManagedFile
   , GhcServer(..)
   , RunActions(..)
+  , IdeCallbacks(..)
     -- * Accessors
   , ideLogicalTimestamp
   , ideComputed
@@ -38,6 +39,9 @@ module IdeSession.State
   -- * To allow for non-server environments
   , ideSourceDir
   , ideDataDir
+  -- * Callbacks
+  , defaultIdeCallbacks
+  , ideLogFunc
   ) where
 
 import Control.Concurrent (ThreadId)
@@ -54,6 +58,7 @@ import IdeSession.Strict.Container
 import IdeSession.Strict.MVar (StrictMVar)
 import IdeSession.Types.Private hiding (RunResult)
 import qualified IdeSession.Types.Public as Public
+import IdeSession.Util.Logger
 
 import System.FilePath ((</>))
 
@@ -98,6 +103,7 @@ data Computed = Computed {
 data IdeSession = IdeSession {
     ideStaticInfo :: IdeStaticInfo
   , ideState      :: StrictMVar IdeSessionState
+  , ideCallbacks  :: IdeCallbacks
   }
 
 data IdeStaticInfo = IdeStaticInfo {
@@ -213,6 +219,12 @@ data RunActions a = RunActions {
   , forceCancel :: IO ()
   }
 
+-- | Session callbacks.  Currently this just configures how logging is
+-- handled.
+data IdeCallbacks = IdeCallbacks
+  { ideCallbacksLogFunc :: LogFunc
+  }
+
 {------------------------------------------------------------------------------
   Accessors
 ------------------------------------------------------------------------------}
@@ -281,3 +293,24 @@ ideDataDir IdeStaticInfo{..} =
   case configLocalWorkingDir ideConfig of
     Just path -> path
     Nothing   -> ideSessionDir </> "data"
+
+{------------------------------------------------------------------------------
+  Callbacks
+------------------------------------------------------------------------------}
+
+-- | Default session configuration.
+--
+-- Use this instead of creating your own IdeCallbacks to be robust
+-- against extensions of IdeCallbacks.
+--
+-- >> defaultIdeCallbacks = IdeCallbacks
+-- >>  { ideCallbacksLogFunc = \_ _ _ _ -> return ()
+-- >>  }
+defaultIdeCallbacks :: IdeCallbacks
+defaultIdeCallbacks = IdeCallbacks
+  { ideCallbacksLogFunc = \_ _ _ _ -> return ()
+  }
+
+-- | Get the 'LogFunc' for use with the functions in "IdeSession.Util.Logger"
+ideLogFunc :: IdeSession -> LogFunc
+ideLogFunc = ideCallbacksLogFunc . ideCallbacks

@@ -7,27 +7,21 @@ module IdeSession.ExeCabalClient (
 
 import System.Exit (ExitCode)
 
-import Distribution.Verbosity (normal)
-import Distribution.Simple.Program.Find (
-    ProgramSearchPath
-  , findProgramOnSearchPath
-  , ProgramSearchPathEntry(..)
-  )
-
 import IdeSession.Cabal
 import IdeSession.Config
 import IdeSession.GHC.API
-import IdeSession.RPC.Client (RpcServer, RpcConversation(..), forkRpcServer, rpcConversation, shutdown)
+import IdeSession.RPC.Client (RpcServer, RpcConversation(..), forkRpcServer, rpcConversation, shutdown, findProgram)
 import IdeSession.State
 import IdeSession.Types.Progress
 import IdeSession.Util
 
 -- | Invoke the executable that processes our custom functions that use
 -- the machinery of the cabal library.
-invokeExeCabal :: IdeStaticInfo -> ExeCabalRequest -> (Progress -> IO ())
+invokeExeCabal :: IdeStaticInfo -> IdeCallbacks -> ExeCabalRequest -> (Progress -> IO ())
                -> IO ExitCode
-invokeExeCabal ideStaticInfo@IdeStaticInfo{..} args callback = do
-  mLoc <- findProgramOnSearchPath normal searchPath ide_backend_exe_cabal
+invokeExeCabal ideStaticInfo@IdeStaticInfo{..} ideCallbacks args callback = do
+  let logFunc = ideCallbacksLogFunc ideCallbacks
+  mLoc <- findProgram logFunc searchPath ide_backend_exe_cabal
   case mLoc of
     Nothing ->
       fail $ "Could not find ide-backend-exe-cabal"
