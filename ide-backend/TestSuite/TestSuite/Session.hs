@@ -2,6 +2,8 @@
 module TestSuite.Session (
     updateSessionD
   , updateSessionP
+  , updateAndCollectProgress
+  , updateAndCollectStatus
   , loadModule
   , loadModulesFrom
   , loadModulesFrom'
@@ -13,6 +15,7 @@ import Prelude hiding (mod)
 import Control.Monad
 import Data.IORef
 import Data.List (isPrefixOf, isInfixOf)
+import Data.Maybe (mapMaybe)
 import Data.Monoid
 import System.FilePath
 import System.FilePath.Find (always, extension, find)
@@ -24,13 +27,6 @@ import IdeSession
 
 updateSessionD :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
 updateSessionD session update numProgressUpdates = do
-  progressRef <- newIORef []
-
-  -- We just collect the progress messages first, and verify them afterwards
-  updateSession session update $ \p -> do
-    progressUpdates <- readIORef progressRef
-    writeIORef progressRef $ progressUpdates ++ [p]
-
   -- These progress messages are often something like
   --
   -- [18 of 27] Compiling IdeSession.Types.Private ( IdeSession/Types/Private.hs, dist/build/IdeSession/Types/Private.o )
@@ -42,20 +38,13 @@ updateSessionD session update numProgressUpdates = do
   -- So these numbers don't need to start at 1, may be discontiguous, out of
   -- order, and may not end with [X of X]. The only thing we can check here is
   -- that we get at most the number of progress messages we expect.
-  progressUpdates <- readIORef progressRef
+  progressUpdates <- updateAndCollectProgress session update
   assertBool ("We expected " ++ show numProgressUpdates ++ " progress messages, but got " ++ show progressUpdates)
              (length progressUpdates <= numProgressUpdates)
 
 updateSessionP :: IdeSession -> IdeSessionUpdate -> [(Int, Int, String)] -> IO ()
 updateSessionP session update expectedProgressUpdates = do
-  progressRef <- newIORef []
-
-  -- We just collect the progress messages first, and verify them afterwards
-  updateSession session update $ \p -> do
-    progressUpdates <- readIORef progressRef
-    writeIORef progressRef $ progressUpdates ++ [p]
-
-  progressUpdates <- readIORef progressRef
+  progressUpdates <- updateAndCollectProgress session update
   assertBool ("We expected " ++ show expectedProgressUpdates ++ ", but got " ++ show progressUpdates)
              (length progressUpdates <= length expectedProgressUpdates)
 
@@ -66,6 +55,25 @@ updateSessionP session update expectedProgressUpdates = do
                 case progressOrigMsg actual of
                   Just actualMsg -> msg `isInfixOf` T.unpack actualMsg
                   Nothing        -> False)
+
+updateAndCollectProgress :: IdeSession -> IdeSessionUpdate -> IO [Progress]
+updateAndCollectProgress session update =
+    fmap (mapMaybe getProgress) $ updateAndCollectStatus session update
+  where
+    getProgress (UpdateStatusProgress p) = Just p
+    getProgress _ = Nothing
+
+updateAndCollectStatus :: IdeSession -> IdeSessionUpdate -> IO [UpdateStatus]
+updateAndCollectStatus session update = do
+  statusRef <- newIORef []
+
+  -- We just collect the progress messages first, and verify them afterwards
+  updateSession session update $ \status -> do
+    statusUpdates <- readIORef statusRef
+    writeIORef statusRef $ statusUpdates ++ [status]
+
+  readIORef statusRef
+
 
 loadModule :: FilePath -> String -> IdeSessionUpdate
 loadModule file contents =

@@ -446,15 +446,10 @@ test_RelInclPath_InclPathChange env = withAvailableSession env $ \session -> do
 
 test_ParseCompiling :: TestSuiteEnv -> Assertion
 test_ParseCompiling env = withAvailableSession env $ \session -> do
-    progressUpdatesRef <- newIORef []
-    updateSession session upd $ \p -> do
-      progressUpdates <- readIORef progressUpdatesRef
-      writeIORef progressUpdatesRef (progressUpdates ++ [p])
+    progressUpdates <- updateAndCollectProgress session upd
     assertNoErrors session
-
-    progressUpdates <- readIORef progressUpdatesRef
     assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling B")]
-                 (map abstract progressUpdates)
+                   (map abstract progressUpdates)
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "A.hs" . L.unlines $
@@ -476,15 +471,10 @@ test_ParseCompiling env = withAvailableSession env $ \session -> do
 
 test_ParseCompiling_TH :: TestSuiteEnv -> Assertion
 test_ParseCompiling_TH env = withAvailableSession env $ \session -> do
-    progressUpdatesRef <- newIORef []
-    updateSession session upd $ \p -> do
-      progressUpdates <- readIORef progressUpdatesRef
-      writeIORef progressUpdatesRef (progressUpdates ++ [p])
+    progressUpdates <- updateAndCollectProgress session upd
     assertNoErrors session
-
-    do progressUpdates <- readIORef progressUpdatesRef
-       assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling Main")]
-                      (map abstract progressUpdates)
+    assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling Main")]
+                   (map abstract progressUpdates)
 
     -- Now we touch A, triggering recompilation of both A and B
     -- This will cause ghc to report "[TH]" as part of the progress message
@@ -492,15 +482,10 @@ test_ParseCompiling_TH env = withAvailableSession env $ \session -> do
     -- API; but just in case, we check that we still get the right messages
     -- (and not, for instance, '[TH]' as the module name).
 
-    writeIORef progressUpdatesRef []
-    updateSession session upd2 $ \p -> do
-      progressUpdates <- readIORef progressUpdatesRef
-      writeIORef progressUpdatesRef (progressUpdates ++ [p])
+    progressUpdates2 <- updateAndCollectProgress session upd2
     assertNoErrors session
-
-    do progressUpdates <- readIORef progressUpdatesRef
-       assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling Main")]
-                      (map abstract progressUpdates)
+    assertEqual "" [(1, 2, Just "Compiling A"), (2, 2, Just "Compiling Main")]
+                   (map abstract progressUpdates2)
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "A.hs" . L.unlines $
