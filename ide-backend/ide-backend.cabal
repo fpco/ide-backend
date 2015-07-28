@@ -15,7 +15,7 @@ extra-source-files:   README.md
 
 library
   exposed-modules:    IdeSession
-  other-modules:      IdeSession.State,
+                      IdeSession.State,
                       IdeSession.Config,
                       IdeSession.Cabal,
                       IdeSession.ExeCabalClient,
@@ -191,7 +191,7 @@ test-suite TestSuite
 test-suite rpc-server
   type:               exitcode-stdio-1.0
   main-is:            rpc-server.hs
-  hs-source-dirs:     . test
+  hs-source-dirs:     test
   build-depends:      base                 ==4.*,
                       directory            ==1.*,
                       filemanip            >= 0.3.6.2 && < 0.4,
@@ -209,6 +209,7 @@ test-suite rpc-server
                       executable-path      >= 0.0     && < 0.1,
                       unix                 >= 2.5     && < 2.8,
                       binary               >= 0.7.1.0 && < 0.8,
+                      ide-backend,
                       ide-backend-common,
                       template-haskell
 
