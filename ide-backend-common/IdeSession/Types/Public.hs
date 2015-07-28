@@ -144,7 +144,7 @@ data SourceError = SourceError
   deriving (Show, Eq, Generic)
 
 -- | Severity of an error.
-data SourceErrorKind = KindError | KindWarning
+data SourceErrorKind = KindError | KindWarning | KindServerDied
   deriving (Show, Eq, Generic)
 
 type ModuleName = Text
@@ -349,13 +349,14 @@ instance Binary IdNameSpace where
 instance Binary SourceErrorKind where
   put KindError      = putWord8 0
   put KindWarning    = putWord8 1
+  put KindServerDied = putWord8 2
 
   get = do
     header <- getWord8
     case header of
       0 -> return KindError
       1 -> return KindWarning
-      2 -> return KindError -- In old versions was KindServerDied
+      2 -> return KindServerDied
       _ -> fail "SourceErrorKind.get: invalid header"
 
 instance Binary ImportEntities where
@@ -509,7 +510,6 @@ $(deriveJSON defaultOptions ''SpanInfo)
 $(deriveJSON defaultOptions ''BreakInfo)
 $(deriveJSON defaultOptions ''RunResult)
 $(deriveJSON defaultOptions ''RunBufferMode)
-$(deriveJSON defaultOptions ''UpdateStatus)
 
 {------------------------------------------------------------------------------
   PrettyVal instances (these rely on Generics)
