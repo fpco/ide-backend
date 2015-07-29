@@ -494,22 +494,24 @@ instance Binary Targets where
   internally.
 ------------------------------------------------------------------------------}
 
-$(deriveJSON defaultOptions ''IdNameSpace)
-$(deriveJSON defaultOptions ''SourceErrorKind)
-$(deriveJSON defaultOptions ''ImportEntities)
-$(deriveJSON defaultOptions ''Import)
-$(deriveJSON defaultOptions ''SourceError)
-$(deriveJSON defaultOptions ''IdProp)
-$(deriveJSON defaultOptions ''IdScope)
-$(deriveJSON defaultOptions ''SourceSpan)
-$(deriveJSON defaultOptions ''EitherSpan)
-$(deriveJSON defaultOptions ''ModuleId)
-$(deriveJSON defaultOptions ''PackageId)
-$(deriveJSON defaultOptions ''IdInfo)
-$(deriveJSON defaultOptions ''SpanInfo)
-$(deriveJSON defaultOptions ''BreakInfo)
-$(deriveJSON defaultOptions ''RunResult)
-$(deriveJSON defaultOptions ''RunBufferMode)
+$(concat <$> mapM (deriveJSON defaultOptions)
+  [ ''BreakInfo
+  , ''EitherSpan
+  , ''IdInfo
+  , ''IdNameSpace
+  , ''IdProp
+  , ''IdScope
+  , ''Import
+  , ''ImportEntities
+  , ''ModuleId
+  , ''PackageId
+  , ''RunBufferMode
+  , ''RunResult
+  , ''SourceError
+  , ''SourceErrorKind
+  , ''SourceSpan
+  , ''SpanInfo
+  ])
 
 {------------------------------------------------------------------------------
   PrettyVal instances (these rely on Generics)
