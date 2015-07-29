@@ -90,6 +90,8 @@ executable ide-backend-server
                    Cabal
     cpp-options: -DGHC_710
     ghc-options: -dynamic
+  if impl(ghc > 7.10.1)
+    cpp-options: -DGHC_AFTER_710_1
 
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,

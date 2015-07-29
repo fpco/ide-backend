@@ -11,7 +11,7 @@
 -- any modules from the ghc package and the modules should not be reexported
 -- anywhere else, with the exception of @IdeSession.GHC.Server@.
 module Run
-  ( -- * Re-expored GHC API
+  ( -- * Re-exported GHC API
     Ghc
   , runFromGhc
   , liftIO
@@ -73,7 +73,7 @@ import Bag (bagToList)
 import DynFlags (defaultDynFlags)
 import Exception (ghandle)
 import ErrUtils (ErrMsg)
-import FastString ( unpackFS )
+import FastString (unpackFS, mkFastString)
 import GHC hiding (
     ModuleName
   , RunResult(..)
@@ -85,6 +85,7 @@ import OccName (occEnvElts)
 import Outputable (PprStyle, mkUserStyle)
 import RdrName (GlobalRdrEnv, GlobalRdrElt, gre_name)
 import RnNames (rnImports)
+import SrcLoc (mkRealSrcSpan, mkRealSrcLoc)
 import TcRnMonad (initTc)
 import TcRnTypes (RnM)
 import RtClosureInspect (Term)
@@ -317,14 +318,23 @@ autocompletion summary = do
         return IdInfo{..}
 
       autoEnvs :: ModSummary -> IO [GlobalRdrElt]
-      autoEnvs ModSummary{ ms_mod
+      autoEnvs ms@ModSummary{ ms_mod
                                  , ms_hsc_src
                                  , ms_srcimps
                                  , ms_textual_imps
                                  } = do
         let go :: RnM (a, GlobalRdrEnv, b, c) -> IO [GlobalRdrElt]
             go op = do
+#if GHC_AFTER_710_1
+              -- Not sure if this is the same thing that GHC would
+              -- pass in, but this is just to initialize the state,
+              -- and will be overridden before any uses.
+              let srcSpan = mkRealSrcSpan loc loc
+                  loc = mkRealSrcLoc (mkFastString (HscTypes.msHsFilePath ms)) 1 1
+              ((_warns, _errs), res) <- initTc session ms_hsc_src False ms_mod srcSpan op
+#else
               ((_warns, _errs), res) <- initTc session ms_hsc_src False ms_mod op
+#endif
               case res of
                 Nothing -> do
                   -- TODO: deal with import errors
@@ -465,7 +475,7 @@ importBreakInfo (Just GHC.BreakInfo{..}) names = runMaybeT $ do
       setPrintContext pprStyle
 
       localVars           <- mkTerms >>= mapM (exportVar pprStyle)
-      ProperSpan srcSpan' <- liftIO $ extractSourceSpan srcSpan
+      ProperSpan srcSpan' <- liftIO $ extractEitherSpan srcSpan
       prettyResTy         <- prettyM pprStyle breakInfo_resty
 
       return BreakInfo {
@@ -534,7 +544,7 @@ collectSrcError' errsRef _ _ flags severity srcspan style msg
                       SevFatal   -> Just KindError
                       _          -> Nothing
   = do let msgstr = showSDocForUser flags (queryQual style) msg
-       sp <- extractSourceSpan srcspan
+       sp <- extractEitherSpan srcspan
        modifyIORef errsRef (StrictList.cons $ SourceError errKind sp (Text.pack msgstr))
 
 collectSrcError' _errsRef handlerOutput _ flags SevOutput _srcspan style msg
@@ -563,7 +573,7 @@ fromHscSourceError = mapM aux . bagToList . HscTypes.srcErrorMessages
 
       case sourceErrorSpan e of
         Just real -> do
-          xSpan <- extractSourceSpan real
+          xSpan <- extractEitherSpan real
           return $ SourceError KindError xSpan err
         Nothing ->
           return $ SourceError KindError (TextSpan noloc) err

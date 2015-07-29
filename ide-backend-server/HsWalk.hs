@@ -136,9 +136,15 @@ runHscQQ stRef qq@(HsQuasiQuote quoter _span _str) = do
     extractIdsResumeTc stRef $ go span
     return qq
   where
+#ifdef GHC_AFTER_710_1
+    go :: RealSrcSpan -> ExtractIdsM ()
+    go span = do
+      span'                  <- extractSourceSpan span
+#else
     go :: SrcSpan -> ExtractIdsM ()
     go span = do
-      ProperSpan span'       <- extractSourceSpan span
+      ProperSpan span'       <- extractEitherSpan span
+#endif
       dflags                 <- asks eIdsDynFlags
       linkEnv                <- asks eIdsLinkEnv
       rdrEnv                 <- asks eIdsRdrEnv
@@ -397,7 +403,7 @@ lookupRdrEnv rdrEnv name =
 
 recordExpType :: SrcSpan -> Maybe Type -> ExtractIdsM (Maybe Type)
 recordExpType span (Just typ) = do
-  eitherSpan <- extractSourceSpan span
+  eitherSpan <- extractEitherSpan span
   case eitherSpan of
     ProperSpan properSpan -> do
       prettyTyp <- tidyType typ >>= showTypeForUser
@@ -455,7 +461,7 @@ idInfoForName
   -> m (IdPropPtr, Maybe IdScope)     -- ^ Nothing if imported but no GlobalRdrElt
 idInfoForName dflags name idIsBinder mElt mCurrent home = do
     scope      <- constructScope
-    idDefSpan  <- extractSourceSpan (Name.nameSrcSpan name)
+    idDefSpan  <- extractEitherSpan (Name.nameSrcSpan name)
 
     let mod          = if isLocal scope
                          then fromJust mCurrent
@@ -501,8 +507,8 @@ idInfoForName dflags name idIsBinder mElt mCurrent home = do
       extractImportInfo :: [RdrName.ImportSpec] -> m (GHC.ModuleName, EitherSpan, String)
       extractImportInfo (RdrName.ImpSpec decl item:_) = do
         span <- case item of
-                  RdrName.ImpAll -> extractSourceSpan (RdrName.is_dloc decl)
-                  RdrName.ImpSome _explicit loc -> extractSourceSpan loc
+                  RdrName.ImpAll -> extractEitherSpan (RdrName.is_dloc decl)
+                  RdrName.ImpSome _explicit loc -> extractEitherSpan loc
         return
           ( RdrName.is_mod decl
           , span
@@ -563,7 +569,7 @@ recordName :: (IdInfo -> SpanInfo)
            -> IsBinder -> Located Name
            -> ExtractIdsM (Maybe Type)
 recordName mkSpanInfo idIsBinder (L span name) = do
-  span' <- extractSourceSpan span
+  span' <- extractEitherSpan span
   case span' of
     ProperSpan sourceSpan -> do
       dflags  <- getDynFlags

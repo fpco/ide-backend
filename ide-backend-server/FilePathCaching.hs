@@ -1,6 +1,7 @@
 module FilePathCaching (
     MonadFilePathCaching(..)
   , mkFilePathPtr
+  , extractEitherSpan
   , extractSourceSpan
   ) where
 
@@ -46,15 +47,24 @@ mkFilePathPtr path = do
     Just key ->
        return $ FilePathPtr key
 
-extractSourceSpan :: MonadFilePathCaching m => SrcSpan -> m EitherSpan
-extractSourceSpan (RealSrcSpan srcspan) = do
+extractEitherSpan :: MonadFilePathCaching m => SrcSpan -> m EitherSpan
+extractEitherSpan (RealSrcSpan srcspan) = do
   key <- mkFilePathPtr $ unpackFS (srcSpanFile srcspan)
   return . ProperSpan $ SourceSpan
     key
     (srcSpanStartLine srcspan) (srcSpanStartCol srcspan)
     (srcSpanEndLine srcspan)   (srcSpanEndCol   srcspan)
-extractSourceSpan (UnhelpfulSpan s) =
+extractEitherSpan (UnhelpfulSpan s) =
   return . TextSpan $ fsToText s
+
+extractSourceSpan:: MonadFilePathCaching m => RealSrcSpan -> m SourceSpan
+extractSourceSpan srcspan = do
+  key <- mkFilePathPtr $ unpackFS (srcSpanFile srcspan)
+  return $ SourceSpan
+    key
+    (srcSpanStartLine srcspan) (srcSpanStartCol srcspan)
+    (srcSpanEndLine srcspan)   (srcSpanEndCol   srcspan)
+
 
 fsToText :: FastString -> Text
 fsToText = Text.pack . unpackFS
