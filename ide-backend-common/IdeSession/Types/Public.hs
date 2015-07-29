@@ -511,6 +511,7 @@ $(concat <$> mapM (deriveJSON defaultOptions)
   , ''SourceErrorKind
   , ''SourceSpan
   , ''SpanInfo
+  , ''UpdateStatus
   ])
 
 {------------------------------------------------------------------------------
