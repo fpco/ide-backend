@@ -2,6 +2,7 @@
 module TestSuite.Session (
     updateSessionD
   , updateSessionP
+  , updateAndExpectProgressCount
   , updateAndCollectProgress
   , updateAndCollectStatus
   , loadModule
@@ -55,6 +56,12 @@ updateSessionP session update expectedProgressUpdates = do
                 case progressOrigMsg actual of
                   Just actualMsg -> msg `isInfixOf` T.unpack actualMsg
                   Nothing        -> False)
+
+updateAndExpectProgressCount :: IdeSession -> IdeSessionUpdate -> Int -> IO ()
+updateAndExpectProgressCount session update expected = do
+    count <- fmap length (updateAndCollectProgress session update)
+    assertBool ("Expected " ++ show expected ++ " build steps, but got " ++ show count)
+               (count == expected)
 
 updateAndCollectProgress :: IdeSession -> IdeSessionUpdate -> IO [Progress]
 updateAndCollectProgress session update =

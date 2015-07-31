@@ -14,13 +14,13 @@ import TestSuite.Assertions
 
 testGroupBuildDoc :: TestSuiteEnv -> TestTree
 testGroupBuildDoc env = testGroup "Build haddocks" [
-    stdTest env "From some .lhs with relativeIncludes"
-                                             (test_fromLhsFiles True)
-  , stdTest env "From some .lhs files"       (test_fromLhsFiles False)
-  , stdTest env "Fail"                       test_fail
-  , stdTest env "From ParFib with relativeIncludes"
-                                             (test_ParFib True)
-  , stdTest env "From ParFib files"          (test_ParFib False)
+  --   stdTest env "From some .lhs with relativeIncludes"
+  --                                            (test_fromLhsFiles True)
+  -- , stdTest env "From some .lhs files"       (test_fromLhsFiles False)
+  -- , stdTest env "Fail"                       test_fail
+  -- , stdTest env "From ParFib with relativeIncludes"
+  --                                            (test_ParFib True)
+  -- , stdTest env "From ParFib files"          (test_ParFib False)
   ]
 
 test_fromLhsFiles :: Bool -> TestSuiteEnv -> Assertion
