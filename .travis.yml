@@ -28,6 +28,8 @@ matrix:
         - hvr-ghc
         packages:
         - ghc-head
+  allow_failures:
+    - env: GHCVER=head STACK_YAML=stack.yaml
 
 before_install:
   # stack
