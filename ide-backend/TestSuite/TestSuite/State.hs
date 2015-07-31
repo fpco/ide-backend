@@ -37,6 +37,7 @@ module TestSuite.State (
   , packageCheck
   ) where
 
+import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.DeepSeq (rnf)
@@ -369,8 +370,10 @@ data TestSuiteServerConfig = TestSuiteServerConfig {
   deriving (Eq, Show)
 
 startNewSession :: TestSuiteServerConfig -> IO IdeSession
-startNewSession cfg = initSession (deriveSessionInitParams cfg)
-                                  (deriveSessionConfig     cfg)
+startNewSession cfg = do
+    mpkgDb <- lookupEnv "GHC_PACKAGE_PATH_TEST"
+    initSession (deriveSessionInitParams cfg)
+                (deriveSessionConfig     cfg mpkgDb)
 
 deriveSessionInitParams :: TestSuiteServerConfig -> SessionInitParams
 deriveSessionInitParams TestSuiteServerConfig{..} = defaultSessionInitParams {
@@ -385,21 +388,25 @@ deriveSessionInitParams TestSuiteServerConfig{..} = defaultSessionInitParams {
   where
     TestSuiteConfig{..} = testSuiteServerConfig
 
-deriveSessionConfig :: TestSuiteServerConfig -> SessionConfig
-deriveSessionConfig TestSuiteServerConfig{..} = defaultSessionConfig {
+deriveSessionConfig :: TestSuiteServerConfig -> Maybe String -> SessionConfig
+deriveSessionConfig TestSuiteServerConfig{..} mpkgDb = defaultSessionConfig {
       configDeleteTempFiles =
         not testSuiteConfigKeepTempFiles
     , configPackageDBStack  =
         fromMaybe (configPackageDBStack defaultSessionConfig) $
-          (
-            testSuiteServerPackageDBStack
-          `mplus`
-            do packageDb <- case testSuiteServerGhcVersion of
+          ( do packageDb <- case testSuiteServerGhcVersion of
                               GHC_7_4  -> testSuiteConfigPackageDb74
                               GHC_7_8  -> testSuiteConfigPackageDb78
                               GHC_7_10 -> testSuiteConfigPackageDb710
-               return [GlobalPackageDB, SpecificPackageDB packageDb]
-          )
+               return [GlobalPackageDB, SpecificPackageDB packageDb])
+          <|>
+            testSuiteServerPackageDBStack
+          <|>
+            fmap
+              (\pkgPath ->
+                let dbPaths = drop 1 (reverse (splitSearchPath pkgPath))
+                in GlobalPackageDB : map SpecificPackageDB dbPaths)
+              mpkgDb
     , configExtraPathDirs =
         splitSearchPath $ case testSuiteServerGhcVersion of
                             GHC_7_4  -> testSuiteConfigExtraPaths74

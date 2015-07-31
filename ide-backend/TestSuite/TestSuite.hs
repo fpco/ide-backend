@@ -1,5 +1,6 @@
 module Main where
 
+import Data.Foldable (forM_)
 import Data.List (isPrefixOf)
 import System.Process (readProcess)
 import System.Environment
@@ -80,7 +81,8 @@ allTests name env = testGroup name [
 main :: IO ()
 main = do
     -- Yes, this is hacky, but I couldn't figure out how to easily do
-    -- this with tasty's API...
+    -- this with tasty's API...  So, instead of trying to
+    -- programatically modify the config, we generate arguments.
     args <- getArgs
     let noGhcSpecified =
            "--test-74"  `notElem` args &&
@@ -102,6 +104,11 @@ main = do
           putStrLn $ "Assuming --test-" ++ versionCode
           return (("--test-" ++ versionCode) : args)
         else return args
+    -- Set GHC_PACKAGE_PATH_TEST, an environment variable used by
+    -- TestSuite.State.startNewSession.  This is needed because
+    -- ide-backend unsets GHC_PACKAGE_PATH.
+    mpkgPath <- lookupEnv "GHC_PACKAGE_PATH"
+    forM_ mpkgPath $ setEnv "GHC_PACKAGE_PATH_TEST"
     withArgs args' $ defaultMainWithIngredients ings $ testSuite $ \env ->
       let TestSuiteConfig{..} = testSuiteEnvConfig env
           env74  = env { testSuiteEnvGhcVersion = GHC_7_4  }
