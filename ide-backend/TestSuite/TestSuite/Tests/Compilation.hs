@@ -165,14 +165,8 @@ test_NamedFieldPuns env = withAvailableSession' env (withGhcOpts ["-hide-package
 
 test_DontRecompile_SingleModule :: TestSuiteEnv -> Assertion
 test_DontRecompile_SingleModule env = withAvailableSession env $ \session -> do
-    counter <- newCounter
-
-    updateSession session upd (\_ -> incCounter counter)
-    assertCounter counter 1
-
-    resetCounter counter
-    updateSession session upd (\_ -> incCounter counter)
-    assertCounter counter 0
+    updateAndExpectProgressCount session upd 1
+    updateAndExpectProgressCount session upd 0
   where
     upd = (updateCodeGeneration True)
        <> (updateSourceFile "A.hs" . L.unlines $
@@ -183,31 +177,16 @@ test_DontRecompile_SingleModule env = withAvailableSession env $ \session -> do
 
 test_DontRecompile_Depends :: TestSuiteEnv -> Assertion
 test_DontRecompile_Depends env = withAvailableSession env $ \session -> do
-    counter <- newCounter
-
     -- Initial compilation needs to recompile for A and B
-    updateSession session upd (\_ -> incCounter counter)
-    assertCounter counter 2
-
+    updateAndExpectProgressCount session upd 2
     -- Overwriting B with the same code requires no compilation at all
-    resetCounter counter
-    updateSession session (updB 0) (\_ -> incCounter counter)
-    assertCounter counter 0
-
+    updateAndExpectProgressCount session (updB 0) 0
     -- Nor does overwriting A with the same code
-    resetCounter counter
-    updateSession session (updA 0) (\_ -> incCounter counter)
-    assertCounter counter 0
-
+    updateAndExpectProgressCount session (updA 0) 0
     -- Giving B a new interface means both A and B need to be recompiled
-    resetCounter counter
-    updateSession session (updB 1) (\_ -> incCounter counter)
-    assertCounter counter 2
-
+    updateAndExpectProgressCount session (updB 1) 2
     -- Changing the interface of A only requires recompilation of A
-    resetCounter counter
-    updateSession session (updA 1) (\_ -> incCounter counter)
-    assertCounter counter 1
+    updateAndExpectProgressCount session (updA 1) 1
   where
     -- 'updA' is defined so that the interface of 'updA n' is different
     -- to the interface of 'updA m' (with n /= m)
@@ -526,25 +505,3 @@ test_RejectMangledHeader env = withAvailableSession env $ \session -> do
   where
     update  = updateSourceFile "M.hs" "module very-wrong where"
     update2 = updateSourceFile "M.hs" "module M.1.2.3.8.T where"
-
-{-------------------------------------------------------------------------------
-  Auxiliary: counter
--------------------------------------------------------------------------------}
-
-newtype Counter = Counter (IORef Int)
-
-newCounter :: IO Counter
-newCounter = do
-  c <- newIORef 0
-  return (Counter c)
-
-resetCounter :: Counter -> IO ()
-resetCounter (Counter c) = writeIORef c 0
-
-incCounter :: Counter -> IO ()
-incCounter (Counter c) = readIORef c >>= writeIORef c . (+ 1)
-
-assertCounter :: Counter -> Int -> Assertion
-assertCounter (Counter c) i = do
-  j <- readIORef c
-  assertEqual "" i j
