@@ -1,19 +1,44 @@
-env:
- - CABALVER=1.20 GHCVER=7.8.4
- #- CABALVER=1.22 GHCVER=7.10.1 # bytestring-trie not yet fixed
- #- CABALVER=head GHCVER=head   # see section about GHC HEAD snapshots
+matrix:
+  include:
+  - env: GHCVER=7.8.4 STACK_YAML=stack-7.8.yaml
+    addons:
+      apt:
+        sources:
+        - hvr-ghc
+        packages:
+        - ghc-7.8.4
+  - env: GHCVER=7.10.1 STACK_YAML=stack.yaml
+    addons:
+      apt:
+        sources:
+        - hvr-ghc
+        packages:
+        - ghc-7.10.1
+  - env: GHCVER=7.10.2 STACK_YAML=stack.yaml
+    addons:
+      apt:
+        sources:
+        - hvr-ghc
+        packages:
+        - ghc-7.10.2
+  - env: GHCVER=head STACK_YAML=stack.yaml
+    addons:
+      apt:
+        sources:
+        - hvr-ghc
+        packages:
+        - ghc-head
 
 before_install:
- - travis_retry sudo add-apt-repository -y ppa:hvr/ghc
- - travis_retry sudo apt-get update
- - travis_retry sudo apt-get install cabal-install-$CABALVER ghc-$GHCVER # see note about happy/alex
- - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$HOME/.cabal/bin:$PATH
+  # stack
+  - mkdir -p ~/.local/bin
+  - export PATH=~/.local/bin:/opt/ghc/$GHCVER/bin:$PATH
+  - travis_retry curl -L https://github.com/commercialhaskell/stack/releases/download/v0.1.2.0/stack-0.1.2.0-x86_64-linux.gz | gunzip > ~/.local/bin/stack
+  - chmod a+x ~/.local/bin/stack
 
 install:
- - cabal --version
- - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
- - travis_retry cabal update
- - cabal install alex happy
+  - ./travis_long stack --no-terminal --skip-ghc-check setup
+  - ./travis_long stack --no-terminal --skip-ghc-check test --only-snapshot
 
 script:
- - cabal install --run-tests ./ide-backend ./ide-backend-server ./ide-backend-common
+  - ./travis_long stack --no-terminal --skip-ghc-check test
