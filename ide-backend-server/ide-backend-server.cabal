@@ -81,7 +81,7 @@ executable ide-backend-server
                    Cabal
     cpp-options: -DGHC_78
     ghc-options: -dynamic
-  if impl(ghc == 7.10.*)
+  if impl(ghc == 7.10.*) || impl(ghc == 7.11.*)
     build-depends: time        == 1.5.*,
                    haddock-api == 2.16.*,
                    -- although from 7.10 basic datatypes are defined in
