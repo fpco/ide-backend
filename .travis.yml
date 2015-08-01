@@ -43,4 +43,5 @@ install:
   - ./travis_long stack --no-terminal --skip-ghc-check test --only-snapshot
 
 script:
+  - ./travis_long stack --no-terminal --skip-ghc-check build ide-backend-server
   - ./travis_long stack --no-terminal --skip-ghc-check test

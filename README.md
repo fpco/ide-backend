@@ -16,11 +16,14 @@ build ide-backend.  Once you have stack, run `stack install`.
 
 ## Running the tests
 
-To run the tests, just do `stack test`.  This won't run a complete
-test, as it will only use your current GHC version, but that should be
-sufficient for most development.  We can leave it to
-[travis](https://travis-ci.org/fpco/ide-backend) to try multiple GHC
-versions.
+To run the tests, `stack build ide-backend-server && stack test`.
+This won't run a complete test, as it will only use your current GHC
+version, but that should be sufficient for most development.  We can
+leave it to [travis](https://travis-ci.org/fpco/ide-backend) to try
+multiple GHC versions.
+
+Note: Hopefully soon this will merely be `stack test`.  See
+[this issue](https://github.com/commercialhaskell/stack/issues/701).
 
 ## Hello World
 
