@@ -197,14 +197,14 @@ testPerfMs :: Int
 {-# NOINLINE testPerfMs #-}
 testPerfMs = read $ unsafePerformIO $
   System.getEnv "IDE_BACKEND_testPerfMs"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "150")
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "20")
 
 -- TODO: This should use tasty command line arguments instead
 testPerfTimes :: Int
 {-# NOINLINE testPerfTimes #-}
 testPerfTimes = read $ unsafePerformIO $
   System.getEnv "IDE_BACKEND_testPerfTimes"
-  `Ex.catch` (\(_ :: Ex.IOException) -> return "150")
+  `Ex.catch` (\(_ :: Ex.IOException) -> return "20")
 
 -- TODO: This should use tasty command line arguments instead
 testPerfLimit :: Int
