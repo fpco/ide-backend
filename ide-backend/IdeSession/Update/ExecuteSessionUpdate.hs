@@ -201,9 +201,7 @@ executeSessionUpdate justRestarted IdeSessionUpdate{..} = do
         cFilesChanged = numActions > 0
 
     IdeStaticInfo{ideConfig} <- asks ideUpdateStaticInfo
-    let hasLocalWorkingDir = case configLocalWorkingDir ideConfig of
-                               Just _ -> True
-                               _      -> False
+    let hasLocalWorkingDir = isJust (configLocalWorkingDir ideConfig)
 
     let needsRecompile =
              -- We recompile both when source code and when data files change
