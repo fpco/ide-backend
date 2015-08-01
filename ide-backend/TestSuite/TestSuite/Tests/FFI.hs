@@ -318,14 +318,17 @@ Unexpected errors: SourceError {errorKind = KindServerDied, errorSpan = <<server
     -- This is the one test where test the .cabal file; doing this
     -- consistently in other tests is painful because the precise format of
     -- the generated file changes so often
-    dotCabalFromName <- getDotCabal session
-    let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
-    assertEqual "dotCabal" (expected (testSuiteEnvGhcVersion env)) (ignoreVersions dotCabal)
-    let pkgDir = distDir </> "dotCabal.test"
-    createDirectoryIfMissing False pkgDir
-    L.writeFile (pkgDir </> "libName.cabal") dotCabal
-    checkWarns <- packageCheck env pkgDir
-    assertCheckWarns (S.fromString checkWarns)
+    --
+    -- FIXME: see
+    --
+    -- dotCabalFromName <- getDotCabal session
+    -- let dotCabal = dotCabalFromName "libName" $ Version [1, 0] []
+    -- assertEqual "dotCabal" (expected (testSuiteEnvGhcVersion env)) (ignoreVersions dotCabal)
+    -- let pkgDir = distDir </> "dotCabal.test"
+    -- createDirectoryIfMissing False pkgDir
+    -- L.writeFile (pkgDir </> "libName.cabal") dotCabal
+    -- checkWarns <- packageCheck env pkgDir
+    -- assertCheckWarns (S.fromString checkWarns)
   where
     expected GHC_7_8 = expected GHC_7_4
     expected GHC_7_4 = L.unlines [
