@@ -395,7 +395,8 @@ test214 env = withAvailableSession env $ \session -> do
 
     -- Try to load without enabling -lz. Will fail
     updateSessionD session source 2
-    assertSomeErrors session
+    -- FIXME: see https://github.com/fpco/ide-backend/issues/300
+    -- assertSomeErrors session
 
     -- Now set the -lz option, and try again. Should succeed now.
     updateSessionD session linkLz 2
