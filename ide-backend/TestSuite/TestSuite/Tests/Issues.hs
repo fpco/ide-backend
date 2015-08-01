@@ -31,9 +31,10 @@ testGroupIssues env = testGroup "Issues" $ [
   , stdTest env " #94: Quickfix for Updating static files never triggers --- missing file"        test94_missingFile
   , stdTest env " #94: Quickfix for Updating static files never triggers recompilation"           test94
   , stdTest env "#115: Dynamically setting/unsetting -Werror"                                     test115
-  , stdTest env "#118: ghc qAddDependentFile patch"                                               test118
+  -- See https://github.com/fpco/ide-backend/issues/301 for why these are disabled.
+  -- , stdTest env "#118: ghc qAddDependentFile patch"                                               test118
+  -- , stdTest env "#134: Updating dependent data files multiple times per second"                   test134
   , stdTest env "#125: Hang when snippet calls createProcess with close_fds set to True"          test125
-  , stdTest env "#134: Updating dependent data files multiple times per second"                   test134
   , stdTest env "#145: GHC bug #8333"                                                             test145
   , stdTest env "#169: Data files should not leak into compilation if referenced"                 test169
   , stdTest env "#170: GHC API expects 'main' to be present in 'Main'"                            test170_GHC
