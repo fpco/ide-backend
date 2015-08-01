@@ -1,47 +1,29 @@
 matrix:
   include:
-  - env: GHCVER=7.8.4 STACK_YAML=stack-7.8.yaml
-    addons:
-      apt:
-        sources:
-        - hvr-ghc
-        packages:
-        - ghc-7.8.4
-  - env: GHCVER=7.10.1 STACK_YAML=stack.yaml
-    addons:
-      apt:
-        sources:
-        - hvr-ghc
-        packages:
-        - ghc-7.10.1
-  - env: GHCVER=7.10.2 STACK_YAML=stack.yaml
-    addons:
-      apt:
-        sources:
-        - hvr-ghc
-        packages:
-        - ghc-7.10.2
-  - env: GHCVER=head STACK_YAML=stack.yaml
-    addons:
-      apt:
-        sources:
-        - hvr-ghc
-        packages:
-        - ghc-head
-  allow_failures:
-    - env: GHCVER=head STACK_YAML=stack.yaml
+    - env: GHCVER=7.8.4 CABALVER=1.18 STACK_YAML=stack-7.8.yaml
+    - env: GHCVER=7.10.1 CABALVER=1.22 STACK_YAML=stack.yaml
+    - env: GHCVER=7.10.2 CABALVER=1.22 STACK_YAML=stack.yaml
+
+# Disabled until haddock-api supports it
+#    - env: GHCVER=head CABALVER=1.22 STACK_YAML=stack.yaml
+#  allow_failures:
+#    - env: GHCVER=head STACK_YAML=stack.yaml
 
 before_install:
+  # ghc
+  - travis_retry sudo add-apt-repository -y ppa:hvr/ghc
+  - travis_retry sudo apt-get update
+  - travis_retry sudo apt-get install cabal-install-$CABALVER ghc-$GHCVER
   # stack
   - mkdir -p ~/.local/bin
-  - export PATH=~/.local/bin:/opt/ghc/$GHCVER/bin:$PATH
+  - export PATH=~/.local/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
   - travis_retry curl -L https://github.com/commercialhaskell/stack/releases/download/v0.1.2.0/stack-0.1.2.0-x86_64-linux.gz | gunzip > ~/.local/bin/stack
   - chmod a+x ~/.local/bin/stack
 
 install:
-  - ./travis_long stack --no-terminal --skip-ghc-check setup
-  - ./travis_long stack --no-terminal --skip-ghc-check test --only-snapshot
+  - ./travis_long stack --no-terminal --skip-ghc-check test --only-snapshot -j1
 
 script:
-  - ./travis_long stack --no-terminal --skip-ghc-check build ide-backend-server
-  - ./travis_long stack --no-terminal --skip-ghc-check test
+  - ./travis_long stack --no-terminal --skip-ghc-check build
+  - ./travis_long stack --no-terminal --skip-ghc-check test ide-backend:TestSuite --test-arguments "-j2"
+  - ./travis_long stack --no-terminal --skip-ghc-check test ide-backend:rpc-server

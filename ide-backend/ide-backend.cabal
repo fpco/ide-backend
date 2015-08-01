@@ -174,7 +174,10 @@ test-suite TestSuite
                       random,
                       Cabal-ide-backend,
                       containers,
-                      deepseq
+                      deepseq,
+                      -- Dependencies of test suite at runtime
+                      parallel,
+                      monads-tf
   default-language:   Haskell2010
   ghc-options:        -Wall
                       -threaded
