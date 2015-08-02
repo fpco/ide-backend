@@ -32,7 +32,7 @@ makeSocket :: IO Socket
 makeSocket = listenOn $ PortNumber aNY_PORT
 
 connectToPort :: PortID -> IO Handle
-connectToPort = connectTo ""
+connectToPort = connectTo "localhost"
 
 acceptHandle :: Socket -> IO Handle
 acceptHandle s = do
