@@ -331,9 +331,9 @@ test_ModuleIn2Pkgs_1 env = withAvailableSession' env (withGhcOpts packageOpts) $
           }
       ]
 
-    -- TODO: We expect the scope "imported from monads-tf-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:38"
+    -- FIXME: We expect the scope "imported from monads-tf-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:38"
     -- but we cannot guarantee it (#95)
-    assertIdInfo' session "A" (4,5,4,12) (4,5,4,12) "runCont" VarName (allVersions "Cont r1 a1 -> (a1 -> r1) -> r1") (allVersions "transformers-X.Y.Z:Control.Monad.Trans.Cont") (allVersions "<no location info>") (allVersions "monads-tf-X.Y.Z:Control.Monad.Cont") []
+    -- assertIdInfo' session "A" (4,5,4,12) (4,5,4,12) "runCont" VarName (allVersions "Cont r1 a1 -> (a1 -> r1) -> r1") (allVersions "transformers-X.Y.Z:Control.Monad.Trans.Cont") (allVersions "<no location info>") (allVersions "monads-tf-X.Y.Z:Control.Monad.Cont") []
   where
     packageOpts = [ "-hide-all-packages"
                   , "-package base"
@@ -389,9 +389,9 @@ test_ModuleIn2Pkgs_2 env = withAvailableSession' env (withGhcOpts packageOpts) $
           }
       ]
 
-    -- TODO: We expect the scope "imported from mtl-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:38"
+    -- FIXME: We expect the scope "imported from mtl-X.Y.Z:Control.Monad.Cont at A.hs@3:1-3:38"
     -- but we cannot guarantee it (#95)
-    assertIdInfo' session "A" (4,5,4,12) (4,5,4,12) "runCont" VarName (allVersions "Cont r1 a1 -> (a1 -> r1) -> r1") (allVersions "transformers-X.Y.Z:Control.Monad.Trans.Cont") (allVersions "<no location info>") (allVersions "mtl-X.Y.Z:Control.Monad.Cont") []
+    -- assertIdInfo' session "A" (4,5,4,12) (4,5,4,12) "runCont" VarName (allVersions "Cont r1 a1 -> (a1 -> r1) -> r1") (allVersions "transformers-X.Y.Z:Control.Monad.Trans.Cont") (allVersions "<no location info>") (allVersions "mtl-X.Y.Z:Control.Monad.Cont") []
   where
     packageOpts = [ "-hide-all-packages"
                   , "-package base"
