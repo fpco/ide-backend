@@ -371,9 +371,9 @@ data TestSuiteServerConfig = TestSuiteServerConfig {
 
 startNewSession :: TestSuiteServerConfig -> IO IdeSession
 startNewSession cfg = do
-    mpkgDb <- lookupEnv "GHC_PACKAGE_PATH_TEST"
+    dbStack <- getPackageDBStack cfg
     initSession (deriveSessionInitParams cfg)
-                (deriveSessionConfig     cfg mpkgDb)
+                (deriveSessionConfig     cfg dbStack)
 
 deriveSessionInitParams :: TestSuiteServerConfig -> SessionInitParams
 deriveSessionInitParams TestSuiteServerConfig{..} = defaultSessionInitParams {
@@ -388,25 +388,11 @@ deriveSessionInitParams TestSuiteServerConfig{..} = defaultSessionInitParams {
   where
     TestSuiteConfig{..} = testSuiteServerConfig
 
-deriveSessionConfig :: TestSuiteServerConfig -> Maybe String -> SessionConfig
-deriveSessionConfig TestSuiteServerConfig{..} mpkgDb = defaultSessionConfig {
+deriveSessionConfig :: TestSuiteServerConfig -> PackageDBStack -> SessionConfig
+deriveSessionConfig TestSuiteServerConfig{..} dbStack = defaultSessionConfig {
       configDeleteTempFiles =
         not testSuiteConfigKeepTempFiles
-    , configPackageDBStack  =
-        fromMaybe (configPackageDBStack defaultSessionConfig) $
-          ( do packageDb <- case testSuiteServerGhcVersion of
-                              GHC_7_4  -> testSuiteConfigPackageDb74
-                              GHC_7_8  -> testSuiteConfigPackageDb78
-                              GHC_7_10 -> testSuiteConfigPackageDb710
-               return [GlobalPackageDB, SpecificPackageDB packageDb])
-          <|>
-            testSuiteServerPackageDBStack
-          <|>
-            fmap
-              (\pkgPath ->
-                let dbPaths = drop 1 (reverse (splitSearchPath pkgPath))
-                in GlobalPackageDB : map SpecificPackageDB dbPaths)
-              mpkgDb
+    , configPackageDBStack = dbStack
     , configExtraPathDirs =
         splitSearchPath $ case testSuiteServerGhcVersion of
                             GHC_7_4  -> testSuiteConfigExtraPaths74
@@ -416,6 +402,26 @@ deriveSessionConfig TestSuiteServerConfig{..} mpkgDb = defaultSessionConfig {
         fromMaybe (configGenerateModInfo defaultSessionConfig) $
           testSuiteServerGenerateModInfo
     }
+  where
+    TestSuiteConfig{..} = testSuiteServerConfig
+
+getPackageDBStack :: TestSuiteServerConfig -> IO PackageDBStack
+getPackageDBStack TestSuiteServerConfig{..} = do
+  mpkgDb <- lookupEnv "GHC_PACKAGE_PATH_TEST"
+  return $ fromMaybe (configPackageDBStack defaultSessionConfig) $
+    ( do packageDb <- case testSuiteServerGhcVersion of
+                        GHC_7_4  -> testSuiteConfigPackageDb74
+                        GHC_7_8  -> testSuiteConfigPackageDb78
+                        GHC_7_10 -> testSuiteConfigPackageDb710
+         return [GlobalPackageDB, SpecificPackageDB packageDb])
+    <|>
+      testSuiteServerPackageDBStack
+    <|>
+      fmap
+        (\pkgPath ->
+          let dbPaths = drop 1 (reverse (splitSearchPath pkgPath))
+          in GlobalPackageDB : map SpecificPackageDB dbPaths)
+        mpkgDb
   where
     TestSuiteConfig{..} = testSuiteServerConfig
 
@@ -637,6 +643,13 @@ withInstalledPackage env pkgDir act =
 -- This should not be used in isolation because it changes test global state.
 packageInstall :: TestSuiteEnv -> FilePath -> IO ()
 packageInstall env@TestSuiteEnv{..} pkgDir = do
+    packageDb <- fmap (fromMaybe "") $ getLocalPackageDB env
+    let opts = [ "--no-require-sandbox"
+               , "install"
+               , "--package-db=" ++ packageDb
+               , "--disable-library-profiling"
+               , "-v0"
+               ]
     cabalExe <- findExe env "cabal"
     oldEnv   <- System.Environment.getEnvironment
     let oldEnvMap          = Map.fromList oldEnv
@@ -654,42 +667,29 @@ packageInstall env@TestSuiteEnv{..} pkgDir = do
         GHC_7_4  -> testSuiteConfigExtraPaths74  testSuiteEnvConfig
         GHC_7_8  -> testSuiteConfigExtraPaths78  testSuiteEnvConfig
         GHC_7_10 -> testSuiteConfigExtraPaths710 testSuiteEnvConfig
-    packageDb = fromMaybe "" $
-      case testSuiteEnvGhcVersion of
-        GHC_7_4  -> testSuiteConfigPackageDb74  testSuiteEnvConfig
-        GHC_7_8  -> testSuiteConfigPackageDb78  testSuiteEnvConfig
-        GHC_7_10 -> testSuiteConfigPackageDb710 testSuiteEnvConfig
-
-    opts = [ "--no-require-sandbox"
-           , "install"
-           , "--package-db=" ++ packageDb
-           , "--disable-library-profiling"
-           , "-v0"
-           ]
-
 
 -- | Used only in the definition of 'withInstalledPackage'
 --
 -- This should not be used in isolation because it changes test global state.
 packageDelete :: TestSuiteEnv -> FilePath -> IO ()
 packageDelete env@TestSuiteEnv{..} pkgDir = do
+    packageDb <- fmap (fromMaybe "") $ getLocalPackageDB env
+    let opts = [ "--package-conf=" ++ packageDb, "-v0", "unregister"
+               , takeFileName pkgDir
+               ]
     ghcPkgExe  <- findExe env "ghc-pkg"
     (_,_,_,r2) <- createProcess (proc ghcPkgExe opts)
                     { cwd     = Just pkgDir
                     , std_err = CreatePipe
                     }
     void $ waitForProcess r2
-  where
-    packageDb = fromMaybe "" $
-      case testSuiteEnvGhcVersion of
-        GHC_7_4  -> testSuiteConfigPackageDb74  testSuiteEnvConfig
-        GHC_7_8  -> testSuiteConfigPackageDb78  testSuiteEnvConfig
-        GHC_7_10 -> testSuiteConfigPackageDb710 testSuiteEnvConfig
 
-    opts = [ "--package-conf=" ++ packageDb, "-v0", "unregister"
-           , takeFileName pkgDir
-           ]
-
+getLocalPackageDB :: TestSuiteEnv -> IO (Maybe FilePath)
+getLocalPackageDB env = do
+  dbStack <- getPackageDBStack (defaultServerConfig env)
+  return $ case reverse dbStack of
+    (SpecificPackageDB path:_) -> Just path
+    _ -> Nothing
 
 -- TODO: We need to be careful with concurrency here
 --
