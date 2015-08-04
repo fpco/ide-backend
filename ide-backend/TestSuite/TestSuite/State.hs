@@ -659,6 +659,11 @@ packageInstall env@TestSuiteEnv{..} pkgDir = do
         adjustPATH oldPATH = extraPathDirs ++ ":" ++ oldPATH
         newEnvMap          = Map.adjust adjustPATH "PATH" oldEnvMap
         newEnv             = Map.toList newEnvMap
+    (_,_,_,r1) <- createProcess (proc cabalExe ["clean"])
+                    { cwd = Just pkgDir
+                    , env = Just newEnv
+                    }
+    waitForProcessSuccess r1
     (_,_,_,r2) <- createProcess (proc cabalExe opts)
                     { cwd = Just pkgDir
                     , env = Just newEnv
