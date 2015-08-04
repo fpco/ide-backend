@@ -49,6 +49,7 @@ import Data.Proxy
 import Data.Typeable
 import System.Directory
 import System.Environment
+import System.Exit (ExitCode(..))
 import System.FilePath
 import System.IO (hGetContents, hClose)
 import System.IO.Unsafe (unsafePerformIO)
@@ -662,7 +663,7 @@ packageInstall env@TestSuiteEnv{..} pkgDir = do
                     { cwd = Just pkgDir
                     , env = Just newEnv
                     }
-    void $ waitForProcess r2
+    waitForProcessSuccess r2
   where
     extraPathDirs =
       case testSuiteEnvGhcVersion of
@@ -684,7 +685,7 @@ packageDelete env@TestSuiteEnv{..} pkgDir = do
                     { cwd     = Just pkgDir
                     , std_err = CreatePipe
                     }
-    void $ waitForProcess r2
+    waitForProcessSuccess r2
 
 getLocalPackageDB :: TestSuiteEnv -> IO (Maybe FilePath)
 getLocalPackageDB env = do
@@ -708,8 +709,15 @@ packageCheck env pkgDir = do
     checkWarns <- hGetContents local_std_out
     evaluate $ rnf checkWarns
     hClose local_std_out
-    void $ waitForProcess r2
+    waitForProcess r2
     return checkWarns
+
+waitForProcessSuccess :: ProcessHandle -> IO ()
+waitForProcessSuccess ph = do
+    ec <- waitForProcess ph
+    case ec of
+        ExitSuccess -> return ()
+        ExitFailure code -> fail $ "Process exited with code: " ++ show code
 
 {-------------------------------------------------------------------------------
   Concurrency control
