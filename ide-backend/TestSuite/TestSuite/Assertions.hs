@@ -493,7 +493,7 @@ knownProblems = [
     -- filepaths in any of them).
     ("#32", [GHC_7_4])
     -- https://github.com/fpco/ide-backend/issues/254
-  , ("#254", [GHC_7_10])
+  , ("#254", [GHC_7_8, GHC_7_10])
   ]
 
 fixme :: IdeSession -> String -> IO () -> IO String
