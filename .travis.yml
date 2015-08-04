@@ -1,5 +1,9 @@
 sudo: false
 
+cache:
+  directories:
+    - $HOME/.stack
+
 matrix:
   include:
     - env: GHCVER=7.8.4 CABALVER=1.18 STACK_YAML=stack-7.8.yaml
