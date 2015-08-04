@@ -53,6 +53,7 @@ import System.FilePath
 import System.IO (hGetContents, hClose)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Process
+import System.Timeout
 import Test.HUnit (Assertion)
 import Test.HUnit.Lang (HUnitFailure(..))
 import Test.Tasty
@@ -189,7 +190,7 @@ dontReuse setup = setup {
 
 -- | More general version of 'withAvailableSession'
 withAvailableSession' :: TestSuiteEnv -> (TestSuiteSessionSetup -> TestSuiteSessionSetup) -> (IdeSession -> IO a) -> IO a
-withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
+withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = withTimeout $ do
     TestSuiteState{..} <- testSuiteEnvState
 
     -- Find an available session, if one exists
@@ -229,6 +230,7 @@ withAvailableSession' env@TestSuiteEnv{..} sessionSetup act = do
       Left  ex     -> throwIO (ex :: SomeException)
       Right result -> return result
   where
+    withTimeout = fmap (fromMaybe (error "Test took longer than 2 minutes")) . timeout (120 * 1000 * 1000)
     TestSuiteSessionSetup{..} = sessionSetup (defaultSessionSetup env)
 
 -- | Reset a session so that it can be reused in subsequent tests
