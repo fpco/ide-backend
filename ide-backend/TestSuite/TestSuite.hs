@@ -109,7 +109,7 @@ main = do
     -- ide-backend unsets GHC_PACKAGE_PATH.
     mpkgPath <- lookupEnv "GHC_PACKAGE_PATH"
     forM_ mpkgPath $ setEnv "GHC_PACKAGE_PATH_TEST"
-    withArgs args' $ defaultMainWithIngredients ings $ testSuite $ \env ->
+    withArgs ("--no-session-reuse" : args') $ defaultMainWithIngredients ings $ testSuite $ \env ->
       let TestSuiteConfig{..} = testSuiteEnvConfig env
           env74  = env { testSuiteEnvGhcVersion = GHC_7_4  }
           env78  = env { testSuiteEnvGhcVersion = GHC_7_8  }
