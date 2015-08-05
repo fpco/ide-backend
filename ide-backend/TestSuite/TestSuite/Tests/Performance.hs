@@ -140,7 +140,7 @@ test_UpdateModule_2 env = withAvailableSession env $ \session -> limitPerfTest $
                     mempty
                     [1..testPerfMsFixed]
 
-    testPerfMsFixed = 50  -- dependencies force recompilation: slow
+    testPerfMsFixed = 10  -- dependencies force recompilation: slow
     upd k = updDepKN k (testPerfMsFixed `div` 2)
 
 test_UpdateAndRun_1 :: TestSuiteEnv -> Assertion
@@ -177,7 +177,7 @@ test_UpdateAndRun_2 env = withAvailableSession env $ \session -> limitPerfTest $
                     mempty
                     [1..testPerfMsFixed]
 
-    testPerfMsFixed = 40  -- dependencies force recompilation: slow
+    testPerfMsFixed = 8  -- dependencies force recompilation: slow
     upd k = updDepKN k (testPerfMsFixed `div` 2)
     mdiv2 = "M" ++ show (testPerfMsFixed `div` 2)
 
