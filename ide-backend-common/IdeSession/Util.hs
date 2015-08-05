@@ -22,6 +22,7 @@ module IdeSession.Util (
   , redirectStderr
   , captureOutput
   , UnsupportedOnNonUnix(..)
+  , ReqRunRpc(..)
 ) where
 
 import Control.Exception
@@ -49,10 +50,13 @@ import System.FilePath (splitSearchPath, searchPathSeparator)
 import System.IO
 import System.IO.Error (isDoesNotExistError)
 import Data.Typeable (Typeable)
+import Network
 
 import Foreign.Ptr (nullPtr)
 import System.IO.Temp (withSystemTempFile)
 import IdeSession.Util.PortableIO
+import IdeSession.RPC.Sockets
+import IdeSession.Util.PortableProcess
 
 import System.PosixCompat.Types (CPid(..))
 import Text.Show.Pretty
@@ -314,6 +318,14 @@ captureOutput act = do
 {-------------------------------------------------------------------------------
   Non-Unix compatibility
 -------------------------------------------------------------------------------}
+
+-- A data type for RPC communication when trying to run a @ReqRun@ value on the server
+-- Encoding the possibility that the action is not supported
+data ReqRunRpc = ReqRunConversation Pid WriteChannel ReadChannel FilePath
+               | ReqRunUnsupported String
+               deriving (Generic, Typeable)
+
+instance Binary ReqRunRpc
 
 newtype UnsupportedOnNonUnix = UnsupportedOnNonUnix String
     deriving (Typeable, Show)

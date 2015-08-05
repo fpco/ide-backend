@@ -242,11 +242,13 @@ rpcRun server cmd translateResult =
       -- TODO: This is of course a tad dangerous, because if for whatever reason
       -- the communication with the main server stalls we cannot interrupt it.
       -- Perhaps we should introduce a separate timeout for that?
-      (pid, stdin, stdout, errorLog) <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
-
-      -- Unmask exceptions only once we've installed an exception handler to
-      -- cleanup the process again
-      interruptible (aux pid stdin stdout errorLog) `Ex.onException` sigKillProcess pid
+      rpcRes <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
+      case rpcRes of
+        ReqRunUnsupported msg -> Ex.throwIO $ UnsupportedOnNonUnix msg
+        ReqRunConversation pid stdin stdout errorLog ->
+          -- Unmask exceptions only once we've installed an exception handler to
+          -- cleanup the process again
+          interruptible (aux pid stdin stdout errorLog) `Ex.onException` sigKillProcess pid
   where
     aux :: Pid -> WriteChannel -> ReadChannel -> FilePath -> IO (RunActions a)
     aux pid stdin stdout errorLog = do
