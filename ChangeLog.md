@@ -8,7 +8,22 @@ ChangeLog
 
     * Added support for ghc 7.10
 
-    TODO: Release notes not yet complete.
+    * ide-backend-rts is now packed into the ide-backend-server
+      executable.  It gets expanded into a single package database on
+      demand.  This means ide-backend-rts doesn't need to be installed
+      to use ide-backend-server!
+
+    * Local working dir feature, allowing ide-backend to be used on
+      local projects without copying their contents.
+
+    * Support for running code in a pseudoterminal.
+
+    * Stack is now the preferred means of building / testing.
+
+    * Test suite automatically selects ghc version and utilizes
+      GHC_PACKAGE_PATH.
+
+    * Initial support for debug logging (not used much yet).
 
  *  Version 0.9
 
