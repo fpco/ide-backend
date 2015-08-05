@@ -50,7 +50,7 @@ import GhcShim.GhcShim78
 #ifdef GHC_710
 import GhcShim.GhcShim710
 #else
-#error "Unsupported GHC version"
+#error "No GHC_* CPP flag specified, possibly using an unsupported GHC version"
 #endif
 #endif
 #endif
