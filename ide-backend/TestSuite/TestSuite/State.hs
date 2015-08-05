@@ -647,8 +647,7 @@ withInstalledPackage env pkgDir act =
 packageInstall :: TestSuiteEnv -> FilePath -> IO ()
 packageInstall env@TestSuiteEnv{..} pkgDir = do
     packageDb <- fmap (fromMaybe "") $ getLocalPackageDB env
-    let opts = [ "--no-require-sandbox"
-               , "install"
+    let opts = [ "install"
                , "--package-db=" ++ packageDb
                , "--disable-library-profiling"
                , "-v0"
