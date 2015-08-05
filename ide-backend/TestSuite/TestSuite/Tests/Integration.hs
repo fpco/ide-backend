@@ -38,8 +38,12 @@ integrationTest env name test = testGroup name $
 testWithProject :: TestSuiteEnv -> IntegrationTest -> Project -> TestTree
 testWithProject env test Project{..} = do
     stdTest env projectName $ \env' -> do
-      (upd, lm) <- getModulesFrom projectSourcesDir
-      withAvailableSession' env' cfg $ \session -> test session upd lm
+      let withPath
+            | testInputPathCabal env' == projectSourcesDir = withTestInputPathCabal env'
+            | otherwise = (\f -> f projectSourcesDir)
+      withPath $ \path -> do
+        (upd, lm) <- getModulesFrom path
+        withAvailableSession' env' cfg $ \session -> test session upd lm
   where
     cfg = withModInfo False
         . withGhcOpts projectOptions

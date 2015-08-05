@@ -99,8 +99,8 @@ test_ParFib env = withAvailableSession env $ \session -> do
     assertBool ("licenses length (" ++ show (length licenses) ++ ")") $ length licenses >= 14165
 
 test_Cabal :: TestSuiteEnv -> Assertion
-test_Cabal env = withAvailableSession env $ \session -> do
-    withCurrentDirectory (testInputPathCabal env) $ do
+test_Cabal env = withAvailableSession env $ \session -> withTestInputPathCabal env $ \cabalPath -> do
+    withCurrentDirectory cabalPath $ do
       loadModulesFrom session "."
       assertNoErrors session
     cabalsPath <- canonicalizePath "TestSuite/inputs/Puns/cabals"  -- 7 packages missing

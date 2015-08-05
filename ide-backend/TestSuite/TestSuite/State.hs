@@ -29,6 +29,7 @@ module TestSuite.State (
   , exeTests
   , integrationTests
     -- * Paths
+  , withTestInputPathCabal
   , testInputPathCabal
     -- * Test suite global state
   , withCurrentDirectory
@@ -835,12 +836,20 @@ requireExclusiveAccess act = do
   define testInputPath here and use it throughout.
 -------------------------------------------------------------------------------}
 
+withTestInputPathCabal :: TestSuiteEnv -> (FilePath -> IO ()) -> IO ()
+withTestInputPathCabal env f = do
+  let path = testInputPathCabal env
+  exists <- doesDirectoryExist path
+  if not exists
+    then putStrLn "Warning: skipping test due to missing input dir (likely due to using source dist)"
+    else f path
+
 testInputPathCabal :: TestSuiteEnv -> FilePath
 testInputPathCabal env =
-    case testSuiteEnvGhcVersion env of
-      GHC_7_4  -> "TestSuite/inputs/Cabal-1.14.0"
-      GHC_7_8  -> "TestSuite/inputs/Cabal-1.18.1.5"
-      GHC_7_10 -> "TestSuite/inputs/Cabal-1.22.0.0"
+  case testSuiteEnvGhcVersion env of
+    GHC_7_4  -> "TestSuite/inputs/Cabal-1.14.0"
+    GHC_7_8  -> "TestSuite/inputs/Cabal-1.18.1.5"
+    GHC_7_10 -> "TestSuite/inputs/Cabal-1.22.0.0"
 
 {-------------------------------------------------------------------------------
   Auxiliary

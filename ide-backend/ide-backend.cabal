@@ -12,6 +12,35 @@ category:             Development
 build-type:           Simple
 cabal-version:        >=1.10
 extra-source-files:   README.md
+                      TestSuite/inputs/README.md
+                      TestSuite/inputs/ABerror/*.hs
+                      TestSuite/inputs/AnotherA/*.hs
+                      TestSuite/inputs/TH/*.hs
+                      TestSuite/inputs/simple-lib17/*.hs
+                      TestSuite/inputs/simple-lib17/*.sh
+                      TestSuite/inputs/simple-lib17/*.cabal
+                      TestSuite/inputs/simple-lib17/LICENSE
+                      TestSuite/inputs/MainModule/cabals/*.cabal
+                      TestSuite/inputs/MainModule/ParFib/*.hs
+                      TestSuite/inputs/MainModule/*.hs
+                      TestSuite/inputs/compiler/utils/Subdir/*.lhs
+                      TestSuite/inputs/compiler/utils/*.hs
+                      TestSuite/inputs/compiler/utils/*.lhs
+                      TestSuite/inputs/AnotherB/*.hs
+                      TestSuite/inputs/bootMods/*.hs
+                      TestSuite/inputs/bootMods/*.hs-boot
+                      TestSuite/inputs/ABnoError/*.hs
+                      TestSuite/inputs/AerrorB/*.hs
+                      TestSuite/inputs/FFI/ffiles/*.c
+                      TestSuite/inputs/FFI/ffiles/*.h
+                      TestSuite/inputs/FFI/*.hs
+                      TestSuite/inputs/FFI/*.h
+                      TestSuite/inputs/FFI/*.c
+                      TestSuite/inputs/Puns/cabals/parse_error/*.cabal
+                      TestSuite/inputs/Puns/cabals/no_text_error/*.cabal
+                      TestSuite/inputs/Puns/cabals/*.cabal
+                      TestSuite/inputs/Puns/GHC/RTS/*.h
+                      TestSuite/inputs/Puns/GHC/RTS/*.hs
 
 library
   exposed-modules:    IdeSession
