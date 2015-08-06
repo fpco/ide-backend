@@ -19,6 +19,9 @@ extra-source-files:   ide-backend-rts/ide-backend-rts.cabal,
                       ide-backend-rts/Setup.hs,
                       ide-backend-rts/IdeBackendRTS.hs
 
+Flag pty-support
+  Description:       Enable PTY support
+  Default:           True
 
 executable ide-backend-server
   main-is:            ide-backend-server.hs
@@ -34,7 +37,6 @@ executable ide-backend-server
                       Haddock
                       GhcShim.API
                       GhcShim
-                      Posix
                       RTS
   build-depends:      base < 10,
                       ghc                  == 7.4.* || == 7.8.* || == 7.10.* || == 7.11.*,
@@ -92,6 +94,9 @@ executable ide-backend-server
     other-modules: GhcShim.GhcShim710
   if impl(ghc > 7.10.1)
     cpp-options: -DGHC_AFTER_710_1
+  if flag(pty-support)
+    cpp-options: -DPTY_SUPPORT
+    other-modules: Posix
 
   default-language:   Haskell2010
   default-extensions: MonoLocalBinds,

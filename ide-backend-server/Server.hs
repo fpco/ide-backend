@@ -27,7 +27,6 @@ import System.Posix.Files (createNamedPipe)
 import System.Posix.Process (forkProcess, getProcessStatus)
 import System.Posix.Terminal (openPseudoTerminal)
 import System.Posix.Signals (signalProcess, sigKILL, sigTERM)
-import qualified Posix
 import System.Posix.Types (ProcessID)
 import qualified Control.Exception as Ex
 import qualified Data.ByteString   as BSS
@@ -58,6 +57,10 @@ import HsWalk
 import Debug
 import GhcShim
 import RTS
+
+#ifdef PTY_SUPPORT
+import qualified Posix
+#endif
 
 foreign import ccall "fflush" fflush :: Ptr CFile -> IO ()
 
@@ -127,12 +130,17 @@ ghcServerEngine rtsInfo errorLog conv@RpcConversation{..} = do
               return args
             ReqRun runCmd
               | runCmdPty runCmd -> do
+#if PTY_SUPPORT
                 fds <- liftIO openPseudoTerminal
                 conversationTuple <- startConcurrentConversation sessionDir $ \_ _ _ ->
                   ghcWithArgs args $ ghcHandleRunPtySlave fds runCmd
                 liftIO $ runPtyMaster fds conversationTuple
                 liftIO $ put conversationTuple
                 return args
+#else
+                --TODO: fail more gracefully than this?
+                fail "ide-backend-server not build with -DPTY_SUPPORT / pty-support cabal flag"
+#endif
               | otherwise -> do
                 conversationTuple <- startConcurrentConversation sessionDir $
                   ghcConcurrentConversation $ \_errorLog' conv' ->
@@ -544,6 +552,7 @@ ghcHandleUnload RpcConversation{..} objects = liftIO $ do
   mapM_ ObjLink.unloadObj objects
   put ()
 
+#if PTY_SUPPORT
 runPtyMaster :: (Fd, Fd) -> (ProcessID, FilePath, FilePath, FilePath) -> IO ()
 runPtyMaster (masterFd, slaveFd) (processId, stdin, stdout, errorLog) = do
   -- Since we're in the master process, close the slave FD.
@@ -602,6 +611,7 @@ ghcHandleRunPtySlave (masterFd, slaveFd) runCmd = do
     -- failures.
     RunOk -> return ()
     _ -> liftIO $ putStrLn $ "\r\nProcess done: " ++ show result ++ "\r\n"
+#endif
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation -> RunCmd -> Ghc ()
