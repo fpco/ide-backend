@@ -32,10 +32,7 @@ executable ide-backend-server
                       Conv
                       TraceMonad
                       Haddock
-                      GhcShim.GhcShim742
                       GhcShim.API
-                      GhcShim.GhcShim78
-                      GhcShim.GhcShim710
                       GhcShim
                       Posix
                       RTS
@@ -74,6 +71,7 @@ executable ide-backend-server
                    -- use whatever version came with ghc
                    Cabal
     cpp-options: -DGHC_742
+    other-modules: GhcShim.GhcShim742
   if impl(ghc == 7.8.*)
     build-depends: time        == 1.4.*,
                    haddock-api == 2.15.*,
@@ -81,6 +79,7 @@ executable ide-backend-server
                    Cabal
     cpp-options: -DGHC_78
     ghc-options: -dynamic
+    other-modules: GhcShim.GhcShim78
   if impl(ghc == 7.10.*) || impl(ghc == 7.11.*)
     build-depends: time        == 1.5.*,
                    haddock-api == 2.16.*,
@@ -90,6 +89,7 @@ executable ide-backend-server
                    Cabal
     cpp-options: -DGHC_710
     ghc-options: -dynamic
+    other-modules: GhcShim.GhcShim710
   if impl(ghc > 7.10.1)
     cpp-options: -DGHC_AFTER_710_1
 
