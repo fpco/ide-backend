@@ -2,4 +2,4 @@ packages:
   - ./ide-backend
   - ./ide-backend-server
   - ./ide-backend-common
-resolver: lts-2.19
+resolver: lts-2.21
