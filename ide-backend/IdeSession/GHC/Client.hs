@@ -242,6 +242,13 @@ rpcRun server cmd translateResult =
       -- Perhaps we should introduce a separate timeout for that?
       rpcRes <- Ex.uninterruptibleMask_ $ ghcRpc server (ReqRun cmd)
       case rpcRes of
+        -- TODO maybe returnging a dummy RunActions is better than throwing an exception?
+        -- ReqRunUnsupported msg -> return RunActions {
+        --     runWait = fmap Right $ translateResult $ Just $ RunGhcException msg
+        --   , interrupt = return ()
+        --   , supplyStdin = const $ return ()
+        --   , forceCancel = return ()
+        -- }
         ReqRunUnsupported msg -> Ex.throwIO $ UnsupportedOnNonUnix msg
         ReqRunConversation pid stdin stdout errorLog ->
           -- Unmask exceptions only once we've installed an exception handler to
