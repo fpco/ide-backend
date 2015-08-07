@@ -50,5 +50,5 @@ install:
 
 script:
   - ./travis_long stack --no-terminal --skip-ghc-check build
-  - './travis_long stack --no-terminal --skip-ghc-check test ide-backend:TestSuite --test-arguments "-j2 --timeout=2m"'
+  - ./travis_long stack --no-terminal --skip-ghc-check test ide-backend:TestSuite --test-arguments -j2
   - ./travis_long stack --no-terminal --skip-ghc-check test ide-backend:rpc-server
