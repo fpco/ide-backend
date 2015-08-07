@@ -19,6 +19,7 @@ import Data.Typeable (Typeable)
 import Data.Binary
 import Network
 import Data.ByteString.Lazy.Char8
+import qualified Data.ByteString.Base64.Lazy as Base64
 import Network.Socket hiding (close, accept, socketPort)
 import qualified Network.Socket as Socket
 
@@ -40,10 +41,10 @@ acceptHandle s = do
   return h
 
 portToString :: PortID -> String
-portToString = unpack . encode
+portToString = unpack . Base64.encode . encode
 
 stringToPort :: String -> PortID
-stringToPort = decode . pack
+stringToPort = decode . Base64.decodeLenient . pack
 
 
 {- Orphans -}
