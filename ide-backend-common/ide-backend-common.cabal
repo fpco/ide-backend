@@ -67,7 +67,8 @@ library
                       monad-logger,
                       unix-compat          >= 0.4.1.1 && < 0.4.2,
                       network,
-                      process
+                      process,
+                      base64-bytestring
 
 
   -- GHC.Generics lived in `ghc-prim` for GHC 7.2 & GHC 7.4
