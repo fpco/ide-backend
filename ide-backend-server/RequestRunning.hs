@@ -71,12 +71,17 @@ runCommand RpcConversation{..} args _ _ = do
 #else
 runCommand conv args sessionDir runCmd
   | runCmdPty runCmd = do
+#if PTY_SUPPORT
         fds <- liftIO openPseudoTerminal
         conversationTuple <- startConcurrentConversation sessionDir $ \_ _ _ ->
           ghcWithArgs args $ ghcHandleRunPtySlave fds runCmd
         liftIO $ runPtyMaster fds conversationTuple
         rpcConversationTuple conv conversationTuple
         return args
+#else
+        --TODO: fail more gracefully than this?
+        fail "ide-backend-server not build with -DPTY_SUPPORT / pty-support cabal flag"
+#endif
   | otherwise = do
         conversationTuple <- startConcurrentConversation sessionDir $
           ghcConcurrentConversation $ \_errorLog' conv' ->
