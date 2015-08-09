@@ -99,6 +99,7 @@ library
   ghc-options:        -Wall -fno-warn-unused-do-bind
 
   if os(windows)
-    build-depends: Win32
+    build-depends: Win32,
+                   time
   else
     build-depends: unix         >= 2.5 && < 2.8
