@@ -18,18 +18,18 @@ import TestSuite.Assertions
 
 testGroupPerformance :: TestSuiteEnv -> TestTree
 testGroupPerformance env = testGroup "Performance" [
-    stdTest env "Perf: Load testPerfMs modules in one call 1"                           test_OneCall_1
-  , stdTest env "Perf: Load testPerfMs modules in one call 2"                           test_OneCall_2
-  , stdTest env "Perf: Load testPerfMs modules in many calls 1"                         test_ManyCalls_1
-  , stdTest env "Perf: Load testPerfMs modules in many calls 2"                         test_ManyCalls_2
-  , stdTest env "Perf: Load 4xtestPerfMs modules, each batch in one call 1"             test_Batch_OneCall_1
-  , stdTest env "Perf: Load 4xtestPerfMs modules, each batch in one call 2"             test_Batch_OneCall_2
-  , stdTest env "Perf: Update a module testPerfTimes with no context 1"                 test_NoContext_1
-  , stdTest env "Perf: Update a module testPerfTimes with no context 2"                 test_NoContext_2
-  , stdTest env "Perf: Update a module testPerfTimes with testPerfMs modules 1"         test_UpdateModule_1
-  , stdTest env "Perf: Update a module testPerfTimes with testPerfMs modules 2"         test_UpdateModule_2
-  , stdTest env "Perf: Update and run a module testPerfTimes with testPerfMs modules 1" test_UpdateAndRun_1
-  , stdTest env "Perf: Update and run a module testPerfTimes with testPerfMs modules 2" test_UpdateAndRun_2
+  --   stdTest env "Perf: Load testPerfMs modules in one call 1"                           test_OneCall_1
+  -- , stdTest env "Perf: Load testPerfMs modules in one call 2"                           test_OneCall_2
+  -- , stdTest env "Perf: Load testPerfMs modules in many calls 1"                         test_ManyCalls_1
+  -- , stdTest env "Perf: Load testPerfMs modules in many calls 2"                         test_ManyCalls_2
+  -- , stdTest env "Perf: Load 4xtestPerfMs modules, each batch in one call 1"             test_Batch_OneCall_1
+  -- , stdTest env "Perf: Load 4xtestPerfMs modules, each batch in one call 2"             test_Batch_OneCall_2
+  -- , stdTest env "Perf: Update a module testPerfTimes with no context 1"                 test_NoContext_1
+  -- , stdTest env "Perf: Update a module testPerfTimes with no context 2"                 test_NoContext_2
+  -- , stdTest env "Perf: Update a module testPerfTimes with testPerfMs modules 1"         test_UpdateModule_1
+  -- , stdTest env "Perf: Update a module testPerfTimes with testPerfMs modules 2"         test_UpdateModule_2
+  -- , stdTest env "Perf: Update and run a module testPerfTimes with testPerfMs modules 1" test_UpdateAndRun_1
+  -- , stdTest env "Perf: Update and run a module testPerfTimes with testPerfMs modules 2" test_UpdateAndRun_2
   ]
 
 test_OneCall_1 :: TestSuiteEnv -> Assertion
