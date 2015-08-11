@@ -38,8 +38,9 @@ nextInStream (Stream h st) = readIORef st >>= go False
       Binary.Partial k -> do
         mchunk <- Ex.try $ BSS.hGetSome h BSL.defaultChunkSize
         case mchunk of
-          Left ex -> do writeIORef st decoder
-                        Ex.throwIO (ex :: Ex.SomeException)
+          Left (ex :: Ex.SomeException) -> do -- wrapping with a user error so that it's easier to catch later on
+            writeIORef st decoder
+            Ex.throwIO $ userError $ "IdeSession.RPC.Stream ended, causing " ++ show ex
           Right chunk | BSS.null chunk -> go True . k $ Nothing
                       | otherwise      -> go False . k $ Just chunk
       Binary.Done unused _numConsumed a -> do
