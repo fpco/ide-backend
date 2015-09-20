@@ -28,13 +28,18 @@ sigTermProcess :: Pid -> IO ()
 -- Raises a sigKILL
 raiseSigKill :: IO ()
 
+-- The exit code for sigKILL
+sigKillExitCode :: Int
+
 -- If available sends a sigKill to the given process handle
 killProcessHandle :: ProcessHandle -> IO ()
+
 
 #ifdef VERSION_unix
 sigKillProcess = signalProcess sigKILL
 sigTermProcess = signalProcess sigTERM
 raiseSigKill = raiseSignal sigKILL
+sigKillExitCode = -9
 
 killProcessHandle ph = withProcessHandle ph $ \p_ ->
     case p_ of
@@ -58,6 +63,8 @@ sigTermProcess pid = do
   ptr <- openProcess pROCESS_TERMINATE False pid
   ph <- mkProcessHandle ptr
   terminateProcess ph
+
+sigKillExitCode = 1
 
 -- On Windows, no special support for sigKill
 killProcessHandle = terminateProcess
