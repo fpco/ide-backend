@@ -88,6 +88,7 @@ import IdeSession.Util
 import IdeSession.Util.BlockingOps
 import IdeSession.Util.Logger
 import IdeSession.Util.PortableIO
+import IdeSession.Util.PortableFiles (moduleNameToExeName)
 import qualified IdeSession.Query         as Query
 import qualified IdeSession.Strict.List   as List
 import qualified IdeSession.Strict.Map    as Map
@@ -550,7 +551,7 @@ runExe session m = do
           overrideVar (var, Just val) env = Map.insert var val env
           overrideVar (var, Nothing) env = Map.delete var env
           envMap = foldr overrideVar (Map.fromList envInherited) envOverride
-      let exePath = distDir </> "build" </> m </> m
+      let exePath = distDir </> "build" </> m </> moduleNameToExeName m
       exeExists <- Dir.doesFileExist exePath
       unless exeExists $
         fail $ "No compiled executable file "
