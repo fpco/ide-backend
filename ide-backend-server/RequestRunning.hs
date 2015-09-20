@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TemplateHaskell #-}
+{-# LANGUAGE CPP, TemplateHaskell, ScopedTypeVariables #-}
 
 -- A module that handles request running. This is taken out of Server to allow
 -- for conditional compilation on non-Unix platforms.
@@ -172,8 +172,16 @@ ghcHandleRun RpcConversation{..} runCmd = do
     -- Wait for the process to output something or terminate
     readStdout :: Handle -> IO ()
     readStdout stdOutputRd =
-      let go = do bs <- BSS.hGetSome stdOutputRd blockSize
-                  unless (BSS.null bs) $ put (GhcRunOutp bs) >> go
+      let go = do
+            mbs <- Ex.try $ BSS.hGetSome stdOutputRd blockSize
+            case mbs of
+              Right bs -> unless (BSS.null bs) $ put (GhcRunOutp bs) >> go
+              -- hGetSome might throw some very unpleasant exceptions in case
+              -- someone force cancels the operation
+              -- (which triggered some weird race conditions in test220 in Issues.hs)
+              -- Swallowing everything, since an exception here implies that there
+              -- is no more output to read
+              Left (_ :: Ex.SomeException) -> return ()
       in go
 
     -- Turn an asynchronous exception into a RunResult
@@ -316,8 +324,6 @@ startConcurrentConversation sessionDir inner = do
   -- we need to redirect stdin, stdout, and stderr (as well as some other global
   -- state, including withArgs).
   liftIO performGC
-  -- processId <- forkGhcProcess $ inner stdin stdout errorLog
-  -- This is a placeholder socket
   processId <- forkGhcProcess $ inner stdin stdout errorLog
 
   -- We wait for the process to finish in a separate thread so that we do not
