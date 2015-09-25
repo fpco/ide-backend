@@ -416,8 +416,12 @@ updateSession' IdeSession{ideStaticInfo, ideState, ideCallbacks} updateStatus = 
         then do
           (idleState', mex) <- runSessionUpdate justRestarted update ideStaticInfo updateStatus ideCallbacks idleState
           case mex of
-            Nothing -> return $ IdeSessionIdle          idleState'
-            Just ex -> return $ IdeSessionServerDied ex idleState'
+            Nothing -> do
+              updateStatus Public.UpdateStatusDone
+              return $ IdeSessionIdle idleState'
+            Just ex -> do
+              updateStatus $ Public.UpdateStatusFailed (Text.pack (show ex))
+              return $ IdeSessionServerDied ex idleState'
         else do
           $logInfo $ "Restarting session due to update requiring it."
           unless justRestarted $ updateStatus Public.UpdateStatusRequiredRestart
@@ -426,7 +430,7 @@ updateSession' IdeSession{ideStaticInfo, ideState, ideCallbacks} updateStatus = 
     go justRestarted update (IdeSessionServerDied ex idleState) = do
       let msg = Text.pack (show ex)
       $logInfo $ "Restarting session due to server dieing: " <> msg
-      unless justRestarted $ updateStatus (Public.UpdateStatusCrashRestart msg)
+      unless justRestarted $ updateStatus (Public.UpdateStatusErrorRestart msg)
       let restartParams = sessionRestartParams idleState update
       restart justRestarted update restartParams idleState
     go _ _ IdeSessionShutdown =
@@ -445,7 +449,7 @@ updateSession' IdeSession{ideStaticInfo, ideState, ideCallbacks} updateStatus = 
         ServerRestarted idleState' resetSession ->
           go True (resetSession <> update) (IdeSessionIdle idleState')
         ServerRestartFailed idleState' -> do
-          updateStatus (Public.UpdateStatusServerDied "Failed to restart ide-backend-server")
+          updateStatus Public.UpdateStatusFailedToRestart
           return $ IdeSessionServerDied failedToRestart idleState'
 
 -- | @requiresSessionRestart st upd@ returns true if update @upd@ requires a

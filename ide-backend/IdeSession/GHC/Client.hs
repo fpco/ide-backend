@@ -197,9 +197,7 @@ rpcCompile server genCode targets updateStatus =
                   GhcCompileProgress pcounter -> do
                     updateStatus (Public.UpdateStatusProgress pcounter)
                     go
-                  GhcCompileDone result -> do
-                    updateStatus Public.UpdateStatusDone
-                    return result
+                  GhcCompileDone result -> return result
 
     go
 

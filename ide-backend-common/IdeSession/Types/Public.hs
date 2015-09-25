@@ -255,12 +255,23 @@ data Targets = TargetsInclude [FilePath] | TargetsExclude [FilePath]
 
 -- | This type represents the status of the compilation from an IDE update.
 data UpdateStatus =
-    UpdateStatusFailed Text
-  | UpdateStatusRequiredRestart
-  | UpdateStatusCrashRestart Text
-  | UpdateStatusServerDied Text
+  -- | Indicates that the server is restarting because it needs to to fulfil the
+  -- update.
+    UpdateStatusRequiredRestart
+  -- | Indicates that this update has caused the server to start again, since it
+  -- died last update.
+  | UpdateStatusErrorRestart Text
+  -- | Gives compilation progress updates.
   | UpdateStatusProgress Progress
+
+  -- | The update completed successfully.
   | UpdateStatusDone
+  -- | The update failed, yielding an error. No more status updates should come
+  -- after this.
+  | UpdateStatusFailed Text
+  -- The server tried to restart, but failed to restart. No more status updates
+  -- should come after this.
+  | UpdateStatusFailedToRestart
   deriving (Typeable, Generic, Eq, Show)
 
 {------------------------------------------------------------------------------
