@@ -80,6 +80,11 @@ data SessionConfig = SessionConfig {
 -- * GHC package database.  Like GHC, it takes the GHC_PACKAGE_PATH,
 --   and uses this list of package databases.  This allows ide-backend
 --   to do the 'right thing' when used with tools like stack.
+--
+-- NOTE: In order for it to pull GHC_PACKAGE_PATH from the environment,
+-- this must be used before any ide-backend session is initialized. This
+-- is because the environment variable gets unset due to
+-- https://github.com/haskell/cabal/issues/1944
 sessionConfigFromEnv :: IO SessionConfig
 sessionConfigFromEnv = do
   tmpDir <- getTemporaryDirectory
