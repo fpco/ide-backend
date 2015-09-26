@@ -69,13 +69,13 @@ data SessionConfig = SessionConfig {
   , configIdeBackendExeCabal :: (ProgramSearchPath,FilePath)
   }
 
--- Get the default local session configuration, pulling the following
+-- | Get the default local session configuration, pulling the following
 -- information from the environment:
 --
--- * OS temporary directory (used for session.*) files
+-- * OS temporary directory (used for session.* files)
 --
--- * Current working directory - assumed to be the project root.
---   Instead of running
+-- * Current working directory - assumed to be the project root. Instead
+--   of sending files in updates, they are read from the filesystem.
 --
 -- * GHC package database.  Like GHC, it takes the GHC_PACKAGE_PATH,
 --   and uses this list of package databases.  This allows ide-backend
