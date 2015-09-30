@@ -400,7 +400,6 @@ configureAndHaddock BuildExeArgs{ bePackageDBStack = configPackageDBStack
         lbi <- configure (gpDesc, hookedBuildInfo) confFlags
         Haddock.haddock (BuildInfo.localPkgDescr lbi) lbi preprocessors haddockFlags
   -- Handle various exceptions and stderr printouts.
-  -- TODO make redirect work again
   exitCode :: Either ExitCode () <- redirectStderr beStderrLog $
     Ex.try $ catchIOError confAndBuild $ \e ->
       if isUserError e
