@@ -21,7 +21,6 @@ import Data.Monoid (Monoid(..))
 import System.Exit (ExitCode(..))
 import System.FilePath (makeRelative, (</>), takeExtension, replaceExtension, dropFileName)
 import System.FilePath.Find (find, always, extension, (&&?), (||?), fileType, (==?), FileType (RegularFile))
-import System.Posix.Files (setFileTimes, getFileStatus, modificationTime)
 import qualified Control.Exception             as Ex
 import qualified Data.Accessor.Monad.MTL.State as Acc
 import qualified Data.ByteString.Char8         as BSS
@@ -43,6 +42,7 @@ import IdeSession.Types.Public (RunBufferMode(..), Targets(..), UpdateStatus(..)
 import IdeSession.Update.IdeSessionUpdate
 import IdeSession.Util
 import IdeSession.Util.Logger
+import IdeSession.Util.PortableFiles
 import qualified IdeSession.GHC.Client    as GHC
 import qualified IdeSession.Strict.IORef  as IORef
 import qualified IdeSession.Strict.IntMap as IntMap

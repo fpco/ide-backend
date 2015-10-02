@@ -15,8 +15,7 @@ import System.Environment.Executable (getExecutablePath)
 import System.FilePath ((</>))
 import System.IO (hClose)
 import System.IO.Temp (withTempDirectory, openTempFile)
-import System.Posix.Files (createNamedPipe)
-import System.Posix.Signals (sigKILL)
+-- import System.Posix.Signals (sigKILL)
 import qualified Control.Concurrent.Async as Async
 import qualified Control.Exception        as Ex
 import qualified Data.Binary              as Binary
@@ -26,8 +25,10 @@ import Test.Framework (Test, defaultMain, testGroup)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (Assertion, assertEqual)
 
+import Network
 import IdeSession.RPC.Client
 import IdeSession.RPC.Server
+import IdeSession.RPC.Sockets
 import TestTools
 
 --------------------------------------------------------------------------------
@@ -328,7 +329,7 @@ testKillServer firstRequest _errorLog RpcConversation{..} = forever $ do
   modifyMVar_ firstRequest $ \isFirst -> do
     if isFirst
       then put req
-      else throwSignal sigKILL
+      else throwSigKill
     return False
 
 -- | Test server which gets killed between requests
@@ -343,7 +344,7 @@ testKillAsyncServer :: FilePath -> RpcConversation -> IO ()
 testKillAsyncServer _errorLog RpcConversation{..} = forever $ do
   req <- get :: IO String
   -- Fork a thread which causes the server to crash 0.5 seconds after the request
-  forkIO $ threadDelay 250000 >> throwSignal sigKILL
+  forkIO $ threadDelay 250000 >> throwSigKill
   put req
 
 -- | Test crash during decoding
@@ -408,7 +409,7 @@ testKillMultiServer :: FilePath -> RpcConversation -> IO ()
 testKillMultiServer _errorLog RpcConversation{..} = forever $ do
   req <- get :: IO Int
   forM_ [req, req - 1 .. 1] $ put
-  throwSignal sigKILL
+  throwSigKill
 
 -- | Like 'KillMulti', but now the server gets killed *between* messages
 testKillAsyncMulti :: RpcServer -> Assertion
@@ -419,7 +420,7 @@ testKillAsyncMulti server =
 testKillAsyncMultiServer :: FilePath -> RpcConversation -> IO ()
 testKillAsyncMultiServer _errorLog RpcConversation{..} = forever $ do
   req <- get
-  forkIO $ threadDelay (250000 + (req - 1) * 50000) >> throwSignal sigKILL
+  forkIO $ threadDelay (250000 + (req - 1) * 50000) >> throwSigKill
   forM_ [req, req - 1 .. 1] $ \i -> threadDelay 50000 >> put i
 
 --------------------------------------------------------------------------------
@@ -497,26 +498,22 @@ testConcurrentServer _errorLog RpcConversation{..} = go
           put str
           go
         ConcurrentServerSpawn -> do
-          pipes <- newEmptyMVar :: IO (MVar (String, String, String))
+          pipes <- newEmptyMVar :: IO (MVar (WriteChannel, ReadChannel, String))
           forkIO $ do
-            withTempDirectory "." "rpc" $ \tempDir -> do
-              let stdin  = tempDir </> "stdin"
-                  stdout = tempDir </> "stdout"
-                  stderr = tempDir </> "stderr"
+            stdin <- makeSocket
+            stdout <- makeSocket
 
-              createNamedPipe stdin  0o600
-              createNamedPipe stdout 0o600
+            tmpDir <- Dir.getTemporaryDirectory
+            (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc.log"
+            hClose errorLogHandle
 
-              tmpDir <- Dir.getTemporaryDirectory
-              (errorLogPath, errorLogHandle) <- openTempFile tmpDir "rpc.log"
-              hClose errorLogHandle
+            [stdinPort, stdoutPort] <- mapM socketPort [stdin, stdout]
+            -- Once we have created the sockets we can tell the client
+            putMVar pipes (WriteChannel stdinPort, ReadChannel stdoutPort, errorLogPath)
+            concurrentConversation stdin stdout errorLogPath testConversationServer
 
-              -- Once we have created the pipes we can tell the client
-              putMVar pipes (stdin, stdout, errorLogPath)
-              concurrentConversation stdin stdout stderr testConversationServer
-
-          (stdin, stdout, errorLogPath) <- readMVar pipes
-          put (stdin, stdout, errorLogPath)
+          (stdinPort, stdoutPort, errorLogPath) <- readMVar pipes
+          put (stdinPort, stdoutPort, errorLogPath)
           go
         ConcurrentServerTerminate -> do
           put ()
@@ -581,7 +578,7 @@ tests = [
    , testGroup "Client code errors" [
          testRPC "illscoped"        testIllscoped
        , testRPC "invalidReqType"   testInvalidReqType
---       , testRPC "invalidRespType"  testInvalidRespType
+      --  , testRPC "invalidRespType"  testInvalidRespType
        ]
    , testGroup "Concurrent conversations" [
          testRPC "concurrent" testConcurrent

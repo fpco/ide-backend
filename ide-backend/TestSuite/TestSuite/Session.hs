@@ -93,11 +93,14 @@ loadModule file contents =
       Just rest -> dotToSlash . dropExtension . dropFirstPathComponent $ rest
       Nothing   -> takeBaseName path
 
+    -- reverse slash for Windows, TODO proper handling of paths
+    isSep c = c == '/' || c == '\\'
+
     dropFirstPathComponent :: FilePath -> FilePath
-    dropFirstPathComponent = tail . dropWhile (/= '/')
+    dropFirstPathComponent = tail . dropWhile (not . isSep)
 
     dotToSlash :: String -> String
-    dotToSlash = map $ \c -> if c == '/' then '.' else c
+    dotToSlash = map $ \c -> if isSep c then '.' else c
 
     -- | Specification:
     --

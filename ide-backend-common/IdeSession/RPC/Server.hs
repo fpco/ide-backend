@@ -13,8 +13,6 @@ import System.IO
   , hSetBuffering
   , BufferMode(BlockBuffering)
   )
-import System.Posix.Types (Fd)
-import System.Posix.IO (closeFd, fdToHandle)
 import Control.Monad (void)
 import qualified Control.Exception as Ex
 import Control.Concurrent (threadDelay)
@@ -23,9 +21,12 @@ import qualified Data.ByteString.Lazy.Char8 as BSL
 import Control.Concurrent.Async (Async, async)
 import Data.Binary (encode, decode)
 
+import Network
+
 import IdeSession.Util.BlockingOps (readChan, wait, waitAny)
 import IdeSession.RPC.API
 import IdeSession.RPC.Stream
+import IdeSession.RPC.Sockets
 
 --------------------------------------------------------------------------------
 -- Server-side API                                                            --
@@ -43,32 +44,24 @@ rpcServer :: (FilePath -> RpcConversation -> IO ()) -- ^ Request server
           -> [String]                               -- ^ Command line args
           -> IO ()
 rpcServer handler args = do
-  let readFd :: String -> Fd
-      readFd fd = fromIntegral (read fd :: Int)
+      let errorLog : ports = args
+          [request, response] = map stringToPort ports
 
-  let errorLog : fds = args
-      [requestR, requestW, responseR, responseW] = map readFd fds
+      request'  <- connectToPort request
+      response' <- connectToPort response
 
-  closeFd requestW
-  closeFd responseR
-  requestR'  <- fdToHandle requestR
-  responseW' <- fdToHandle responseW
-
-  rpcServer' requestR' responseW' errorLog handler
+      rpcServer' request' response' errorLog handler
 
 -- | Start a concurrent conversation.
-concurrentConversation :: FilePath -- ^ stdin named pipe
-                       -> FilePath -- ^ stdout named pipe
+concurrentConversation :: Socket -- ^ input, stdin named pipe on unix
+                       -> Socket -- ^ output, stdout named pipe on unix
                        -> FilePath -- ^ log file for exceptions
                        -> (FilePath -> RpcConversation -> IO ())
                        -> IO ()
-concurrentConversation requestR responseW errorLog server = do
-    hin  <- openPipeForReading requestR  timeout
-    hout <- openPipeForWriting responseW timeout
+concurrentConversation request response errorLog server = do
+    hin  <- acceptHandle request
+    hout <- acceptHandle response
     rpcServer' hin hout errorLog server
-  where
-    timeout :: Int
-    timeout = maxBound
 
 -- | Start the RPC server
 rpcServer' :: Handle                     -- ^ Input

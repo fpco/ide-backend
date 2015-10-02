@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor, DeriveGeneric, StandaloneDeriving, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TemplateHaskell, ScopedTypeVariables, DeriveFunctor, DeriveGeneric, DeriveDataTypeable, StandaloneDeriving, GeneralizedNewtypeDeriving #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module IdeSession.Util (
     -- * Misc util
@@ -21,8 +21,11 @@ module IdeSession.Util (
   , swizzleStderr
   , redirectStderr
   , captureOutput
-  ) where
+  , UnsupportedOnNonUnix(..)
+  , ReqRunRpc(..)
+) where
 
+import Control.Exception
 import Control.Applicative ((<$>))
 import Control.Monad (void, forM_, mplus)
 import Crypto.Classes (blockLength, initialCtx, updateCtx, finalize)
@@ -37,20 +40,25 @@ import Data.Tagged (Tagged, untag)
 import Data.Text (Text)
 import Data.Typeable (typeOf)
 import Foreign.C.Types (CFile)
-import Foreign.Ptr (Ptr, castPtr, nullPtr)
+import Foreign.Ptr (Ptr, castPtr, )
 import GHC.Generics (Generic)
 import GHC.IO (unsafeUnmask)
 import System.Directory (createDirectoryIfMissing, removeFile, renameFile)
-import System.Environment (getEnvironment)
+import System.Environment (getEnvironment, setEnv, unsetEnv)
 import System.FilePath (splitFileName, (<.>), (</>))
 import System.FilePath (splitSearchPath, searchPathSeparator)
 import System.IO
 import System.IO.Error (isDoesNotExistError)
+import Data.Typeable (Typeable)
+import Network
+
+import Foreign.Ptr (nullPtr)
 import System.IO.Temp (withSystemTempFile)
-import System.Posix (Fd)
-import System.Posix.Env (setEnv, unsetEnv)
-import System.Posix.IO
-import System.Posix.Types (CPid(..))
+import IdeSession.Util.PortableIO
+import IdeSession.RPC.Sockets
+import IdeSession.Util.PortableProcess
+
+import System.PosixCompat.Types (CPid(..))
 import Text.Show.Pretty
 import qualified Control.Exception            as Ex
 import qualified Data.Attoparsec.Text         as Att
@@ -62,7 +70,6 @@ import qualified Data.ByteString              as BSS
 import qualified Data.ByteString.Lazy         as BSL
 import qualified Data.Text                    as Text
 import qualified Data.Text.Foreign            as Text
-import qualified System.Posix.Files           as Files
 
 import IdeSession.Strict.Container
 import qualified IdeSession.Strict.Map as StrictMap
@@ -170,12 +177,14 @@ setupEnv initEnv overrides = do
   forM_ curEnv $ \(var, _val) -> unsetEnv var
 
   -- Restore initial environment
-  forM_ initEnv $ \(var, val) -> setEnv var val True
+  forM_ initEnv $ \(var, val) -> setEnv var val
+  -- previously used the Posix setEnv, which had an explicit flag for overwrites (set to True)
+  -- not sure about the behavior of the portable version
 
   -- Apply overrides
   forM_ overrides $ \(var, mVal) ->
     case mVal of
-      Just val -> setEnv var val True
+      Just val -> setEnv var val -- see comment about setEnv above
       Nothing  -> unsetEnv var
 
 relInclToOpts :: FilePath -> [FilePath] -> [String]
@@ -258,18 +267,17 @@ applyMapDiff diff = foldr (.) id (map aux $ StrictMap.toList diff)
 {-------------------------------------------------------------------------------
   Manipulations with stdout and stderr.
 -------------------------------------------------------------------------------}
-
-swizzleStdout :: Fd -> IO a -> IO a
+swizzleStdout :: FileDescriptor -> IO a -> IO a
 swizzleStdout = swizzleHandle (stdout, stdOutput)
 
-swizzleStderr :: Fd -> IO a -> IO a
+swizzleStderr :: FileDescriptor -> IO a -> IO a
 swizzleStderr = swizzleHandle (stderr, stdError)
 
-swizzleHandle :: (Handle, Fd) -> Fd -> IO a -> IO a
+swizzleHandle :: (Handle, FileDescriptor) -> FileDescriptor -> IO a -> IO a
 swizzleHandle (targetHandle, targetFd) fd act =
     Ex.bracket swizzle unswizzle (\_ -> act)
   where
-    swizzle :: IO Fd
+    swizzle :: IO FileDescriptor
     swizzle = do
       -- Flush existing handles
       hFlush targetHandle
@@ -281,7 +289,7 @@ swizzleHandle (targetHandle, targetFd) fd act =
 
       return backup
 
-    unswizzle :: Fd -> IO ()
+    unswizzle :: FileDescriptor -> IO ()
     unswizzle backup = do
       -- Flush handles again
       hFlush targetHandle
@@ -293,12 +301,10 @@ swizzleHandle (targetHandle, targetFd) fd act =
 
 redirectStderr :: FilePath -> IO a -> IO a
 redirectStderr fp act = do
-  Ex.bracket (openFd fp WriteOnly (Just mode) defaultFileFlags)
+  Ex.bracket (openWritableFile fp)
              closeFd $ \errorLogFd ->
     swizzleStderr errorLogFd $
       act
-  where
-    mode = Files.unionFileModes Files.ownerReadMode Files.ownerWriteMode
 
 captureOutput :: IO a -> IO (String, a)
 captureOutput act = do
@@ -308,6 +314,22 @@ captureOutput act = do
     closeFd fd
     suppressed <- readFile fp
     return (suppressed, a)
+
+{-------------------------------------------------------------------------------
+  Non-Unix compatibility
+-------------------------------------------------------------------------------}
+
+-- A data type for RPC communication when trying to run a @ReqRun@ value on the server
+-- Encoding the possibility that the action is not supported
+data ReqRunRpc = ReqRunConversation Pid WriteChannel ReadChannel FilePath
+               | ReqRunUnsupported String
+               deriving (Generic, Typeable)
+
+instance Binary ReqRunRpc
+
+newtype UnsupportedOnNonUnix = UnsupportedOnNonUnix String
+    deriving (Typeable, Show)
+instance Exception UnsupportedOnNonUnix
 
 {-------------------------------------------------------------------------------
   Orphans

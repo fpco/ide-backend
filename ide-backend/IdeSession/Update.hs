@@ -60,7 +60,7 @@ import System.Environment (getEnvironment, unsetEnv, lookupEnv)
 import System.Exit (ExitCode(..))
 import System.FilePath ((</>))
 import System.IO.Temp (createTempDirectory)
-import System.Posix.IO.ByteString
+import System.IO (IOMode(..))
 import System.Process (proc, CreateProcess(..), StdStream(..), createProcess, waitForProcess, interruptProcessGroupOf, terminateProcess)
 import qualified Control.Exception         as Ex
 import qualified Data.ByteString           as BSS
@@ -87,6 +87,8 @@ import IdeSession.Update.IdeSessionUpdate
 import IdeSession.Util
 import IdeSession.Util.BlockingOps
 import IdeSession.Util.Logger
+import IdeSession.Util.PortableIO
+import IdeSession.Util.PortableFiles (moduleNameToExeName)
 import qualified IdeSession.Query         as Query
 import qualified IdeSession.Strict.List   as List
 import qualified IdeSession.Strict.Map    as Map
@@ -553,15 +555,15 @@ runExe session m = do
           overrideVar (var, Just val) env = Map.insert var val env
           overrideVar (var, Nothing) env = Map.delete var env
           envMap = foldr overrideVar (Map.fromList envInherited) envOverride
-      let exePath = distDir </> "build" </> m </> m
+      let exePath = distDir </> "build" </> m </> moduleNameToExeName m
       exeExists <- Dir.doesFileExist exePath
       unless exeExists $
         fail $ "No compiled executable file "
                ++ m ++ " exists at path "
                ++ exePath ++ "."
       (stdRd, stdWr) <- liftIO createPipe
-      std_rd_hdl <- fdToHandle stdRd
-      std_wr_hdl <- fdToHandle stdWr
+      std_rd_hdl <- fdToHandle stdRd ReadMode
+      std_wr_hdl <- fdToHandle stdWr WriteMode
       let cproc = (proc exePath args) { cwd = Just dataDir
                                       , env = Just $ Map.toList envMap
                                       , create_group = True

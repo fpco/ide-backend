@@ -17,12 +17,16 @@ library
                       IdeSession.Util.BlockingOps
                       IdeSession.Util.Logger
                       IdeSession.Util.PrettyVal
+                      IdeSession.Util.PortableProcess
+                      IdeSession.Util.PortableIO
+                      IdeSession.Util.PortableFiles
                       IdeSession.GHC.API
                       IdeSession.GHC.Requests
                       IdeSession.GHC.Responses
                       IdeSession.RPC.API
                       IdeSession.RPC.Server
                       IdeSession.RPC.Stream
+                      IdeSession.RPC.Sockets
                       IdeSession.Strict.Container
                       IdeSession.Strict.IntMap
                       IdeSession.Strict.List
@@ -47,7 +51,6 @@ library
                       mtl                  >= 2.1     && < 2.3,
                       async                >= 2.0     && < 2.1,
                       aeson                >= 0.6.2   && < 0.10,
-                      unix                 >= 2.5     && < 2.8,
                       temporary            >= 1.1.2.4 && < 1.3,
                       bytestring-trie      >= 0.2     && < 0.3,
                       text                 >= 0.11    && < 1.3,
@@ -61,7 +64,12 @@ library
                       attoparsec           >= 0.10    && < 0.14,
                       template-haskell,
                       pretty-show          >= 1.3     && < 1.7,
-                      monad-logger
+                      monad-logger,
+                      unix-compat          >= 0.4.1.1 && < 0.4.2,
+                      network,
+                      process,
+                      base64-bytestring
+
 
   -- GHC.Generics lived in `ghc-prim` for GHC 7.2 & GHC 7.4
   if impl(ghc < 7.6)
@@ -89,3 +97,9 @@ library
                       TypeSynonymInstances
 
   ghc-options:        -Wall -fno-warn-unused-do-bind
+
+  if os(windows)
+    build-depends: Win32,
+                   time
+  else
+    build-depends: unix         >= 2.5 && < 2.8

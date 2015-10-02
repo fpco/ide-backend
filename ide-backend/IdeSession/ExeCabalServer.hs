@@ -6,8 +6,8 @@ module IdeSession.ExeCabalServer (
 
 import Control.Concurrent.Async (async, wait)
 import System.Exit (ExitCode)
+import System.IO (IOMode(..))
 import System.IO.Error (isEOFError)
-import System.Posix.IO.ByteString
 import qualified Control.Exception  as Ex
 import qualified Data.ByteString    as BSS
 import qualified Data.Text.Encoding as E
@@ -17,6 +17,7 @@ import IdeSession.Cabal
 import IdeSession.RPC.Server
 import IdeSession.Types.Progress
 import IdeSession.Util
+import IdeSession.Util.PortableIO
 
 -- | Handle RPC requests by calling Cabal functions, keeping track
 -- of progress and passing the results.
@@ -40,7 +41,7 @@ runExeCabal conv req = do
   -- Backup stdout, then replace stdout with the pipe's write end
   (exitCode, stdoutThread) <- swizzleStdout stdOutputWr $ do
     -- Convert the read end to a handle
-    stdOutputRdHandle <- fdToHandle stdOutputRd
+    stdOutputRdHandle <- fdToHandle stdOutputRd ReadMode
     IO.hSetBuffering stdOutputRdHandle IO.LineBuffering
 
     let stdoutLog = case req of
