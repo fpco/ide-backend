@@ -107,6 +107,7 @@ import IdeSession.Types.Public (RunBufferMode(..), Targets(..))
 import IdeSession.Types.Private
 import qualified IdeSession.Types.Public as Public
 import IdeSession.Util
+import IdeSession.Util.PortableFiles (toExecutable)
 import IdeSession.Strict.Container
 import IdeSession.Strict.IORef
 import qualified IdeSession.Strict.List as StrictList
@@ -134,7 +135,7 @@ optsToDynFlags = map noLoc
 
 getGhcLibdir :: IO FilePath
 getGhcLibdir = do
-  let ghcbinary = "ghc-" ++ GHC.cProjectVersion
+  let ghcbinary = toExecutable $ "ghc-" ++ GHC.cProjectVersion
   out <- readProcess ghcbinary ["--print-libdir"] ""
   case lines out of
     [libdir] -> return libdir

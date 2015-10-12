@@ -3,6 +3,7 @@ module IdeSession.Util.PortableFiles (
     setFileTimes
   , getFileStatus
   , modificationTime
+  , toExecutable
   , moduleNameToExeName
 ) where
 
@@ -25,11 +26,16 @@ setFileTimes :: FilePath -> EpochTime -> EpochTime -> IO ()
 -- Converts a module name to and executable file name
 moduleNameToExeName :: String -> String
 
+-- Converts a name of an a executable to the corresponding file name
+toExecutable :: String -> String
+
 #ifdef VERSION_unix
 
 setFileTimes = Posix.setFileTimes
 
 moduleNameToExeName = id
+
+toExecutable = id
 
 #else
 
@@ -59,5 +65,7 @@ setFileTimes path atime mtime =
                  .|. Win32.fILE_FLAG_BACKUP_SEMANTICS -- required for directories
 
 
-moduleNameToExeName m = m ++ ".exe"
+moduleNameToExeName = toExecutable
+
+toExecutable e = e ++ ".exe"
 #endif
