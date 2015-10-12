@@ -20,8 +20,15 @@ import Data.Binary
 import Network
 import Data.ByteString.Lazy.Char8
 import qualified Data.ByteString.Base64.Lazy as Base64
-import Network.Socket hiding (close, accept, socketPort)
-import qualified Network.Socket as Socket
+import Network.Socket hiding (close, sClose, accept, socketPort)
+
+#ifdef VERSION_unix
+-- import Control.Exception
+-- import Control.Concurrent.MVar
+import System.IO.Temp (createTempDirectory)
+import System.FilePath ((</>))
+import System.Directory (getTemporaryDirectory)
+#endif
 
 newtype ReadChannel = ReadChannel PortID deriving (Generic, Typeable)
 newtype WriteChannel = WriteChannel PortID deriving (Generic, Typeable)
@@ -29,8 +36,24 @@ newtype WriteChannel = WriteChannel PortID deriving (Generic, Typeable)
 instance Binary ReadChannel
 instance Binary WriteChannel
 
+-- Creating a socket with auto generated port (or file in case Unix domain
+-- sockets are used)
 makeSocket :: IO Socket
+
+#ifdef VERSION_unix
+makeSocket = do
+  tmpDir <- getTemporaryDirectory
+  rpcDir <- createTempDirectory tmpDir "ide-backend-rpc."
+  let rpcFile = rpcDir </> "rpc"
+  s <- listenOn $ UnixSocket rpcFile
+  p <- socketPort s
+  return s
+
+
+#else
+{- On non-Unix we use a plain socket -}
 makeSocket = listenOn $ PortNumber aNY_PORT
+#endif
 
 connectToPort :: PortID -> IO Handle
 connectToPort = connectTo "localhost"
