@@ -54,7 +54,6 @@ foreign import ccall "fflush" fflush :: Ptr CFile -> IO ()
 
 #else
 
-import qualified Control.Exception as Ex
 import Control.Monad.Trans (liftIO)
 import IdeSession.Util
 
@@ -73,7 +72,7 @@ runCommand conv args sessionDir runCmd
   | runCmdPty runCmd = do
 #if PTY_SUPPORT
         fds <- liftIO openPseudoTerminal
-        conversationTuple <- startConcurrentConversation sessionDir $ \_ _ _ ->
+        conversationTuple <- startConcurrentConversation $ \_ _ _ ->
           ghcWithArgs args $ ghcHandleRunPtySlave fds runCmd
         liftIO $ runPtyMaster fds conversationTuple
         rpcConversationTuple conv conversationTuple
@@ -83,7 +82,7 @@ runCommand conv args sessionDir runCmd
         fail "ide-backend-server not build with -DPTY_SUPPORT / pty-support cabal flag"
 #endif
   | otherwise = do
-        conversationTuple <- startConcurrentConversation sessionDir $
+        conversationTuple <- startConcurrentConversation $
           ghcConcurrentConversation $ \_errorLog' conv' ->
             ghcWithArgs args $ ghcHandleRun conv' runCmd
         rpcConversationTuple conv conversationTuple
@@ -298,10 +297,9 @@ ghcHandleRunPtySlave (masterFd, slaveFd) runCmd = do
 #endif
 
 startConcurrentConversation
-  :: FilePath
-  -> (Socket -> Socket -> FilePath -> Ghc ())
+  :: (Socket -> Socket -> FilePath -> Ghc ())
   -> Ghc (Pid, Socket, Socket, FilePath)
-startConcurrentConversation sessionDir inner = do
+startConcurrentConversation inner = do
   -- Ideally, we'd have the child process create the temp directory and
   -- communicate the name back to us, so that the child process can remove the
   -- directories again when it's done with it. However, this means we need some

@@ -14,7 +14,7 @@ import System.Environment (getArgs)
 import System.Environment.Executable (getExecutablePath)
 import System.FilePath ((</>))
 import System.IO (hClose)
-import System.IO.Temp (withTempDirectory, openTempFile)
+import System.IO.Temp (openTempFile)
 -- import System.Posix.Signals (sigKILL)
 import qualified Control.Concurrent.Async as Async
 import qualified Control.Exception        as Ex
