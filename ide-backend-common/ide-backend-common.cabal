@@ -1,5 +1,5 @@
 name:                 ide-backend-common
-version:              0.10.0
+version:              0.10.1
 synopsis:             Shared library used be ide-backend and ide-backend-server
 description:          Should not be used by end users
 license:              MIT
@@ -10,7 +10,7 @@ copyright:            (c) 2015 FP Complete
 category:             Development
 build-type:           Simple
 cabal-version:        >=1.10
-extra-source-files:   README.md
+extra-source-files:   README.md ChangeLog.md
 
 library
   exposed-modules:    IdeSession.Util

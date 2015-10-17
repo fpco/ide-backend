@@ -1,4 +1,5 @@
 -- | (Orphan) PrettyVal instances for various standard datatypes
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module IdeSession.Util.PrettyVal (
     -- * Re-exports
@@ -17,9 +18,11 @@ import qualified Data.Trie             as Trie
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.Text             as Text
 
+#if !MIN_VERSION_pretty_show(1,6,9)
 instance PrettyVal a => PrettyVal (Maybe a) where
   prettyVal Nothing  = Con "Nothing" []
   prettyVal (Just x) = Con "Just"    [prettyVal x]
+#endif
 
 -- TODO: This has encoding issues
 instance PrettyVal ByteString where
@@ -34,9 +37,11 @@ instance (PrettyVal k, PrettyVal a) => PrettyVal (Map k a) where
 instance PrettyVal a => PrettyVal (Trie a) where
   prettyVal m = Con "fromList" [prettyVal . Trie.toList $ m]
 
+#if !MIN_VERSION_pretty_show(1,6,9)
 instance PrettyVal Bool where
   prettyVal True  = Con "True"  []
   prettyVal False = Con "False" []
+#endif
 
 instance PrettyVal Text where
   prettyVal = prettyVal . Text.unpack
